@@ -1041,6 +1041,14 @@ select.fc{cursor:pointer}
           🏗️ Selecione uma obra emitida para preencher a Finalização de Obra — Tipo de pedido, cliente, OS, cidade/UF e e-mails de contato já vêm automáticos da emissão. Depois de salvar, um resumo é enviado por e-mail aos contatos do pedido e para pedidos@granda.ind.br.
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <!-- Navegador de mês por setinhas (2026-07-24, a pedido do usuário) — filtra pelo
+               mesmo Mês da Venda mostrado na coluna da tabela (_opMesVenda). Ciclo inclui
+               "Todos os meses" (posição inicial) pra nunca esconder pendências por padrão. -->
+          <div class="dash-mes-nav" style="margin:0">
+            <button onclick="_plMesMov(-1)" type="button">◀</button>
+            <div class="dash-mes-label" id="pl-mes-lbl" style="min-width:150px">Todos os meses</div>
+            <button onclick="_plMesMov(1)" type="button">▶</button>
+          </div>
           <input id="pl-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="renderPlanejamentoObras()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
           <select id="pl-fil-status" onchange="renderPlanejamentoObras()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
             <option value="">Todas (pendentes + atrasadas)</option>
@@ -1075,7 +1083,13 @@ select.fc{cursor:pointer}
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
         <label style="font-size:.72rem;font-weight:600;color:var(--ink3);white-space:nowrap">📅 Indicadores do mês</label>
-        <select id="hp-fil-mes" onchange="_hpMesChanged()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)"></select>
+        <!-- Navegador de mês por setinhas (2026-07-24, a pedido do usuário — substitui o
+             select antigo, mesmo padrão já usado no Financeiro). -->
+        <div class="dash-mes-nav" style="margin:0">
+          <button onclick="_hpMesMov(-1)" type="button">◀</button>
+          <div class="dash-mes-label" id="hp-mes-lbl" style="min-width:150px">—</div>
+          <button onclick="_hpMesMov(1)" type="button">▶</button>
+        </div>
       </div>
       <div id="hp-cards" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px"></div>
       <input id="hp-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="renderHistoricoPedidos()" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;margin-bottom:14px;box-sizing:border-box">
@@ -2245,6 +2259,18 @@ window._fbAdminDeleteUser=(email)=>httpsCallable(functions,'adminDeleteUser')({e
 
 <script>
 const TC={'Venda':'tv','Permuta':'tv','Garantia / Retrabalho':'tg','Amostra':'ta','Interno':'ti','Brinde':'tb2'};
+// Pedido antigo (venda manual/importado da planilha, de antes da separação Categoria/Tipo em
+// 2026-07-22 — ver "ev-tipo" em input livre pra importadoPlanilha) às vezes guarda por engano
+// um valor de CATEGORIA (ex.: MANUTENÇÃO, LOJA — ver getTiposPedido()) no campo p.tipo, que
+// deveria sempre ser um dos tipos comerciais de TC (Venda/Garantia/Interno/etc). Usar isto em
+// qualquer resumo/e-mail que mostre "Tipo do Pedido" pra nunca deixar categoria vazar ali — se
+// não for um valor válido de TC, assume "Venda" (é sempre venda: o próprio botão de inclusão
+// manual desses pedidos antigos é "Venda Manual") — 2026-07-24, a pedido do usuário.
+function _tipoPedidoDisplay(p){
+  const t=(p&&p.tipo||'').trim();
+  const valido=Object.keys(TC).some(k=>k.toLowerCase()===t.toLowerCase());
+  return valido?t:'Venda';
+}
 
 const CATEGORIAS_USUARIOS=['ADMINISTRADOR','COMERCIAL','PROJETOS','COMPRAS','PRODUÇÃO','PCP','QUALIDADE','PLANEJAMENTO','RH','FINANCEIRO'];
 
@@ -3191,7 +3217,6 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
       // toda vez que a aba é reaberta — "sempre que abrir a tela" mostrar o mês corrente,
       // mas o usuário pode trocar livremente enquanto está nela (2026-07-23).
       _hpMes=new Date().getMonth()+1;_hpCardFiltro='';
-      const selMesReset=document.getElementById('hp-fil-mes');if(selMesReset)selMesReset.dataset.filled='';
       const buscaReset=document.getElementById('hp-fil-busca');if(buscaReset)buscaReset.value='';
       renderHistoricoPedidos();
     }
@@ -5398,7 +5423,7 @@ function buildEmissaoEmailContent(p){
         <table cellpadding="0" cellspacing="0"><tr>
           <td style="background:#1f2937;border-radius:20px;padding:5px 14px">
             <span style="color:#e91e63;font-size:12px;font-weight:700">OS Nº ${p.os}</span>
-            <span style="color:#6b7280;font-size:12px">&nbsp;·&nbsp;${p.tipo}</span>
+            <span style="color:#6b7280;font-size:12px">&nbsp;·&nbsp;${_tipoPedidoDisplay(p)}</span>
           </td>
         </tr></table>
       </td></tr>
@@ -9615,6 +9640,24 @@ function planMainSetTab(tab,btn){
 // (ex.: só material enviado, sem equipe indo até o cliente) — fora da lista de Planejamento
 // (2026-07-23, a pedido do usuário). Mesmos campos usados em pedidoToVendaRow()/Operacionais
 // Pedidos (inst['Valor da Instalação'] / fr['Valor do Frete']).
+// Ciclo do navegador de mês por setinhas (2026-07-24, a pedido do usuário) — reaproveitado
+// pela Finalização de Obra e pelo Histórico de Pedidos. Ordem: "Todos os meses" (''), Jan..Dez,
+// e volta pro início — nunca esconde nada por padrão, o usuário só filtra se quiser.
+function _mesNavCiclo(atual,dir){
+  const ordem=['',1,2,3,4,5,6,7,8,9,10,11,12];
+  let idx=ordem.indexOf(atual===''?'':atual);
+  if(idx===-1)idx=0;
+  idx=(idx+dir+ordem.length)%ordem.length;
+  return ordem[idx];
+}
+// Mês selecionado no filtro de Finalização de Obra ('' = Todos os meses) — filtra pelo mesmo
+// Mês da Venda (_opMesVenda) já exibido na coluna da tabela.
+let _plMes='';
+function _plMesMov(dir){
+  _plMes=_mesNavCiclo(_plMes,dir);
+  renderPlanejamentoObras();
+}
+
 function _plPedidosElegiveis(){
   return pedidos.filter(p=>{
     if(p.forcarFinalizacao)return true; // incluído manualmente por admin (venda antiga sem os critérios normais)
@@ -9626,9 +9669,12 @@ function _plPedidosElegiveis(){
 }
 
 function renderPlanejamentoObras(){
+  const lblEl=document.getElementById('pl-mes-lbl');
+  if(lblEl)lblEl.textContent=_plMes?MESES_PT[_plMes]:'Todos os meses';
   const busca=(document.getElementById('pl-fil-busca')?.value||'').toUpperCase().trim();
   const filStatus=document.getElementById('pl-fil-status')?.value||'';
   let lista=_plPedidosElegiveis();
+  if(_plMes)lista=lista.filter(p=>_opMesVenda(p)===_plMes);
   if(busca){
     lista=lista.filter(p=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
   }
@@ -10080,9 +10126,11 @@ function _hpClassificarPedido(p){
 // usuário pode trocar livremente enquanto está na tela.
 let _hpMes=new Date().getMonth()+1;
 let _hpCardFiltro=''; // '' | 'pagamento' | 'finalizacao' | 'sem'
-function _hpMesChanged(){
-  const v=document.getElementById('hp-fil-mes')?.value||'';
-  _hpMes=v?parseInt(v,10):'';
+// Navegador de mês por setinhas (2026-07-24, substitui o select "Indicadores do mês" — a
+// pedido do usuário, mesmo padrão do Financeiro). Reaproveita _mesNavCiclo (definido junto
+// com Planejamento/Finalização de Obra) — ciclo inclui "Todos os meses".
+function _hpMesMov(dir){
+  _hpMes=_mesNavCiclo(_hpMes,dir);
   _hpCardFiltro='';
   renderHistoricoPedidos();
 }
@@ -10095,12 +10143,8 @@ function _hpFiltrarCard(tipo){
 // planilha (esse último clicado mostra aviso, não timeline — nunca teve evento registrado
 // no sistema). Sem busca digitada, mostra os 20 mais recentes; com busca, até 100 resultados.
 function renderHistoricoPedidos(){
-  const selMes=document.getElementById('hp-fil-mes');
-  if(selMes&&!selMes.dataset.filled){
-    selMes.innerHTML='<option value="">Todos os meses</option>'+MESES_PT.map((nome,i)=>i>0?`<option value="${i}">${nome}</option>`:'').join('');
-    selMes.dataset.filled='1';
-    selMes.value=_hpMes?String(_hpMes):'';
-  }
+  const lblEl=document.getElementById('hp-mes-lbl');
+  if(lblEl)lblEl.textContent=_hpMes?MESES_PT[_hpMes]:'Todos os meses';
   // Indicadores do mês selecionado — só entram pedidos REAIS (com registro no Firestore,
   // r._pid preenchido); linha vinda só da planilha nunca tem historicoPrazo/parcelas
   // rastreadas, então não é dado confiável nem pra "adiado" nem pra "sem adiamento" — fica
@@ -10303,7 +10347,7 @@ function abrirFinalizacaoObra(pedidoId){
   const dadosEl=document.getElementById('pl-dados-auto');
   if(dadosEl){
     const linha=(lbl,val)=>`<div><div style="font-size:.66rem;font-weight:700;color:var(--ink4);text-transform:uppercase;letter-spacing:.5px">${lbl}</div><div style="font-weight:600;color:var(--ink2)">${val||'—'}</div></div>`;
-    dadosEl.innerHTML=linha('Tipo de Pedido',p.tipo)+linha('Responsável pelo Preenchimento',usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—')
+    dadosEl.innerHTML=linha('Tipo de Pedido',_tipoPedidoDisplay(p))+linha('Responsável pelo Preenchimento',usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—')
       +linha('Cliente',p.cliente)+linha('Nº do Pedido Granda (OS)',p.os)
       +linha('Cidade e Estado da Instalação',loc)
       // E-mail do Comprador(a) só entra aqui (automático) pro pedido emitido pelo sistema —
@@ -10727,7 +10771,7 @@ function buildFinalizacaoEmailContent(p){
         <table cellpadding="0" cellspacing="0"><tr>
           <td style="background:#1f2937;border-radius:20px;padding:5px 14px">
             <span style="color:#e91e63;font-size:12px;font-weight:700">OS Nº ${p.os}</span>
-            <span style="color:#6b7280;font-size:12px">&nbsp;·&nbsp;${p.tipo}</span>
+            <span style="color:#6b7280;font-size:12px">&nbsp;·&nbsp;${_tipoPedidoDisplay(p)}</span>
           </td>
         </tr></table>
       </td></tr>
