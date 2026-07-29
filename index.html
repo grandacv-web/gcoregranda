@@ -1247,6 +1247,57 @@ select.fc{cursor:pointer}
         <div style="overflow:auto;max-height:520px"><table id="cpl-detalhe-table" style="width:100%;border-collapse:collapse;font-size:.82rem"></table></div>
       </div>
     </div>
+    <!-- RH — PONTUALIDADE E ASSIDUIDADE (2026-07-29) — só admin ou categoria RH. Upload em
+         lote do Cartão Ponto (Hponto, HTML disfarçado de .xls), cadastro automático de
+         colaborador+departamento, indicadores de horas previstas/perdidas/faltas por
+         funcionário, por departamento e geral, com índice de pontualidade. -->
+    <div id="sec-cat-RH" style="display:none">
+      <div class="dash-tabs" style="margin-bottom:14px" id="rh-main-tabs">
+        <button class="dash-tab active rh-main-tab" onclick="rhSetMainTab('pontualidade',this)">📅 Pontualidade e Assiduidade</button>
+      </div>
+      <div id="rh-sec-pontualidade">
+        <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
+          📅 Suba o(s) arquivo(s) de Cartão Ponto (exportado pelo Hponto, .xls) de cada colaborador — pode subir vários de uma vez. O sistema lê nome, função e departamento automaticamente: cadastra o colaborador se for a 1ª vez, ou atualiza as horas por dia se ele já existir (sem duplicar — se já tinha um dia lançado, só atualiza as horas desse dia). Dias de hoje/futuro no arquivo são ignorados, ainda não aconteceram.
+        </div>
+        <div style="background:var(--surface);border:1.5px dashed var(--border);border-radius:14px;padding:16px;margin-bottom:16px">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input type="file" id="rh-upload-input" multiple accept=".xls,.xlsx,.htm,.html" style="font-size:.8rem">
+            <button class="dash-btn-conf" onclick="rhProcessarUpload()" type="button" style="background:#4f46e5">📥 Processar Arquivo(s)</button>
+          </div>
+          <div id="rh-upload-resumo" style="margin-top:10px"></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <div class="dash-mes-nav" style="margin:0">
+            <button onclick="_rhMesMov(-1)" type="button">◀</button>
+            <div class="dash-mes-label" id="rh-mes-lbl" style="min-width:150px">Todos os meses</div>
+            <button onclick="_rhMesMov(1)" type="button">▶</button>
+          </div>
+          <select id="rh-fil-depto" onchange="renderRhPontualidade()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer;min-width:180px">
+            <option value="">Todos os departamentos</option>
+          </select>
+          <input id="rh-fil-busca" placeholder="🔍 Buscar colaborador..." oninput="renderRhPontualidade()" style="flex:1;min-width:200px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
+        </div>
+        <div id="rh-cards-gerais" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:16px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px" class="fg-dash-2col">
+          <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+            <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">⚠️ Precisa de atenção — Faltas</h3>
+            <div id="rh-atencao-faltas"></div>
+          </div>
+          <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+            <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">⏱️ Precisa de atenção — Atrasos/Saídas antecipadas</h3>
+            <div id="rh-atencao-atrasos"></div>
+          </div>
+        </div>
+        <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px">
+          <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Indicador por Departamento</h3>
+          <div style="overflow:auto"><table id="rh-tabela-depto" style="width:100%;border-collapse:collapse;font-size:.82rem"></table></div>
+        </div>
+        <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+          <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Indicador por Funcionário</h3>
+          <div style="overflow:auto;max-height:520px"><table id="rh-tabela-func" style="width:100%;border-collapse:collapse;font-size:.82rem"></table></div>
+        </div>
+      </div>
+    </div>
     <!-- OUTRAS CATEGORIAS (placeholder genérico) -->
     <div id="sec-cat-generic" style="display:none">
       <div style="background:var(--surface);border:1.5px dashed var(--border);border-radius:14px;padding:48px;text-align:center;color:var(--ink4)">
@@ -2520,6 +2571,11 @@ window._fbWatchPedidos=(cb)=>onSnapshot(collection(db,'pedidos'),cb);
 window._fbSaveContaPagar=(c)=>setDoc(doc(db,'contasPagar',String(c.id)),c);
 window._fbDeleteContaPagar=(id)=>deleteDoc(doc(db,'contasPagar',String(id)));
 window._fbWatchContasPagar=(cb)=>onSnapshot(collection(db,'contasPagar'),cb);
+// RH — Pontualidade e Assiduidade (2026-07-29). Coleção separada de cfg/pedidos porque o
+// volume de dias de ponto pode crescer bastante (1 doc por funcionário+mês, com merge por
+// dia — nunca sobrescreve o mês inteiro, só os dias que vieram no arquivo).
+window._fbSaveRhPonto=(docId,payload)=>setDoc(doc(db,'rhPonto',String(docId)),payload,{merge:true});
+window._fbWatchRhPonto=(cb)=>onSnapshot(collection(db,'rhPonto'),cb);
 // Config global (compartilhada entre todos os usuários)
 window._fbSaveCfg=(data)=>setDoc(doc(db,'sistema','config'),data);
 window._fbLoadCfg=()=>getDocs(collection(db,'sistema')).then(snap=>{const d=snap.docs.find(x=>x.id==='config');return d?d.data():null;});
@@ -3220,6 +3276,18 @@ function setupContasPagarSync(){
     }
   });
 }
+// Mesmo padrão de setupContasPagarSync() — coleção própria (rhPonto), 1 doc por
+// funcionário+mês. rhPontoMeses fica em memória pra montar os indicadores sem reconsultar
+// o Firestore a cada clique de filtro.
+let rhPontoMeses=[];
+function setupRhPontoSync(){
+  if(!window._fbWatchRhPonto)return;
+  window._fbWatchRhPonto(function(snapshot){
+    rhPontoMeses=snapshot.docs.map(d=>({id:d.id,...d.data()}));
+    const elRh=document.getElementById('sec-cat-RH');
+    if(elRh&&elRh.style.display!=='none'&&typeof renderRhPontualidade==='function')renderRhPontualidade();
+  });
+}
 async function saveContaPagarFS(c){
   if(!window._fbSaveContaPagar){console.warn('Firestore não disponível');return;}
   try{await window._fbSaveContaPagar(c);}
@@ -3447,7 +3515,7 @@ function buildSidebarCats(){
   // comissão dos vendedores); esta é a régua de incentivo do time de Planejamento (0,05% do
   // líquido entregue + 1% do save positivo + R$20 por relatório de finalização no prazo).
   // Mesma regra de acesso do resto do Planejamento, a pedido do usuário.
-  const cats=['FERRAMENTAS','HISTORICO',...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['PLANEJAMENTO','COMISSAO_PLANEJAMENTO']:[])];
+  const cats=['FERRAMENTAS','HISTORICO',...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['PLANEJAMENTO','COMISSAO_PLANEJAMENTO']:[]),...(_isRhUser()?['RH']:[])];
   const catIcons={'FERRAMENTAS':'🧰','RH':'👥','FINANCEIRO':'💰','COMPRAS':'🛒','PCP':'📋','PRODUÇÃO':'🏭','QUALIDADE':'✅','PLANEJAMENTO':'🏗️','PROJETOS':'📐','HISTORICO':'🔍','COMISSAO_PLANEJAMENTO':'📈'};
   const catLabelsSidebar={'FERRAMENTAS':'FERRAMENTAS','HISTORICO':'HISTÓRICO DE PEDIDOS','COMISSAO_PLANEJAMENTO':'COMISSÃO PLANEJAMENTO'};
   container.innerHTML=cats.map(cat=>`
@@ -3483,6 +3551,12 @@ function setSection(sec){
     toast('ACESSO NÃO PERMITIDO','terr');
     return;
   }
+  // RH (2026-07-29) — só admin ou categoria RH (cadastro de usuário já tinha essa opção em
+  // CATEGORIAS_USUARIOS, só faltava o gate de tela e o menu de verdade).
+  if(sec==='cat:RH'&&!_isRhUser()){
+    toast('ACESSO NÃO PERMITIDO','terr');
+    return;
+  }
   currentSection=sec;
   const isGeral=sec==='geral';
 
@@ -3501,7 +3575,7 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
     const isFerr=cat==='FERRAMENTAS';
     // Atualiza header da seção
     const catIcons={'FERRAMENTAS':'🧰','RH':'👥','FINANCEIRO':'💰','COMPRAS':'🛒','PCP':'📋','PRODUÇÃO':'🏭','QUALIDADE':'✅','PLANEJAMENTO':'🏗️','PROJETOS':'📐','HISTORICO':'🔍','COMISSAO_PLANEJAMENTO':'📈'};
-    const catLabelsHeader={'FERRAMENTAS':'Ferramentas','PLANEJAMENTO':'Planejamento','HISTORICO':'Histórico de Pedidos','COMISSAO_PLANEJAMENTO':'Comissão Planejamento'};
+    const catLabelsHeader={'FERRAMENTAS':'Ferramentas','PLANEJAMENTO':'Planejamento','HISTORICO':'Histórico de Pedidos','COMISSAO_PLANEJAMENTO':'Comissão Planejamento','RH':'RH'};
     const catDescs={'FERRAMENTAS':'Tarefas, prazos e outras ferramentas do time','RH':'Recursos Humanos','FINANCEIRO':'Financeiro e contabilidade','COMPRAS':'Compras e suprimentos','PCP':'Planejamento e controle da produção','PRODUÇÃO':'Acompanhamento de produção','QUALIDADE':'Controle de qualidade','PLANEJAMENTO':'Finalização de obra','PROJETOS':'Gestão de projetos','HISTORICO':'Tudo que já aconteceu com um pedido, num só lugar','COMISSAO_PLANEJAMENTO':'Incentivo do time de Planejamento — líquido entregue, save e relatórios no prazo'};
     const nameEl=document.getElementById('cat-hdr-name');
     const descEl=document.getElementById('cat-hdr-desc');
@@ -3511,12 +3585,15 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
     const isPlan=cat==='PLANEJAMENTO';
     const isHist=cat==='HISTORICO';
     const isComPlan=cat==='COMISSAO_PLANEJAMENTO';
+    const isRh=cat==='RH';
     document.getElementById('sec-cat-FERRAMENTAS').style.display=isFerr?'':'none';
     document.getElementById('sec-cat-FINANCEIRO').style.display=isFin?'':'none';
     document.getElementById('sec-cat-PLANEJAMENTO').style.display=isPlan?'':'none';
     document.getElementById('sec-cat-HISTORICO').style.display=isHist?'':'none';
     document.getElementById('sec-cat-COMISSAO_PLANEJAMENTO').style.display=isComPlan?'':'none';
-    document.getElementById('sec-cat-generic').style.display=(isFin||isFerr||isPlan||isHist||isComPlan)?'none':'';
+    document.getElementById('sec-cat-RH').style.display=isRh?'':'none';
+    document.getElementById('sec-cat-generic').style.display=(isFin||isFerr||isPlan||isHist||isComPlan||isRh)?'none':'';
+    if(isRh&&typeof renderRhPontualidade==='function')renderRhPontualidade();
     if(isComPlan){
       // Sempre volta pro mês atual real ao reabrir a tela, mesmo padrão do Histórico de
       // Pedidos — o usuário pode trocar livremente enquanto está nela.
@@ -7004,6 +7081,7 @@ function initAuth(tries){
         if(ls)ls.style.display='none';
         setupRealtimeSync();
         setupContasPagarSync();
+        setupRhPontoSync();
         load().then(()=>{
           const nomeMap=cfg.usuarioNomes||{};
           const catMap=cfg.usuarioCats||{};
@@ -10923,6 +11001,373 @@ function renderComissaoPlanejamento(){
   }
 }
 // ===================== FIM COMISSÃO PLANEJAMENTO =====================
+
+// ===================== RH — PONTUALIDADE E ASSIDUIDADE (2026-07-29) =====================
+// Menu novo, a pedido do usuário: upload em lote do Cartão Ponto (sistema "Hponto" — o
+// arquivo tem extensão .xls mas na real é uma tabela HTML exportada, não um binário Excel de
+// verdade). O sistema lê nome/função/departamento automaticamente e cadastra o colaborador
+// na 1ª vez; se ele já existe, só atualiza as horas dos dias que vieram no arquivo (merge por
+// dia em cfg.rhFuncionarios + coleção Firestore rhPonto, nunca duplica). Cálculo de Horas
+// Previstas/Perdidas/Faltas é feito TODO aqui (não confiamos nas colunas FALTAS/HND da
+// planilha, que vêm em formatos inconsistentes) a partir de 2 fontes cruas do arquivo: a
+// tabela "Horário de Trabalho" (escala semanal de referência) e os horários de Ent/Sai batidos
+// dia a dia. Validado em Python/BeautifulSoup contra o arquivo real de exemplo (ADRIANO
+// MIGLIORINI, RH/horario colaborador.xls) antes de portar pra JS.
+function _isRhUser(){
+  const{cat,isAdm}=_getUserCat();
+  return isAdm||cat==='RH';
+}
+function _rhNorm(s){
+  return String(s==null?'':s).replace(/ /g,' ').replace(/\s+/g,' ').trim();
+}
+function _rhParseHoraHHMM(s){
+  const m=/^(\d{2}):(\d{2})$/.exec(_rhNorm(s));
+  return m?(parseInt(m[1],10)*60+parseInt(m[2],10)):null;
+}
+function _rhFmtHoras(min){
+  const v=Math.round(min||0);
+  const sinal=v<0?'-':'';
+  const abs=Math.abs(v);
+  return sinal+Math.floor(abs/60)+':'+String(abs%60).padStart(2,'0');
+}
+// Acha o valor ao lado de um rótulo conhecido (ex.: "Nome", "Depart.") — mais robusto que
+// depender de posição de coluna, já que o HTML exportado pelo Hponto tem colspans
+// inconsistentes entre seções.
+function _rhValorPorRotulo(root,rotulo){
+  const tds=[...root.querySelectorAll('td')];
+  const alvo=rotulo.toUpperCase();
+  for(let i=0;i<tds.length;i++){
+    if(_rhNorm(tds[i].textContent).toUpperCase()===alvo){
+      return i+1<tds.length?_rhNorm(tds[i+1].textContent):'';
+    }
+  }
+  return'';
+}
+// Escala semanal de referência ("Horário de Trabalho") — soma os pares Entrada/Saída de cada
+// linha Seg..Dom pra saber quantos minutos são esperados naquele dia da semana. Sábado/
+// Domingo normalmente vêm vazios (0 minutos = day off).
+function _rhParseHorarioSemanal(root){
+  const previstoMin={0:0,1:0,2:0,3:0,4:0,5:0,6:0}; // índice = Date.getDay() (0=dom..6=sab)
+  let horarioTd=null;
+  for(const td of root.querySelectorAll('td')){
+    if(_rhNorm(td.textContent)==='Horario de Trabalho'){horarioTd=td;break;}
+  }
+  if(!horarioTd)return previstoMin;
+  const tabela=horarioTd.closest('table');
+  if(!tabela)return previstoMin;
+  const abrevMap={seg:1,ter:2,qua:3,qui:4,sex:5,sab:6,dom:0};
+  [...tabela.querySelectorAll('tr')].forEach(tr=>{
+    const tds=[...tr.children];
+    if(!tds.length)return;
+    const primeiro=_rhNorm(tds[0].textContent).toLowerCase();
+    if(!(primeiro in abrevMap))return;
+    const tempos=tds.slice(1).map(td=>_rhNorm(td.textContent)).filter(t=>/^\d{2}:\d{2}$/.test(t));
+    let mins=0;
+    for(let i=0;i+1<tempos.length;i+=2){
+      const a=_rhParseHoraHHMM(tempos[i]),b=_rhParseHoraHHMM(tempos[i+1]);
+      if(a!=null&&b!=null&&b>a)mins+=(b-a);
+    }
+    previstoMin[abrevMap[primeiro]]=mins;
+  });
+  return previstoMin;
+}
+// Status que zeram o "previsto" do dia mesmo caindo num dia de semana com escala normal —
+// feriado/férias/folga extra não são falta nem entram nas horas previstas.
+const _RH_STATUS_NAO_UTIL=['folga','feriado','férias','ferias','dsr'];
+// Tabela dia a dia — cada <tr> é reconstruído respeitando colspan (algumas linhas, tipo
+// Atestado com "FALTA DE ENERGIA HOF", mesclam 4 colunas de Ent3/Sai3/Ent4/Sai4 numa só célula
+// de texto livre; sem essa reconstrução, Ent1/Sai1/Ent2/Sai2 ficariam desalinhados). Dias de
+// hoje/futuro são ignorados — o arquivo do Hponto já traz o mês inteiro mesmo antes de
+// terminar, marcando dias futuros com um "*Falta" que NÃO é falta de verdade, só ainda não
+// aconteceu.
+function _rhParseDiasTable(root,previstoMin,hojeIso){
+  let diaTd=null;
+  for(const td of root.querySelectorAll('td')){
+    if(_rhNorm(td.textContent)==='Dia'){diaTd=td;break;}
+  }
+  if(!diaTd)return[];
+  const tabela=diaTd.closest('table');
+  if(!tabela)return[];
+  const dias=[];
+  [...tabela.querySelectorAll('tr')].forEach(tr=>{
+    const tds=[...tr.children];
+    if(!tds.length)return;
+    const primeiroTxt=_rhNorm(tds[0].textContent);
+    const m=/^(\d{2})\/(\d{2})\/(\d{4})/.exec(primeiroTxt);
+    if(!m)return;
+    const iso=`${m[3]}-${m[2]}-${m[1]}`;
+    if(iso>=hojeIso)return; // hoje e futuro: dia ainda não concluído, não dá pra avaliar
+    const logical={};
+    let ptr=0;
+    tds.forEach(td=>{
+      const span=parseInt(td.getAttribute('colspan')||'1',10)||1;
+      logical[ptr]=_rhNorm(td.textContent);
+      ptr+=span;
+    });
+    const status=logical[1]||'';
+    let trabalhadoMin=0;
+    [[2,3],[4,5],[6,7],[8,9]].forEach(([a,b])=>{
+      const ta=_rhParseHoraHHMM(logical[a]),tb=_rhParseHoraHHMM(logical[b]);
+      if(ta!=null&&tb!=null&&tb>ta)trabalhadoMin+=(tb-ta);
+    });
+    const diaSemana=new Date(iso+'T00:00:00').getDay();
+    let previstoDiaMin=previstoMin[diaSemana]||0;
+    const statusLower=status.toLowerCase();
+    if(_RH_STATUS_NAO_UTIL.some(k=>statusLower.includes(k)))previstoDiaMin=0;
+    dias.push({data:iso,diaSemana,status,previstoMin:previstoDiaMin,trabalhadoMin});
+  });
+  return dias;
+}
+// Lê o arquivo (texto puro — é HTML, não binário) e monta {nome,funcao,departamento,dias[]}.
+async function _rhParseArquivo(file){
+  const texto=await file.text();
+  const doc=new DOMParser().parseFromString(texto,'text/html');
+  const nome=_rhValorPorRotulo(doc,'Nome').toUpperCase();
+  if(!nome)throw new Error('não encontrei o nome do colaborador — formato de arquivo não reconhecido');
+  const funcao=_rhValorPorRotulo(doc,'Função');
+  const departamentoRaw=_rhValorPorRotulo(doc,'Depart.');
+  const departamento=(departamentoRaw||'SEM DEPARTAMENTO').toUpperCase();
+  const previstoMin=_rhParseHorarioSemanal(doc);
+  const hojeIso=fmtISOLocal(new Date());
+  const dias=_rhParseDiasTable(doc,previstoMin,hojeIso);
+  return{nome,funcao,departamento,dias};
+}
+// ── Cadastro automático de funcionário (cfg.rhFuncionarios) ────────────────────────────
+function _rhFuncionarioPorNome(nome){
+  return(cfg.rhFuncionarios||[]).find(f=>f.nome===nome);
+}
+function _rhGarantirFuncionario(nome,funcao,departamento){
+  cfg.rhFuncionarios=cfg.rhFuncionarios||[];
+  let f=_rhFuncionarioPorNome(nome);
+  if(!f){
+    f={id:uid(),nome,funcao:funcao||'',departamento:departamento||'SEM DEPARTAMENTO',criadoEm:new Date().toISOString()};
+    cfg.rhFuncionarios.push(f);
+  }else{
+    // a planilha é a fonte de verdade — se função/departamento vierem preenchidos e
+    // diferentes do que já estava cadastrado, atualiza.
+    if(funcao&&f.funcao!==funcao)f.funcao=funcao;
+    if(departamento&&f.departamento!==departamento)f.departamento=departamento;
+  }
+  return f;
+}
+async function _rhSalvarCfg(){
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+}
+// ── Gravação dos dias em rhPonto (1 doc por funcionário+mês, merge por dia) ────────────
+function _rhAnoMes(dataIso){return dataIso.slice(0,7);}
+async function _rhSalvarRegistrosFuncionario(funcionarioId,dias,arquivoNome){
+  const porMes={};
+  dias.forEach(d=>{(porMes[_rhAnoMes(d.data)]=porMes[_rhAnoMes(d.data)]||[]).push(d);});
+  const promessas=[];
+  Object.keys(porMes).forEach(anoMes=>{
+    const docId=funcionarioId+'_'+anoMes;
+    const payload={funcionarioId,anoMes,atualizadoEm:new Date().toISOString(),arquivoOrigem:arquivoNome||''};
+    porMes[anoMes].forEach(d=>{
+      payload['dias.'+d.data]={status:d.status,previstoMin:d.previstoMin,trabalhadoMin:d.trabalhadoMin,diaSemana:d.diaSemana};
+    });
+    if(window._fbSaveRhPonto)promessas.push(window._fbSaveRhPonto(docId,payload));
+  });
+  await Promise.all(promessas);
+}
+// ── Upload em lote (o usuário pode subir os ~35 arquivos de uma vez, não precisa 1 a 1) ─
+function rhProcessarUpload(){
+  const input=document.getElementById('rh-upload-input');
+  if(!input||!input.files||!input.files.length){toast('Selecione ao menos um arquivo','terr');return;}
+  processarArquivosRhPonto(input.files);
+}
+async function processarArquivosRhPonto(fileList){
+  if(!_isRhUser()){toast('Só RH/Administrador pode fazer isso','terr');return;}
+  const arquivos=[...fileList];
+  if(!arquivos.length)return;
+  const resumoEl=document.getElementById('rh-upload-resumo');
+  if(resumoEl)resumoEl.innerHTML='⏳ Processando '+arquivos.length+' arquivo(s)...';
+  let novos=0,atualizados=0;
+  const erros=[];
+  let cfgMudou=false;
+  for(const file of arquivos){
+    try{
+      const dados=await _rhParseArquivo(file);
+      if(!dados.dias.length){erros.push(file.name+': nenhum dia concluído encontrado (só tinha hoje/dias futuros?).');continue;}
+      const existiaAntes=!!_rhFuncionarioPorNome(dados.nome);
+      const f=_rhGarantirFuncionario(dados.nome,dados.funcao,dados.departamento);
+      cfgMudou=true;
+      if(existiaAntes)atualizados++;else novos++;
+      await _rhSalvarRegistrosFuncionario(f.id,dados.dias,file.name);
+    }catch(e){
+      console.error('Erro ao processar arquivo de ponto: '+file.name,e);
+      erros.push(file.name+': '+(e.message||'erro ao ler o arquivo'));
+    }
+  }
+  if(cfgMudou)await _rhSalvarCfg();
+  if(resumoEl){
+    resumoEl.innerHTML=`<div style="font-size:.8rem;padding:10px 12px;border-radius:8px;background:${erros.length?'#fef3c7':'#dcfce7'}">
+      ✅ <b>${novos}</b> colaborador(es) novo(s) cadastrado(s), <b>${atualizados}</b> atualizado(s).
+      ${erros.length?'<br>⚠️ '+erros.length+' arquivo(s) com problema:<br>'+erros.map(e=>'• '+e).join('<br>'):''}
+    </div>`;
+  }
+  const inputEl=document.getElementById('rh-upload-input');
+  if(inputEl)inputEl.value='';
+  renderRhPontualidade();
+}
+// ── Indicadores (funcionário / departamento / geral) + Índice de Pontualidade ──────────
+function _rhDiasDoFuncionario(funcionarioId,anoMesFiltro){
+  const out=[];
+  rhPontoMeses.forEach(doc=>{
+    if(doc.funcionarioId!==funcionarioId)return;
+    if(anoMesFiltro&&doc.anoMes!==anoMesFiltro)return;
+    const diasMap=doc.dias||{};
+    Object.keys(diasMap).forEach(data=>out.push({data,...diasMap[data]}));
+  });
+  return out;
+}
+function _rhStats(diasArr){
+  let previstoMin=0,trabalhadoMin=0,faltasDias=0,diasParciais=0,diasUteis=0;
+  diasArr.forEach(d=>{
+    const prev=d.previstoMin||0,trab=d.trabalhadoMin||0;
+    previstoMin+=prev;
+    trabalhadoMin+=trab;
+    if(prev>0){
+      diasUteis++;
+      if(trab===0)faltasDias++;
+      else if(trab<prev)diasParciais++;
+    }
+  });
+  const perdidoMin=Math.max(0,previstoMin-trabalhadoMin);
+  const pctPerdida=previstoMin>0?(perdidoMin/previstoMin*100):0;
+  return{previstoMin,trabalhadoMin,perdidoMin,pctPerdida,faltasDias,diasParciais,diasUteis};
+}
+// Índice de Pontualidade (0-100): parte de 100 e desconta % de horas perdidas + taxa de
+// faltas (com peso maior, 1.5x, porque falta integral pesa mais que atraso pontual pra saúde
+// operacional). >=90 Saudável, 70-89 Atenção, <70 Crítico — pensado pra evidenciar rápido
+// quem precisa de conversa: falta demais OU atrasa/sai cedo demais.
+function _rhIndice(stats){
+  if(!stats.diasUteis)return{score:null,status:'Sem dados',cor:'#94a3b8'};
+  const faltaRate=stats.faltasDias/stats.diasUteis*100;
+  let score=100-stats.pctPerdida-faltaRate*1.5;
+  score=Math.max(0,Math.min(100,Math.round(score)));
+  let status,cor;
+  if(score>=90){status='Saudável';cor='#16a34a';}
+  else if(score>=70){status='Atenção';cor='#d97706';}
+  else{status='Crítico';cor='#dc2626';}
+  return{score,status,cor};
+}
+let _rhMes='';
+function _rhMesCiclo(atual,dir){
+  const disponiveis=[...new Set(rhPontoMeses.map(m=>m.anoMes).filter(Boolean))].sort();
+  const lista=['',...disponiveis];
+  let idx=lista.indexOf(atual);
+  if(idx===-1)idx=0;
+  idx=(idx+dir+lista.length)%lista.length;
+  return lista[idx];
+}
+function _rhMesMov(dir){
+  _rhMes=_rhMesCiclo(_rhMes,dir);
+  renderRhPontualidade();
+}
+function rhSetMainTab(tab,btn){
+  document.querySelectorAll('.rh-main-tab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  ['pontualidade'].forEach(t=>{
+    const el=document.getElementById('rh-sec-'+t);
+    if(el)el.style.display=t===tab?'':'none';
+  });
+  if(tab==='pontualidade')renderRhPontualidade();
+}
+function renderRhPontualidade(){
+  if(!_isRhUser())return;
+  if(!document.getElementById('rh-cards-gerais'))return;
+  const funcs=cfg.rhFuncionarios||[];
+  const deptoSel=document.getElementById('rh-fil-depto');
+  if(deptoSel){
+    const atual=deptoSel.value;
+    const deptos=[...new Set(funcs.map(f=>f.departamento).filter(Boolean))].sort();
+    deptoSel.innerHTML='<option value="">Todos os departamentos</option>'+deptos.map(d=>`<option value="${d}" ${d===atual?'selected':''}>${d}</option>`).join('');
+  }
+  const lblEl=document.getElementById('rh-mes-lbl');
+  if(lblEl)lblEl.textContent=_rhMes||'Todos os meses';
+  const deptoFiltro=document.getElementById('rh-fil-depto')?.value||'';
+  const busca=(document.getElementById('rh-fil-busca')?.value||'').toUpperCase().trim();
+  let funcsFiltrados=funcs;
+  if(deptoFiltro)funcsFiltrados=funcsFiltrados.filter(f=>f.departamento===deptoFiltro);
+  if(busca)funcsFiltrados=funcsFiltrados.filter(f=>f.nome.includes(busca));
+  const porFunc=funcsFiltrados.map(f=>{
+    const dias=_rhDiasDoFuncionario(f.id,_rhMes);
+    const stats=_rhStats(dias);
+    return{f,stats,indice:_rhIndice(stats)};
+  });
+  const statsGeral={
+    previstoMin:porFunc.reduce((s,x)=>s+x.stats.previstoMin,0),
+    trabalhadoMin:porFunc.reduce((s,x)=>s+x.stats.trabalhadoMin,0),
+    faltasDias:porFunc.reduce((s,x)=>s+x.stats.faltasDias,0),
+    diasParciais:porFunc.reduce((s,x)=>s+x.stats.diasParciais,0),
+    diasUteis:porFunc.reduce((s,x)=>s+x.stats.diasUteis,0)
+  };
+  statsGeral.perdidoMin=Math.max(0,statsGeral.previstoMin-statsGeral.trabalhadoMin);
+  statsGeral.pctPerdida=statsGeral.previstoMin>0?(statsGeral.perdidoMin/statsGeral.previstoMin*100):0;
+  const indiceGeral=_rhIndice(statsGeral);
+  const cardsEl=document.getElementById('rh-cards-gerais');
+  if(cardsEl){
+    const cards=[
+      ['Horas Previstas de Trabalho',_rhFmtHoras(statsGeral.previstoMin),'#101B3D'],
+      ['Horas Perdidas de Trabalho',_rhFmtHoras(statsGeral.perdidoMin)+' ('+statsGeral.pctPerdida.toFixed(1)+'%)',statsGeral.pctPerdida>15?'#dc2626':(statsGeral.pctPerdida>7?'#d97706':'#16a34a')],
+      ['Faltas (dias) / Absenteísmo',String(statsGeral.faltasDias),statsGeral.faltasDias>0?'#dc2626':'#16a34a'],
+      ['Índice de Pontualidade',indiceGeral.score==null?'Sem dados':(indiceGeral.score+'/100 — '+indiceGeral.status),indiceGeral.cor]
+    ];
+    cardsEl.innerHTML=cards.map(c=>`<div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:14px;min-width:0"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">${c[0]}</div><div style="font-size:1rem;font-weight:800;color:${c[2]};margin-top:6px">${c[1]}</div></div>`).join('');
+  }
+  const comDados=porFunc.filter(x=>x.stats.diasUteis>0);
+  const topFaltas=[...comDados].filter(x=>x.stats.faltasDias>0).sort((a,b)=>b.stats.faltasDias-a.stats.faltasDias).slice(0,5);
+  const topAtrasos=[...comDados].filter(x=>x.stats.diasParciais>0).sort((a,b)=>b.stats.perdidoMin-a.stats.perdidoMin).slice(0,5);
+  const elFaltas=document.getElementById('rh-atencao-faltas');
+  if(elFaltas)elFaltas.innerHTML=topFaltas.length?topFaltas.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-lt);font-size:.8rem"><span><b>${x.f.nome}</b> <span style="color:var(--ink4)">(${x.f.departamento||'—'})</span></span><span style="font-weight:700;color:#dc2626;white-space:nowrap">${x.stats.faltasDias} falta${x.stats.faltasDias===1?'':'s'}</span></div>`).join(''):'<div style="color:var(--ink4);font-size:.82rem">Nenhuma falta no período. 🎉</div>';
+  const elAtrasos=document.getElementById('rh-atencao-atrasos');
+  if(elAtrasos)elAtrasos.innerHTML=topAtrasos.length?topAtrasos.map(x=>`<div style="display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-lt);font-size:.8rem"><span><b>${x.f.nome}</b> <span style="color:var(--ink4)">(${x.f.departamento||'—'})</span></span><span style="font-weight:700;color:#d97706;white-space:nowrap">${_rhFmtHoras(x.stats.perdidoMin)} em ${x.stats.diasParciais} dia${x.stats.diasParciais===1?'':'s'}</span></div>`).join(''):'<div style="color:var(--ink4);font-size:.82rem">Nenhum atraso relevante no período. 🎉</div>';
+  const porDepto={};
+  porFunc.forEach(x=>{
+    const d=x.f.departamento||'SEM DEPARTAMENTO';
+    if(!porDepto[d])porDepto[d]={previstoMin:0,trabalhadoMin:0,faltasDias:0,diasParciais:0,diasUteis:0};
+    const s=porDepto[d];
+    s.previstoMin+=x.stats.previstoMin;s.trabalhadoMin+=x.stats.trabalhadoMin;
+    s.faltasDias+=x.stats.faltasDias;s.diasParciais+=x.stats.diasParciais;s.diasUteis+=x.stats.diasUteis;
+  });
+  const deptoRows=Object.entries(porDepto).map(([nome,s])=>{
+    s.perdidoMin=Math.max(0,s.previstoMin-s.trabalhadoMin);
+    s.pctPerdida=s.previstoMin>0?(s.perdidoMin/s.previstoMin*100):0;
+    return{nome,s,idx:_rhIndice(s)};
+  }).sort((a,b)=>(a.idx.score??999)-(b.idx.score??999));
+  const deptoTableEl=document.getElementById('rh-tabela-depto');
+  if(deptoTableEl){
+    const linhasDepto=deptoRows.map(r=>`<tr style="border-bottom:1px solid var(--border-lt)">
+      <td style="padding:8px 10px;font-weight:700">${r.nome}</td>
+      <td style="padding:8px 10px">${_rhFmtHoras(r.s.previstoMin)}</td>
+      <td style="padding:8px 10px">${_rhFmtHoras(r.s.perdidoMin)}</td>
+      <td style="padding:8px 10px">${r.s.pctPerdida.toFixed(1)}%</td>
+      <td style="padding:8px 10px;font-weight:700;color:${r.s.faltasDias>0?'#dc2626':'inherit'}">${r.s.faltasDias}</td>
+      <td style="padding:8px 10px"><span style="background:${r.idx.cor}22;color:${r.idx.cor};border-radius:999px;padding:3px 10px;font-size:.72rem;font-weight:700">${r.idx.score==null?'—':r.idx.score+' · '+r.idx.status}</span></td>
+    </tr>`).join('');
+    deptoTableEl.innerHTML=`<thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
+      <th style="padding:8px 10px">Departamento</th><th style="padding:8px 10px">Horas Previstas</th><th style="padding:8px 10px">Horas Perdidas</th><th style="padding:8px 10px">% Perdida</th><th style="padding:8px 10px">Faltas (dias)</th><th style="padding:8px 10px">Índice</th>
+    </tr></thead><tbody>${linhasDepto||'<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--ink4)">Nenhum dado no período.</td></tr>'}</tbody>`;
+  }
+  const funcRows=[...porFunc].sort((a,b)=>(a.indice.score??999)-(b.indice.score??999));
+  const funcTableEl=document.getElementById('rh-tabela-func');
+  if(funcTableEl){
+    const linhasFunc=funcRows.map(x=>`<tr style="border-bottom:1px solid var(--border-lt)">
+      <td style="padding:8px 10px;font-weight:700">${x.f.nome}</td>
+      <td style="padding:8px 10px">${x.f.departamento||'—'}</td>
+      <td style="padding:8px 10px">${_rhFmtHoras(x.stats.previstoMin)}</td>
+      <td style="padding:8px 10px">${_rhFmtHoras(x.stats.trabalhadoMin)}</td>
+      <td style="padding:8px 10px">${_rhFmtHoras(x.stats.perdidoMin)}</td>
+      <td style="padding:8px 10px">${x.stats.pctPerdida.toFixed(1)}%</td>
+      <td style="padding:8px 10px;font-weight:700;color:${x.stats.faltasDias>0?'#dc2626':'inherit'}">${x.stats.faltasDias}</td>
+      <td style="padding:8px 10px"><span style="background:${x.indice.cor}22;color:${x.indice.cor};border-radius:999px;padding:3px 10px;font-size:.72rem;font-weight:700">${x.indice.score==null?'Sem dados':x.indice.score+' · '+x.indice.status}</span></td>
+    </tr>`).join('');
+    funcTableEl.innerHTML=`<thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
+      <th style="padding:8px 10px">Colaborador</th><th style="padding:8px 10px">Departamento</th><th style="padding:8px 10px">Horas Previstas</th><th style="padding:8px 10px">Horas Trabalhadas</th><th style="padding:8px 10px">Horas Perdidas</th><th style="padding:8px 10px">% Perdida</th><th style="padding:8px 10px">Faltas (dias)</th><th style="padding:8px 10px">Índice</th>
+    </tr></thead><tbody>${linhasFunc||'<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--ink4)">Nenhum colaborador cadastrado ainda — suba um arquivo de Cartão Ponto pra começar.</td></tr>'}</tbody>`;
+  }
+}
+// ===================== FIM RH — PONTUALIDADE E ASSIDUIDADE =====================
 
 function renderPlanejamentoObras(){
   const lblEl=document.getElementById('pl-mes-lbl');
