@@ -4768,7 +4768,7 @@ function renderStep(id){
         </div>
         <div id="vi-row" style="display:${si?'':'none'}">
           <div class="g2">
-            <div class="fg"><label>Valor da Instalação <span class="r">*</span></label><input class="fc" id="em-vi" value="${ed.vinst||''}" placeholder="R$ 0,00" oninput="fmtMoney(this);updLiq();_checarValorPdf(this,'vinst','DE INSTALAÇÃO')"></div>
+            <div class="fg"><label>Serviço de Instalação <span class="r">*</span></label><input class="fc" id="em-vi" value="${ed.vinst||''}" placeholder="R$ 0,00" oninput="fmtMoney(this);updLiq();_checarValorPdf(this,'vinst','DE INSTALAÇÃO')"></div>
             <div class="fg"><label>Valor da Mobilização <span class="r">*</span></label><input class="fc" id="em-vm" value="${ed.vmob||''}" placeholder="R$ 0,00" oninput="fmtMoney(this);updLiq();_checarValorPdf(this,'vmob','DE MOBILIZAÇÃO')"></div>
           </div>
         </div>
@@ -4777,7 +4777,7 @@ function renderStep(id){
             <div class="tg-grp">${rTG('tg_rem','Sim','Sim',ed.remocao,true)}${rTG('tg_rem','Não','Não',ed.remocao,false)}</div>
           </div>
           <div id="vr-row" style="display:${ed.remocao==='Sim'?'':'none'}">
-            <div class="fg"><label>Valor da Remoção de Materiais</label><input class="fc" id="em-vr" value="${ed.vrem||''}" placeholder="R$ 0,00" oninput="fmtMoney(this);updLiq()"></div>
+            <div class="fg"><label>Valor da Remoção de Materiais</label><input class="fc" id="em-vr" value="${ed.vrem||''}" placeholder="R$ 0,00" oninput="fmtMoney(this);updLiq();_checarValorPdf(this,'vrem','DE REMOÇÃO DE MATERIAIS')"></div>
           </div>
         </div>
         <div class="fg"><label>Frete <span class="r">*</span></label>
@@ -5691,7 +5691,8 @@ function _extrairNumeroOsDoPdf(texto){
 // ===================== AUTOPREENCHIMENTO DE VALORES A PARTIR DO PDF (2026-07-29) =====================
 // A pedido do usuário: além do Nº da OS, tenta ler do mesmo PDF da Ordem de Serviço os
 // valores operacionais (Total do pedido, ART, Mobilização, Serviço de Instalação, Caminhão
-// Munck/Elevações, Frete, Medição Técnica/Survey) e pré-preencher a aba Valores/Bases.
+// Munck/Elevações, Frete, Medição Técnica/Survey, Remoção de Materiais) e pré-preencher a
+// aba Valores/Bases.
 // MESMA FILOSOFIA do resto do verificador de OS: heurístico (busca o rótulo no texto e pega
 // o "R$ ..." mais próximo) — pdf.js não garante ordem de tabela, só ordem do fluxo de texto
 // do PDF, então pode falhar em layouts diferentes. Por isso NUNCA inventa valor nenhum: se
@@ -5729,6 +5730,8 @@ function _extrairValoresPedidoPdf(texto){
   if(munck)out.velev=munck;
   const medicao=_valorPertoDoRotulo(t,/medi[çc][ãa]o\s*t[ée]cnica|\bsurvey\b/i);
   if(medicao)out.vmed=medicao;
+  const remocao=_valorPertoDoRotulo(t,/remo[çc][ãa]o\s+de\s+materia(is|l)/i);
+  if(remocao)out.vrem=remocao;
   // Seguro de Obra: só decide que TEM custo de seguro no pedido (marca iseg='Sim' sozinho) —
   // NUNCA guarda/preenche o valor. O campo do formulário ("Valor solicitado de seguro pelo
   // empreendimento") pede o valor da APÓLICE exigida pelo empreendimento, que é uma coisa
@@ -5770,12 +5773,13 @@ function _extrairValoresPedidoPdf(texto){
 // diferente do que o PDF trazia.
 function _aplicarValoresPdfNaEd(vals){
   ed._pdfVals=Object.assign({},ed._pdfVals,vals);
-  const camposDinheiro=['vtotal','vart','vinst','vmob','velev','vfrete','vmed','vpintub'];
+  const camposDinheiro=['vtotal','vart','vinst','vmob','velev','vfrete','vmed','vpintub','vrem'];
   camposDinheiro.forEach(c=>{if(vals[c]&&!ed[c])ed[c]=vals[c];});
   if((vals.vinst||vals.vmob)&&!ed.i_tipo)ed.i_tipo='Por nossa conta';
   if(vals.velev&&!ed.elevacoes)ed.elevacoes='Sim';
   if(vals.vmed&&!ed.medicao)ed.medicao='Sim';
   if(vals.vart&&!ed.art)ed.art='Sim';
+  if(vals.vrem&&!ed.remocao)ed.remocao='Sim';
   if(vals.f_tipo&&!ed.f_tipo)ed.f_tipo=vals.f_tipo;
   if(vals.fmod&&!ed.fmod)ed.fmod=vals.fmod;
   if(vals.baseTemValor&&!ed.bases)ed.bases='BASE POR NOSSA CONTA';
@@ -5815,6 +5819,7 @@ function _atualizarAvisosValorPdf(){
   _checarValorPdf(document.getElementById('em-velv'),'velev','DAS ELEVAÇÕES');
   _checarValorPdf(document.getElementById('em-vmed'),'vmed','DA MEDIÇÃO TÉCNICA');
   _checarValorPdf(document.getElementById('em-vart'),'vart','DA ART');
+  _checarValorPdf(document.getElementById('em-vr'),'vrem','DE REMOÇÃO DE MATERIAIS');
 }
 // ===================== FIM AUTOPREENCHIMENTO DE VALORES =====================
 // Roda ao selecionar o PDF da OS: faz o upload de sempre (setUpload) e, em paralelo,
@@ -5881,7 +5886,7 @@ async function emOsPdfSelecionado(input){
     // preencher manualmente (validarAba/submit não mudam).
     const valoresPdf=_extrairValoresPedidoPdf(texto);
     _aplicarValoresPdfNaEd(valoresPdf);
-    const rotulos={vtotal:'Valor Total',vart:'ART',vinst:'Instalação',vmob:'Mobilização',velev:'Elevações (Munck)',vfrete:'Frete',vmed:'Medição Técnica',vpintub:'Pintura de Tubo (mão de obra)'};
+    const rotulos={vtotal:'Valor Total',vart:'ART',vinst:'Instalação',vmob:'Mobilização',velev:'Elevações (Munck)',vfrete:'Frete',vmed:'Medição Técnica',vpintub:'Pintura de Tubo (mão de obra)',vrem:'Remoção de Materiais'};
     const achados=Object.keys(rotulos).filter(k=>valoresPdf[k]).map(k=>rotulos[k]);
     if(achados.length){
       toast('📄 Valores pré-preenchidos a partir do PDF: '+achados.join(', ')+'. Confira antes de emitir.','tok');
