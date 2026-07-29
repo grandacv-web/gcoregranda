@@ -2921,6 +2921,21 @@ async function _migrarLancarGcoreSemResponsavel(){
   }
   _refreshTarefasBadge();
 }
+// Corrige na origem o bug achado 2026-07-29 ("aparece atrasado sem nem ter chegado a
+// entrega"): pedidos criados a partir da planilha (editarVendaLista/
+// incluirVendaNaFinalizacao/importação em massa) gravavam p.prazo em BR "DD/MM/YYYY" em vez
+// de ISO — a Finalização de Obra e os Diários de Obra já normalizam na hora de exibir (ver
+// _normPrazoIso), mas aqui corrige o dado salvo de vez, pra qualquer outro lugar que venha a
+// usar p.prazo (ex.: pré-preencher o campo de Alterar Prazo) também funcionar certo.
+function _prazoPareceBR(v){return/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(v||'');}
+async function _migrarPrazoBrParaIso(){
+  const afetados=pedidos.filter(p=>_prazoPareceBR(p.prazo));
+  if(!afetados.length)return;
+  for(const p of afetados){
+    p.prazo=_brToIso(p.prazo);
+    await savePedidoFS(p);
+  }
+}
 async function savePedidoFS(p){
   if(!window._fbSavePedido){console.warn('Firestore não disponível');return;}
   try{await window._fbSavePedido(p);}
@@ -2930,6 +2945,7 @@ async function savePedidoFS(p){
 // Trava pra _migrarLancarGcoreSemResponsavel() rodar só 1x por sessão, mesmo o listener de
 // pedidos disparando de novo a cada mudança (senão reescreveria o mesmo pedido repetidas vezes).
 let _gcoreMigracaoFeita=false;
+let _prazoMigracaoFeita=false;
 function setupRealtimeSync(){
   if(!window._fbWatchPedidos)return;
   window._fbWatchPedidos(function(snapshot){
@@ -2941,6 +2957,12 @@ function setupRealtimeSync(){
     if(!_gcoreMigracaoFeita&&_getUserCat().isAdm){
       _gcoreMigracaoFeita=true;
       _migrarLancarGcoreSemResponsavel().catch(e=>{_gcoreMigracaoFeita=false;console.error('Erro na migração de tarefas GCore',e);});
+    }
+    // Mesmo padrão acima, pra corrigir de vez o prazo gravado em BR (ver
+    // _migrarPrazoBrParaIso) — só 1x por sessão, só admin.
+    if(!_prazoMigracaoFeita&&_getUserCat().isAdm){
+      _prazoMigracaoFeita=true;
+      _migrarPrazoBrParaIso().catch(e=>{_prazoMigracaoFeita=false;console.error('Erro na migração de prazo BR→ISO',e);});
     }
     // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache)
     // montado ANTES dessa atualização de pedidos — editar OS/valores/vendedor num pedido
@@ -3598,7 +3620,7 @@ async function editarVendaLista(os,pedidoId){
   };
   const projetos=x.art>0?{'Valor da ART':fmtBR(x.art)}:{};
   const pedido={id:uid(),os:String(x.p),tipo:x.cat,tipoPedido:x.cat,responsavel:mapVendedorName(x.v),
-    cliente:x.cl,emails:[],job:x.cl,prazo:x.entrega||'',etapa:'Pedido Entregue',
+    cliente:x.cl,emails:[],job:x.cl,prazo:_brToIso(x.entrega)||'',etapa:'Pedido Entregue',
     emissaoEm,obs:'Editado a partir da Lista de Vendas',importadoPlanilha:true,
     // origPlanilhaOs guarda o OS original da linha em XLSX_VENDAS que deu origem a este
     // pedido — necessário pra getVendaRowsMerged continuar escondendo essa linha da
@@ -3640,7 +3662,7 @@ async function incluirVendaNaFinalizacao(os,pedidoId){
     };
     const projetos=x.art>0?{'Valor da ART':fmtBR(x.art)}:{};
     p={id:uid(),os:String(x.p),tipo:x.cat,tipoPedido:x.cat,responsavel:mapVendedorName(x.v),
-      cliente:x.cl,emails:[],job:x.cl,prazo:x.entrega||'',etapa:'Pedido Entregue',
+      cliente:x.cl,emails:[],job:x.cl,prazo:_brToIso(x.entrega)||'',etapa:'Pedido Entregue',
       emissaoEm,obs:'Incluído na Finalização de Obra a partir da Lista de Vendas',importadoPlanilha:true,
       origPlanilhaOs:String(x.p),
       valores,pagamento:{},instalacao,frete,bases:'',elevacoes:[],remocoes:[],projetos};
@@ -9876,6 +9898,24 @@ function _plMesMov(dir){
   renderPlanejamentoObras();
 }
 
+// Normaliza p.prazo pra ISO 'YYYY-MM-DD' na hora de COMPARAR/calcular dias — corrige o bug
+// achado 2026-07-29 (usuário: "aparece atrasado se nem chegou a entrega ainda"): pedidos
+// criados a partir da planilha (editarVendaLista/incluirVendaNaFinalizacao/importação em
+// massa) gravavam prazo:x.entrega direto, no formato BR "DD/MM/YYYY" — string diferente do
+// ISO usado pelo <input type=date> da Emissão. Isso quebrava de duas formas: a comparação de
+// string `prazo<hojeISO` dava errado (não é ordem cronológica) e `new Date(prazo)` também
+// lê "DD/MM/YYYY" como se fosse "MM/DD/YYYY" (padrão americano do JS), embaralhando mês/dia —
+// por isso prazos no FUTURO apareciam "atrasados" e a contagem de dias vinha absurda. A
+// criação já foi corrigida pra gravar ISO (ver _brToIso em editarVendaLista/
+// incluirVendaNaFinalizacao/importação), mas pedidos já salvos ANTES da correção continuam
+// com prazo em BR — por isso normaliza aqui também, e uma migração automática (ver
+// _migrarPrazoBrParaIso) corrige o dado salvo pra não depender só disso.
+function _normPrazoIso(v){
+  if(!v)return'';
+  if(/^\d{4}-\d{2}-\d{2}/.test(v))return v.slice(0,10);
+  if(/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(v))return _brToIso(v);
+  return v;
+}
 function _plPedidosElegiveis(){
   return pedidos.filter(p=>{
     if(p.forcarFinalizacao)return true; // incluído manualmente por admin (venda antiga sem os critérios normais)
@@ -9897,12 +9937,14 @@ function renderPlanejamentoObras(){
     lista=lista.filter(p=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
   }
   const hojeISO=new Date().toISOString().slice(0,10);
-  // atrasado = ainda não concluída E o Prazo de Finalização já passou (comparação direta de
-  // string ISO 'YYYY-MM-DD', mesmo formato salvo pelo <input type=date> da Emissão).
+  // atrasado = ainda não concluída E o Prazo de Finalização já passou (comparação de string
+  // ISO 'YYYY-MM-DD' — normaliza com _normPrazoIso pra também funcionar com pedidos antigos
+  // que ficaram gravados em BR "DD/MM/YYYY", ver comentário ali).
   let rows=lista.map(p=>{
+    const prazoIso=_normPrazoIso(p.prazo);
     const concl=!!(p.finalizacao&&p.finalizacao.dataFinalizacao);
-    const atrasado=!concl&&!!p.prazo&&p.prazo<hojeISO;
-    return{p,concl,atrasado};
+    const atrasado=!concl&&!!prazoIso&&prazoIso<hojeISO;
+    return{p,concl,atrasado,prazoIso};
   });
   // Concluídas somem da lista por padrão — só aparecem quando o filtro "✅ Concluídas" é
   // escolhido explicitamente (2026-07-23, a pedido do usuário: a lista principal é de
@@ -9915,7 +9957,7 @@ function renderPlanejamentoObras(){
     if(a.concl!==b.concl)return a.concl?1:-1; // pendentes sempre primeiro
     if(!a.concl){
       if(a.atrasado!==b.atrasado)return a.atrasado?-1:1; // atrasadas primeiro
-      return new Date(a.p.prazo||'2100-01-01')-new Date(b.p.prazo||'2100-01-01'); // mais urgente primeiro
+      return new Date(a.prazoIso||'2100-01-01')-new Date(b.prazoIso||'2100-01-01'); // mais urgente primeiro
     }
     return new Date(b.p.finalizacao?.preenchidoEm||0)-new Date(a.p.finalizacao?.preenchidoEm||0); // mais recente primeiro
   });
@@ -9934,11 +9976,11 @@ function renderPlanejamentoObras(){
       <th style="padding:8px 10px">Cidade/UF</th><th style="padding:8px 10px">Status</th><th style="padding:8px 10px"></th>
     </tr></thead>
     <tbody>
-    ${rows.map(({p,concl,atrasado})=>{
+    ${rows.map(({p,concl,atrasado,prazoIso})=>{
       const cid=(p.locCidade||'').toUpperCase(),uf=(p.locUf||'').toUpperCase();
       const loc=cid&&uf?`${cid}/${uf}`:(cid||uf||'—');
       const corLinha=atrasado?'color:#dc2626':'';
-      const diasAtraso=atrasado?Math.floor((new Date(hojeISO)-new Date(p.prazo))/86400000):0;
+      const diasAtraso=atrasado?Math.floor((new Date(hojeISO)-new Date(prazoIso))/86400000):0;
       const statusHtml=concl?'<span style="color:var(--success);font-weight:700">✅ Concluída</span>'
         :atrasado?`<span style="color:#dc2626;font-weight:700">🔴 Atrasada · ${diasAtraso}d</span>`
         :'<span style="color:#d97706;font-weight:700">⏳ Pendente</span>';
@@ -10215,10 +10257,13 @@ function renderDiariosObra(){
     lista=lista.filter(p=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
   }
   const hojeISO=new Date().toISOString().slice(0,10);
+  // Normaliza com _normPrazoIso (ver comentário na definição) — sem isso, pedido antigo com
+  // prazo gravado em BR "DD/MM/YYYY" aparecia atrasado mesmo com a entrega ainda no futuro.
   let rows=lista.map(p=>{
+    const prazoIso=_normPrazoIso(p.prazo);
     const concl=!!(p.finalizacao&&p.finalizacao.dataFinalizacao);
-    const atrasado=!concl&&!!p.prazo&&p.prazo<hojeISO;
-    return{p,concl,atrasado};
+    const atrasado=!concl&&!!prazoIso&&prazoIso<hojeISO;
+    return{p,concl,atrasado,prazoIso};
   });
   if(filStatus==='pendentes')rows=rows.filter(x=>!x.concl&&!x.atrasado);
   else if(filStatus==='atrasadas')rows=rows.filter(x=>x.atrasado);
@@ -10228,7 +10273,7 @@ function renderDiariosObra(){
     if(a.concl!==b.concl)return a.concl?1:-1;
     if(!a.concl){
       if(a.atrasado!==b.atrasado)return a.atrasado?-1:1;
-      return new Date(a.p.prazo||'2100-01-01')-new Date(b.p.prazo||'2100-01-01');
+      return new Date(a.prazoIso||'2100-01-01')-new Date(b.prazoIso||'2100-01-01');
     }
     return new Date(b.p.finalizacao?.preenchidoEm||0)-new Date(a.p.finalizacao?.preenchidoEm||0);
   });
@@ -10245,9 +10290,9 @@ function renderDiariosObra(){
       <th style="padding:8px 10px">Registros</th><th style="padding:8px 10px"></th>
     </tr></thead>
     <tbody>
-    ${rows.map(({p,concl,atrasado})=>{
+    ${rows.map(({p,concl,atrasado,prazoIso})=>{
       const corLinha=atrasado?'color:#dc2626':'';
-      const diasAtraso=atrasado?Math.floor((new Date(hojeISO)-new Date(p.prazo))/86400000):0;
+      const diasAtraso=atrasado?Math.floor((new Date(hojeISO)-new Date(prazoIso))/86400000):0;
       const statusHtml=concl?'<span style="color:var(--success);font-weight:700">✅ Concluída</span>'
         :atrasado?`<span style="color:#dc2626;font-weight:700">🔴 Atrasada · ${diasAtraso}d</span>`
         :'<span style="color:#d97706;font-weight:700">⏳ Pendente</span>';
@@ -10702,7 +10747,7 @@ function abrirAlterarPrazoObra(pedidoId){
   const idEl=document.getElementById('pz-pedido-id');if(idEl)idEl.value=pedidoId;
   const infoEl=document.getElementById('pz-info');
   if(infoEl)infoEl.innerHTML=`OS Nº <strong>${p.os||'—'}</strong> · ${p.cliente||'—'}<br>Prazo atual: <strong>${fmtD(p.prazo)||'—'}</strong>${p.prazoOriginal&&p.prazoOriginal!==p.prazo?` · Prazo original: <strong style="color:#e91e63">${fmtD(p.prazoOriginal)}</strong>`:''}`;
-  const novoEl=document.getElementById('pz-novo-prazo');if(novoEl)novoEl.value=p.prazo||'';
+  const novoEl=document.getElementById('pz-novo-prazo');if(novoEl)novoEl.value=_normPrazoIso(p.prazo)||'';
   const motEl=document.getElementById('pz-motivo');if(motEl)motEl.value='';
   const selEl=document.getElementById('pz-motivo-select');
   if(selEl){selEl.innerHTML='<option value="">Selecione...</option>'+getMotivosPrazoFinalizacao().map(m=>`<option value="${m}">${m}</option>`).join('');selEl.value='';}
@@ -13970,7 +14015,7 @@ async function importarPlanilha(){
     const pedido=existing
       ? {...existing,valores,pagamento,responsavel:resp,emissaoEm,frete,instalacao,projetos}
       : {id:uid(),os:String(x.p),tipo:x.cat,tipoPedido:x.cat,responsavel:resp,
-         cliente:x.cl,emails:[],job:x.cl,prazo:x.entrega||'',etapa:'Pedido Entregue',
+         cliente:x.cl,emails:[],job:x.cl,prazo:_brToIso(x.entrega)||'',etapa:'Pedido Entregue',
          emissaoEm,obs:'Importado da planilha de vendas',importadoPlanilha:true,
          valores,pagamento,instalacao,frete,bases:'',elevacoes:[],remocoes:[],projetos};
 
