@@ -1036,6 +1036,7 @@ select.fc{cursor:pointer}
         <button class="dash-tab active plan-main-tab" onclick="planMainSetTab('obras',this)">🏗️ Finalização de Obra</button>
         <button class="dash-tab plan-main-tab" onclick="planMainSetTab('pendencias',this)">⚠️ Finalizados com Pendências</button>
         <button class="dash-tab plan-main-tab" onclick="planMainSetTab('diarios',this)">📔 Diários de Obra</button>
+        <button class="dash-tab plan-main-tab" onclick="planMainSetTab('fornecedores',this)">🧰 Fornecedores</button>
       </div>
       <div id="pl-sec-obras">
         <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
@@ -1100,6 +1101,106 @@ select.fc{cursor:pointer}
         </div>
         <div id="pd-body"></div>
       </div>
+      <!-- GESTÃO DE FORNECEDORES (2026-07-29, reformulado 2026-07-29 pra espelhar de perto as
+           4 telas do sistema de referência do usuário — Início/Dashboard/Pedidos/Fornecedores,
+           com os mesmos KPIs, rankings e gráfico comparativo mensal). Budget automático (70% do
+           valor cobrado do cliente naquele item), Valor Fechado (negociado de verdade) e Save
+           (Budget − Fechado). Reaproveita os pedidos já emitidos (mesma lista de Finalização de
+           Obra/Diários de Obra) — não duplica cadastro de pedido, só o lançamento por cima.
+           Status do pedido (Aguardando/Em Execução/Finalizado) é derivado, não duplicado: ver
+           _fgStatus() — finalizado vem de p.finalizacao (já existe no sistema). -->
+      <div id="pl-sec-fornecedores" style="display:none">
+        <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
+          🧰 Gestão de Fornecedores — Instalador, Transportadora e Munque por pedido, Budget automático (70% do valor cobrado do cliente), Valor Fechado e Save. Nada aqui é enviado por e-mail, fica só registrado no sistema.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+          <div class="dash-mes-nav" style="margin:0">
+            <button onclick="_fgMesMov(-1)" type="button">◀</button>
+            <div class="dash-mes-label" id="fg-mes-lbl" style="min-width:150px">Todos os meses</div>
+            <button onclick="_fgMesMov(1)" type="button">▶</button>
+          </div>
+          <select id="fg-fil-fornecedor" onchange="renderFgAll()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer;min-width:170px">
+            <option value="">Todos os fornecedores</option>
+          </select>
+          <select id="fg-fil-status-geral" onchange="renderFgAll()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+            <option value="">Todos os status</option>
+            <option value="aguardando">⏳ Aguardando</option>
+            <option value="aberto">🔧 Em Execução</option>
+            <option value="finalizado">✅ Finalizado</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <button class="fg-sub-tab active" onclick="fgSetSubTab('pedidos',this)" style="padding:8px 14px;border:1px solid var(--border);background:#fff;border-radius:999px;cursor:pointer;font-weight:600;font-size:.8rem">📋 Pedidos</button>
+          <button class="fg-sub-tab" onclick="fgSetSubTab('dashboard',this)" style="padding:8px 14px;border:1px solid var(--border);background:#fff;border-radius:999px;cursor:pointer;font-weight:600;font-size:.8rem">📊 Dashboard</button>
+          <button class="fg-sub-tab" onclick="fgSetSubTab('cadastro',this)" style="padding:8px 14px;border:1px solid var(--border);background:#fff;border-radius:999px;cursor:pointer;font-weight:600;font-size:.8rem">👷 Fornecedores</button>
+        </div>
+        <!-- ── DASHBOARD ── -->
+        <div id="fg-sec-dashboard" style="display:none">
+          <div id="fg-dash-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px"></div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px" class="fg-dash-3col">
+            <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+              <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Mais contratados</h3>
+              <div id="fg-dash-contratados" style="font-size:.82rem;line-height:1.9"></div>
+            </div>
+            <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+              <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Save por área</h3>
+              <div id="fg-dash-save-areas"></div>
+            </div>
+            <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+              <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Bruto x Líquido x Gasto</h3>
+              <div id="fg-dash-comparativo"></div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px" class="fg-dash-2col">
+            <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+              <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Ranking Instaladores <span style="font-weight:400;color:var(--ink4);font-size:.72rem">(valor fechado)</span></h3>
+              <div id="fg-dash-rank-inst"></div>
+            </div>
+            <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+              <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Distribuição de gastos</h3>
+              <div id="fg-dash-dist-gastos"></div>
+            </div>
+          </div>
+          <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px;margin-top:14px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;flex-wrap:wrap;gap:6px">
+              <h3 style="margin:0;font-size:.85rem;font-weight:700">Comparativo Mensal</h3>
+              <span style="font-size:.72rem;color:var(--ink4)">Pedidos finalizados, por mês da Data de Finalização</span>
+            </div>
+            <div id="fg-dash-comparativo-mensal"></div>
+          </div>
+        </div>
+        <!-- ── PEDIDOS ── -->
+        <div id="fg-sec-pedidos">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+            <div class="dash-tabs" id="fg-status-tabs" style="margin-bottom:0;width:auto;display:inline-flex">
+              <button class="dash-tab active" onclick="fgSetStatusTab('',this)" type="button">Todos</button>
+              <button class="dash-tab" onclick="fgSetStatusTab('aguardando',this)" type="button">Aguardando</button>
+              <button class="dash-tab" onclick="fgSetStatusTab('aberto',this)" type="button">Em Execução</button>
+              <button class="dash-tab" onclick="fgSetStatusTab('finalizado',this)" type="button">Finalizados</button>
+            </div>
+            <button class="dash-btn-conf" onclick="exportarFgPedidosCSV()" type="button" style="background:#475569;white-space:nowrap">⬇️ Exportar CSV</button>
+          </div>
+          <input id="fg-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="renderFgPedidos()" style="width:100%;box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;margin-bottom:14px">
+          <div id="fg-body"></div>
+        </div>
+        <!-- ── FORNECEDORES (cadastro + resumo) ── -->
+        <div id="fg-sec-cadastro" style="display:none">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px" class="fg-dash-2col">
+            <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <h3 style="margin:0;font-size:.85rem;font-weight:700">Cadastro de fornecedores</h3>
+                <button class="dash-btn-conf" onclick="abrirFornecedorModal()" type="button" style="background:#16a34a">+ Novo Fornecedor</button>
+              </div>
+              <div id="fg-backfill-banner"></div>
+              <div id="fg-cad-body"></div>
+            </div>
+            <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+              <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Resumo por fornecedor</h3>
+              <div id="fg-resumo-body"></div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     <!-- HISTÓRICO DE PEDIDOS (consulta, aberto pra qualquer usuário logado) -->
     <div id="sec-cat-HISTORICO" style="display:none">
@@ -1119,6 +1220,32 @@ select.fc{cursor:pointer}
       <div id="hp-cards" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px"></div>
       <input id="hp-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="renderHistoricoPedidos()" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;margin-bottom:14px;box-sizing:border-box">
       <div id="hp-lista"></div>
+    </div>
+    <!-- COMISSÃO PLANEJAMENTO (2026-07-29) — incentivo do time de Planejamento, SEPARADO
+         da comissão de vendedores (Metas & Comissões): 0,05% do valor líquido entregue no
+         mês + 1% do save positivo (ver Fornecedores) + R$20 por pedido cujo relatório de
+         finalização foi enviado em até 2 dias úteis. Competência = mês da Data de
+         Finalização (não mês da venda). -->
+    <div id="sec-cat-COMISSAO_PLANEJAMENTO" style="display:none">
+      <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
+        📈 Regra: 0,05% do valor líquido entregue no mês + 1% do save positivo (Fornecedores) + R$20 por relatório de finalização enviado em até 2 dias úteis. Competência pelo mês da Data de Finalização.
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <div class="dash-mes-nav" style="margin:0">
+          <button onclick="_cplMesMov(-1)" type="button">◀</button>
+          <div class="dash-mes-label" id="cpl-mes-lbl" style="min-width:150px">—</div>
+          <button onclick="_cplMesMov(1)" type="button">▶</button>
+        </div>
+      </div>
+      <div id="cpl-cards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px"></div>
+      <div class="card" style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px;margin-bottom:16px">
+        <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Resumo mensal</h3>
+        <div style="overflow:auto"><table id="cpl-resumo-table" style="width:100%;border-collapse:collapse;font-size:.82rem"></table></div>
+      </div>
+      <div class="card" style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+        <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Detalhamento dos pedidos finalizados</h3>
+        <div style="overflow:auto;max-height:520px"><table id="cpl-detalhe-table" style="width:100%;border-collapse:collapse;font-size:.82rem"></table></div>
+      </div>
     </div>
     <!-- OUTRAS CATEGORIAS (placeholder genérico) -->
     <div id="sec-cat-generic" style="display:none">
@@ -1780,6 +1907,90 @@ select.fc{cursor:pointer}
     <div id="pd-reg-fotos-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px"></div>
   </div>
   <button onclick="salvarDiarioRegistro()" style="margin-top:6px;width:100%;background:#0891b2;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">💾 Salvar Registro</button>
+</div>
+</div>
+
+<!-- CADASTRO DE FORNECEDOR MODAL (Planejamento → Fornecedores, 2026-07-29) -->
+<div class="mov" id="mo-fornecedor" onclick="cio(event,'mo-fornecedor')">
+<div class="mvmod" style="width:420px;max-width:96vw">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <h3 id="fn-titulo" style="margin-bottom:0">👷 Novo Fornecedor</h3>
+    <button onclick="closeM('mo-fornecedor')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <input type="hidden" id="fn-id">
+  <div class="fg"><label>Nome <span class="r">*</span></label><input class="fc" id="fn-nome" placeholder="Nome do fornecedor"></div>
+  <div class="fg"><label>Tipo <span class="r">*</span></label>
+    <select class="fc" id="fn-tipo">
+      <option value="instalador">Instalador</option>
+      <option value="frete">Transportadora (Frete)</option>
+      <option value="munque">Munque</option>
+    </select>
+  </div>
+  <button onclick="salvarFornecedor()" style="margin-top:6px;width:100%;background:#0891b2;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">💾 Salvar Fornecedor</button>
+</div>
+</div>
+
+<!-- LANÇAR FORNECEDORES POR PEDIDO MODAL (Planejamento → Fornecedores, 2026-07-29) —
+     Budget é sempre automático (70% do valor já cobrado do cliente naquele item, vindo da
+     Emissão) e só-leitura; só o Valor Fechado (o que foi realmente negociado) é digitado. -->
+<div class="mov" id="mo-fg-lancar" onclick="cio(event,'mo-fg-lancar')">
+<div class="mvmod" style="width:640px;max-width:97vw;max-height:92vh;overflow-y:auto">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <h3 style="margin-bottom:0">💰 Lançar Fornecedores</h3>
+    <button onclick="closeM('mo-fg-lancar')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div id="fgl-info" style="font-size:.8rem;color:var(--ink3);margin-bottom:14px;padding:8px 12px;background:#f8fafc;border-radius:8px;border:1px solid var(--border)"></div>
+  <input type="hidden" id="fgl-pedido-id">
+
+  <div class="fsec">
+    <div class="fsec-t">🔧 Instalação</div>
+    <div style="border:1.5px solid #eef0f5;border-radius:12px;padding:16px">
+      <div class="fg"><label>Instalador</label><select class="fc" id="fgl-instalador"></select></div>
+      <div class="g2">
+        <div class="fg"><label>Budget (automático — 70% de Instalação/Mobilização/Remoção/Pintura de Tubo)</label><div class="fc" id="fgl-budget-inst" style="background:#f3f4f6;display:flex;align-items:center;cursor:default;user-select:none">R$ 0,00</div></div>
+        <div class="fg"><label>Valor Fechado</label><input class="fc" id="fgl-fechado-inst" placeholder="R$ 0,00" oninput="fmtMoney(this);_fglAtualizarSaves()"></div>
+      </div>
+      <div id="fgl-save-inst" style="font-size:.78rem;font-weight:700"></div>
+    </div>
+  </div>
+
+  <div class="fsec" style="margin-top:14px">
+    <div class="fsec-t">🚚 Frete / Transportadora</div>
+    <div style="border:1.5px solid #eef0f5;border-radius:12px;padding:16px">
+      <div class="fg"><label>Transportadora</label><select class="fc" id="fgl-transportadora"></select></div>
+      <div class="g2">
+        <div class="fg"><label>Budget (automático — 70% do Frete)</label><div class="fc" id="fgl-budget-frete" style="background:#f3f4f6;display:flex;align-items:center;cursor:default;user-select:none">R$ 0,00</div></div>
+        <div class="fg"><label>Valor Fechado</label><input class="fc" id="fgl-fechado-frete" placeholder="R$ 0,00" oninput="fmtMoney(this);_fglAtualizarSaves()"></div>
+      </div>
+      <div id="fgl-save-frete" style="font-size:.78rem;font-weight:700"></div>
+    </div>
+  </div>
+
+  <div class="fsec" style="margin-top:14px">
+    <div class="fsec-t">🏗️ Munque</div>
+    <div style="border:1.5px solid #eef0f5;border-radius:12px;padding:16px">
+      <div class="fg"><label>Empresa de Munque</label><select class="fc" id="fgl-munque"></select></div>
+      <div class="g2">
+        <div class="fg"><label>Budget (automático — 70% da Elevação)</label><div class="fc" id="fgl-budget-munque" style="background:#f3f4f6;display:flex;align-items:center;cursor:default;user-select:none">R$ 0,00</div></div>
+        <div class="fg"><label>Valor Fechado</label><input class="fc" id="fgl-fechado-munque" placeholder="R$ 0,00" oninput="fmtMoney(this);_fglAtualizarSaves()"></div>
+      </div>
+      <div id="fgl-save-munque" style="font-size:.78rem;font-weight:700"></div>
+    </div>
+  </div>
+
+  <div class="fsec" style="margin-top:14px">
+    <div class="fsec-t">🧾 Gastos Extras (não entram no save)</div>
+    <div style="border:1.5px solid #eef0f5;border-radius:12px;padding:16px">
+      <div style="font-size:.72rem;color:var(--ink4);margin-bottom:10px">Ex.: taxa local, diária extra, estacionamento — não muda o Valor Líquido nem o Save, só soma no Total Gasto.</div>
+      <div id="fgl-extras-list"></div>
+      <button type="button" onclick="fglAddExtra()" style="background:var(--surface-2,#f3f4f6);border:1px solid var(--border);color:var(--ink);border-radius:8px;padding:8px 12px;font-size:.78rem;font-weight:600;cursor:pointer">+ Adicionar gasto</button>
+      <div style="margin-top:10px;font-size:.8rem;color:var(--ink3)">Total de gastos extras: <strong id="fgl-extras-total">R$ 0,00</strong></div>
+    </div>
+  </div>
+
+  <div class="vliq" style="margin-top:14px"><div><div class="vliq-l">Total Gasto (Fechado + Extras)</div></div><div class="vliq-v" id="fgl-total-gasto">R$ 0,00</div></div>
+
+  <button onclick="salvarFgLancamento()" style="margin-top:14px;width:100%;background:#16a34a;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">💾 Salvar Lançamento</button>
 </div>
 </div>
 
@@ -3232,9 +3443,13 @@ function buildSidebarCats(){
   // HISTÓRICO é igual FERRAMENTAS: fixo pra qualquer usuário logado, não é categoria de
   // cadastro — é só consulta (não edita nada), então não faz sentido restringir acesso
   // (2026-07-23, a pedido do usuário, depois de perguntar se valia a pena ter essa tela).
-  const cats=['FERRAMENTAS','HISTORICO',...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['PLANEJAMENTO']:[])];
-  const catIcons={'FERRAMENTAS':'🧰','RH':'👥','FINANCEIRO':'💰','COMPRAS':'🛒','PCP':'📋','PRODUÇÃO':'🏭','QUALIDADE':'✅','PLANEJAMENTO':'🏗️','PROJETOS':'📐','HISTORICO':'🔍'};
-  const catLabelsSidebar={'FERRAMENTAS':'FERRAMENTAS','HISTORICO':'HISTÓRICO DE PEDIDOS'};
+  // COMISSÃO PLANEJAMENTO (2026-07-29) — menu novo e separado da Metas & Comissões (que é a
+  // comissão dos vendedores); esta é a régua de incentivo do time de Planejamento (0,05% do
+  // líquido entregue + 1% do save positivo + R$20 por relatório de finalização no prazo).
+  // Mesma regra de acesso do resto do Planejamento, a pedido do usuário.
+  const cats=['FERRAMENTAS','HISTORICO',...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['PLANEJAMENTO','COMISSAO_PLANEJAMENTO']:[])];
+  const catIcons={'FERRAMENTAS':'🧰','RH':'👥','FINANCEIRO':'💰','COMPRAS':'🛒','PCP':'📋','PRODUÇÃO':'🏭','QUALIDADE':'✅','PLANEJAMENTO':'🏗️','PROJETOS':'📐','HISTORICO':'🔍','COMISSAO_PLANEJAMENTO':'📈'};
+  const catLabelsSidebar={'FERRAMENTAS':'FERRAMENTAS','HISTORICO':'HISTÓRICO DE PEDIDOS','COMISSAO_PLANEJAMENTO':'COMISSÃO PLANEJAMENTO'};
   container.innerHTML=cats.map(cat=>`
     <button class="sb-btn" id="sb-cat-${cat.replace(/\s/g,'_')}" onclick="setSection('cat:${cat}')" title="${catLabelsSidebar[cat]||cat}" style="font-size:.7rem">
       <span style="font-size:1rem;flex-shrink:0;width:18px;text-align:center">${catIcons[cat]||'📁'}</span>
@@ -3263,6 +3478,11 @@ function setSection(sec){
     toast('ACESSO NÃO PERMITIDO','terr');
     return;
   }
+  // Comissão Planejamento (2026-07-29) — mesma trava do resto do Planejamento.
+  if(sec==='cat:COMISSAO_PLANEJAMENTO'&&!_isPlanejamentoUser()){
+    toast('ACESSO NÃO PERMITIDO','terr');
+    return;
+  }
   currentSection=sec;
   const isGeral=sec==='geral';
 
@@ -3280,9 +3500,9 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
     const cat=sec.replace('cat:','');
     const isFerr=cat==='FERRAMENTAS';
     // Atualiza header da seção
-    const catIcons={'FERRAMENTAS':'🧰','RH':'👥','FINANCEIRO':'💰','COMPRAS':'🛒','PCP':'📋','PRODUÇÃO':'🏭','QUALIDADE':'✅','PLANEJAMENTO':'🏗️','PROJETOS':'📐','HISTORICO':'🔍'};
-    const catLabelsHeader={'FERRAMENTAS':'Ferramentas','PLANEJAMENTO':'Planejamento','HISTORICO':'Histórico de Pedidos'};
-    const catDescs={'FERRAMENTAS':'Tarefas, prazos e outras ferramentas do time','RH':'Recursos Humanos','FINANCEIRO':'Financeiro e contabilidade','COMPRAS':'Compras e suprimentos','PCP':'Planejamento e controle da produção','PRODUÇÃO':'Acompanhamento de produção','QUALIDADE':'Controle de qualidade','PLANEJAMENTO':'Finalização de obra','PROJETOS':'Gestão de projetos','HISTORICO':'Tudo que já aconteceu com um pedido, num só lugar'};
+    const catIcons={'FERRAMENTAS':'🧰','RH':'👥','FINANCEIRO':'💰','COMPRAS':'🛒','PCP':'📋','PRODUÇÃO':'🏭','QUALIDADE':'✅','PLANEJAMENTO':'🏗️','PROJETOS':'📐','HISTORICO':'🔍','COMISSAO_PLANEJAMENTO':'📈'};
+    const catLabelsHeader={'FERRAMENTAS':'Ferramentas','PLANEJAMENTO':'Planejamento','HISTORICO':'Histórico de Pedidos','COMISSAO_PLANEJAMENTO':'Comissão Planejamento'};
+    const catDescs={'FERRAMENTAS':'Tarefas, prazos e outras ferramentas do time','RH':'Recursos Humanos','FINANCEIRO':'Financeiro e contabilidade','COMPRAS':'Compras e suprimentos','PCP':'Planejamento e controle da produção','PRODUÇÃO':'Acompanhamento de produção','QUALIDADE':'Controle de qualidade','PLANEJAMENTO':'Finalização de obra','PROJETOS':'Gestão de projetos','HISTORICO':'Tudo que já aconteceu com um pedido, num só lugar','COMISSAO_PLANEJAMENTO':'Incentivo do time de Planejamento — líquido entregue, save e relatórios no prazo'};
     const nameEl=document.getElementById('cat-hdr-name');
     const descEl=document.getElementById('cat-hdr-desc');
     if(nameEl)nameEl.textContent=(catIcons[cat]||'📁')+' '+(catLabelsHeader[cat]||(cat.charAt(0)+cat.slice(1).toLowerCase()));
@@ -3290,11 +3510,19 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
     const isFin=cat==='FINANCEIRO';
     const isPlan=cat==='PLANEJAMENTO';
     const isHist=cat==='HISTORICO';
+    const isComPlan=cat==='COMISSAO_PLANEJAMENTO';
     document.getElementById('sec-cat-FERRAMENTAS').style.display=isFerr?'':'none';
     document.getElementById('sec-cat-FINANCEIRO').style.display=isFin?'':'none';
     document.getElementById('sec-cat-PLANEJAMENTO').style.display=isPlan?'':'none';
     document.getElementById('sec-cat-HISTORICO').style.display=isHist?'':'none';
-    document.getElementById('sec-cat-generic').style.display=(isFin||isFerr||isPlan||isHist)?'none':'';
+    document.getElementById('sec-cat-COMISSAO_PLANEJAMENTO').style.display=isComPlan?'':'none';
+    document.getElementById('sec-cat-generic').style.display=(isFin||isFerr||isPlan||isHist||isComPlan)?'none':'';
+    if(isComPlan){
+      // Sempre volta pro mês atual real ao reabrir a tela, mesmo padrão do Histórico de
+      // Pedidos — o usuário pode trocar livremente enquanto está nela.
+      _cplMes=new Date().getMonth()+1;
+      renderComissaoPlanejamento();
+    }
     if(isHist){
       // Sempre volta pro mês atual real (e limpa qualquer filtro de indicador clicado antes)
       // toda vez que a aba é reaberta — "sempre que abrir a tela" mostrar o mês corrente,
@@ -9884,12 +10112,14 @@ function _isPlanejamentoUser(){
 function planMainSetTab(tab,btn){
   document.querySelectorAll('.plan-main-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  const so=document.getElementById('pl-sec-obras'),sp=document.getElementById('pl-sec-pendencias'),sd=document.getElementById('pl-sec-diarios');
+  const so=document.getElementById('pl-sec-obras'),sp=document.getElementById('pl-sec-pendencias'),sd=document.getElementById('pl-sec-diarios'),sf=document.getElementById('pl-sec-fornecedores');
   if(so)so.style.display=tab==='obras'?'':'none';
   if(sp)sp.style.display=tab==='pendencias'?'':'none';
   if(sd)sd.style.display=tab==='diarios'?'':'none';
+  if(sf)sf.style.display=tab==='fornecedores'?'':'none';
   if(tab==='obras'){if(typeof renderPlanejamentoObras==='function')renderPlanejamentoObras();}
   else if(tab==='diarios'){if(typeof renderDiariosObra==='function')renderDiariosObra();}
+  else if(tab==='fornecedores'){if(typeof fgSetSubTab==='function')fgSetSubTab('pedidos',document.querySelector('.fg-sub-tab'));}
   else{if(typeof renderPendenciasFinalizacao==='function')renderPendenciasFinalizacao();}
 }
 // Pedidos sem Valor de Instalação E sem Valor de Frete não têm obra física pra acompanhar
@@ -9941,6 +10171,758 @@ function _plPedidosElegiveis(){
     return temInst||temFrete;
   });
 }
+
+// ===================== GESTÃO DE FORNECEDORES (Planejamento, 2026-07-29) =====================
+// Nova aba dentro de Planejamento, a pedido do usuário — inspirada num sistema separado que
+// ele já usa (controle de Instalador/Transportadora/Munque por pedido, com Budget automático
+// = 70% do valor cobrado do cliente naquele item, Valor Fechado = o que foi realmente
+// negociado com o fornecedor, e Save = Budget − Fechado). Reaproveita os PEDIDOS QUE JÁ
+// EXISTEM no Comercial (mesma lista de Finalização de Obra/Diários de Obra,
+// _plPedidosElegiveis) em vez de duplicar cadastro de pedido — os valores de Instalação/
+// Mobilização/Remoção/Pintura de Tubo/Frete/Elevação já vêm da Emissão via
+// pedidoToVendaRow(p), então não tem nada novo pra digitar ali.
+//
+// Cadastro de fornecedores fica em cfg.fornecedores (array de {id,nome,tipo}, tipo em
+// 'instalador'|'frete'|'munque') — salvo direto via window._fbSaveCfg(cfg), sem passar pela
+// Configurações (que agora é só admin, ver project_configuracoes_gate_senha_admin — esta
+// aba tem que ficar aberta pra quem já é categoria PLANEJAMENTO, mesma regra do resto do
+// menu).
+//
+// O lançamento de cada pedido (fornecedor escolhido por papel + valor fechado + gastos
+// extras que NÃO entram no save) fica em p.fornGestao, salvo com savePedidoFS(p) — mesmo
+// padrão de p.diarios/p.finalizacao/p.pendenciaFin.
+function _fgTiposFornecedor(){return{instalador:'Instalador',frete:'Transportadora',munque:'Munque'};}
+function _fgFornecedores(tipo){
+  const lista=cfg.fornecedores||[];
+  return tipo?lista.filter(f=>f.tipo===tipo):lista.slice();
+}
+async function _fgSalvarFornecedores(){
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+}
+// Calcula Budget (70% do valor cobrado do cliente naquele item — ART e Medição Técnica ficam
+// de fora, não são custo de instalador/frete/munque, mesmo critério do sistema de
+// referência), Valor Fechado (digitado manualmente em p.fornGestao) e Save (Budget −
+// Fechado). Nunca grava nada — só deriva na hora de mostrar.
+function _fgCalc(p){
+  const r=pedidoToVendaRow(p);
+  const fg=p.fornGestao||{};
+  const gastosExtras=(fg.gastosExtras||[]).reduce((s,e)=>s+(moneyToNum(e.valor)||0),0);
+  const budgetInst=(r.mo+r.vi+r.rem+r.pintub)*0.7;
+  const budgetFrete=r.ft*0.7;
+  const budgetMunque=r.el*0.7;
+  const fechadoInst=moneyToNum(fg.fechadoInst||0);
+  const fechadoFrete=moneyToNum(fg.fechadoFrete||0);
+  const fechadoMunque=moneyToNum(fg.fechadoMunque||0);
+  const saveInst=budgetInst-fechadoInst;
+  const saveFrete=budgetFrete-fechadoFrete;
+  const saveMunque=budgetMunque-fechadoMunque;
+  return{
+    r,fg,budgetInst,budgetFrete,budgetMunque,fechadoInst,fechadoFrete,fechadoMunque,
+    saveInst,saveFrete,saveMunque,saveTotal:saveInst+saveFrete+saveMunque,
+    gastosExtras,totalGasto:fechadoInst+fechadoFrete+fechadoMunque+gastosExtras
+  };
+}
+// Soma N dias ÚTEIS (considerando feriados nacionais, ver getFeriadosNacionais — mais
+// preciso que o sistema de referência, que só pulava fim de semana) a partir de uma data ISO.
+// Usado só pra checar se o "relatório" (ver relatorioNoPrazo) foi enviado no prazo.
+function _addDiasUteis(dataIso,dias){
+  if(!dataIso)return null;
+  let d=new Date(dataIso+'T00:00:00'),added=0;
+  while(added<dias){
+    d.setDate(d.getDate()+1);
+    const wd=d.getDay();
+    if(wd!==0&&wd!==6&&!getFeriadosNacionais(d.getFullYear()).has(fmtISOLocal(d)))added++;
+  }
+  return d;
+}
+// "Relatório enviado no prazo" pro pedido: o próprio formulário de Finalização de Obra É o
+// relatório (fotos, documento assinado, resumo etc.) — compara a Data de Finalização (data
+// real da obra em campo, escolhida por quem preenche) com QUANDO o formulário foi de fato
+// preenchido no sistema (p.finalizacao.preenchidoEm), equivalente à Data de Envio do
+// Relatório do sistema de referência. Prazo: até 2 dias úteis. Usado pela Comissão
+// Planejamento (ver renderComissaoPlanejamento).
+function relatorioNoPrazo(p){
+  const fin=p.finalizacao;
+  if(!fin||!fin.dataFinalizacao||!fin.preenchidoEm)return false;
+  const limite=_addDiasUteis(fin.dataFinalizacao,2);
+  const preenchido=new Date(fin.preenchidoEm);
+  return !!limite&&preenchido<=limite;
+}
+// ── STATUS DERIVADO POR PEDIDO (aguardando/aberto/finalizado) ──────────────────────────
+// Não duplica estado: "finalizado" vem de p.finalizacao (Finalização de Obra, já existe no
+// sistema) — nunca é setado por aqui. "aberto" é só um sinalizador leve (p.fornGestao.status)
+// pra saber que alguém já começou a lançar os gastos desse pedido; sem isso vira "aguardando".
+function _fgStatus(p){
+  if(p.finalizacao&&p.finalizacao.dataFinalizacao)return'finalizado';
+  if(p.fornGestao&&p.fornGestao.status==='aberto')return'aberto';
+  return'aguardando';
+}
+function _fgStatusLabel(s){return s==='finalizado'?'Finalizado':s==='aberto'?'Em Execução':'Aguardando';}
+function _fgStatusPill(s){
+  const map={finalizado:['#DEF7E8','#0E7A45'],aberto:['#E3E8FA','#3346A6'],aguardando:['#FBEACB','#8A5A00']};
+  const cores=map[s]||map.aguardando;
+  return`<span style="background:${cores[0]};color:${cores[1]};border-radius:999px;padding:3px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">${_fgStatusLabel(s)}</span>`;
+}
+// ── Cadastro inicial de fornecedores (2026-07-29, a pedido do usuário: "já cadastre os
+// fornecedores que tao nesse sistema") — mesma lista de fornecedores do sistema de
+// referência que ele mandou. Idempotente: só adiciona quem ainda não existe (por nome+tipo),
+// nunca duplica nem apaga fornecedores que o usuário já tenha cadastrado/editado por conta.
+const _FG_SEED_FORNECEDORES=[
+  {nome:'LUIS CARLOS',tipo:'instalador'},{nome:'EDUARDO',tipo:'instalador'},{nome:'GLAUCUS',tipo:'frete'},
+  {nome:'MHGL LOC',tipo:'munque'},{nome:'ROBERSON',tipo:'instalador'},{nome:'MUNCK NH',tipo:'munque'},
+  {nome:'BETO',tipo:'instalador'},{nome:'LUCAS RJ',tipo:'instalador'},{nome:'RODONAVES',tipo:'frete'},
+  {nome:'RITTER LOC',tipo:'munque'},{nome:'BNS ENG',tipo:'munque'},{nome:'ELIAS',tipo:'instalador'},
+  {nome:'SM GUINDASTES',tipo:'munque'},{nome:'FELIPE',tipo:'instalador'},{nome:'CNPJ MUNCK',tipo:'munque'},
+  {nome:'JOSIMAR',tipo:'frete'},{nome:'MGHL',tipo:'munque'},{nome:'CHINA',tipo:'instalador'},
+  {nome:'BRAZ FERRAGENS',tipo:'munque'},{nome:'RICHARLISSON',tipo:'instalador'},{nome:'NH',tipo:'munque'},
+  {nome:'LUCAS RAFAEL',tipo:'instalador'},{nome:'FELIPE RIBAS',tipo:'instalador'},{nome:'TRANSGOIANIA',tipo:'munque'},
+  {nome:'TRANSPENSA',tipo:'munque'},{nome:'JL',tipo:'munque'},{nome:'BLUEPRINT',tipo:'instalador'},
+  {nome:'CARLOS',tipo:'instalador'},{nome:'RIBMUNK',tipo:'munque'},{nome:'PONTO MUNCK',tipo:'munque'},
+  {nome:'SILVIA LOCAÇÕES',tipo:'munque'},{nome:'ABNER',tipo:'instalador'},{nome:'FELIPE SP',tipo:'instalador'},
+  {nome:'POSTO',tipo:'frete'},{nome:'ALOCON',tipo:'munque'},{nome:'CNPJ',tipo:'munque'},
+  {nome:'JRS',tipo:'munque'},{nome:'PIRAMIDE',tipo:'munque'},{nome:'MONTPAR',tipo:'munque'},
+  {nome:'EVANDRO',tipo:'instalador'},{nome:'JOÃO ENEAS',tipo:'instalador'},{nome:'LUIS BR MUNCK',tipo:'munque'},
+  {nome:'PINZ MUNCK',tipo:'munque'},{nome:'GUILHERME CAVALHEIRO',tipo:'munque'},{nome:'TRANSPESA',tipo:'munque'},
+  {nome:'FORTES MUNCK',tipo:'munque'}
+];
+let _fgSeedTentado=false;
+async function _fgSeedFornecedoresIniciais(){
+  if(_fgSeedTentado)return;
+  _fgSeedTentado=true;
+  cfg.fornecedores=cfg.fornecedores||[];
+  const existe=(nome,tipo)=>cfg.fornecedores.some(f=>f.nome===nome&&f.tipo===tipo);
+  let mudou=false;
+  _FG_SEED_FORNECEDORES.forEach(s=>{
+    if(!existe(s.nome,s.tipo)){cfg.fornecedores.push({id:uid(),nome:s.nome,tipo:s.tipo});mudou=true;}
+  });
+  if(mudou){
+    await _fgSalvarFornecedores();
+    renderFgCadastro();
+  }
+}
+// ── Preenchimento automático dos pedidos históricos (2026-07-29, a pedido do usuário: "veja
+// que tem pedidos que já tem o instalador certo e o frete certo etc... pode já colocar o mesmo
+// instalador, mesmo frete etc; os que não tiver o usuário vai colocar depois") — dados reais
+// de Instalador/Transportadora/Munque/Valor Fechado de Abril/Maio/Junho/2026 que já existiam
+// no sistema de referência que o usuário mandou, casados por Nº de OS. Só ADMIN pode rodar
+// (mexe em vários pedidos de uma vez) e NUNCA sobrescreve um p.fornGestao que já tenha algo
+// lançado manualmente — só preenche quem ainda está vazio. Quando a mesma OS aparece mais de
+// uma vez no histórico (dado real duplicado/repetido em mais de um mês), fica valendo a
+// última ocorrência da lista.
+const _FG_SEED_PEDIDOS_HISTORICO=[
+{os:'9',instalador:'LUIS CARLOS',transportadora:'',munque:'',fechadoInst:8000.0,fechadoFrete:0,fechadoMunque:0},
+{os:'74',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'MHGL LOC',fechadoInst:6000.0,fechadoFrete:6000.0,fechadoMunque:4040.25},
+{os:'18711',instalador:'ROBERSON',transportadora:'GLAUCUS',munque:'',fechadoInst:3102.83,fechadoFrete:6000.0,fechadoMunque:0},
+{os:'18712',instalador:'ROBERSON',transportadora:'GLAUCUS',munque:'',fechadoInst:3102.83,fechadoFrete:6000.0,fechadoMunque:0},
+{os:'18710',instalador:'ROBERSON',transportadora:'GLAUCUS',munque:'',fechadoInst:3102.83,fechadoFrete:3000.0,fechadoMunque:0},
+{os:'8',instalador:'LUIS CARLOS',transportadora:'GLAUCUS',munque:'MUNCK NH',fechadoInst:3620.0,fechadoFrete:5500.0,fechadoMunque:8760.0},
+{os:'23',instalador:'BETO',transportadora:'GLAUCUS',munque:'',fechadoInst:2500.0,fechadoFrete:2500.0,fechadoMunque:0},
+{os:'22',instalador:'BETO',transportadora:'GLAUCUS',munque:'',fechadoInst:2500.0,fechadoFrete:2500.0,fechadoMunque:0},
+{os:'43',instalador:'LUIS CARLOS',transportadora:'GLAUCUS',munque:'MUNCK NH',fechadoInst:3150.0,fechadoFrete:4500.0,fechadoMunque:2160.0},
+{os:'46',instalador:'LUCAS RJ',transportadora:'RODONAVES',munque:'',fechadoInst:1800.0,fechadoFrete:721.59,fechadoMunque:0},
+{os:'44',instalador:'LUIS CARLOS',transportadora:'GLAUCUS',munque:'RITTER LOC',fechadoInst:4000.0,fechadoFrete:4500.0,fechadoMunque:8820.0},
+{os:'52',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'MHGL LOC',fechadoInst:2150.0,fechadoFrete:5200.0,fechadoMunque:4000.0},
+{os:'76',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'MHGL LOC',fechadoInst:6500.0,fechadoFrete:6000.0,fechadoMunque:3850.0},
+{os:'75',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'MHGL LOC',fechadoInst:6500.0,fechadoFrete:6000.0,fechadoMunque:4420.0},
+{os:'47',instalador:'ROBERSON',transportadora:'GLAUCUS',munque:'BNS ENG',fechadoInst:1849.83,fechadoFrete:1000.0,fechadoMunque:490.0},
+{os:'41',instalador:'ELIAS',transportadora:'GLAUCUS',munque:'SM GUINDASTES',fechadoInst:6000.0,fechadoFrete:6000.0,fechadoMunque:4500.0},
+{os:'89',instalador:'ELIAS',transportadora:'GLAUCUS',munque:'MHGL LOC',fechadoInst:5500.0,fechadoFrete:6000.0,fechadoMunque:3700.0},
+{os:'86',instalador:'ELIAS',transportadora:'GLAUCUS',munque:'MHGL LOC',fechadoInst:5500.0,fechadoFrete:6000.0,fechadoMunque:3900.0},
+{os:'90',instalador:'ELIAS',transportadora:'GLAUCUS',munque:'MHGL LOC',fechadoInst:5500.0,fechadoFrete:6000.0,fechadoMunque:3900.0},
+{os:'6',instalador:'FELIPE',transportadora:'GLAUCUS',munque:'CNPJ MUNCK',fechadoInst:4000.0,fechadoFrete:7000.0,fechadoMunque:8380.0},
+{os:'6',instalador:'FELIPE',transportadora:'GLAUCUS',munque:'',fechadoInst:18310.0,fechadoFrete:4950.0,fechadoMunque:0},
+{os:'92',instalador:'EDUARDO',transportadora:'JOSIMAR',munque:'',fechadoInst:1150.0,fechadoFrete:1500.0,fechadoMunque:0},
+{os:'91',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'MGHL',fechadoInst:6500.0,fechadoFrete:4200.0,fechadoMunque:4140.25},
+{os:'18549',instalador:'CHINA',transportadora:'GLAUCUS',munque:'BRAZ FERRAGENS',fechadoInst:12500.0,fechadoFrete:3500.0,fechadoMunque:13550.0},
+{os:'11',instalador:'RICHARLISSON',transportadora:'GLAUCUS',munque:'',fechadoInst:6800.0,fechadoFrete:4000.0,fechadoMunque:0},
+{os:'72',instalador:'LUIS CARLOS',transportadora:'GLAUCUS',munque:'NH',fechadoInst:5000.0,fechadoFrete:6500.0,fechadoMunque:3950.0},
+{os:'30',instalador:'ELIAS',transportadora:'GLAUCUS',munque:'',fechadoInst:6000.0,fechadoFrete:4000.0,fechadoMunque:0},
+{os:'65',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'',fechadoInst:5000.0,fechadoFrete:4200.0,fechadoMunque:0},
+{os:'71',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'',fechadoInst:1800.0,fechadoFrete:2000.0,fechadoMunque:0},
+{os:'58',instalador:'LUCAS RAFAEL',transportadora:'GLAUCUS',munque:'',fechadoInst:6000.0,fechadoFrete:7500.0,fechadoMunque:0},
+{os:'68',instalador:'FELIPE RIBAS',transportadora:'',munque:'',fechadoInst:2500.0,fechadoFrete:0,fechadoMunque:0},
+{os:'77',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'TRANSGOIANIA',fechadoInst:6500.0,fechadoFrete:9000.0,fechadoMunque:7050.0},
+{os:'56',instalador:'FELIPE RIBAS',transportadora:'GLAUCUS',munque:'TRANSPENSA',fechadoInst:6500.0,fechadoFrete:4500.0,fechadoMunque:7623.78},
+{os:'86',instalador:'LUCAS RAFAEL',transportadora:'GLAUCUS',munque:'MGHL',fechadoInst:6000.0,fechadoFrete:4200.0,fechadoMunque:3411.0},
+{os:'83',instalador:'RICHARLISSON',transportadora:'GLAUCUS',munque:'JL',fechadoInst:5000.0,fechadoFrete:8500.0,fechadoMunque:7800.0},
+{os:'32',instalador:'BLUEPRINT',transportadora:'GLAUCUS',munque:'',fechadoInst:0,fechadoFrete:0,fechadoMunque:0},
+{os:'102',instalador:'RICHARLISSON',transportadora:'RODONAVES',munque:'MGHL',fechadoInst:1750.0,fechadoFrete:351.14,fechadoMunque:3411.0},
+{os:'97',instalador:'CARLOS',transportadora:'GLAUCUS',munque:'RIBMUNK',fechadoInst:6000.0,fechadoFrete:6000.0,fechadoMunque:5855.0},
+{os:'101',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'PONTO MUNCK',fechadoInst:4000.0,fechadoFrete:6000.0,fechadoMunque:2902.0},
+{os:'170',instalador:'RICHARLISSON',transportadora:'GLAUCUS',munque:'MGHL',fechadoInst:7000.0,fechadoFrete:6000.0,fechadoMunque:4140.0},
+{os:'169',instalador:'LUCAS RAFAEL',transportadora:'GLAUCUS',munque:'MGHL',fechadoInst:4000.0,fechadoFrete:6000.0,fechadoMunque:4140.0},
+{os:'18707',instalador:'ROBERSON',transportadora:'GLAUCUS',munque:'',fechadoInst:1379.31,fechadoFrete:2400.0,fechadoMunque:0},
+{os:'13',instalador:'ROBERSON',transportadora:'GLAUCUS',munque:'',fechadoInst:1379.31,fechadoFrete:2400.0,fechadoMunque:0},
+{os:'12',instalador:'ROBERSON',transportadora:'GLAUCUS',munque:'',fechadoInst:1379.31,fechadoFrete:2400.0,fechadoMunque:0},
+{os:'160',instalador:'ROBERSON',transportadora:'',munque:'',fechadoInst:250.0,fechadoFrete:0,fechadoMunque:0},
+{os:'161',instalador:'LUCAS RAFAEL',transportadora:'GLAUCUS',munque:'SILVIA LOCAÇÕES',fechadoInst:0,fechadoFrete:0,fechadoMunque:0},
+{os:'183',instalador:'LUCAS RAFAEL',transportadora:'GLAUCUS',munque:'MGHL',fechadoInst:7000.0,fechadoFrete:4000.0,fechadoMunque:4140.0},
+{os:'56',instalador:'ABNER',transportadora:'RODONAVES',munque:'',fechadoInst:13000.0,fechadoFrete:120.0,fechadoMunque:0},
+{os:'194',instalador:'FELIPE SP',transportadora:'POSTO',munque:'ALOCON',fechadoInst:1000.0,fechadoFrete:400.0,fechadoMunque:1400.0},
+{os:'105',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'',fechadoInst:1000.0,fechadoFrete:1450.0,fechadoMunque:0},
+{os:'109',instalador:'LUCAS RJ',transportadora:'',munque:'',fechadoInst:3000.0,fechadoFrete:0,fechadoMunque:0},
+{os:'106',instalador:'EDUARDO',transportadora:'RODONAVES',munque:'CNPJ',fechadoInst:1000.0,fechadoFrete:398.5,fechadoMunque:2200.0},
+{os:'96',instalador:'LUCAS RAFAEL',transportadora:'RODONAVES',munque:'JRS',fechadoInst:1300.0,fechadoFrete:634.42,fechadoMunque:2800.0},
+{os:'134',instalador:'RICHARLISSON',transportadora:'GLAUCUS',munque:'',fechadoInst:8000.0,fechadoFrete:6000.0,fechadoMunque:0},
+{os:'88',instalador:'CHINA',transportadora:'GLAUCUS',munque:'PIRAMIDE',fechadoInst:6500.0,fechadoFrete:7000.0,fechadoMunque:6350.0},
+{os:'184',instalador:'',transportadora:'',munque:'MONTPAR',fechadoInst:0,fechadoFrete:0,fechadoMunque:1250.0},
+{os:'129',instalador:'EVANDRO',transportadora:'',munque:'',fechadoInst:5000.0,fechadoFrete:0,fechadoMunque:0},
+{os:'185',instalador:'JOÃO ENEAS',transportadora:'',munque:'',fechadoInst:300.0,fechadoFrete:0,fechadoMunque:0},
+{os:'148',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'LUIS BR MUNCK',fechadoInst:4500.0,fechadoFrete:5100.0,fechadoMunque:8400.0},
+{os:'141',instalador:'LUIS CARLOS',transportadora:'GLAUCUS',munque:'PINZ MUNCK',fechadoInst:6500.0,fechadoFrete:7500.0,fechadoMunque:3150.0},
+{os:'99',instalador:'LUIS CARLOS',transportadora:'',munque:'GUILHERME CAVALHEIRO',fechadoInst:1690.0,fechadoFrete:0,fechadoMunque:2500.0},
+{os:'107',instalador:'',transportadora:'',munque:'',fechadoInst:0,fechadoFrete:0,fechadoMunque:0},
+{os:'85',instalador:'LUCAS RAFAEL',transportadora:'GLAUCUS',munque:'MGHL',fechadoInst:8000.0,fechadoFrete:6000.0,fechadoMunque:4227.08},
+{os:'150',instalador:'RICHARLISSON',transportadora:'GLAUCUS',munque:'MGHL',fechadoInst:5000.0,fechadoFrete:3500.0,fechadoMunque:2818.0},
+{os:'110',instalador:'FELIPE RIBAS',transportadora:'GLAUCUS',munque:'TRANSPESA',fechadoInst:6500.0,fechadoFrete:4500.0,fechadoMunque:9603.78},
+{os:'82',instalador:'CHINA',transportadora:'',munque:'FORTES MUNCK',fechadoInst:7500.0,fechadoFrete:0,fechadoMunque:8555.0},
+{os:'28',instalador:'ELIAS',transportadora:'GLAUCUS',munque:'',fechadoInst:6500.0,fechadoFrete:2000.0,fechadoMunque:0},
+{os:'118',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'',fechadoInst:0,fechadoFrete:1450.0,fechadoMunque:0},
+{os:'117',instalador:'EDUARDO',transportadora:'GLAUCUS',munque:'',fechadoInst:0,fechadoFrete:1450.0,fechadoMunque:0}
+];
+function _fgTemLancamento(p){
+  const fg=p.fornGestao;
+  if(!fg)return false;
+  return!!(fg.instalador||fg.transportadora||fg.munque||moneyToNum(fg.fechadoInst||0)||moneyToNum(fg.fechadoFrete||0)||moneyToNum(fg.fechadoMunque||0));
+}
+function _fgQtdBackfillDisponivel(){
+  const porOs={};
+  _FG_SEED_PEDIDOS_HISTORICO.forEach(s=>{porOs[s.os]=s;});
+  return _plPedidosElegiveis().filter(p=>p.os&&porOs[String(p.os).trim()]&&!_fgTemLancamento(p)).length;
+}
+async function _fgBackfillHistorico(){
+  const{isAdm}=_getUserCat();
+  if(!isAdm){toast('Só Administrador pode preencher o histórico','terr');return;}
+  const porOs={};
+  _FG_SEED_PEDIDOS_HISTORICO.forEach(s=>{porOs[s.os]=s;}); // última ocorrência da lista vence
+  let preenchidos=0,mantidos=0;
+  const promessas=[];
+  _plPedidosElegiveis().forEach(p=>{
+    if(!p.os)return;
+    const seed=porOs[String(p.os).trim()];
+    if(!seed)return;
+    if(_fgTemLancamento(p)){mantidos++;return;}
+    p.fornGestao={
+      instalador:seed.instalador||'',transportadora:seed.transportadora||'',munque:seed.munque||'',
+      fechadoInst:fmtR(seed.fechadoInst||0),fechadoFrete:fmtR(seed.fechadoFrete||0),fechadoMunque:fmtR(seed.fechadoMunque||0),
+      gastosExtras:[],status:'aberto',
+      atualizadoPor:'Preenchimento automático (histórico do sistema anterior)',
+      atualizadoEm:new Date().toISOString()
+    };
+    preenchidos++;
+    promessas.push(savePedidoFS(p));
+  });
+  if(!preenchidos){toast(mantidos?`Nenhum pedido novo pra preencher — ${mantidos} já tinham lançamento.`:'Nenhum pedido com OS correspondente ao histórico foi encontrado.','tinf');return;}
+  await Promise.all(promessas);
+  toast(`${preenchidos} pedido(s) preenchido(s) a partir do histórico${mantidos?` (${mantidos} já tinham lançamento e foram mantidos)`:''}.`,'tok');
+  renderFgAll();
+}
+// ── ABA FORNECEDORES — sub-abas Início/Dashboard/Pedidos/Fornecedores ──────────────────
+let _fgTabAtual='pedidos';
+function fgSetSubTab(tab,btn){
+  _fgTabAtual=tab;
+  document.querySelectorAll('.fg-sub-tab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  ['dashboard','pedidos','cadastro'].forEach(t=>{
+    const el=document.getElementById('fg-sec-'+t);
+    if(el)el.style.display=t===tab?'':'none';
+  });
+  renderFgAll();
+}
+let _fgMes='';
+function _fgMesMov(dir){
+  _fgMes=_mesNavCiclo(_fgMes,dir);
+  renderFgAll();
+}
+function _fgPreencherFiltroFornecedor(){
+  const el=document.getElementById('fg-fil-fornecedor');
+  if(!el)return;
+  const atual=el.value;
+  el.innerHTML='<option value="">Todos os fornecedores</option>'+_fgFornecedores().map(f=>`<option value="${f.nome}" ${f.nome===atual?'selected':''}>${f.nome}</option>`).join('');
+}
+// Filtro global (mês + fornecedor + status), igual ao toolbar do sistema de referência —
+// usado por Início, Dashboard e Pedidos. O mês segue o padrão do resto do Planejamento
+// (_opMesVenda, mês da venda), não o mês da finalização — porque aqui também aparecem
+// pedidos ainda aguardando/em execução, sem data de finalização pra filtrar por mês.
+function _fgFiltradosBase(){
+  let lista=_plPedidosElegiveis();
+  if(_fgMes)lista=lista.filter(p=>_opMesVenda(p)===_fgMes);
+  const forn=document.getElementById('fg-fil-fornecedor')?.value||'';
+  if(forn)lista=lista.filter(p=>{const fg=p.fornGestao||{};return fg.instalador===forn||fg.transportadora===forn||fg.munque===forn;});
+  const st=document.getElementById('fg-fil-status-geral')?.value||'';
+  if(st)lista=lista.filter(p=>_fgStatus(p)===st);
+  return lista;
+}
+function renderFgAll(){
+  _fgSeedFornecedoresIniciais();
+  _fgPreencherFiltroFornecedor();
+  const lblEl=document.getElementById('fg-mes-lbl');
+  if(lblEl)lblEl.textContent=_fgMes?MESES_PT[_fgMes]:'Todos os meses';
+  if(_fgTabAtual==='dashboard')renderFgDashboard();
+  else if(_fgTabAtual==='pedidos')renderFgPedidos();
+  else{renderFgCadastro();renderFgResumo();}
+}
+// ── DASHBOARD ───────────────────────────────────────────────────────────────────────────
+function _fgMiniBars(rows,comCor){
+  const max=Math.max(...rows.map(r=>Math.abs(r[1])),1);
+  if(!rows.length)return'<div style="color:var(--ink4);font-size:.82rem">Sem dados.</div>';
+  return rows.map(r=>`<div style="display:grid;grid-template-columns:130px 1fr 110px;gap:10px;align-items:center;margin:8px 0">
+    <b style="font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${String(r[0]).replace(/"/g,'&quot;')}">${r[0]}</b>
+    <div style="height:18px;background:#f1f5f9;border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:${Math.abs(r[1])/max*100}%;background:linear-gradient(90deg,#e11d6e,#ff8ab4)"></span></div>
+    <div style="text-align:right;font-size:.78rem;font-weight:700;color:${comCor?(r[1]>=0?'#16a34a':'#dc2626'):'var(--ink2)'}">${fmtR(r[1])}</div>
+  </div>`).join('');
+}
+function renderFgDashboard(){
+  const calcs=_fgFiltradosBase().map(p=>({p,c:_fgCalc(p)}));
+  const soma=campo=>calcs.reduce((s,x)=>s+(x.c[campo]||0),0);
+  const bruto=calcs.reduce((s,x)=>s+(x.c.r.br||0),0);
+  const liquido=calcs.reduce((s,x)=>s+(x.c.r.lq||0),0);
+  const totalGasto=soma('totalGasto');
+  const saveTotal=soma('saveTotal');
+  const contarPor=campo=>{
+    const m={};
+    calcs.forEach(({p})=>{const v=(p.fornGestao||{})[campo];if(v)m[v]=(m[v]||0)+1;});
+    const arr=Object.entries(m).sort((a,b)=>b[1]-a[1]);
+    return arr[0]||['—',0];
+  };
+  const topI=contarPor('instalador'),topF=contarPor('transportadora'),topM=contarPor('munque');
+  const kpisEl=document.getElementById('fg-dash-kpis');
+  if(kpisEl){
+    const cards=[
+      ['Valor Bruto',fmtR(bruto),'#101B3D','#f8fafc'],
+      ['Valor Líquido',fmtR(liquido),'#0E7A45','#DEF7E8'],
+      ['Total Gasto',fmtR(totalGasto),'#0B2A3D','#f8fafc'],
+      ['Save Total',fmtR(saveTotal),saveTotal>=0?'#0E7A45':'#C1440E',saveTotal>=0?'#DEF7E8':'#FBDDD3'],
+      ['Top Instalador',topI[0]+' ('+topI[1]+'x)','#8A5A00','#FBEACB']
+    ];
+    kpisEl.innerHTML=cards.map(c=>`<div style="background:${c[3]};border-radius:10px;padding:14px;min-width:0"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">${c[0]}</div><div style="font-size:1rem;font-weight:800;color:${c[2]};margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${String(c[1]).replace(/"/g,'&quot;')}">${c[1]}</div></div>`).join('');
+  }
+  const contratadosEl=document.getElementById('fg-dash-contratados');
+  if(contratadosEl)contratadosEl.innerHTML=`<div>👷 Instalador: <b>${topI[0]}</b> <span style="color:var(--ink4)">(${topI[1]}x)</span></div>
+    <div>🚛 Transportadora: <b>${topF[0]}</b> <span style="color:var(--ink4)">(${topF[1]}x)</span></div>
+    <div>🏗️ Munque: <b>${topM[0]}</b> <span style="color:var(--ink4)">(${topM[1]}x)</span></div>`;
+  const saveAreasEl=document.getElementById('fg-dash-save-areas');
+  if(saveAreasEl)saveAreasEl.innerHTML=_fgMiniBars([['Instalação',soma('saveInst')],['Frete',soma('saveFrete')],['Munque',soma('saveMunque')]],true);
+  const compEl=document.getElementById('fg-dash-comparativo');
+  if(compEl)compEl.innerHTML=_fgMiniBars([['Bruto',bruto],['Líquido',liquido],['Gasto',totalGasto]],false);
+  const rankInstEl=document.getElementById('fg-dash-rank-inst');
+  if(rankInstEl){
+    const porInst={};
+    calcs.forEach(({p,c})=>{const nome=(p.fornGestao||{}).instalador;if(nome)porInst[nome]=(porInst[nome]||0)+c.fechadoInst;});
+    rankInstEl.innerHTML=_fgMiniBars(Object.entries(porInst).sort((a,b)=>b[1]-a[1]).slice(0,15),false);
+  }
+  const distEl=document.getElementById('fg-dash-dist-gastos');
+  if(distEl)distEl.innerHTML=_fgMiniBars([['Instalação',soma('fechadoInst')],['Frete',soma('fechadoFrete')],['Munque',soma('fechadoMunque')],['Gastos Extras',soma('gastosExtras')]],false);
+  _fgRenderComparativoMensal();
+}
+// Comparativo mensal (evolução ao longo de todos os 12 meses) — sempre baseado em TODOS os
+// pedidos finalizados (ignora o filtro de mês, que não faz sentido pra uma série temporal),
+// respeita só o filtro de fornecedor. Reaproveita _cplCalcComissao/_cplMesDaData (mesma
+// fórmula da Comissão Planejamento, ver mais abaixo) pra não duplicar a regra de comissão.
+function _fgComparativoMensalDados(){
+  const forn=document.getElementById('fg-fil-fornecedor')?.value||'';
+  let base=_plPedidosElegiveis().filter(p=>_fgStatus(p)==='finalizado');
+  if(forn)base=base.filter(p=>{const fg=p.fornGestao||{};return fg.instalador===forn||fg.transportadora===forn||fg.munque===forn;});
+  const byMes={};
+  base.forEach(p=>{
+    const m=_cplMesDaData(p.finalizacao.dataFinalizacao);
+    if(!m)return;
+    (byMes[m]=byMes[m]||[]).push(p);
+  });
+  const meses=[];
+  for(let m=1;m<=12;m++){
+    const rows=byMes[m]||[];
+    const calcs=rows.map(p=>_fgCalc(p));
+    const liquido=calcs.reduce((s,c)=>s+(c.r.lq||0),0);
+    const save=calcs.reduce((s,c)=>s+(c.saveTotal||0),0);
+    const com=_cplCalcComissao(rows);
+    meses.push({mes:m,qtd:rows.length,liquido,save,comissao:com.total});
+  }
+  return meses;
+}
+function _fgLineChartSVG(values,cor){
+  const width=1000,height=90,padding=14;
+  const max=Math.max(...values,0),min=Math.min(...values,0);
+  const range=(max-min)||1;
+  const n=values.length;
+  const stepX=n>1?(width-2*padding)/(n-1):0;
+  const toY=v=>height-padding-((v-min)/range)*(height-2*padding);
+  const pts=values.map((v,i)=>[padding+i*stepX,toY(v)]);
+  const path=pts.map((p,i)=>(i===0?'M':'L')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ');
+  const dots=pts.map((p,i)=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.5" fill="${cor}"><title>${fmtR(values[i])}</title></circle>`).join('');
+  const zeroY=toY(0);
+  return`<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:${height}px;display:block">
+    <line x1="${padding}" y1="${zeroY.toFixed(1)}" x2="${width-padding}" y2="${zeroY.toFixed(1)}" stroke="rgba(16,27,61,.12)" stroke-width="1"/>
+    <path d="${path}" fill="none" stroke="${cor}" stroke-width="2.6" vector-effect="non-scaling-stroke"/>
+    ${dots}
+  </svg>`;
+}
+function _fgRenderComparativoMensal(){
+  const el=document.getElementById('fg-dash-comparativo-mensal');
+  if(!el)return;
+  const data=_fgComparativoMensalDados();
+  const nomesCurtos=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const serie=(titulo,values,cor)=>`<div style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;flex-wrap:wrap;gap:6px">
+      <h4 style="margin:0;font-size:.8rem;font-weight:700">${titulo}</h4>
+      <span style="font-size:.7rem;color:var(--ink4)">Acumulado: <b style="color:${cor}">${fmtR(values.reduce((a,b)=>a+b,0))}</b></span>
+    </div>
+    ${_fgLineChartSVG(values,cor)}
+    <div style="display:flex;justify-content:space-between;font-size:.62rem;color:var(--ink4);margin-top:3px">${nomesCurtos.map(m=>`<span>${m}</span>`).join('')}</div>
+  </div>`;
+  el.innerHTML=
+    serie('Valor Líquido por mês',data.map(d=>d.liquido),'#101B3D')+
+    serie('Save Total por mês',data.map(d=>d.save),'#0E7A45')+
+    serie('Comissão Planejamento por mês',data.map(d=>d.comissao),'#E31C6E')+
+    `<div style="overflow:auto;margin-top:6px"><table style="width:100%;border-collapse:collapse;font-size:.78rem">
+      <thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px 8px">Mês</th><th style="padding:6px 8px">Finalizados</th><th style="padding:6px 8px">Valor Líquido</th><th style="padding:6px 8px">Save Total</th><th style="padding:6px 8px">Comissão</th></tr></thead>
+      <tbody>${data.map((d,i)=>`<tr style="border-bottom:1px solid var(--border-lt)"><td style="padding:6px 8px">${nomesCurtos[i]}</td><td style="padding:6px 8px">${d.qtd}</td><td style="padding:6px 8px">${fmtR(d.liquido)}</td><td style="padding:6px 8px;color:${d.save>=0?'#16a34a':'#dc2626'}">${fmtR(d.save)}</td><td style="padding:6px 8px;color:#16a34a;font-weight:700">${fmtR(d.comissao)}</td></tr>`).join('')}</tbody>
+    </table></div>`;
+}
+// ── PEDIDOS (status Aguardando/Em Execução/Finalizado + exportar) ─────────────────────
+let _fgStatusTabAtual='';
+function fgSetStatusTab(status,btn){
+  _fgStatusTabAtual=status;
+  document.querySelectorAll('#fg-status-tabs .dash-tab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  renderFgPedidos();
+}
+async function _fgAbrirParaLancamento(pedidoId){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  p.fornGestao=p.fornGestao||{};
+  p.fornGestao.status='aberto';
+  await savePedidoFS(p);
+  renderFgAll();
+  abrirFgLancar(pedidoId);
+}
+function renderFgPedidos(){
+  const busca=(document.getElementById('fg-fil-busca')?.value||'').toUpperCase().trim();
+  let lista=_fgFiltradosBase();
+  if(_fgStatusTabAtual)lista=lista.filter(p=>_fgStatus(p)===_fgStatusTabAtual);
+  if(busca)lista=lista.filter(p=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
+  lista=[...lista].sort((a,b)=>String(a.prazo||'9999').localeCompare(String(b.prazo||'9999')));
+  const body=document.getElementById('fg-body');
+  if(!body)return;
+  if(!lista.length){
+    body.innerHTML=`<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum pedido encontrado.</div>`;
+    return;
+  }
+  body.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:.82rem">
+    <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
+      <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">Status</th>
+      <th style="padding:8px 10px">Prazo</th><th style="padding:8px 10px">Instalador</th><th style="padding:8px 10px">Frete</th>
+      <th style="padding:8px 10px">Munque</th><th style="padding:8px 10px">Save Total</th><th style="padding:8px 10px"></th>
+    </tr></thead>
+    <tbody>
+    ${lista.map(p=>{
+      const c=_fgCalc(p);
+      const fg=p.fornGestao||{};
+      const status=_fgStatus(p);
+      const acao=status==='aguardando'
+        ?`<button onclick="_fgAbrirParaLancamento('${p.id}')" class="dash-btn-conf" style="background:#0891b2;white-space:nowrap">▶️ Abrir p/ Lançamento</button>`
+        :`<button onclick="abrirFgLancar('${p.id}')" class="dash-btn-conf" style="background:#0891b2;white-space:nowrap">💰 Lançar Gastos</button>`;
+      return`<tr style="border-bottom:1px solid var(--border-lt)">
+        <td style="padding:8px 10px;font-weight:700">${p.os||'—'}</td>
+        <td style="padding:8px 10px" title="${(p.cliente||'').replace(/"/g,'&quot;')}">${p.cliente||'—'}</td>
+        <td style="padding:8px 10px">${_fgStatusPill(status)}</td>
+        <td style="padding:8px 10px">${p.prazo?fmtD(p.prazo):'—'}</td>
+        <td style="padding:8px 10px">${fg.instalador||'—'}<br><span style="color:var(--ink4);font-size:.72rem">${fmtR(c.fechadoInst)}</span></td>
+        <td style="padding:8px 10px">${fg.transportadora||'—'}<br><span style="color:var(--ink4);font-size:.72rem">${fmtR(c.fechadoFrete)}</span></td>
+        <td style="padding:8px 10px">${fg.munque||'—'}<br><span style="color:var(--ink4);font-size:.72rem">${fmtR(c.fechadoMunque)}</span></td>
+        <td style="padding:8px 10px;font-weight:700;color:${c.saveTotal>=0?'#16a34a':'#dc2626'}">${fmtR(c.saveTotal)}</td>
+        <td style="padding:8px 10px;text-align:right">${acao}</td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>`;
+}
+function exportarFgPedidosCSV(){
+  let lista=_fgFiltradosBase();
+  if(_fgStatusTabAtual)lista=lista.filter(p=>_fgStatus(p)===_fgStatusTabAtual);
+  if(!lista.length){toast('Nenhum pedido encontrado com esses filtros para exportar','terr');return;}
+  const headers=['OS','Cliente','Status','Prazo','Instalador','Valor Fechado Instalação','Transportadora','Valor Fechado Frete','Munque','Valor Fechado Munque','Gastos Extras','Save Total','Data Finalização'];
+  const body=lista.map(p=>{
+    const c=_fgCalc(p),fg=p.fornGestao||{};
+    return[String(p.os||''),p.cliente||'',_fgStatusLabel(_fgStatus(p)),p.prazo?fmtD(p.prazo):'',fg.instalador||'',fmtR(c.fechadoInst),fg.transportadora||'',fmtR(c.fechadoFrete),fg.munque||'',fmtR(c.fechadoMunque),fmtR(c.gastosExtras),fmtR(c.saveTotal),p.finalizacao?.dataFinalizacao?fmtD(p.finalizacao.dataFinalizacao):''];
+  });
+  _csvDownload(`fornecedores_pedidos_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+// ── FORNECEDORES (cadastro + resumo) ───────────────────────────────────────────────────
+function renderFgCadastro(){
+  const banner=document.getElementById('fg-backfill-banner');
+  if(banner){
+    const{isAdm}=_getUserCat();
+    const qtd=isAdm?_fgQtdBackfillDisponivel():0;
+    banner.innerHTML=(isAdm&&qtd>0)?`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:#eef2ff;border:1px dashed #a5b4fc;border-radius:10px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-size:.76rem;color:#3730a3">📥 ${qtd} pedido${qtd===1?'':'s'} da OS já tem Instalador/Frete/Munque no histórico anterior (Abril–Junho) e ainda não foi lançado aqui.</div>
+      <button class="dash-btn-conf" onclick="_fgBackfillHistorico()" type="button" style="background:#4f46e5;white-space:nowrap">Preencher automaticamente</button>
+    </div>`:'';
+  }
+  const body=document.getElementById('fg-cad-body');
+  if(!body)return;
+  const lista=_fgFornecedores();
+  const tipos=_fgTiposFornecedor();
+  if(!lista.length){
+    body.innerHTML=`<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum fornecedor cadastrado ainda.</div>`;
+    return;
+  }
+  body.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:.82rem">
+    <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
+      <th style="padding:8px 10px">Nome</th><th style="padding:8px 10px">Tipo</th><th style="padding:8px 10px"></th>
+    </tr></thead>
+    <tbody>
+    ${lista.map(f=>`<tr style="border-bottom:1px solid var(--border-lt)">
+      <td style="padding:8px 10px;font-weight:700">${f.nome}</td>
+      <td style="padding:8px 10px">${tipos[f.tipo]||f.tipo}</td>
+      <td style="padding:8px 10px;text-align:right">
+        <button onclick="abrirFornecedorModal('${f.id}')" title="Editar" style="background:none;border:none;cursor:pointer;color:#1d4ed8;font-size:.72rem;font-weight:700;margin-right:10px">✏️ Editar</button>
+        <button onclick="excluirFornecedor('${f.id}')" title="Excluir" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.72rem;font-weight:700">🗑️ Excluir</button>
+      </td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+function renderFgResumo(){
+  const el=document.getElementById('fg-resumo-body');
+  if(!el)return;
+  const calcs=_plPedidosElegiveis().map(p=>({p,c:_fgCalc(p)}));
+  const soma=campo=>calcs.reduce((s,x)=>s+(x.c[campo]||0),0);
+  const bruto=calcs.reduce((s,x)=>s+(x.c.r.br||0),0);
+  const liquido=calcs.reduce((s,x)=>s+(x.c.r.lq||0),0);
+  const saveTotal=soma('saveTotal');
+  const cards=[
+    ['Valor Bruto',fmtR(bruto),'#101B3D'],
+    ['Valor Líquido',fmtR(liquido),'#16a34a'],
+    ['Total Gasto c/ Fornecedores',fmtR(soma('totalGasto')),'#d97706'],
+    ['Save Total',fmtR(saveTotal),saveTotal>=0?'#16a34a':'#dc2626']
+  ];
+  const cardsHtml=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:18px">${cards.map(c=>`<div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:14px"><div style="font-size:.68rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">${c[0]}</div><div style="font-size:1.15rem;font-weight:800;color:${c[2]}">${c[1]}</div></div>`).join('')}</div>`;
+  // Ranking por fornecedor — soma do Valor Fechado de cada um, nos 3 papéis que ele aparecer.
+  const porFornecedor={};
+  calcs.forEach(({p,c})=>{
+    const fg=p.fornGestao||{};
+    if(fg.instalador)porFornecedor[fg.instalador]=(porFornecedor[fg.instalador]||0)+c.fechadoInst;
+    if(fg.transportadora)porFornecedor[fg.transportadora]=(porFornecedor[fg.transportadora]||0)+c.fechadoFrete;
+    if(fg.munque)porFornecedor[fg.munque]=(porFornecedor[fg.munque]||0)+c.fechadoMunque;
+  });
+  const ranking=Object.entries(porFornecedor).sort((a,b)=>b[1]-a[1]).slice(0,15);
+  const max=Math.max(...ranking.map(r=>r[1]),1);
+  const rankHtml=ranking.length?ranking.map(([nome,valor])=>`<div style="display:grid;grid-template-columns:160px 1fr 110px;gap:10px;align-items:center;margin:8px 0">
+    <b style="font-size:.8rem">${nome}</b>
+    <div style="height:18px;background:#f1f5f9;border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:${valor/max*100}%;background:linear-gradient(90deg,#0891b2,#67e8f9)"></span></div>
+    <div style="text-align:right;font-size:.8rem;font-weight:700">${fmtR(valor)}</div>
+  </div>`).join(''):'<div style="color:var(--ink4);font-size:.82rem">Nenhum lançamento ainda.</div>';
+  el.innerHTML=cardsHtml+'<h3 style="margin:6px 0 10px;font-size:.85rem;font-weight:700">Valor fechado por fornecedor</h3>'+rankHtml;
+}
+// ── CRUD de Fornecedores (cfg.fornecedores) ─────────────────────────────────────────────
+function abrirFornecedorModal(id){
+  const f=id?(cfg.fornecedores||[]).find(x=>x.id===id):null;
+  const idEl=document.getElementById('fn-id');if(idEl)idEl.value=f?f.id:'';
+  const nomeEl=document.getElementById('fn-nome');if(nomeEl)nomeEl.value=f?f.nome:'';
+  const tipoEl=document.getElementById('fn-tipo');if(tipoEl)tipoEl.value=f?f.tipo:'instalador';
+  const tituloEl=document.getElementById('fn-titulo');if(tituloEl)tituloEl.textContent=f?'✏️ Editar Fornecedor':'👷 Novo Fornecedor';
+  openM('mo-fornecedor');
+}
+async function salvarFornecedor(){
+  const id=document.getElementById('fn-id')?.value||'';
+  const nome=(document.getElementById('fn-nome')?.value||'').trim().toUpperCase();
+  const tipo=document.getElementById('fn-tipo')?.value||'instalador';
+  if(!nome){toast('Informe o nome do fornecedor','terr');return;}
+  cfg.fornecedores=cfg.fornecedores||[];
+  if(id){
+    const f=cfg.fornecedores.find(x=>x.id===id);
+    if(f){f.nome=nome;f.tipo=tipo;}
+  }else{
+    if(cfg.fornecedores.some(x=>x.nome===nome&&x.tipo===tipo)){toast('Já existe um fornecedor com esse nome e tipo','terr');return;}
+    cfg.fornecedores.push({id:uid(),nome,tipo});
+  }
+  await _fgSalvarFornecedores();
+  toast('Fornecedor salvo','tok');
+  closeM('mo-fornecedor');
+  renderFgAll();
+}
+async function excluirFornecedor(id){
+  if(!confirm('Excluir este fornecedor? Pedidos que já usam ele mantêm o nome lançado, só não aparece mais na lista pra escolher.'))return;
+  cfg.fornecedores=(cfg.fornecedores||[]).filter(x=>x.id!==id);
+  await _fgSalvarFornecedores();
+  toast('Fornecedor excluído','tok');
+  renderFgCadastro();
+}
+// ── Lançamento de Fornecedores por pedido (modal mo-fg-lancar) ─────────────────────────
+function fillFgSelect(id,tipo,valorAtual){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.innerHTML='<option value="">Selecione...</option>'+_fgFornecedores(tipo).map(f=>`<option value="${f.nome}" ${f.nome===valorAtual?'selected':''}>${f.nome}</option>`).join('');
+}
+let _fglPedidoId='';
+let _fglExtras=[]; // [{valor:number,motivo}]
+function _fglRenderExtras(){
+  const wrap=document.getElementById('fgl-extras-list');
+  if(!wrap)return;
+  wrap.innerHTML=_fglExtras.map((e,i)=>`
+    <div style="display:grid;grid-template-columns:140px 1fr auto;gap:8px;align-items:center;margin-bottom:6px">
+      <input class="fc" placeholder="R$ 0,00" value="${e.valor?Number(e.valor).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):''}" oninput="fmtMoney(this);_fglExtras[${i}].valor=moneyToNum(this.value);_fglAtualizarSaves()">
+      <input class="fc no-upper" placeholder="Motivo (ex.: taxa local, diária extra, estacionamento...)" value="${(e.motivo||'').replace(/"/g,'&quot;')}" oninput="_fglExtras[${i}].motivo=this.value">
+      <button type="button" onclick="_fglExtras.splice(${i},1);_fglRenderExtras();_fglAtualizarSaves()" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem" title="Remover">🗑️</button>
+    </div>`).join('');
+}
+function fglAddExtra(){
+  _fglExtras.push({valor:0,motivo:''});
+  _fglRenderExtras();
+}
+// Recalcula os 3 Saves + Total Gasto ao vivo, toda vez que um Valor Fechado ou um gasto
+// extra muda — o Budget não muda (é fixo, vem da Emissão), só o que a pessoa está digitando.
+function _fglAtualizarSaves(){
+  const bi=moneyToNum(document.getElementById('fgl-budget-inst')?.dataset.val||0);
+  const bf=moneyToNum(document.getElementById('fgl-budget-frete')?.dataset.val||0);
+  const bm=moneyToNum(document.getElementById('fgl-budget-munque')?.dataset.val||0);
+  const fi=moneyToNum(document.getElementById('fgl-fechado-inst')?.value||0);
+  const ff=moneyToNum(document.getElementById('fgl-fechado-frete')?.value||0);
+  const fm=moneyToNum(document.getElementById('fgl-fechado-munque')?.value||0);
+  const setSave=(id,v)=>{const el=document.getElementById(id);if(!el)return;el.textContent='Save: '+fmtR(v);el.style.color=v>=0?'#16a34a':'#dc2626';};
+  setSave('fgl-save-inst',bi-fi);
+  setSave('fgl-save-frete',bf-ff);
+  setSave('fgl-save-munque',bm-fm);
+  const extrasTotal=_fglExtras.reduce((s,e)=>s+(moneyToNum(e.valor)||0),0);
+  const elExtrasTotal=document.getElementById('fgl-extras-total');
+  if(elExtrasTotal)elExtrasTotal.textContent=fmtR(extrasTotal);
+  const elTotal=document.getElementById('fgl-total-gasto');
+  if(elTotal)elTotal.textContent=fmtR(fi+ff+fm+extrasTotal);
+}
+function abrirFgLancar(pedidoId){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  _fglPedidoId=pedidoId;
+  const c=_fgCalc(p);
+  const fg=p.fornGestao||{};
+  const infoEl=document.getElementById('fgl-info');
+  if(infoEl)infoEl.innerHTML=`OS Nº <strong>${p.os||'—'}</strong> · ${p.cliente||'—'}<br><span style="color:var(--ink4)">Valor Líquido do Pedido: ${fmtR(c.r.lq)}</span>`;
+  fillFgSelect('fgl-instalador','instalador',fg.instalador);
+  fillFgSelect('fgl-transportadora','frete',fg.transportadora);
+  fillFgSelect('fgl-munque','munque',fg.munque);
+  const setBudget=(id,v)=>{const el=document.getElementById(id);if(el){el.textContent=fmtR(v);el.dataset.val=String(v);}};
+  setBudget('fgl-budget-inst',c.budgetInst);
+  setBudget('fgl-budget-frete',c.budgetFrete);
+  setBudget('fgl-budget-munque',c.budgetMunque);
+  const setInp=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v?Number(v).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';};
+  setInp('fgl-fechado-inst',c.fechadoInst);
+  setInp('fgl-fechado-frete',c.fechadoFrete);
+  setInp('fgl-fechado-munque',c.fechadoMunque);
+  _fglExtras=Array.isArray(fg.gastosExtras)?fg.gastosExtras.map(e=>({valor:moneyToNum(e.valor),motivo:e.motivo||''})):[];
+  _fglRenderExtras();
+  _fglAtualizarSaves();
+  openM('mo-fg-lancar');
+}
+async function salvarFgLancamento(){
+  const p=pedidos.find(x=>x.id===_fglPedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const instalador=document.getElementById('fgl-instalador')?.value||'';
+  const transportadora=document.getElementById('fgl-transportadora')?.value||'';
+  const munque=document.getElementById('fgl-munque')?.value||'';
+  const fechadoInst=moneyToNum(document.getElementById('fgl-fechado-inst')?.value||0);
+  const fechadoFrete=moneyToNum(document.getElementById('fgl-fechado-frete')?.value||0);
+  const fechadoMunque=moneyToNum(document.getElementById('fgl-fechado-munque')?.value||0);
+  const gastosExtras=_fglExtras.filter(e=>moneyToNum(e.valor)>0||e.motivo).map(e=>({valor:fmtR(moneyToNum(e.valor)),motivo:(e.motivo||'').trim()}));
+  p.fornGestao={
+    instalador,transportadora,munque,
+    fechadoInst:fmtR(fechadoInst),fechadoFrete:fmtR(fechadoFrete),fechadoMunque:fmtR(fechadoMunque),
+    gastosExtras,
+    status:(p.fornGestao&&p.fornGestao.status)||'aberto', // preserva/garante "Em Execução" ao salvar um lançamento
+    atualizadoPor:usuarioLogado?.nomeExibicao||usuarioLogado?.email||'',
+    atualizadoEm:new Date().toISOString()
+  };
+  await savePedidoFS(p);
+  toast('Lançamento de fornecedores salvo','tok');
+  closeM('mo-fg-lancar');
+  renderFgAll();
+}
+// ===================== FIM GESTÃO DE FORNECEDORES =====================
+
+// ===================== COMISSÃO PLANEJAMENTO (2026-07-29) =====================
+// Menu novo e SEPARADO da comissão de vendedores (Metas & Comissões, que fica intacta) —
+// é o incentivo do time de Planejamento (ex.: Roberson), a pedido do usuário, inspirado no
+// mesmo sistema de referência da Gestão de Fornecedores: 0,05% do valor líquido entregue no
+// mês + 1% do save positivo (ver _fgCalc) + R$20 por pedido cujo relatório de finalização
+// foi enviado em até 2 dias úteis (ver relatorioNoPrazo). Competência = mês da Data de
+// Finalização (não mês da venda) — mesma base de pedidos elegíveis da Finalização de Obra/
+// Fornecedores (_plPedidosElegiveis), só entram os já finalizados.
+let _cplMes=new Date().getMonth()+1;
+function _cplMesMov(dir){
+  _cplMes=_mesNavCiclo(_cplMes,dir);
+  renderComissaoPlanejamento();
+}
+function _cplMesDaData(iso){
+  if(!iso)return 0;
+  const partes=String(iso).split('-');
+  return parseInt(partes[1],10)||0;
+}
+function _cplCalcComissao(pedidosFinalizados){
+  const calcs=pedidosFinalizados.map(p=>({p,c:_fgCalc(p)}));
+  const liquido=calcs.reduce((s,x)=>s+(x.c.r.lq||0),0);
+  const savePositivo=calcs.reduce((s,x)=>s+Math.max(x.c.saveTotal,0),0);
+  const relatorios=pedidosFinalizados.filter(relatorioNoPrazo).length;
+  const cLiquido=liquido*0.0005;
+  const cSave=savePositivo*0.01;
+  const cRel=relatorios*20;
+  return{liquido,savePositivo,relatorios,cLiquido,cSave,cRel,total:cLiquido+cSave+cRel};
+}
+function renderComissaoPlanejamento(){
+  if(!document.getElementById('cpl-cards'))return;
+  const lblEl=document.getElementById('cpl-mes-lbl');
+  if(lblEl)lblEl.textContent=_cplMes?MESES_PT[_cplMes]:'Todos os meses';
+  const todasFinalizadas=_plPedidosElegiveis().filter(p=>p.finalizacao&&p.finalizacao.dataFinalizacao);
+  let base=todasFinalizadas;
+  if(_cplMes)base=base.filter(p=>_cplMesDaData(p.finalizacao.dataFinalizacao)===_cplMes);
+  const c=_cplCalcComissao(base);
+  const cardsEl=document.getElementById('cpl-cards');
+  if(cardsEl){
+    const cards=[
+      ['Valor líquido entregue',fmtR(c.liquido),'#101B3D'],
+      ['Comissão 0,05%',fmtR(c.cLiquido),'#1d4ed8'],
+      ['Save positivo',fmtR(c.savePositivo),'#d97706'],
+      ['Comissão 1% save',fmtR(c.cSave),'#16a34a'],
+      ['Relatórios no prazo',String(c.relatorios),'#1d4ed8'],
+      ['Comissão total',fmtR(c.total),'#7c3aed']
+    ];
+    cardsEl.innerHTML=cards.map(k=>`<div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:14px"><div style="font-size:.62rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">${k[0]}</div><div style="font-size:1.15rem;font-weight:800;color:${k[2]}">${k[1]}</div></div>`).join('');
+  }
+  // Resumo mensal ignora o filtro de mês acima (é sempre visão geral de todos os meses com
+  // pedido finalizado) — o navegador de mês só controla os cards/detalhe de UM mês.
+  const porMes={};
+  todasFinalizadas.forEach(p=>{
+    const m=_cplMesDaData(p.finalizacao.dataFinalizacao);
+    if(!m)return;
+    (porMes[m]=porMes[m]||[]).push(p);
+  });
+  const resumoEl=document.getElementById('cpl-resumo-table');
+  if(resumoEl){
+    const linhas=Object.keys(porMes).map(Number).sort((a,b)=>a-b).map(m=>{
+      const x=_cplCalcComissao(porMes[m]);
+      return`<tr style="border-bottom:1px solid var(--border-lt)"><td style="padding:8px 10px">${MESES_PT[m]||m}</td><td style="padding:8px 10px">${fmtR(x.liquido)}</td><td style="padding:8px 10px">${fmtR(x.savePositivo)}</td><td style="padding:8px 10px">${x.relatorios}</td><td style="padding:8px 10px;font-weight:800;color:#16a34a">${fmtR(x.total)}</td></tr>`;
+    }).join('');
+    resumoEl.innerHTML=`<thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:8px 10px">Mês da finalização</th><th style="padding:8px 10px">Valor líquido</th><th style="padding:8px 10px">Save positivo</th><th style="padding:8px 10px">Relatórios no prazo</th><th style="padding:8px 10px">Comissão total</th></tr></thead><tbody>${linhas||'<tr><td colspan="5" style="padding:20px;text-align:center;color:var(--ink4)">Nenhum pedido finalizado ainda.</td></tr>'}</tbody>`;
+  }
+  const detEl=document.getElementById('cpl-detalhe-table');
+  if(detEl){
+    const linhas=base.map(p=>{
+      const calc=_fgCalc(p);
+      const savePos=Math.max(calc.saveTotal,0);
+      const relOk=relatorioNoPrazo(p);
+      const com=(calc.r.lq||0)*0.0005+savePos*0.01+(relOk?20:0);
+      return`<tr style="border-bottom:1px solid var(--border-lt)">
+        <td style="padding:8px 10px;font-weight:700">${p.os||'—'}</td>
+        <td style="padding:8px 10px">${p.cliente||'—'}</td>
+        <td style="padding:8px 10px">${fmtD(p.finalizacao.dataFinalizacao)||'—'}</td>
+        <td style="padding:8px 10px">${fmtR(calc.r.lq)}</td>
+        <td style="padding:8px 10px">${fmtR(savePos)}</td>
+        <td style="padding:8px 10px">${relOk?'<span style="color:#16a34a;font-weight:700">✅ No prazo</span>':'<span style="color:#dc2626;font-weight:700">🔴 Fora do prazo</span>'}</td>
+        <td style="padding:8px 10px;font-weight:800;color:#16a34a">${fmtR(com)}</td>
+      </tr>`;
+    }).join('');
+    detEl.innerHTML=`<thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">Finalização</th><th style="padding:8px 10px">Líquido</th><th style="padding:8px 10px">Save Positivo</th><th style="padding:8px 10px">Relatório</th><th style="padding:8px 10px">Comissão</th></tr></thead><tbody>${linhas||'<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--ink4)">Nenhum pedido finalizado neste mês.</td></tr>'}</tbody>`;
+  }
+}
+// ===================== FIM COMISSÃO PLANEJAMENTO =====================
 
 function renderPlanejamentoObras(){
   const lblEl=document.getElementById('pl-mes-lbl');
