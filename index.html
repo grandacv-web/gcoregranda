@@ -1041,12 +1041,12 @@ select.fc{cursor:pointer}
       <!-- INDICADORES DE PLANEJAMENTO (2026-07-29) — era o "Dashboard" de dentro da aba
            Fornecedores; virou a página principal do menu a pedido do usuário, já que reúne
            todos os indicadores (KPIs, rankings, comparativo mensal) que fazem sentido ver
-           primeiro ao entrar em Planejamento. Mesmos ids/filtros de sempre (mês por prazo de
-           entrega, fornecedor, status) — só mudou de casa, a lógica em renderFgDashboard()
-           continua a mesma. -->
+           primeiro ao entrar em Planejamento. Mesmos ids/filtros de sempre (fornecedor,
+           status) — só mudou de casa, a lógica em renderFgDashboard() continua a mesma. Mês
+           do filtro trocado no mesmo dia pra usar a entrega DE FATO (_fgMesEntregaReal). -->
       <div id="pl-sec-indicadores">
         <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
-          📊 Indicadores de Planejamento — Budget x Fechado x Save por fornecedor, rankings e evolução mensal. Baseado no mês da DATA FINAL DE ENTREGA (prazo de finalização) por padrão.
+          📊 Indicadores de Planejamento — Budget x Fechado x Save por fornecedor, rankings e evolução mensal. Baseado no mês em que a obra foi ENTREGUE DE FATO (Data de Finalização); enquanto ainda pendente, usa o prazo previsto como mês provisório.
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
           <div class="dash-mes-nav" style="margin:0">
@@ -1106,8 +1106,9 @@ select.fc{cursor:pointer}
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
           <!-- Navegador de mês por setinhas (2026-07-24, a pedido do usuário) — filtra pelo
-               mesmo Mês da Venda mostrado na coluna da tabela (_opMesVenda). Ciclo inclui
-               "Todos os meses" (posição inicial) pra nunca esconder pendências por padrão. -->
+               Mês de Entrega (prazo de finalização, _fgMesPrazo), não pelo mês da venda
+               (2026-07-29, a pedido do usuário). Ciclo inclui "Todos os meses" (posição
+               inicial) pra nunca esconder pendências por padrão. -->
           <div class="dash-mes-nav" style="margin:0">
             <button onclick="_plMesMov(-1)" type="button">◀</button>
             <div class="dash-mes-label" id="pl-mes-lbl" style="min-width:150px">Todos os meses</div>
@@ -10536,19 +10537,30 @@ function _fgMesPrazo(p){
   if(!iso)return 0;
   return parseInt(iso.slice(5,7),10)||0;
 }
+// Mês de ENTREGA DE FATO, usado pelo dashboard "Indicadores de Planejamento" (2026-07-29, a
+// pedido do usuário: "o mês que aparece ali pra selecionar tem que ser o mês que foi entregue
+// de fato a obra"). Prioriza a Data de Finalização real (p.finalizacao.dataFinalizacao,
+// preenchida só quando a obra é de fato concluída); pedidos ainda pendentes (sem finalização)
+// não têm essa data ainda, então caem no prazo previsto (_fgMesPrazo) como mês provisório até
+// serem finalizados de verdade.
+function _fgMesEntregaReal(p){
+  if(p.finalizacao&&p.finalizacao.dataFinalizacao){
+    return parseInt(String(p.finalizacao.dataFinalizacao).slice(5,7),10)||0;
+  }
+  return _fgMesPrazo(p);
+}
 function _fgPreencherFiltroFornecedor(){
   const el=document.getElementById('fg-fil-fornecedor');
   if(!el)return;
   const atual=el.value;
   el.innerHTML='<option value="">Todos os fornecedores</option>'+_fgFornecedores().map(f=>`<option value="${f.nome}" ${f.nome===atual?'selected':''}>${f.nome}</option>`).join('');
 }
-// Filtro global (mês + fornecedor + status), usado pelo Dashboard. O mês agora é baseado na
-// DATA FINAL DE ENTREGA de cada pedido (_fgMesPrazo, prazo de finalização), não mais no mês
-// da venda — a pedido do usuário: este painel é sobre o que precisa ser entregue/gerido no
-// mês vigente, não sobre quando a venda foi fechada (2026-07-29).
+// Filtro global (mês + fornecedor + status), usado pelo Dashboard. O mês é baseado na DATA DE
+// ENTREGA DE FATO (_fgMesEntregaReal: Data de Finalização real se já concluída, senão o prazo
+// previsto) — não no mês da venda (2026-07-29, a pedido do usuário).
 function _fgFiltradosBase(){
   let lista=_plPedidosElegiveis();
-  if(_fgMes)lista=lista.filter(p=>_fgMesPrazo(p)===_fgMes);
+  if(_fgMes)lista=lista.filter(p=>_fgMesEntregaReal(p)===_fgMes);
   const forn=document.getElementById('fg-fil-fornecedor')?.value||'';
   if(forn)lista=lista.filter(p=>{const fg=p.fornGestao||{};return fg.instalador===forn||fg.transportadora===forn||fg.munque===forn;});
   const st=document.getElementById('fg-fil-status-geral')?.value||'';
@@ -11717,7 +11729,9 @@ function renderPlanejamentoObras(){
   const busca=(document.getElementById('pl-fil-busca')?.value||'').toUpperCase().trim();
   const filStatus=document.getElementById('pl-fil-status')?.value||'';
   let lista=_plPedidosElegiveis();
-  if(_plMes)lista=lista.filter(p=>_opMesVenda(p)===_plMes);
+  // Mês aqui é o de ENTREGA (prazo de finalização), não o da venda (2026-07-29, a pedido do
+  // usuário — reaproveita _fgMesPrazo, mesma conta já usada em Indicadores de Planejamento).
+  if(_plMes)lista=lista.filter(p=>_fgMesPrazo(p)===_plMes);
   if(busca){
     lista=lista.filter(p=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
   }
@@ -11756,7 +11770,7 @@ function renderPlanejamentoObras(){
   body.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:.82rem">
     <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
       <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">Tipo</th>
-      <th style="padding:8px 10px">Vendedor</th><th style="padding:8px 10px">Mês da Venda</th><th style="padding:8px 10px">Prazo de Finalização</th>
+      <th style="padding:8px 10px">Vendedor</th><th style="padding:8px 10px">Mês de Entrega</th><th style="padding:8px 10px">Prazo de Finalização</th>
       <th style="padding:8px 10px">Cidade/UF</th><th style="padding:8px 10px">Status</th><th style="padding:8px 10px"></th>
     </tr></thead>
     <tbody>
@@ -11776,9 +11790,9 @@ function renderPlanejamentoObras(){
       const verFormLink=concl?`<br><a href="#" onclick="verFormularioFinalizacao('${p.id}');return false;" style="font-size:.7rem;color:var(--brand);text-decoration:underline">Ver Formulário de Finalização</a>`:'';
       const prazoOrigTag=p.prazoOriginal&&p.prazoOriginal!==p.prazo?`<span title="Prazo original: ${fmtD(p.prazoOriginal)}" style="font-size:.68rem;color:${atrasado?'#dc2626':'var(--ink4)'};cursor:help;margin-left:4px">(orig. ${fmtD(p.prazoOriginal)})</span>`:'';
       const editPrazoBtn=podeEditarPrazo?`<button onclick="abrirAlterarPrazoObra('${p.id}')" title="Alterar prazo de finalização" style="background:none;border:none;cursor:pointer;color:#1d4ed8;font-size:.85rem;padding:0;margin-left:6px;vertical-align:middle">✏️</button>`:'';
-      // Mesma fonte usada em Operacionais Pedidos (_opMesVenda) — override manual > planilha
-      // reconciliada > mês de emissão, nunca uma conta própria nova (2026-07-23, a pedido do usuário).
-      const mesVendaNum=_opMesVenda(p);
+      // Mês de ENTREGA (prazo de finalização), não da venda (2026-07-29, a pedido do usuário)
+      // — mesma conta usada no filtro de mês desta tela e em Indicadores de Planejamento.
+      const mesVendaNum=_fgMesPrazo(p);
       const mesVendaTxt=mesVendaNum?MESES_PT[mesVendaNum]:'—';
       // Unificação 2026-07-29: Diário de Obra e Definir Fornecedores viram botões diretos
       // nesta mesma lista, reaproveitando os modais já existentes (abrirDiarioObra/
