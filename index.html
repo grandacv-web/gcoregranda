@@ -6253,12 +6253,14 @@ async function submit(){
 }
 
 // CONFIGURAÇÕES
-// Corrigido 2026-07-23: as duas funções abaixo abriam/fechavam um modal "mo-cfg" que não
-// existe (sobrou de algum refactor antigo — o modal real de Configurações é "mo-set",
-// aberto direto por openSettings()). closeCfg() é chamada no fim de saveCfg(); como
-// closeM() é null-safe, não dava erro nenhum — só silenciosamente não fechava nada, dando
-// a impressão de que o botão "Salvar Configurações" não tinha feito nada.
-function openCfg(){openM('mo-set');renderUserList()}
+// Corrigido 2026-07-23: esta função (e a antiga openCfg(), removida em 2026-07-29 por não
+// ser usada em lugar nenhum — abria "mo-cfg", um modal que nem existe, sobra de algum
+// refactor antigo, e dava um jeito de abrir Configurações pelo console sem passar pela
+// trava de senha de openSettings()) fecha/abria um modal "mo-cfg" que não existe — o modal
+// real de Configurações é "mo-set", aberto SEMPRE via openSettings() (nunca direto). closeCfg()
+// é chamada no fim de saveCfg(); como closeM() é null-safe, não dava erro nenhum — só
+// silenciosamente não fechava nada, dando a impressão de que o botão "Salvar Configurações"
+// não tinha feito nada.
 function closeCfg(){closeM('mo-set')}
 function saveCfg(){
   // (Corrigido 2026-07-16) Os 3 campos abaixo liam de ids 'cfg-s'/'cfg-t'/'cfg-k', que não
@@ -6587,7 +6589,21 @@ async function doLogout(){
 }
 
 // CONFIGURAÇÕES
-function openSettings(){
+// Configurações guarda dados sensíveis (chaves do EmailJS/Cloudinary, a própria Senha/PIN de
+// Administrador, gestão de usuários etc.) — até 2026-07-29 QUALQUER usuário logado conseguia
+// abrir o modal (só as SEÇÕES ficavam escondidas via CSS .admin-only pra quem não é admin), o
+// que significa que os valores sensíveis eram carregados no DOM mesmo assim e davam pra ler
+// pelo console do navegador. Corrigido: agora só quem já está logado como categoria
+// ADMINISTRADOR abre direto; qualquer outra categoria precisa digitar a Senha/PIN de
+// Administrador (mesma senha usada em excluir pedido/cancelar venda etc.) ANTES do modal
+// sequer ser populado/aberto — errar ou cancelar bloqueia por completo, nada é carregado.
+async function openSettings(){
+  const {isAdm}=_getUserCat();
+  if(!isAdm){
+    const senha=await pedirSenhaAdmin('Configurações do Sistema','Esta área é restrita a administradores. Digite a senha/PIN de administrador para abrir:');
+    if(!senha){toast('Acesso não permitido','terr');return;}
+    if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
+  }
   const c=cfg;
   document.getElementById('cs').value=c.s||'';
   document.getElementById('ct').value=c.t||'';
