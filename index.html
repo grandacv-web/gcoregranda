@@ -11086,12 +11086,26 @@ function _rhPrevistoMinPadrao(){
 // linha Seg..Dom pra saber quantos minutos são esperados naquele dia da semana. Sábado/
 // Domingo normalmente vêm vazios (0 minutos = day off). Se a tabela não for encontrada no
 // arquivo, cai no horário padrão da empresa (RH_HORARIO_PADRAO_EMPRESA) em vez de zerar tudo.
+// Também guarda o horário de ENTRADA esperado de cada dia (1º horário da linha) — sem isso não
+// dava pra saber SE o funcionário chegou atrasado, só que "trabalhou menos horas que o
+// previsto", o que também acontece por sair mais cedo, almoço longo etc. (coisas bem
+// diferentes de "chegou atrasado", que foi o que o usuário pediu explicitamente — 2026-07-30).
+function _rhEntradaPrevistaPadrao(){
+  const abrevMap={seg:1,ter:2,qua:3,qui:4,sex:5,sab:6,dom:0};
+  const entradaMin={0:null,1:null,2:null,3:null,4:null,5:null,6:null};
+  Object.entries(RH_HORARIO_PADRAO_EMPRESA).forEach(([abr,h])=>{
+    if(!h)return;
+    entradaMin[abrevMap[abr]]=_rhParseHoraHHMM(h.entrada);
+  });
+  return entradaMin;
+}
 function _rhParseHorarioSemanal(root){
   const previstoMin={0:0,1:0,2:0,3:0,4:0,5:0,6:0}; // índice = Date.getDay() (0=dom..6=sab)
+  const entradaMin={0:null,1:null,2:null,3:null,4:null,5:null,6:null};
   const horarioTd=_rhAchaTd(root,['Horario de Trabalho','Horário de Trabalho']);
-  if(!horarioTd)return _rhPrevistoMinPadrao();
+  if(!horarioTd)return{previstoMin:_rhPrevistoMinPadrao(),entradaMin:_rhEntradaPrevistaPadrao()};
   const tabela=horarioTd.closest('table');
-  if(!tabela)return _rhPrevistoMinPadrao();
+  if(!tabela)return{previstoMin:_rhPrevistoMinPadrao(),entradaMin:_rhEntradaPrevistaPadrao()};
   const abrevMap={seg:1,ter:2,qua:3,qui:4,sex:5,sab:6,dom:0};
   let achouAlgumDia=false;
   [...tabela.querySelectorAll('tr')].forEach(tr=>{
@@ -11106,9 +11120,10 @@ function _rhParseHorarioSemanal(root){
       if(a!=null&&b!=null&&b>a)mins+=(b-a);
     }
     previstoMin[abrevMap[primeiro]]=mins;
+    entradaMin[abrevMap[primeiro]]=tempos.length?_rhParseHoraHHMM(tempos[0]):null;
     achouAlgumDia=true;
   });
-  return achouAlgumDia?previstoMin:_rhPrevistoMinPadrao();
+  return achouAlgumDia?{previstoMin,entradaMin}:{previstoMin:_rhPrevistoMinPadrao(),entradaMin:_rhEntradaPrevistaPadrao()};
 }
 // Status que zeram o "previsto" do dia mesmo caindo num dia de semana com escala normal —
 // feriado/férias/folga extra não são falta nem entram nas horas previstas.
@@ -11119,7 +11134,8 @@ const _RH_STATUS_NAO_UTIL=['folga','feriado','férias','ferias','dsr'];
 // hoje/futuro são ignorados — o arquivo do Hponto já traz o mês inteiro mesmo antes de
 // terminar, marcando dias futuros com um "*Falta" que NÃO é falta de verdade, só ainda não
 // aconteceu.
-function _rhParseDiasTable(root,previstoMin,hojeIso){
+function _rhParseDiasTable(root,horario,hojeIso){
+  const previstoMin=horario.previstoMin,entradaPrevMin=horario.entradaMin;
   const diaTd=_rhAchaTd(root,['Dia']);
   if(!diaTd)return[];
   const tabela=diaTd.closest('table');
@@ -11155,8 +11171,26 @@ function _rhParseDiasTable(root,previstoMin,hojeIso){
     // dia de Atestado) — pedido do usuário (2026-07-29): "quero ver o horário que ele chegou
     // no dia tal", precisa do dado por dia, não só o total.
     const obsExtra=[logical[6],logical[7],logical[8],logical[9]].filter(v=>v&&!/^\d{2}:\d{2}$/.test(v)).join(' ');
+    // Atraso de ENTRADA (2026-07-30, pedido do usuário: "quero ver os horários que ele chegou
+    // atrasado" — não bastava "trabalhou menos horas", que também acontece por sair mais cedo
+    // ou almoço longo). Compara o Ent1 batido contra a entrada esperada daquele dia da semana;
+    // só conta se o dia tinha expediente previsto (não é folga/feriado) e o ponto de entrada
+    // foi batido de fato.
+    const entradaRealMin=_rhParseHoraHHMM(logical[2]);
+    const entradaPrevDiaMin=entradaPrevMin[diaSemana];
+    let atrasoMin=0;
+    if(previstoDiaMin>0&&entradaRealMin!=null&&entradaPrevDiaMin!=null&&entradaRealMin>entradaPrevDiaMin){
+      atrasoMin=entradaRealMin-entradaPrevDiaMin;
+    }
+    // Dia "incompleto" (2026-07-30, achado testando com o arquivo real de exemplo do usuário):
+    // tem Ent1 batido mas nenhum par Entrada/Saída fechado — normalmente porque o arquivo foi
+    // exportado no meio do expediente e o ponto do dia ainda não fechou. Antes disso virava
+    // FALTA (0h trabalhadas) mesmo o funcionário tendo comparecido de fato. Marcado à parte pra
+    // não acusar ausência de quem só ainda não bateu a saída no momento em que o Hponto gerou
+    // o arquivo.
+    const incompleto=previstoDiaMin>0&&trabalhadoMin===0&&entradaRealMin!=null;
     dias.push({
-      data:iso,diaSemana,status,previstoMin:previstoDiaMin,trabalhadoMin,
+      data:iso,diaSemana,status,previstoMin:previstoDiaMin,trabalhadoMin,atrasoMin,incompleto,
       entrada:logical[2]||'',saidaAlmoco:logical[3]||'',voltaAlmoco:logical[4]||'',saidaFinal:logical[5]||'',
       obs:obsExtra||''
     });
@@ -11189,11 +11223,11 @@ async function _rhParseArquivo(file){
   const departamentoRaw=_rhValorPorRotulo(doc,['Depart.','Departamento','Depto','Depto.','Setor']);
   const departamento=(departamentoRaw||'SEM DEPARTAMENTO').toUpperCase();
   diag.push(`Função: "${funcao||'—'}" · Departamento: "${departamento}".`);
-  const previstoMin=_rhParseHorarioSemanal(doc);
-  const temEscala=Object.values(previstoMin).some(v=>v>0);
+  const horario=_rhParseHorarioSemanal(doc);
+  const temEscala=Object.values(horario.previstoMin).some(v=>v>0);
   diag.push(temEscala?'Escala semanal (Horário de Trabalho) reconhecida.':'⚠️ Não achei a escala semanal "Horário de Trabalho" — horas previstas podem sair zeradas.');
   const hojeIso=fmtISOLocal(new Date());
-  const dias=_rhParseDiasTable(doc,previstoMin,hojeIso);
+  const dias=_rhParseDiasTable(doc,horario,hojeIso);
   diag.push(dias.length?`${dias.length} dia(s) já concluído(s) lido(s) da tabela "Dia".`:'⚠️ A tabela "Dia" não foi encontrada, ou nenhum dia concluído (só hoje/futuro) — nenhum indicador vai sair daqui.');
   return{nome,funcao,departamento,dias,diagnostico:diag};
 }
@@ -11237,6 +11271,7 @@ async function _rhSalvarRegistrosFuncionario(funcionarioId,dias,arquivoNome){
       // Histórico do Colaborador (mostrar o horário batido em cada dia, não só o total) —
       // registros salvos ANTES dessa data não têm esses campos, aparecem como "—" no histórico.
       payload['dias.'+d.data]={status:d.status,previstoMin:d.previstoMin,trabalhadoMin:d.trabalhadoMin,diaSemana:d.diaSemana,
+        atrasoMin:d.atrasoMin||0,incompleto:!!d.incompleto,
         entrada:d.entrada||'',saidaAlmoco:d.saidaAlmoco||'',voltaAlmoco:d.voltaAlmoco||'',saidaFinal:d.saidaFinal||'',obs:d.obs||''};
     });
     promessas.push(window._fbSaveRhPonto(docId,payload));
@@ -11320,29 +11355,71 @@ function _rhDiasDoFuncionario(funcionarioId,anoMesFiltro){
   return out;
 }
 function _rhStats(diasArr){
-  let previstoMin=0,trabalhadoMin=0,faltasDias=0,diasParciais=0,diasUteis=0;
+  let previstoMin=0,trabalhadoMin=0,faltasDias=0,diasParciais=0,diasUteis=0,atrasoMin=0,diasComAtraso=0,diasIncompletos=0;
   diasArr.forEach(d=>{
     const prev=d.previstoMin||0,trab=d.trabalhadoMin||0;
     previstoMin+=prev;
     trabalhadoMin+=trab;
     if(prev>0){
       diasUteis++;
-      if(trab===0)faltasDias++;
+      // Dia "incompleto" (só entrada batida, ponto do dia ainda não fechou no export) não
+      // conta como falta nem como parcial — dado insuficiente pra avaliar, não ausência real
+      // (2026-07-30, ver _rhParseDiasTable).
+      if(d.incompleto)diasIncompletos++;
+      else if(trab===0)faltasDias++;
       else if(trab<prev)diasParciais++;
     }
+    if((d.atrasoMin||0)>0){atrasoMin+=d.atrasoMin;diasComAtraso++;}
   });
   const perdidoMin=Math.max(0,previstoMin-trabalhadoMin);
   const pctPerdida=previstoMin>0?(perdidoMin/previstoMin*100):0;
-  return{previstoMin,trabalhadoMin,perdidoMin,pctPerdida,faltasDias,diasParciais,diasUteis};
+  const diasAvaliaveis=diasUteis-diasIncompletos; // base pras taxas — exclui dias sem dado suficiente
+  return{previstoMin,trabalhadoMin,perdidoMin,pctPerdida,faltasDias,diasParciais,diasUteis,atrasoMin,diasComAtraso,diasIncompletos,diasAvaliaveis};
 }
-// Índice de Pontualidade (0-100): parte de 100 e desconta % de horas perdidas + taxa de
-// faltas (com peso maior, 1.5x, porque falta integral pesa mais que atraso pontual pra saúde
-// operacional). >=90 Saudável, 70-89 Atenção, <70 Crítico — pensado pra evidenciar rápido
-// quem precisa de conversa: falta demais OU atrasa/sai cedo demais.
+// Índice geral (0-100): parte de 100 e desconta % de horas perdidas + taxa de faltas (peso
+// 1.5x, porque falta integral pesa mais que atraso pontual pra saúde operacional). Usado só
+// pra colorir/ordenar os cards de Departamento/Funcionário num único selo "de relance" — a
+// visão detalhada (hero da tela) usa os dois índices SEPARADOS abaixo (_rhIndiceAssiduidade e
+// _rhIndicePontualidade), a pedido do usuário: "qual foi a pontualidade, qual foi a
+// assiduidade" são duas perguntas diferentes, e antes só existia um número que misturava as
+// duas coisas (2026-07-30).
 function _rhIndice(stats){
   if(!stats.diasUteis)return{score:null,status:'Sem dados',cor:'#94a3b8'};
   const faltaRate=stats.faltasDias/stats.diasUteis*100;
   let score=100-stats.pctPerdida-faltaRate*1.5;
+  score=Math.max(0,Math.min(100,Math.round(score)));
+  let status,cor;
+  if(score>=90){status='Saudável';cor='#16a34a';}
+  else if(score>=70){status='Atenção';cor='#d97706';}
+  else{status='Crítico';cor='#dc2626';}
+  return{score,status,cor};
+}
+// Assiduidade (0-100): só presença — de todo dia útil avaliável, quantos o funcionário
+// efetivamente compareceu (não faltou). Não penaliza quem chegou atrasado ou saiu cedo — isso
+// é Pontualidade, abaixo. >=95 Saudável, 85-94 Atenção, <85 Crítico (faixa mais rígida que
+// Pontualidade porque falta integral custa mais caro operacionalmente que um atraso).
+function _rhIndiceAssiduidade(stats){
+  const base=stats.diasAvaliaveis;
+  if(!base)return{score:null,status:'Sem dados',cor:'#94a3b8'};
+  const score=Math.max(0,Math.min(100,Math.round((base-stats.faltasDias)/base*100)));
+  let status,cor;
+  if(score>=95){status='Saudável';cor='#16a34a';}
+  else if(score>=85){status='Atenção';cor='#d97706';}
+  else{status='Crítico';cor='#dc2626';}
+  return{score,status,cor};
+}
+// Pontualidade (0-100): só horário de chegada — de quem compareceu (exclui quem faltou, isso
+// já é medido em Assiduidade e não pode penalizar 2x aqui), quanto tempo de atraso de ENTRADA
+// acumulou em relação ao previsto, e em quantos dias diferentes atrasou. Desconta minutos de
+// atraso (peso 3x sobre o % do previsto) e a taxa de dias com atraso (peso 0.5x) — dois
+// funcionários com o mesmo total de minutos perdidos, mas um atrasando todo dia um pouco e
+// outro atrasando muito só 1 dia, pontuam diferente.
+function _rhIndicePontualidade(stats){
+  const base=stats.diasAvaliaveis-stats.faltasDias;
+  if(base<=0)return{score:null,status:'Sem dados',cor:'#94a3b8'};
+  const pctAtraso=stats.previstoMin>0?(stats.atrasoMin/stats.previstoMin*100):0;
+  const taxaDiasAtraso=stats.diasComAtraso/base*100;
+  let score=100-pctAtraso*3-taxaDiasAtraso*0.5;
   score=Math.max(0,Math.min(100,Math.round(score)));
   let status,cor;
   if(score>=90){status='Saudável';cor='#16a34a';}
@@ -11482,31 +11559,44 @@ function renderRhPontualidade(){
   const porFunc=funcsFiltrados.map(f=>{
     const dias=_rhDiasDoFuncionario(f.id,_rhMes);
     const stats=_rhStats(dias);
-    return{f,stats,indice:_rhIndice(stats)};
+    return{f,stats,indice:_rhIndice(stats),indiceA:_rhIndiceAssiduidade(stats),indiceP:_rhIndicePontualidade(stats)};
   });
   const statsGeral={
     previstoMin:porFunc.reduce((s,x)=>s+x.stats.previstoMin,0),
     trabalhadoMin:porFunc.reduce((s,x)=>s+x.stats.trabalhadoMin,0),
     faltasDias:porFunc.reduce((s,x)=>s+x.stats.faltasDias,0),
     diasParciais:porFunc.reduce((s,x)=>s+x.stats.diasParciais,0),
-    diasUteis:porFunc.reduce((s,x)=>s+x.stats.diasUteis,0)
+    diasUteis:porFunc.reduce((s,x)=>s+x.stats.diasUteis,0),
+    atrasoMin:porFunc.reduce((s,x)=>s+x.stats.atrasoMin,0),
+    diasComAtraso:porFunc.reduce((s,x)=>s+x.stats.diasComAtraso,0),
+    diasIncompletos:porFunc.reduce((s,x)=>s+x.stats.diasIncompletos,0)
   };
+  statsGeral.diasAvaliaveis=statsGeral.diasUteis-statsGeral.diasIncompletos;
   statsGeral.perdidoMin=Math.max(0,statsGeral.previstoMin-statsGeral.trabalhadoMin);
   statsGeral.pctPerdida=statsGeral.previstoMin>0?(statsGeral.perdidoMin/statsGeral.previstoMin*100):0;
-  const indiceGeral=_rhIndice(statsGeral);
+  const assiduidadeGeral=_rhIndiceAssiduidade(statsGeral);
+  const pontualidadeGeral=_rhIndicePontualidade(statsGeral);
   const cardsEl=document.getElementById('rh-cards-gerais');
   if(cardsEl){
     const corPerdida=statsGeral.pctPerdida>15?'#dc2626':(statsGeral.pctPerdida>7?'#d97706':'#16a34a');
     const corFaltas=statsGeral.faltasDias>0?'#dc2626':'#16a34a';
-    // Hero visual: gauge do índice geral à esquerda + 3 KPIs com ícone e barrinha à direita —
-    // no lugar dos 4 cards de puro texto que existiam antes (2026-07-29).
+    const corAtraso=statsGeral.diasComAtraso>0?'#d97706':'#16a34a';
+    // Hero visual: 2 gauges — Assiduidade (presença/faltas) e Pontualidade (atraso de
+    // chegada) — SEPARADOS a pedido do usuário ("qual foi a pontualidade, qual foi a
+    // assiduidade" são duas perguntas diferentes; antes só existia 1 índice misturando os
+    // dois). + 4 KPIs com ícone e barrinha à direita (2026-07-30).
     cardsEl.innerHTML=`<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:stretch">
-      <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-width:180px">
-        ${_rhGaugeSVG(indiceGeral.score,indiceGeral.cor,116)}
-        <div style="font-size:.72rem;font-weight:700;color:var(--ink4);text-transform:uppercase">Índice de Pontualidade</div>
-        <div style="font-size:.78rem;font-weight:700;color:${indiceGeral.cor}">${indiceGeral.status}</div>
+      <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-width:160px">
+        ${_rhGaugeSVG(assiduidadeGeral.score,assiduidadeGeral.cor,104)}
+        <div style="font-size:.72rem;font-weight:700;color:var(--ink4);text-transform:uppercase">Assiduidade</div>
+        <div style="font-size:.78rem;font-weight:700;color:${assiduidadeGeral.cor}">${assiduidadeGeral.status}</div>
       </div>
-      <div style="flex:1;min-width:260px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
+      <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-width:160px">
+        ${_rhGaugeSVG(pontualidadeGeral.score,pontualidadeGeral.cor,104)}
+        <div style="font-size:.72rem;font-weight:700;color:var(--ink4);text-transform:uppercase">Pontualidade</div>
+        <div style="font-size:.78rem;font-weight:700;color:${pontualidadeGeral.cor}">${pontualidadeGeral.status}</div>
+      </div>
+      <div style="flex:1;min-width:260px;display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">
         <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
           <div style="font-size:1.4rem">⏱️</div>
           <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;color:var(--ink4);margin-top:6px">Horas Previstas</div>
@@ -11523,7 +11613,13 @@ function renderRhPontualidade(){
           <div style="font-size:1.4rem">🚫</div>
           <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;color:var(--ink4);margin-top:6px">Faltas (dias)</div>
           <div style="font-size:1.3rem;font-weight:800;color:${corFaltas};margin-top:2px">${statsGeral.faltasDias}</div>
-          <div style="font-size:.7rem;color:var(--ink4);margin-top:4px">de ${statsGeral.diasUteis} dia(s) útil(eis) no período</div>
+          <div style="font-size:.7rem;color:var(--ink4);margin-top:4px">de ${statsGeral.diasUteis} dia(s) útil(eis) no período${statsGeral.diasIncompletos?` · ${statsGeral.diasIncompletos} incompleto(s)`:''}</div>
+        </div>
+        <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+          <div style="font-size:1.4rem">⏰</div>
+          <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;color:var(--ink4);margin-top:6px">Atraso de Chegada</div>
+          <div style="font-size:1.3rem;font-weight:800;color:${corAtraso};margin-top:2px">${_rhFmtHoras(statsGeral.atrasoMin)}</div>
+          <div style="font-size:.7rem;color:var(--ink4);margin-top:4px">em ${statsGeral.diasComAtraso} dia(s) com chegada atrasada</div>
         </div>
       </div>
     </div>`;
@@ -11543,19 +11639,21 @@ function renderRhPontualidade(){
   const elFaltas=document.getElementById('rh-atencao-faltas');
   if(elFaltas)elFaltas.innerHTML=topFaltas.length?topFaltas.map(x=>_rhLinhaAtencao(x,x.stats.faltasDias+' falta'+(x.stats.faltasDias===1?'':'s'),'#dc2626')).join(''):'<div style="color:var(--ink4);font-size:.82rem">Nenhuma falta no período. 🎉</div>';
   const elAtrasos=document.getElementById('rh-atencao-atrasos');
-  if(elAtrasos)elAtrasos.innerHTML=topAtrasos.length?topAtrasos.map(x=>_rhLinhaAtencao(x,_rhFmtHoras(x.stats.perdidoMin)+' em '+x.stats.diasParciais+' dia'+(x.stats.diasParciais===1?'':'s'),'#d97706')).join(''):'<div style="color:var(--ink4);font-size:.82rem">Nenhum atraso relevante no período. 🎉</div>';
+  if(elAtrasos)elAtrasos.innerHTML=topAtrasos.length?topAtrasos.map(x=>_rhLinhaAtencao(x,(x.stats.atrasoMin>0?_rhFmtHoras(x.stats.atrasoMin)+' de atraso · ':'')+_rhFmtHoras(x.stats.perdidoMin)+' perdidas em '+x.stats.diasParciais+' dia'+(x.stats.diasParciais===1?'':'s'),'#d97706')).join(''):'<div style="color:var(--ink4);font-size:.82rem">Nenhum atraso relevante no período. 🎉</div>';
   const porDepto={};
   porFunc.forEach(x=>{
     const d=x.f.departamento||'SEM DEPARTAMENTO';
-    if(!porDepto[d])porDepto[d]={previstoMin:0,trabalhadoMin:0,faltasDias:0,diasParciais:0,diasUteis:0};
+    if(!porDepto[d])porDepto[d]={previstoMin:0,trabalhadoMin:0,faltasDias:0,diasParciais:0,diasUteis:0,atrasoMin:0,diasComAtraso:0,diasIncompletos:0};
     const s=porDepto[d];
     s.previstoMin+=x.stats.previstoMin;s.trabalhadoMin+=x.stats.trabalhadoMin;
     s.faltasDias+=x.stats.faltasDias;s.diasParciais+=x.stats.diasParciais;s.diasUteis+=x.stats.diasUteis;
+    s.atrasoMin+=x.stats.atrasoMin;s.diasComAtraso+=x.stats.diasComAtraso;s.diasIncompletos+=x.stats.diasIncompletos;
   });
   const deptoRows=Object.entries(porDepto).map(([nome,s])=>{
+    s.diasAvaliaveis=s.diasUteis-s.diasIncompletos;
     s.perdidoMin=Math.max(0,s.previstoMin-s.trabalhadoMin);
     s.pctPerdida=s.previstoMin>0?(s.perdidoMin/s.previstoMin*100):0;
-    return{nome,s,idx:_rhIndice(s)};
+    return{nome,s,idx:_rhIndice(s),idxA:_rhIndiceAssiduidade(s),idxP:_rhIndicePontualidade(s)};
   }).sort((a,b)=>(a.idx.score??999)-(b.idx.score??999));
   _rhRenderCharts(porFunc,deptoRows,topFaltas,topAtrasos);
   // Departamento e Funcionário viraram grid de CARDS (não mais <table>) — a pedido do
@@ -11567,7 +11665,10 @@ function renderRhPontualidade(){
     deptoTableEl.innerHTML=deptoRows.length?deptoRows.map(r=>`<div style="border:1.5px solid var(--border-lt);border-radius:12px;padding:14px;background:#f8fafc">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
         <div style="font-weight:700;font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${String(r.nome).replace(/"/g,'&quot;')}">${r.nome}</div>
-        <span style="background:${r.idx.cor}22;color:${r.idx.cor};border-radius:999px;padding:3px 9px;font-size:.68rem;font-weight:800;white-space:nowrap">${r.idx.score==null?'—':r.idx.score}</span>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <span title="Assiduidade" style="background:${r.idxA.cor}22;color:${r.idxA.cor};border-radius:999px;padding:3px 8px;font-size:.64rem;font-weight:800;white-space:nowrap">A ${r.idxA.score==null?'—':r.idxA.score}</span>
+          <span title="Pontualidade" style="background:${r.idxP.cor}22;color:${r.idxP.cor};border-radius:999px;padding:3px 8px;font-size:.64rem;font-weight:800;white-space:nowrap">P ${r.idxP.score==null?'—':r.idxP.score}</span>
+        </div>
       </div>
       <div style="margin-top:10px">${_rhBarraSVG(r.s.pctPerdida,r.idx.cor)}</div>
       <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--ink4);margin-top:6px">
@@ -11580,7 +11681,9 @@ function renderRhPontualidade(){
   const funcTableEl=document.getElementById('rh-tabela-func');
   if(funcTableEl){
     // Card clicável (2026-07-29) — abre o Histórico do Colaborador direto, sem precisar
-    // digitar o nome na busca de novo (mesma modal de abrirRhHistoricoFuncionario).
+    // digitar o nome na busca de novo (mesma modal de abrirRhHistoricoFuncionario). Selos
+    // duplos "A"/"P" (Assiduidade/Pontualidade) substituem o selo único de 2026-07-29 — a
+    // pedido do usuário, as duas coisas são medidas e mostradas separadamente (2026-07-30).
     funcTableEl.innerHTML=funcRows.length?funcRows.map(x=>`<div onclick="abrirRhHistoricoFuncionario('${x.f.id}')" title="Ver histórico de ${String(x.f.nome).replace(/"/g,'&quot;')}" style="border:1.5px solid var(--border-lt);border-radius:12px;padding:14px;background:#f8fafc;cursor:pointer;transition:box-shadow .15s" onmouseover="this.style.boxShadow='0 2px 8px rgba(0,0,0,.08)'" onmouseout="this.style.boxShadow='none'">
       <div style="display:flex;align-items:center;gap:10px">
         <div style="width:34px;height:34px;border-radius:999px;background:${x.indice.cor}22;color:${x.indice.cor};display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:800;flex-shrink:0">${_rhIniciais(x.f.nome)}</div>
@@ -11588,12 +11691,15 @@ function renderRhPontualidade(){
           <div style="font-weight:700;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${String(x.f.nome).replace(/"/g,'&quot;')}">${x.f.nome}</div>
           <div style="font-size:.68rem;color:var(--ink4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${x.f.departamento||'—'}</div>
         </div>
-        <span style="background:${x.indice.cor}22;color:${x.indice.cor};border-radius:999px;padding:3px 9px;font-size:.68rem;font-weight:800;white-space:nowrap">${x.indice.score==null?'—':x.indice.score}</span>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <span title="Assiduidade" style="background:${x.indiceA.cor}22;color:${x.indiceA.cor};border-radius:999px;padding:3px 8px;font-size:.64rem;font-weight:800;white-space:nowrap">A ${x.indiceA.score==null?'—':x.indiceA.score}</span>
+          <span title="Pontualidade" style="background:${x.indiceP.cor}22;color:${x.indiceP.cor};border-radius:999px;padding:3px 8px;font-size:.64rem;font-weight:800;white-space:nowrap">P ${x.indiceP.score==null?'—':x.indiceP.score}</span>
+        </div>
       </div>
       <div style="margin-top:10px">${_rhBarraSVG(x.stats.pctPerdida,x.indice.cor)}</div>
       <div style="display:flex;justify-content:space-between;font-size:.7rem;color:var(--ink4);margin-top:6px">
         <span>⏱️ ${_rhFmtHoras(x.stats.trabalhadoMin)} / ${_rhFmtHoras(x.stats.previstoMin)}</span>
-        <span style="color:${x.stats.faltasDias>0?'#dc2626':'var(--ink4)'};font-weight:${x.stats.faltasDias>0?'700':'400'}">🚫 ${x.stats.faltasDias}</span>
+        <span style="color:${x.stats.faltasDias>0?'#dc2626':'var(--ink4)'};font-weight:${x.stats.faltasDias>0?'700':'400'}">🚫 ${x.stats.faltasDias}${x.stats.atrasoMin>0?` · ⏰ ${_rhFmtHoras(x.stats.atrasoMin)}`:''}</span>
       </div>
     </div>`).join(''):'<div style="grid-column:1/-1;padding:20px;text-align:center;color:var(--ink4);font-size:.82rem">Nenhum colaborador cadastrado ainda — suba um arquivo de Cartão Ponto pra começar.</div>';
   }
@@ -11641,10 +11747,14 @@ function _rhHistMesMov(dir){
 }
 // "Dentro"/"Fora" do horário padrão, por dia — mesma definição de "falta"/"parcial" já usada
 // nos indicadores agregados (_rhStats), só que aplicada a UM dia específico e traduzida pra
-// um selo colorido fácil de escanear visualmente.
+// um selo colorido fácil de escanear visualmente. Dia "incompleto" (só entrada batida, ponto
+// ainda não fechou no export) ganhou selo próprio — 2026-07-30 — pra não ser confundido com
+// falta de verdade (ver _rhParseDiasTable).
 function _rhBadgeDentroFora(d){
   if(!d.previstoMin)return'<span style="color:var(--ink4);font-size:.72rem">Sem expediente</span>';
+  if(d.incompleto)return'<span style="background:#e0e7ff;color:#3730a3;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:700" title="Só a entrada foi batida — ponto do dia provavelmente ainda não fechou quando o arquivo foi exportado">❔ Incompleto</span>';
   if(d.trabalhadoMin<=0)return'<span style="background:#fee2e2;color:#dc2626;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:700">🚫 Falta</span>';
+  if((d.atrasoMin||0)>0)return`<span style="background:#fef3c7;color:#92400e;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:700">⏰ Atrasou ${_rhFmtHoras(d.atrasoMin)}</span>`;
   if(d.trabalhadoMin<d.previstoMin)return'<span style="background:#fef3c7;color:#92400e;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:700">⏱️ Fora do horário</span>';
   return'<span style="background:#dcfce7;color:#166534;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:700">✅ Dentro do horário</span>';
 }
@@ -11659,12 +11769,16 @@ function _rhRenderHistoricoModal(){
   const mesesDisponiveis=_rhHistMesesDisponiveis(_rhHistFuncId);
   const dias=_rhHistMes?_rhDiasDoFuncionario(_rhHistFuncId,_rhHistMes).sort((a,b)=>a.data.localeCompare(b.data)):[];
   const stats=_rhStats(dias);
-  const indice=_rhIndice(stats);
+  const indiceA=_rhIndiceAssiduidade(stats);
+  const indiceP=_rhIndicePontualidade(stats);
   const [anoLbl,mesLbl]=_rhHistMes?_rhHistMes.split('-'):['',''];
   const mesLblTxt=mesLbl?MESES_PT[parseInt(mesLbl,10)]+' de '+anoLbl:'—';
+  // Coluna "Atraso" (2026-07-30, pedido do usuário: "quero ver o horário que ele chegou
+  // atrasado") — mostra os minutos de atraso de ENTRADA daquele dia específico, em vermelho
+  // quando > 0, separado da coluna Trabalhado (que mistura atraso+saída antecipada+almoço).
   const diasHtml=dias.length?`<table style="width:100%;border-collapse:collapse;font-size:.78rem">
     <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
-      <th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Status</th><th style="padding:6px 8px">Entrada</th><th style="padding:6px 8px">Saída Almoço</th><th style="padding:6px 8px">Volta Almoço</th><th style="padding:6px 8px">Saída</th><th style="padding:6px 8px">Trabalhado</th><th style="padding:6px 8px"></th>
+      <th style="padding:6px 8px">Data</th><th style="padding:6px 8px">Status</th><th style="padding:6px 8px">Entrada</th><th style="padding:6px 8px">Saída Almoço</th><th style="padding:6px 8px">Volta Almoço</th><th style="padding:6px 8px">Saída</th><th style="padding:6px 8px">Trabalhado</th><th style="padding:6px 8px">Atraso</th><th style="padding:6px 8px"></th>
     </tr></thead>
     <tbody>${dias.map(d=>`<tr style="border-bottom:1px solid var(--border-lt)">
       <td style="padding:6px 8px;font-weight:700">${fmtD(d.data)} <span style="color:var(--ink4);font-weight:400">${['dom','seg','ter','qua','qui','sex','sáb'][d.diaSemana]||''}</span></td>
@@ -11674,21 +11788,24 @@ function _rhRenderHistoricoModal(){
       <td style="padding:6px 8px">${d.voltaAlmoco||'—'}</td>
       <td style="padding:6px 8px">${d.saidaFinal||'—'}</td>
       <td style="padding:6px 8px">${_rhFmtHoras(d.trabalhadoMin)} / ${_rhFmtHoras(d.previstoMin)}</td>
+      <td style="padding:6px 8px;font-weight:${(d.atrasoMin||0)>0?'700':'400'};color:${(d.atrasoMin||0)>0?'#dc2626':'var(--ink4)'}">${(d.atrasoMin||0)>0?'+'+_rhFmtHoras(d.atrasoMin):'—'}</td>
       <td style="padding:6px 8px">${_rhBadgeDentroFora(d)}</td>
     </tr>`).join('')}</tbody></table>`
     :'<div style="text-align:center;padding:24px;color:var(--ink4);font-size:.82rem">Nenhum dia registrado neste mês.</div>';
   const mesesHistHtml=mesesDisponiveis.length?`<table style="width:100%;border-collapse:collapse;font-size:.78rem">
-    <thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px 8px">Mês</th><th style="padding:6px 8px">Previstas</th><th style="padding:6px 8px">Perdidas</th><th style="padding:6px 8px">Faltas</th><th style="padding:6px 8px">Índice</th></tr></thead>
+    <thead><tr style="text-align:left;border-bottom:2px solid var(--border)"><th style="padding:6px 8px">Mês</th><th style="padding:6px 8px">Previstas</th><th style="padding:6px 8px">Perdidas</th><th style="padding:6px 8px">Faltas</th><th style="padding:6px 8px">Atraso</th><th style="padding:6px 8px">Assid.</th><th style="padding:6px 8px">Pont.</th></tr></thead>
     <tbody>${mesesDisponiveis.map(am=>{
       const dm=_rhDiasDoFuncionario(_rhHistFuncId,am);
-      const sm=_rhStats(dm);const im=_rhIndice(sm);
+      const sm=_rhStats(dm);const imA=_rhIndiceAssiduidade(sm);const imP=_rhIndicePontualidade(sm);
       const[a,m]=am.split('-');
       return`<tr style="border-bottom:1px solid var(--border-lt);${am===_rhHistMes?'background:#eef2ff':''}">
         <td style="padding:6px 8px;font-weight:700;cursor:pointer" onclick="_rhHistMes='${am}';_rhRenderHistoricoModal()">${MESES_PT[parseInt(m,10)]}/${a}</td>
         <td style="padding:6px 8px">${_rhFmtHoras(sm.previstoMin)}</td>
         <td style="padding:6px 8px">${_rhFmtHoras(sm.perdidoMin)}</td>
         <td style="padding:6px 8px;font-weight:${sm.faltasDias>0?'700':'400'};color:${sm.faltasDias>0?'#dc2626':'inherit'}">${sm.faltasDias}</td>
-        <td style="padding:6px 8px"><span style="background:${im.cor}22;color:${im.cor};border-radius:999px;padding:2px 8px;font-size:.7rem;font-weight:700">${im.score==null?'—':im.score}</span></td>
+        <td style="padding:6px 8px;font-weight:${sm.atrasoMin>0?'700':'400'};color:${sm.atrasoMin>0?'#d97706':'inherit'}">${sm.atrasoMin>0?_rhFmtHoras(sm.atrasoMin):'—'}</td>
+        <td style="padding:6px 8px"><span style="background:${imA.cor}22;color:${imA.cor};border-radius:999px;padding:2px 8px;font-size:.7rem;font-weight:700">${imA.score==null?'—':imA.score}</span></td>
+        <td style="padding:6px 8px"><span style="background:${imP.cor}22;color:${imP.cor};border-radius:999px;padding:2px 8px;font-size:.7rem;font-weight:700">${imP.score==null?'—':imP.score}</span></td>
       </tr>`;
     }).join('')}</tbody></table>`:'';
   modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:820px;width:95%;max-height:88vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
@@ -11711,7 +11828,9 @@ function _rhRenderHistoricoModal(){
       <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:12px"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">Previstas</div><div style="font-size:1rem;font-weight:800;margin-top:4px">${_rhFmtHoras(stats.previstoMin)}</div></div>
       <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:12px"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">Perdidas</div><div style="font-size:1rem;font-weight:800;margin-top:4px">${_rhFmtHoras(stats.perdidoMin)}</div></div>
       <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:12px"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">Faltas</div><div style="font-size:1rem;font-weight:800;margin-top:4px;color:${stats.faltasDias>0?'#dc2626':'inherit'}">${stats.faltasDias}</div></div>
-      <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:12px"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">Índice</div><div style="font-size:1rem;font-weight:800;margin-top:4px;color:${indice.cor}">${indice.score==null?'—':indice.score+' · '+indice.status}</div></div>
+      <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:12px"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">Atraso Total</div><div style="font-size:1rem;font-weight:800;margin-top:4px;color:${stats.atrasoMin>0?'#d97706':'inherit'}">${_rhFmtHoras(stats.atrasoMin)}</div></div>
+      <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:12px"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">Assiduidade</div><div style="font-size:1rem;font-weight:800;margin-top:4px;color:${indiceA.cor}">${indiceA.score==null?'—':indiceA.score+' · '+indiceA.status}</div></div>
+      <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:12px"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">Pontualidade</div><div style="font-size:1rem;font-weight:800;margin-top:4px;color:${indiceP.cor}">${indiceP.score==null?'—':indiceP.score+' · '+indiceP.status}</div></div>
     </div>
     <h3 style="margin:0 0 8px;font-size:.85rem;font-weight:700">Dia a dia — ${mesLblTxt}</h3>
     <div style="overflow:auto;margin-bottom:18px">${diasHtml}</div>
