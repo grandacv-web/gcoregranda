@@ -1262,7 +1262,7 @@ select.fc{cursor:pointer}
             <option value="">Todos os departamentos</option>
           </select>
           <input id="rh-fil-busca" placeholder="🔍 Buscar colaborador..." oninput="renderRhPontualidade()" style="flex:1;min-width:200px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
-          <span title="Se esse número não mudar depois de subir o arquivo novo no GitHub, o navegador ainda está com a versão antiga em cache — precisa dar um hard refresh (Ctrl+F5)." style="font-size:.62rem;color:#9ca3af;white-space:nowrap;align-self:center">build RH-2026-07-30-v5</span>
+          <span title="Se esse número não mudar depois de subir o arquivo novo no GitHub, o navegador ainda está com a versão antiga em cache — precisa dar um hard refresh (Ctrl+F5)." style="font-size:.62rem;color:#9ca3af;white-space:nowrap;align-self:center">build RH-2026-07-30-v6</span>
         </div>
         <div id="rh-debug-linha" style="font-size:.7rem;color:#9ca3af;margin:-8px 0 14px 0;font-family:monospace"></div>
         <!-- Dashboard visual (2026-07-29, reformulado 2x): cards/gauge no lugar de tabelas
@@ -11315,15 +11315,28 @@ async function _rhSalvarRegistrosFuncionario(funcionarioId,dias,arquivoNome){
   const promessas=[];
   Object.keys(porMes).forEach(anoMes=>{
     const docId=funcionarioId+'_'+anoMes;
-    const payload={funcionarioId,anoMes,atualizadoEm:new Date().toISOString(),arquivoOrigem:arquivoNome||''};
+    // BUG REAL achado em 2026-07-30 (confirmado pelo debug em tela: "1 doc de ponto no
+    // Firestore · 0 dias somados"): a versão anterior gravava payload['dias.'+d.data]=... —
+    // chaves de nível superior com PONTO, esperando que o Firestore interpretasse isso como
+    // caminho aninhado (campo "dias" → sub-chave da data), do mesmo jeito que updateDoc()
+    // documenta. Na prática, com setDoc(...,{merge:true}), isso NÃO criou o campo aninhado
+    // "dias" — o documento gravava sem erro nenhum (por isso nunca apareceu no diagnóstico de
+    // erro) mas ficava sem nenhum dia de verdade dentro, exatamente o sintoma relatado run
+    // após run. Agora o objeto "dias" é montado À MÃO como um objeto aninhado de verdade, e
+    // mesclado no LADO DO CLIENTE com os dias que já existiam nesse mês (lidos de
+    // rhPontoMeses, que já está em memória) — assim não depende de nenhum comportamento
+    // especial do Firestore pra mesclar sub-campos, e nenhum dia de upload anterior se perde.
+    const docExistente=rhPontoMeses.find(x=>x.id===docId);
+    const diasMerged=Object.assign({},docExistente&&docExistente.dias||{});
     porMes[anoMes].forEach(d=>{
       // entrada/saidaAlmoco/voltaAlmoco/saidaFinal/obs guardados a partir de 2026-07-29 pro
       // Histórico do Colaborador (mostrar o horário batido em cada dia, não só o total) —
       // registros salvos ANTES dessa data não têm esses campos, aparecem como "—" no histórico.
-      payload['dias.'+d.data]={status:d.status,previstoMin:d.previstoMin,trabalhadoMin:d.trabalhadoMin,diaSemana:d.diaSemana,
+      diasMerged[d.data]={status:d.status,previstoMin:d.previstoMin,trabalhadoMin:d.trabalhadoMin,diaSemana:d.diaSemana,
         atrasoMin:d.atrasoMin||0,incompleto:!!d.incompleto,
         entrada:d.entrada||'',saidaAlmoco:d.saidaAlmoco||'',voltaAlmoco:d.voltaAlmoco||'',saidaFinal:d.saidaFinal||'',obs:d.obs||''};
     });
+    const payload={funcionarioId,anoMes,atualizadoEm:new Date().toISOString(),arquivoOrigem:arquivoNome||'',dias:diasMerged};
     promessas.push(window._fbSaveRhPonto(docId,payload));
   });
   await Promise.all(promessas);
