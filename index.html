@@ -1262,7 +1262,7 @@ select.fc{cursor:pointer}
             <option value="">Todos os departamentos</option>
           </select>
           <input id="rh-fil-busca" placeholder="🔍 Buscar colaborador..." oninput="renderRhPontualidade()" style="flex:1;min-width:200px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
-          <span title="Se esse número não mudar depois de subir o arquivo novo no GitHub, o navegador ainda está com a versão antiga em cache — precisa dar um hard refresh (Ctrl+F5)." style="font-size:.62rem;color:#9ca3af;white-space:nowrap;align-self:center">build RH-2026-07-30-v3</span>
+          <span title="Se esse número não mudar depois de subir o arquivo novo no GitHub, o navegador ainda está com a versão antiga em cache — precisa dar um hard refresh (Ctrl+F5)." style="font-size:.62rem;color:#9ca3af;white-space:nowrap;align-self:center">build RH-2026-07-30-v4</span>
         </div>
         <!-- Dashboard visual (2026-07-29, reformulado 2x): cards/gauge no lugar de tabelas
              densas, e agora GRÁFICOS DE VERDADE com Chart.js (mesma biblioteca/paleta usada em
@@ -3293,9 +3293,16 @@ function setupContasPagarSync(){
 // funcionário+mês. rhPontoMeses fica em memória pra montar os indicadores sem reconsultar
 // o Firestore a cada clique de filtro.
 let rhPontoMeses=[];
+// _rhPontoErro guarda o erro do listener de forma PERSISTENTE (2026-07-30) — antes o erro só
+// era escrito uma vez em rh-cards-gerais e qualquer render seguinte (troca de filtro, sync do
+// cfg em segundo plano, troca de aba) sobrescrevia o innerHTML de volta pro estado normal
+// "Sem dados", apagando o aviso antes do usuário ter chance de ver. Agora renderRhPontualidade
+// checa essa variável TODA VEZ e recoloca o aviso até o erro realmente ser resolvido.
+let _rhPontoErro=null;
 function setupRhPontoSync(){
   if(!window._fbWatchRhPonto)return;
   window._fbWatchRhPonto(function(snapshot){
+    _rhPontoErro=null;
     rhPontoMeses=snapshot.docs.map(d=>({id:d.id,...d.data()}));
     const elRh=document.getElementById('sec-cat-RH');
     if(elRh&&elRh.style.display!=='none'&&typeof renderRhPontualidade==='function')renderRhPontualidade();
@@ -3306,12 +3313,8 @@ function setupRhPontoSync(){
     // nenhum aviso na tela (2026-07-30 — sintoma real relatado pelo usuário). Agora aparece bem
     // visível, com a mensagem de erro exata do Firestore, no lugar dos cards do painel.
     console.error('Erro ao sincronizar rhPonto:',err);
-    const cardsEl=document.getElementById('rh-cards-gerais');
-    if(cardsEl)cardsEl.innerHTML=`<div style="padding:16px;border-radius:10px;border:2px solid #dc2626;background:#fef2f2;color:#991b1b;font-weight:700">
-      ❌ Não consegui ler os dados de ponto do Firestore (coleção "rhPonto").<br>
-      <span style="font-weight:400;font-size:.85rem">Erro: ${(err&&err.message)||err}</span><br>
-      <span style="font-weight:400;font-size:.85rem">Isso normalmente é regra de segurança do Firestore bloqueando leitura dessa coleção — confira em Firebase Console → Firestore → Rules.</span>
-    </div>`;
+    _rhPontoErro=(err&&err.message)||String(err);
+    if(typeof renderRhPontualidade==='function')renderRhPontualidade();
     toast('Erro ao carregar dados de ponto do RH — veja o painel','terr');
   });
 }
@@ -11366,6 +11369,17 @@ async function processarArquivosRhPonto(fileList){
     }
   }
   if(cfgMudou)await _rhSalvarCfg();
+  // alert() bloqueante (2026-07-30) — o banner fixo e o toast (abaixo) já existiam desde
+  // 2026-07-29 mas continuavam passando despercebidos (usuário relatou repetidamente "não
+  // aparece nada" mesmo depois de subir o arquivo). alert() força o usuário a ver e fechar
+  // antes de continuar, então ou aparece o diagnóstico real aqui, ou o problema não está em
+  // processarArquivosRhPonto (e sim em algo depois, na leitura/render).
+  if(erros.length){
+    alert('❌ RH — problema ao processar:\n\n'+erros.join('\n\n'));
+  }else if(ok>0){
+    const diagOk=detalhes.filter(d=>d.sucesso).map(d=>d.arquivo+':\n'+d.linhas.join('\n')).join('\n\n');
+    alert('✅ RH — upload processado, isto foi lido do arquivo:\n\n'+diagOk);
+  }
   // Banner de resultado GRANDE e impossível de passar despercebido (2026-07-29 — usuário
   // relatou não perceber o resultado do upload) + toast (notificação flutuante que aparece
   // não importa onde a tela estiver rolada) além do banner fixo na tela.
@@ -11594,7 +11608,16 @@ function _rhRenderCharts(porFunc,deptoRows,topFaltas,topAtrasos){
 }
 function renderRhPontualidade(){
   if(!_isRhUser())return;
-  if(!document.getElementById('rh-cards-gerais'))return;
+  const cardsElErro=document.getElementById('rh-cards-gerais');
+  if(!cardsElErro)return;
+  if(_rhPontoErro){
+    cardsElErro.innerHTML=`<div style="padding:16px;border-radius:10px;border:2px solid #dc2626;background:#fef2f2;color:#991b1b;font-weight:700">
+      ❌ Não consegui ler os dados de ponto do Firestore (coleção "rhPonto").<br>
+      <span style="font-weight:400;font-size:.85rem">Erro: ${_rhPontoErro}</span><br>
+      <span style="font-weight:400;font-size:.85rem">Isso normalmente é regra de segurança do Firestore bloqueando leitura dessa coleção — confira em Firebase Console → Firestore → Rules.</span>
+    </div>`;
+    return; // não continua pro render normal enquanto o erro persistir — evita mostrar "Sem dados" por cima do erro real
+  }
   const funcs=cfg.rhFuncionarios||[];
   const horarioTxtEl=document.getElementById('rh-horario-padrao-texto');
   if(horarioTxtEl)horarioTxtEl.textContent=_rhHorarioPadraoTexto();
