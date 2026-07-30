@@ -1262,6 +1262,7 @@ select.fc{cursor:pointer}
             <option value="">Todos os departamentos</option>
           </select>
           <input id="rh-fil-busca" placeholder="🔍 Buscar colaborador..." oninput="renderRhPontualidade()" style="flex:1;min-width:200px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
+          <span title="Se esse número não mudar depois de subir o arquivo novo no GitHub, o navegador ainda está com a versão antiga em cache — precisa dar um hard refresh (Ctrl+F5)." style="font-size:.62rem;color:#9ca3af;white-space:nowrap;align-self:center">build RH-2026-07-30-v3</span>
         </div>
         <!-- Dashboard visual (2026-07-29, reformulado 2x): cards/gauge no lugar de tabelas
              densas, e agora GRÁFICOS DE VERDADE com Chart.js (mesma biblioteca/paleta usada em
@@ -2578,7 +2579,13 @@ window._fbWatchContasPagar=(cb)=>onSnapshot(collection(db,'contasPagar'),cb);
 // volume de dias de ponto pode crescer bastante (1 doc por funcionário+mês, com merge por
 // dia — nunca sobrescreve o mês inteiro, só os dias que vieram no arquivo).
 window._fbSaveRhPonto=(docId,payload)=>setDoc(doc(db,'rhPonto',String(docId)),payload,{merge:true});
-window._fbWatchRhPonto=(cb)=>onSnapshot(collection(db,'rhPonto'),cb);
+// errCb adicionado (2026-07-30): onSnapshot sem 2º argumento falha CALADO se a leitura da
+// coleção 'rhPonto' for negada (regra de segurança do Firestore, índice faltando etc.) — o
+// listener simplesmente nunca entrega dado nenhum e rhPontoMeses fica [] pra sempre, sem
+// nenhum erro no console nem na tela. Isso é indistinguível de "upload não salvou nada", que
+// foi exatamente o sintoma relatado (indicadores zerados mesmo depois de excluir e subir de
+// novo). Agora qualquer erro do listener é repassado pro chamador em vez de desaparecer.
+window._fbWatchRhPonto=(cb,errCb)=>onSnapshot(collection(db,'rhPonto'),cb,errCb||(e=>console.error('rhPonto watch error',e)));
 // Exclusão de registro de ponto — usada quando o usuário quer reprocessar um colaborador do
 // zero (ex.: testar upload de novo sem ficar acumulando dias antigos misturados com novos).
 window._fbDeleteRhPonto=(docId)=>deleteDoc(doc(db,'rhPonto',String(docId)));
@@ -3292,6 +3299,20 @@ function setupRhPontoSync(){
     rhPontoMeses=snapshot.docs.map(d=>({id:d.id,...d.data()}));
     const elRh=document.getElementById('sec-cat-RH');
     if(elRh&&elRh.style.display!=='none'&&typeof renderRhPontualidade==='function')renderRhPontualidade();
+  },function(err){
+    // Antes esse erro sumia calado (ver comentário em window._fbWatchRhPonto) — se a coleção
+    // 'rhPonto' não puder ser lida (regra de segurança do Firestore bloqueando, por exemplo),
+    // os indicadores do RH ficam zerados PARA SEMPRE, mesmo com upload funcionando 100%, sem
+    // nenhum aviso na tela (2026-07-30 — sintoma real relatado pelo usuário). Agora aparece bem
+    // visível, com a mensagem de erro exata do Firestore, no lugar dos cards do painel.
+    console.error('Erro ao sincronizar rhPonto:',err);
+    const cardsEl=document.getElementById('rh-cards-gerais');
+    if(cardsEl)cardsEl.innerHTML=`<div style="padding:16px;border-radius:10px;border:2px solid #dc2626;background:#fef2f2;color:#991b1b;font-weight:700">
+      ❌ Não consegui ler os dados de ponto do Firestore (coleção "rhPonto").<br>
+      <span style="font-weight:400;font-size:.85rem">Erro: ${(err&&err.message)||err}</span><br>
+      <span style="font-weight:400;font-size:.85rem">Isso normalmente é regra de segurança do Firestore bloqueando leitura dessa coleção — confira em Firebase Console → Firestore → Rules.</span>
+    </div>`;
+    toast('Erro ao carregar dados de ponto do RH — veja o painel','terr');
   });
 }
 async function saveContaPagarFS(c){
