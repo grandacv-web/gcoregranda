@@ -1262,8 +1262,9 @@ select.fc{cursor:pointer}
             <option value="">Todos os departamentos</option>
           </select>
           <input id="rh-fil-busca" placeholder="🔍 Buscar colaborador..." oninput="renderRhPontualidade()" style="flex:1;min-width:200px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
-          <span title="Se esse número não mudar depois de subir o arquivo novo no GitHub, o navegador ainda está com a versão antiga em cache — precisa dar um hard refresh (Ctrl+F5)." style="font-size:.62rem;color:#9ca3af;white-space:nowrap;align-self:center">build RH-2026-07-30-v4</span>
+          <span title="Se esse número não mudar depois de subir o arquivo novo no GitHub, o navegador ainda está com a versão antiga em cache — precisa dar um hard refresh (Ctrl+F5)." style="font-size:.62rem;color:#9ca3af;white-space:nowrap;align-self:center">build RH-2026-07-30-v5</span>
         </div>
+        <div id="rh-debug-linha" style="font-size:.7rem;color:#9ca3af;margin:-8px 0 14px 0;font-family:monospace"></div>
         <!-- Dashboard visual (2026-07-29, reformulado 2x): cards/gauge no lugar de tabelas
              densas, e agora GRÁFICOS DE VERDADE com Chart.js (mesma biblioteca/paleta usada em
              Gráficos do Comercial e Financeiro — GC_CORES, canvas, cores) em vez de só barrinha
@@ -11641,6 +11642,21 @@ function renderRhPontualidade(){
   if(_rhMes&&!_rhMesesDisponiveis.includes(_rhMes))_rhMes='';
   const lblEl=document.getElementById('rh-mes-lbl');
   if(lblEl)lblEl.textContent=_rhMes||'Todos os meses';
+  // Diagnóstico sempre visível, sem precisar de clique nenhum (2026-07-30) — mostra o que o
+  // Firestore realmente devolveu pro navegador: quantos documentos existem em rhPonto, e se
+  // o(s) id(s) de funcionário gravados nesses documentos batem com os cadastrados agora em
+  // cfg.rhFuncionarios. Se um documento tiver funcionarioId que não corresponde a NINGUÉM da
+  // lista atual (ex.: funcionário foi excluído e recriado com id novo, mas o documento antigo
+  // continua com o id velho), ele fica "órfão" — existe no Firestore mas nenhum card mostra
+  // ele, porque nenhum card procura por aquele id.
+  const debugEl=document.getElementById('rh-debug-linha');
+  if(debugEl){
+    const idsAtuais=new Set(funcs.map(f=>f.id));
+    const orfaos=rhPontoMeses.filter(d=>!idsAtuais.has(d.funcionarioId));
+    const totalDias=rhPontoMeses.reduce((s,d)=>s+Object.keys(d.dias||{}).length,0);
+    debugEl.textContent=`[debug] ${rhPontoMeses.length} doc(s) de ponto no Firestore · ${totalDias} dia(s) somados · ${orfaos.length} órfão(s) (id de funcionário sem cadastro correspondente)`;
+    if(orfaos.length)debugEl.title='Órfãos: '+orfaos.map(d=>d.funcionarioId+' ('+d.anoMes+', '+Object.keys(d.dias||{}).length+' dias)').join(' | ');
+  }
   const deptoFiltro=document.getElementById('rh-fil-depto')?.value||'';
   const busca=(document.getElementById('rh-fil-busca')?.value||'').toUpperCase().trim();
   let funcsFiltrados=funcs;
