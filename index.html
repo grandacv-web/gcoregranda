@@ -11271,6 +11271,7 @@ async function rhExcluirFuncionario(funcionarioId){
     await _rhSalvarCfg();
     toast(`"${f.nome}" excluído do RH (${docIds.length} mês(es) de ponto removido(s))`,'tok');
     const modal=document.getElementById('rh-hist-modal');if(modal)modal.remove();
+    _rhMes=''; // mesmo motivo do upload: não deixar filtro de mês preso escondendo o próximo teste
     renderRhPontualidade();
   }catch(e){
     toast('Erro ao excluir: '+(e.message||e),'terr');console.error(e);
@@ -11365,6 +11366,10 @@ async function processarArquivosRhPonto(fileList){
   }
   const inputEl=document.getElementById('rh-upload-input');
   if(inputEl)inputEl.value='';
+  // Depois de subir arquivo(s) com sucesso, sempre volta o filtro de mês pra "Todos os
+  // meses" — o usuário acabou de subir o dado, é o pior momento possível pra estar com um
+  // filtro de mês antigo escondendo justamente o que ele quer ver (2026-07-30).
+  if(ok>0)_rhMes='';
   renderRhPontualidade();
 }
 // ── Indicadores (funcionário / departamento / geral) + Índice de Pontualidade ──────────
@@ -11580,6 +11585,16 @@ function renderRhPontualidade(){
     const deptos=[...new Set(funcs.map(f=>f.departamento).filter(Boolean))].sort();
     deptoSel.innerHTML='<option value="">Todos os departamentos</option>'+deptos.map(d=>`<option value="${d}" ${d===atual?'selected':''}>${d}</option>`).join('');
   }
+  // Trava real achada em 2026-07-30: _rhMes é uma variável solta que fica presa no mês
+  // selecionado mesmo depois que os dados daquele mês somem (ex.: usuário excluiu o
+  // colaborador pra testar de novo, ou o mês filtrado nunca teve dado nenhum). Sem esse
+  // reset, o filtro escondia TODOS os dias de um funcionário recém-recadastrado mesmo com o
+  // upload tendo funcionado — reprocessar o arquivo quantas vezes fosse não resolvia, porque
+  // o problema era o filtro preso, não o dado. Se o mês selecionado não existir mais entre os
+  // meses com dado de verdade, volta sozinho pra "Todos os meses" em vez de mostrar zero
+  // silenciosamente.
+  const _rhMesesDisponiveis=[...new Set(rhPontoMeses.map(m=>m.anoMes).filter(Boolean))];
+  if(_rhMes&&!_rhMesesDisponiveis.includes(_rhMes))_rhMes='';
   const lblEl=document.getElementById('rh-mes-lbl');
   if(lblEl)lblEl.textContent=_rhMes||'Todos os meses';
   const deptoFiltro=document.getElementById('rh-fil-depto')?.value||'';
