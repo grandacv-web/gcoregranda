@@ -1241,8 +1241,37 @@ select.fc{cursor:pointer}
           <option value="incompletos">⚠️ Dados incompletos</option>
         </select>
       </div>
-      <div id="lp-sec-lista"><div id="lp-body"></div></div>
+      <!-- Filtro entre datas (2026-07-31, a pedido do usuário) — campo escolhível, porque
+           "data" pode significar 3 coisas bem diferentes aqui: quando o pedido foi vendido,
+           quando cada setor interno tem que entregar a etapa dele, ou quando o pedido inteiro
+           tem que estar pronto pro cliente. Ver _lpDataNoIntervalo/_lpListaFiltrada. -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+        <select id="lp-fil-data-campo" onchange="lpRenderAtivo()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+          <option value="">📅 Filtrar por data: nenhum</option>
+          <option value="emissao">Data de Emissão/Venda</option>
+          <option value="etapas">Data de entrega dos setores (qualquer etapa)</option>
+          <option value="final">Data de Finalização (Prazo Final)</option>
+        </select>
+        <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">De
+          <input type="date" id="lp-fil-data-de" onchange="lpRenderAtivo()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
+        </label>
+        <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">Até
+          <input type="date" id="lp-fil-data-ate" onchange="lpRenderAtivo()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
+        </label>
+        <button onclick="lpLimparFiltroData()" class="dash-btn-conf" style="background:#94a3b8" type="button">✕ Limpar datas</button>
+      </div>
+      <div id="lp-sec-lista">
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
+          <button onclick="lpExportarListaExcel()" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Exportar Excel</button>
+          <button onclick="lpExportarListaPDF()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
+        </div>
+        <div id="lp-body"></div>
+      </div>
       <div id="lp-sec-kanban" style="display:none">
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
+          <button onclick="lpExportarKanbanExcel()" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Exportar Excel</button>
+          <button onclick="lpExportarKanbanPDF()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
+        </div>
         <div id="lp-kanban-body" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px"></div>
       </div>
       <div id="lp-sec-calendario" style="display:none">
@@ -1250,6 +1279,7 @@ select.fc{cursor:pointer}
           <button onclick="lpCalMov(-1)" type="button">◀</button>
           <div class="dash-mes-label" id="lp-cal-lbl" style="min-width:150px"></div>
           <button onclick="lpCalMov(1)" type="button">▶</button>
+          <button onclick="lpExportarCalendarioPDF()" class="dash-btn-conf" style="background:#dc2626;margin-left:auto" type="button">📄 Exportar PDF do mês</button>
         </div>
         <div id="lp-cal-body"></div>
       </div>
@@ -11023,11 +11053,27 @@ async function lpDesfazerBaixa(pedidoId,etapaKey,setorKey){
   toast('Baixa desfeita','twar');
   renderSetorTarefas(setorKey);
 }
+// Um dia (ISO) está "dentro" do intervalo De/Até — De/Até vazios não restringem daquele lado
+// (só De = "a partir de"; só Até = "até"; os dois vazios nunca chama esta função porque quem
+// chama já confere antes).
+function _lpDataNoIntervalo(iso,de,ate){
+  if(!iso)return false;
+  if(de&&iso<de)return false;
+  if(ate&&iso>ate)return false;
+  return true;
+}
 function _lpListaFiltrada(){
   const hojeIso=new Date().toISOString().slice(0,10);
   const busca=(document.getElementById('lp-fil-busca')?.value||'').toUpperCase().trim();
   const filEtapa=document.getElementById('lp-fil-etapa')?.value||'';
   const filStatus=document.getElementById('lp-fil-status')?.value||'';
+  // Filtro entre datas (2026-07-31, a pedido do usuário) — campo escolhível: Emissão/Venda,
+  // Prazo Final (entrega ao cliente) ou "Etapas internas" (qualquer etapa aplicável do pedido
+  // caindo no intervalo — útil pra planejar uma semana/quinzena olhando todo setor de uma vez).
+  const filDataCampo=document.getElementById('lp-fil-data-campo')?.value||'';
+  const filDataDe=document.getElementById('lp-fil-data-de')?.value||'';
+  const filDataAte=document.getElementById('lp-fil-data-ate')?.value||'';
+  const temFiltroData=!!(filDataCampo&&(filDataDe||filDataAte));
   let infos=_lpPedidosElegiveis().map(p=>_lpInfo(p,hojeIso));
   // Prazo curto demais pro Frete+Instalação informados não é "dado incompleto" pra mostrar
   // como pendência — é inconsistência de cadastro que precisa de correção manual no prazo,
@@ -11035,6 +11081,11 @@ function _lpListaFiltrada(){
   infos=infos.filter(x=>!x.curto);
   if(busca)infos=infos.filter(({p})=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
   if(filEtapa)infos=infos.filter(x=>x.ok&&x.etapaAtual&&x.etapaAtual.key===filEtapa);
+  if(temFiltroData){
+    if(filDataCampo==='emissao')infos=infos.filter(x=>x.ok&&_lpDataNoIntervalo(x.calc.emissaoIso,filDataDe,filDataAte));
+    else if(filDataCampo==='final')infos=infos.filter(x=>x.ok&&_lpDataNoIntervalo(x.calc.prazoIso,filDataDe,filDataAte));
+    else if(filDataCampo==='etapas')infos=infos.filter(x=>x.ok&&x.calc.etapas.some(e=>e.aplicavel&&_lpDataNoIntervalo(e.iso,filDataDe,filDataAte)));
+  }
   if(filStatus==='atrasados')infos=infos.filter(x=>x.ok&&x.atrasado);
   else if(filStatus==='andamento')infos=infos.filter(x=>x.ok&&!x.atrasado&&!x.concluido);
   else if(filStatus==='concluidos')infos=infos.filter(x=>x.ok&&x.concluido);
@@ -11048,6 +11099,33 @@ function _lpListaFiltrada(){
     return (a.calc.prazoIso||'9999').localeCompare(b.calc.prazoIso||'9999');
   });
   return infos;
+}
+// Achata os pedidos filtrados (_lpListaFiltrada) em EVENTOS (pedido+etapa) — usado por
+// Kanban, Calendário, modal do dia e pelas exportações. Centralizado aqui (2026-07-31) pra
+// nunca mais duplicar o filtro em 3 lugares — foi exatamente essa duplicação que causou o
+// bug "filtrei Produção e apareceu Projeto Executivo" (o filtro de etapa/data tinha que
+// restringir os EVENTOS, não só selecionar quais pedidos entram na conta). Filtro de etapa
+// (chave exata, ex.: "producao") e filtro de data no modo "etapas" (qualquer etapa aplicável
+// dentro do intervalo) são aplicados aqui; os modos "emissao"/"final" do filtro de data já
+// filtram o pedido inteiro lá em _lpListaFiltrada, então aqui só repassam todas as etapas dele.
+function _lpEventosFiltrados(){
+  const filEtapa=document.getElementById('lp-fil-etapa')?.value||'';
+  const filDataCampo=document.getElementById('lp-fil-data-campo')?.value||'';
+  const filDataDe=document.getElementById('lp-fil-data-de')?.value||'';
+  const filDataAte=document.getElementById('lp-fil-data-ate')?.value||'';
+  const filtraPorDataDeEtapa=filDataCampo==='etapas'&&(filDataDe||filDataAte);
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const infos=_lpListaFiltrada().filter(x=>x.ok);
+  const eventos=[];
+  infos.forEach(x=>{
+    x.calc.etapas.filter(e=>e.aplicavel
+      &&(!filEtapa||e.key===filEtapa)
+      &&(!filtraPorDataDeEtapa||_lpDataNoIntervalo(e.iso,filDataDe,filDataAte))
+    ).forEach(e=>{
+      eventos.push({p:x.p,etapa:e,atrasadoPedido:x.atrasado,concluidoPedido:x.concluido,statusEtapa:_lpStatusEtapa(x.p,e,hojeIso)});
+    });
+  });
+  return eventos;
 }
 let _lpTabAtiva='lista';
 function lpSetTab(tab,btn){
@@ -11151,24 +11229,15 @@ function renderListaPedidosKanban(){
   const wrap=document.getElementById('lp-kanban-body');
   if(!wrap)return;
   if(!_isPlanejamentoUser()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
-  // Filtro de etapa (2026-07-31, correção de bug: filtrar por "Produção" mostrava também
-  // Projeto/Compras etc. do mesmo pedido) — _lpListaFiltrada() já seleciona só os PEDIDOS cuja
-  // etapa atual bate com o filtro, mas cada pedido tem várias etapas aplicáveis; sem este
-  // segundo filtro por chave, todas elas apareciam juntas mesmo filtrando por uma só.
-  const filEtapaKb=document.getElementById('lp-fil-etapa')?.value||'';
-  const infos=_lpListaFiltrada().filter(x=>x.ok);
-  const hojeIso=new Date().toISOString().slice(0,10);
+  // Eventos já vêm com filtro de etapa/data aplicado — ver _lpEventosFiltrados() (2026-07-31,
+  // centraliza o que antes era duplicado aqui, no Calendário e no modal do dia).
+  const eventosKb=_lpEventosFiltrados();
   const porEtapa={};
   const vistos={};
-  infos.forEach(x=>{
-    x.calc.etapas.filter(e=>e.aplicavel&&(!filEtapaKb||e.key===filEtapaKb)).forEach(e=>{
-      if(!porEtapa[e.key])porEtapa[e.key]=[];
-      // statusEtapa usa a baixa de verdade (ver _lpStatusEtapa) pras etapas com menu próprio
-      // (Projeto/Compras/Corte Galvanizado/ART/Adesivo/Produção); pras demais (sem baixa ainda)
-      // continua puramente por data, igual antes.
-      porEtapa[e.key].push({p:x.p,etapa:e,atrasadoPedido:x.atrasado,concluidoPedido:x.concluido,statusEtapa:_lpStatusEtapa(x.p,e,hojeIso)});
-      if(!vistos[e.key])vistos[e.key]={key:e.key,label:e.label};
-    });
+  eventosKb.forEach(ev=>{
+    if(!porEtapa[ev.etapa.key])porEtapa[ev.etapa.key]=[];
+    porEtapa[ev.etapa.key].push(ev);
+    if(!vistos[ev.etapa.key])vistos[ev.etapa.key]={key:ev.etapa.key,label:ev.etapa.label};
   });
   const colunasBase=_lpEtapasDefParaPedido(null);
   const chavesBase=new Set(colunasBase.map(d=>d.key));
@@ -11214,19 +11283,14 @@ function renderListaPedidosCalendario(){
   const body=document.getElementById('lp-cal-body');
   if(!body)return;
   if(!_isPlanejamentoUser()){body.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
-  // Mesma correção de bug do Kanban (ver comentário lá) — filtrar por uma etapa não pode
-  // mostrar as outras etapas do mesmo pedido.
-  const filEtapaCal=document.getElementById('lp-fil-etapa')?.value||'';
-  const infos=_lpListaFiltrada().filter(x=>x.ok);
+  // Eventos já vêm com filtro de etapa/data aplicado — ver _lpEventosFiltrados().
   const porDia={};
-  infos.forEach(x=>{
-    x.calc.etapas.filter(e=>e.aplicavel&&(!filEtapaCal||e.key===filEtapaCal)).forEach(e=>{
-      const partes=e.iso.split('-');
-      if(parseInt(partes[0],10)===y&&parseInt(partes[1],10)===m){
-        if(!porDia[e.iso])porDia[e.iso]=[];
-        porDia[e.iso].push({p:x.p,etapa:e,atrasado:x.atrasado,concluido:x.concluido});
-      }
-    });
+  _lpEventosFiltrados().forEach(ev=>{
+    const partes=ev.etapa.iso.split('-');
+    if(parseInt(partes[0],10)===y&&parseInt(partes[1],10)===m){
+      if(!porDia[ev.etapa.iso])porDia[ev.etapa.iso]=[];
+      porDia[ev.etapa.iso].push(ev);
+    }
   });
   const primeiroDia=new Date(y,m-1,1);
   const diasNoMes=new Date(y,m,0).getDate();
@@ -11264,16 +11328,8 @@ function renderListaPedidosCalendario(){
 // programado, ordenado por OS. Recalcula na hora em vez de usar o cache do mês renderizado,
 // então funciona certo mesmo se o usuário navegar de mês antes de fechar.
 function lpAbrirDia(iso){
-  // Mesma correção de bug do Kanban/Calendário (2026-07-31) — respeita o filtro de etapa
-  // selecionado no topo da Lista de Pedidos, senão o dia mostra etapas de outros filtros.
-  const filEtapaDia=document.getElementById('lp-fil-etapa')?.value||'';
-  const infos=_lpListaFiltrada().filter(x=>x.ok);
-  const eventosDia=[];
-  infos.forEach(x=>{
-    x.calc.etapas.filter(e=>e.aplicavel&&e.iso===iso&&(!filEtapaDia||e.key===filEtapaDia)).forEach(e=>{
-      eventosDia.push({p:x.p,etapa:e,atrasado:x.atrasado,concluido:x.concluido});
-    });
-  });
+  // Eventos já vêm com filtro de etapa/data aplicado — ver _lpEventosFiltrados().
+  const eventosDia=_lpEventosFiltrados().filter(ev=>ev.etapa.iso===iso);
   eventosDia.sort((a,b)=>String(a.p.os||'').localeCompare(String(b.p.os||''),'pt-BR',{numeric:true}));
   const old=document.getElementById('lp-dia-modal');if(old)old.remove();
   const modal=document.createElement('div');
@@ -11291,7 +11347,7 @@ function lpAbrirDia(iso){
         <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${ev.p.os||'—'} · ${ev.p.cliente||'—'}</div>
         <div style="font-size:.7rem;color:var(--ink4)">${ev.p.job||''}${ev.p.responsavel?' · '+ev.p.responsavel:''}</div>
       </div>
-      ${ev.atrasado?'<span style="font-size:.66rem;color:#dc2626;font-weight:700;flex-shrink:0">🔴 Atrasado</span>':ev.concluido?'<span style="font-size:.9rem;flex-shrink:0">✅</span>':''}
+      ${ev.atrasadoPedido?'<span style="font-size:.66rem;color:#dc2626;font-weight:700;flex-shrink:0">🔴 Atrasado</span>':ev.concluidoPedido?'<span style="font-size:.9rem;flex-shrink:0">✅</span>':''}
     </div>`;
   }).join(''):'<div style="text-align:center;padding:30px;color:var(--ink4);font-size:.85rem">Nenhuma etapa programada pra este dia.</div>';
   modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:540px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
@@ -11378,6 +11434,294 @@ function lpAbrirDetalhe(pedidoId,voltarParaDia){
     ${corpo}
   </div>`;
   document.body.appendChild(modal);
+}
+function lpLimparFiltroData(){
+  const c=document.getElementById('lp-fil-data-campo'),de=document.getElementById('lp-fil-data-de'),ate=document.getElementById('lp-fil-data-ate');
+  if(c)c.value='';if(de)de.value='';if(ate)ate.value='';
+  lpRenderAtivo();
+}
+// Resumo em texto dos filtros ativos na tela — usado nos cabeçalhos dos PDFs exportados, pra
+// deixar claro no papel que o que foi impresso é um RECORTE (mesmo padrão de gerarPDFVendas).
+function _lpFiltrosResumoTexto(){
+  const busca=(document.getElementById('lp-fil-busca')?.value||'').trim();
+  const filEtapa=document.getElementById('lp-fil-etapa')?.value||'';
+  const filStatus=document.getElementById('lp-fil-status')?.value||'';
+  const filDataCampo=document.getElementById('lp-fil-data-campo')?.value||'';
+  const filDataDe=document.getElementById('lp-fil-data-de')?.value||'';
+  const filDataAte=document.getElementById('lp-fil-data-ate')?.value||'';
+  const partes=[];
+  if(busca)partes.push('Busca: "'+busca+'"');
+  if(filEtapa){const opt=document.querySelector('#lp-fil-etapa option[value="'+filEtapa+'"]');partes.push('Etapa: '+(opt?opt.textContent:filEtapa));}
+  if(filStatus){const opt=document.querySelector('#lp-fil-status option[value="'+filStatus+'"]');partes.push('Status: '+(opt?opt.textContent:filStatus));}
+  if(filDataCampo&&(filDataDe||filDataAte)){
+    const opt=document.querySelector('#lp-fil-data-campo option[value="'+filDataCampo+'"]');
+    const rotulo=opt?opt.textContent.replace('📅 Filtrar por data: ',''):filDataCampo;
+    partes.push(rotulo+': '+(filDataDe?fmtD(filDataDe):'início')+' até '+(filDataAte?fmtD(filDataAte):'hoje'));
+  }
+  return partes.length?partes.join('  ·  '):'Sem filtro (todos os pedidos elegíveis)';
+}
+// Hex ('#7c3aed') -> [r,g,b], pra usar cor de etapa (_lpCorEtapa) nas exportações em PDF —
+// jsPDF só aceita RGB numérico em setFillColor/setTextColor, não string hex.
+function _hexToRgb(hex){
+  const h=String(hex).replace('#','');
+  const full=h.length===3?h.split('').map(c=>c+c).join(''):h;
+  const n=parseInt(full,16);
+  return[(n>>16)&255,(n>>8)&255,n&255];
+}
+// ===================== EXPORTAÇÕES (Excel/PDF) — LISTA DE PEDIDOS (2026-07-31) =====================
+// Mesmo padrão já usado em Lista de Vendas/DRE/Financeiro (ver exportarExcelVendas/
+// gerarPDFVendas): Excel = CSV via _csvDownload (abre direto no Excel, sem biblioteca
+// nenhuma); PDF = jsPDF+autoTable, mesma marca (logo, NAVY/PINK). Sempre respeita os filtros
+// ativos na tela (busca/etapa/status/intervalo de datas) — nunca exporta o que o usuário não
+// está vendo. A pedido do usuário: "quero que possa exportar tanto em excel quanto pdf seja
+// na lista, kanban ou calendario".
+function lpExportarListaExcel(){
+  const infos=_lpListaFiltrada();
+  if(!infos.length){toast('Nenhum pedido encontrado com esses filtros para exportar','terr');return;}
+  const headers=['OS','Cliente','JOB','Vendedor','Emissão','Prazo Final','Assertividade %','Progresso %','Status'];
+  const body=infos.map(x=>{
+    if(!x.ok)return[x.p.os||'',x.p.cliente||'',x.p.job||'',x.p.responsavel||'',x.p.emissaoEm?fmtD(x.p.emissaoEm):'',x.p.prazo?fmtD(x.p.prazo):'','—','—',_lpProblemasTexto(x.calc.problemas)||'Dados incompletos'];
+    const statusTxt=x.concluido?'Concluído':x.atrasado?'Atrasado':'Em andamento';
+    return[x.p.os||'',x.p.cliente||'',x.p.job||'',x.p.responsavel||'',fmtD(x.calc.emissaoIso),fmtD(x.calc.prazoIso),x.assert&&x.assert.pct!=null?x.assert.pct+'%':'—',x.progresso+'%',statusTxt];
+  });
+  _csvDownload(`lista_de_pedidos_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+async function lpExportarListaPDF(){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const infos=_lpListaFiltrada();
+  if(!infos.length){toast('Nenhum pedido encontrado com esses filtros para gerar o PDF.','terr');return;}
+  const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const filtrosLbl=_lpFiltrosResumoTexto();
+  const drawnFooterPages=new Set();
+  function drawHeader(titulo){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+    doc.text(titulo,pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    const lines=doc.splitTextToSize('Filtros: '+filtrosLbl,pageW-28);
+    doc.text(lines,pageW-14,26.5,{align:'right'});
+    const lineY=27.5+(lines.length-1)*3.2;
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,lineY,pageW-14,lineY);
+    doc.setFont('helvetica','normal');
+    return lineY+6;
+  }
+  function drawFooter(pageNum){
+    if(drawnFooterPages.has(pageNum))return;
+    drawnFooterPages.add(pageNum);
+    doc.setPage(pageNum);
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
+  }
+  const curY=drawHeader('LISTA DE PEDIDOS');
+  const head=['OS','Cliente','JOB','Vendedor','Emissão','Prazo Final','Assert.','Progr.','Status'];
+  const bodyPdf=infos.map(x=>{
+    if(!x.ok)return[x.p.os||'—',x.p.cliente||'—',x.p.job||'—',x.p.responsavel||'—',x.p.emissaoEm?fmtD(x.p.emissaoEm):'—',x.p.prazo?fmtD(x.p.prazo):'—','—','—','⚠️ Incompleto'];
+    const statusTxt=x.concluido?'✅ Concluído':x.atrasado?'🔴 Atrasado':'🔵 Andamento';
+    return[x.p.os||'—',x.p.cliente||'—',x.p.job||'—',x.p.responsavel||'—',fmtD(x.calc.emissaoIso),fmtD(x.calc.prazoIso),x.assert&&x.assert.pct!=null?x.assert.pct+'%':'—',x.progresso+'%',statusTxt];
+  });
+  doc.autoTable({
+    startY:curY,head:[head],body:bodyPdf,theme:'grid',
+    styles:{fontSize:6.8,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.6},
+    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:7},
+    alternateRowStyles:{fillColor:LIGHT},
+    columnStyles:{6:{halign:'center'},7:{halign:'center'}},
+    margin:{top:32,left:14,right:14,bottom:20},
+    didDrawPage:()=>{drawFooter(doc.internal.getNumberOfPages());}
+  });
+  drawFooter(doc.internal.getNumberOfPages());
+  doc.save(`lista_de_pedidos_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('PDF gerado!','tok');
+}
+// Kanban exporta AGRUPADO por etapa/coluna (não por pedido) — cada linha é um evento
+// (pedido+etapa), igual o que aparece nos cards. Excel: 1 planilha só, coluna "Etapa" pra
+// filtrar/agrupar; PDF: uma seção por etapa (cor da coluna), igual escolhido pelo usuário.
+function lpExportarKanbanExcel(){
+  const eventos=_lpEventosFiltrados();
+  if(!eventos.length){toast('Nenhuma etapa encontrada com esses filtros para exportar','terr');return;}
+  const ordenados=eventos.slice().sort((a,b)=>a.etapa.label.localeCompare(b.etapa.label,'pt-BR')||a.etapa.iso.localeCompare(b.etapa.iso));
+  const headers=['Etapa','OS','Cliente','JOB','Prazo desta Etapa','Status'];
+  const body=ordenados.map(ev=>[
+    ev.etapa.label,ev.p.os||'',ev.p.cliente||'',ev.p.job||'',fmtD(ev.etapa.iso),
+    ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada'
+  ]);
+  _csvDownload(`kanban_pedidos_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+async function lpExportarKanbanPDF(){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const eventos=_lpEventosFiltrados();
+  if(!eventos.length){toast('Nenhuma etapa encontrada com esses filtros para gerar o PDF.','terr');return;}
+  const porEtapa={};
+  eventos.forEach(ev=>{
+    if(!porEtapa[ev.etapa.key])porEtapa[ev.etapa.key]={label:ev.etapa.label,itens:[]};
+    porEtapa[ev.etapa.key].itens.push(ev);
+  });
+  const colunasOrdem=_lpEtapasDefParaPedido(null).map(d=>d.key);
+  const chaves=Object.keys(porEtapa).sort((a,b)=>{
+    const ia=colunasOrdem.indexOf(a),ib=colunasOrdem.indexOf(b);
+    if(ia===-1&&ib===-1)return a.localeCompare(b);
+    if(ia===-1)return 1;if(ib===-1)return -1;
+    return ia-ib;
+  });
+  const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const filtrosLbl=_lpFiltrosResumoTexto();
+  const drawnFooterPages=new Set();
+  function drawHeader(){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+    doc.text('LISTA DE PEDIDOS — KANBAN',pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    const lines=doc.splitTextToSize('Filtros: '+filtrosLbl,pageW-28);
+    doc.text(lines,pageW-14,26.5,{align:'right'});
+    const lineY=27.5+(lines.length-1)*3.2;
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,lineY,pageW-14,lineY);
+    doc.setFont('helvetica','normal');
+    return lineY+6;
+  }
+  function drawFooter(pageNum){
+    if(drawnFooterPages.has(pageNum))return;
+    drawnFooterPages.add(pageNum);
+    doc.setPage(pageNum);
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
+  }
+  let curY=drawHeader();
+  chaves.forEach(key=>{
+    const grupo=porEtapa[key];
+    const corRgb=_hexToRgb(_lpCorEtapa(key));
+    if(curY>pageH-50){doc.addPage();curY=drawHeader();}
+    doc.setFillColor(...corRgb);doc.roundedRect(14,curY,pageW-28,7,1,1,'F');
+    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8.5);
+    doc.text(grupo.label.toUpperCase()+' ('+grupo.itens.length+')',18,curY+5);
+    curY+=10;
+    const head=[['OS','Cliente','JOB','Prazo desta Etapa','Status']];
+    const body=grupo.itens.slice().sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso)).map(ev=>[
+      ev.p.os||'—',ev.p.cliente||'—',ev.p.job||'—',fmtD(ev.etapa.iso),
+      ev.statusEtapa==='ok'?'✅ Baixa dada':ev.statusEtapa==='atrasado'?'🔴 Atrasado':'🔜 Programada'
+    ]);
+    doc.autoTable({
+      startY:curY,head,body,theme:'grid',
+      styles:{fontSize:7,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.6},
+      headStyles:{fillColor:LIGHT,textColor:[51,65,85],fontStyle:'bold',fontSize:7},
+      margin:{top:32,left:14,right:14,bottom:20},
+      didDrawPage:()=>{drawFooter(doc.internal.getNumberOfPages());}
+    });
+    curY=doc.lastAutoTable.finalY+10;
+  });
+  drawFooter(doc.internal.getNumberOfPages());
+  doc.save(`kanban_pedidos_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('PDF gerado!','tok');
+}
+// Calendário — só PDF (Excel de calendário visual não é prático, combinado com o usuário).
+// Desenha a grade do mês NAVEGADO na tela (mesmo _lpCalMes do botão ◀▶) manualmente (sem
+// autoTable, célula por célula) pra poder colorir feriado e escrever várias linhas de evento
+// dentro de cada dia — algo que autoTable sozinho não faz bem numa grade de calendário.
+async function lpExportarCalendarioPDF(){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const{y,m}=_lpCalMes;
+  const eventosMes=_lpEventosFiltrados().filter(ev=>{
+    const partes=ev.etapa.iso.split('-');
+    return parseInt(partes[0],10)===y&&parseInt(partes[1],10)===m;
+  });
+  if(!eventosMes.length){toast('Nenhuma etapa encontrada neste mês com esses filtros','terr');return;}
+  const porDia={};
+  eventosMes.forEach(ev=>{if(!porDia[ev.etapa.iso])porDia[ev.etapa.iso]=[];porDia[ev.etapa.iso].push(ev);});
+  const nomesFeriados=getFeriadosComNome(y);
+  const primeiroDia=new Date(y,m-1,1);
+  const diasNoMes=new Date(y,m,0).getDate();
+  const offset=primeiroDia.getDay();
+  const celulas=[];
+  for(let i=0;i<offset;i++)celulas.push(null);
+  for(let d=1;d<=diasNoMes;d++){
+    const iso=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    celulas.push({dia:d,iso,eventos:porDia[iso]||[],feriado:nomesFeriados[iso]||null});
+  }
+  while(celulas.length%7!==0)celulas.push(null);
+  const semanas=[];
+  for(let i=0;i<celulas.length;i+=7)semanas.push(celulas.slice(i,i+7));
+
+  const doc=new jsPDF({orientation:'landscape'});
+  const NAVY=[26,43,94],PINK=[233,30,99],GRAY=[100,116,139],AMBER=[180,83,9];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const filtrosLbl=_lpFiltrosResumoTexto();
+  if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+  doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+  doc.text('LISTA DE PEDIDOS — CALENDÁRIO',pageW-14,15,{align:'right'});
+  doc.setTextColor(...PINK);doc.setFontSize(10);
+  doc.text('GCORE - Sistema Granda · '+MESES_PT[m]+' '+y,pageW-14,21,{align:'right'});
+  doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+  const lines=doc.splitTextToSize('Filtros: '+filtrosLbl,pageW-28);
+  doc.text(lines,pageW-14,26.5,{align:'right'});
+  const lineY=27.5+(lines.length-1)*3.2;
+  doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,lineY,pageW-14,lineY);
+
+  const startY=lineY+8;
+  const marginX=10;
+  const gridW=pageW-marginX*2;
+  const colW=gridW/7;
+  const rowH=(pageH-startY-14)/semanas.length;
+  const diasSemana=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(...NAVY);
+  diasSemana.forEach((d,i)=>{doc.text(d,marginX+i*colW+colW/2,startY-1,{align:'center'});});
+  let curY=startY;
+  semanas.forEach(semana=>{
+    semana.forEach((cel,i)=>{
+      const x=marginX+i*colW;
+      doc.setDrawColor(226,232,240);doc.setLineWidth(.2);
+      if(cel&&cel.feriado){doc.setFillColor(254,243,199);doc.rect(x,curY,colW,rowH,'FD');}
+      else doc.rect(x,curY,colW,rowH,'S');
+      if(!cel)return;
+      doc.setFont('helvetica','bold');doc.setFontSize(7.5);
+      if(cel.feriado)doc.setTextColor(...AMBER);else doc.setTextColor(51,65,85);
+      doc.text(String(cel.dia),x+2,curY+4.5);
+      let ly=curY+8.5;
+      const maxLinhas=Math.max(1,Math.floor((rowH-9)/3.2));
+      if(cel.feriado){
+        doc.setFont('helvetica','bold');doc.setFontSize(5.6);doc.setTextColor(...AMBER);
+        doc.splitTextToSize('🎌 '+cel.feriado,colW-4).slice(0,maxLinhas).forEach(linha=>{doc.text(linha,x+2,ly);ly+=3.2;});
+      } else {
+        doc.setFont('helvetica','normal');doc.setFontSize(5.4);
+        cel.eventos.slice(0,maxLinhas).forEach(ev=>{
+          doc.setTextColor(..._hexToRgb(_lpCorEtapa(ev.etapa.key)));
+          const txt=(ev.p.os||'—')+'·'+ev.etapa.label;
+          doc.text(doc.splitTextToSize(txt,colW-4)[0],x+2,ly);
+          ly+=3.2;
+        });
+        if(cel.eventos.length>maxLinhas){
+          doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');
+          doc.text('+'+(cel.eventos.length-maxLinhas)+' outro(s)',x+2,ly);
+        }
+      }
+    });
+    curY+=rowH;
+  });
+  doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(marginX,pageH-10,pageW-marginX,pageH-10);
+  doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(...GRAY);
+  doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',marginX,pageH-5);
+  doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR'),pageW-marginX,pageH-5,{align:'right'});
+  doc.save(`calendario_pedidos_${y}_${String(m).padStart(2,'0')}.pdf`);
+  toast('PDF gerado!','tok');
 }
 
 // ===================== GESTÃO DE FORNECEDORES (Planejamento, 2026-07-29) =====================
@@ -13892,13 +14236,22 @@ function verFormularioFinalizacao(pedidoId){
 // ── HISTÓRICO DE PEDIDOS (consulta, 2026-07-23) ─────────────────────────────────────────
 // Junta tudo que já aconteceu com um pedido — emissão, alteração de prazo (adiamento de
 // instalação/finalização, com motivo), pagamentos confirmados ou adiados (com motivo, mesma
-// fonte de Financeiro/Comissões), finalização de obra e diários de obra (2026-07-29) — numa
-// timeline só de leitura.
-// Reaproveita getParcelas/getPagConf, p.historicoPrazo e p.finalizacao (nenhum dado novo,
-// nenhuma lógica duplicada). Pedido de antes de julho/2026 ou não emitido pelo fluxo normal
-// do sistema (_plEmitidoPeloSistema) simplesmente não gera o evento de "emissão" — o resto
-// (prazo/pagamento/finalização) aparece normalmente se existir, e some se não existir, sem
-// inventar informação que o pedido nunca teve.
+// fonte de Financeiro/Comissões), finalização de obra, diários de obra (2026-07-29) e baixas
+// de etapa da Lista de Pedidos (2026-07-31) — numa timeline só de leitura.
+// Reaproveita getParcelas/getPagConf, p.historicoPrazo, p.finalizacao e p.lpBaixas (nenhum
+// dado novo, nenhuma lógica duplicada). Pedido de antes de julho/2026 ou não emitido pelo
+// fluxo normal do sistema (_plEmitidoPeloSistema) simplesmente não gera o evento de "emissão"
+// — o resto (prazo/pagamento/finalização/etapa) aparece normalmente se existir, e some se não
+// existir, sem inventar informação que o pedido nunca teve.
+//
+// ★★★ REGRA GERAL (2026-07-31, a pedido do usuário) ★★★ — "tudo que for adicionado neste
+// sistema e tenha a ver com cada pedido deve aparecer neste histórico". Ou seja: esta função
+// é o ÚNICO lugar que alimenta o Histórico de Pedidos — sempre que uma feature nova gravar
+// algo dentro de um pedido (p.algumCampoNovo) que representa "algo que aconteceu" com aquele
+// pedido (uma ação, uma decisão, uma confirmação, uma baixa, um registro), a pergunta
+// obrigatória antes de considerar a feature pronta é: "isso deveria virar um evento aqui?".
+// Se sim, adicionar um bloco `add(icone,titulo,quando,detalhe,cor)` novo nesta função — nunca
+// espalhar timeline própria em outro lugar do sistema.
 function _histParseTs(str){
   if(!str)return 0;
   if(/^\d{4}-\d{2}-\d{2}T/.test(str))return new Date(str).getTime()||0;
@@ -13961,6 +14314,27 @@ function _histPedidoEventos(p){
     const detalheDiario=`${d.andamento||'—'}${nFotos?' · '+nFotos+' foto(s)/vídeo(s)':''} — registrado por ${d.registradoPor||'—'}`;
     add('📔','Diário de obra registrado',d.data,detalheDiario,'#0891b2');
   });
+
+  // 6. Baixas de etapa da Lista de Pedidos (2026-07-31) — cada setor (Projetos/Compras/
+  // Produção) "dá baixa" quando termina de verdade a etapa dele (ver lpDarBaixa); todo
+  // p.lpBaixas[key] vira um evento aqui, com o prazo que estava calculado pra aquela etapa no
+  // momento (pra já mostrar na própria linha se cumpriu ou atrasou). Usa o snapshot de config
+  // do próprio pedido (_lpCalcEtapas já resolve isso sozinho) — funciona mesmo que a % daquela
+  // etapa tenha mudado depois em Configurações.
+  if(p.lpBaixas&&Object.keys(p.lpBaixas).length&&typeof _lpCalcEtapas==='function'){
+    const calcLp=_lpCalcEtapas(p);
+    const etapasRef=calcLp.ok?calcLp.etapas:(typeof LP_ETAPAS_PADRAO!=='undefined'?LP_ETAPAS_PADRAO:[]);
+    Object.entries(p.lpBaixas).forEach(([key,baixa])=>{
+      const etapaDef=etapasRef.find(e=>e.key===key);
+      const label=etapaDef?etapaDef.label:key;
+      const prazoEtapa=(etapaDef&&calcLp.ok)?etapaDef.iso:null;
+      const atrasou=!!(prazoEtapa&&baixa.data>prazoEtapa);
+      const detalhe=prazoEtapa
+        ?`Prazo da etapa: ${fmtD(prazoEtapa)} — ${atrasou?'concluída com atraso':'concluída no prazo'}. Dado por: ${baixa.por||'—'}`
+        :`Dado por: ${baixa.por||'—'}`;
+      add(atrasou?'🔴':'✅',`Etapa concluída — ${label}`,baixa.data,detalhe,atrasou?'#dc2626':'#16a34a');
+    });
+  }
 
   eventos.sort((a,b)=>a.ts-b.ts);
   return eventos;
@@ -14080,6 +14454,12 @@ function abrirHistoricoPedido(pedidoId,os){
       </div>
     </div>`).join('')
     :'<div style="text-align:center;padding:30px;color:var(--ink4);font-size:.82rem">Nenhum evento registrado ainda para este pedido.</div>';
+  // Exportar (2026-07-31, a pedido do usuário: "eu escolher o pedido e exportar o histórico
+  // dele sobre tudo que aconteceu") — só faz sentido se já tem algum evento pra exportar.
+  const botoesExport=eventos.length?`<div style="display:flex;gap:8px;margin-bottom:14px">
+    <button onclick="hpExportarPedidoExcel('${pedidoId}')" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Exportar Excel</button>
+    <button onclick="hpExportarPedidoPDF('${pedidoId}')" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
+  </div>`:'';
   modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:560px;width:92%;max-height:85vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:10px">
       <div>
@@ -14088,9 +14468,74 @@ function abrirHistoricoPedido(pedidoId,os){
       </div>
       <button onclick="document.getElementById('hp-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
     </div>
+    ${botoesExport}
     <div>${timelineHtml}</div>
   </div>`;
   document.body.appendChild(modal);
+}
+// Exporta a timeline de UM pedido — mesmo padrão de _csvDownload/jsPDF+autoTable já usado no
+// resto do sistema (ver lpExportarListaExcel/PDF). Sempre a partir de _histPedidoEventos(p),
+// então nunca diverge do que aparece na tela.
+function hpExportarPedidoExcel(pedidoId){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const eventos=_histPedidoEventos(p);
+  if(!eventos.length){toast('Este pedido ainda não tem nenhum evento registrado','terr');return;}
+  const headers=['Data','Evento','Detalhe'];
+  const body=eventos.map(ev=>[ev.quandoTxt||'',ev.titulo,ev.detalhe||'']);
+  _csvDownload(`historico_os_${p.os||pedidoId}_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+async function hpExportarPedidoPDF(pedidoId){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const eventos=_histPedidoEventos(p);
+  if(!eventos.length){toast('Este pedido ainda não tem nenhum evento registrado','terr');return;}
+  const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const drawnFooterPages=new Set();
+  function drawHeader(){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+    doc.text('HISTÓRICO DO PEDIDO',pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    doc.text(`OS ${p.os||'—'} · ${p.cliente||'—'}${p.job?' · '+p.job:''}`,pageW-14,26.5,{align:'right'});
+    const lineY=29;
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,lineY,pageW-14,lineY);
+    doc.setFont('helvetica','normal');
+    return lineY+6;
+  }
+  function drawFooter(pageNum){
+    if(drawnFooterPages.has(pageNum))return;
+    drawnFooterPages.add(pageNum);
+    doc.setPage(pageNum);
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
+  }
+  const curY=drawHeader();
+  const head=['Data','Evento','Detalhe'];
+  const body=eventos.map(ev=>[ev.quandoTxt||'—',(ev.icone||'')+' '+ev.titulo,ev.detalhe||'—']);
+  doc.autoTable({
+    startY:curY,head:[head],body,theme:'grid',
+    styles:{fontSize:8,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:2.2,valign:'top'},
+    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:8},
+    alternateRowStyles:{fillColor:LIGHT},
+    columnStyles:{0:{cellWidth:24},1:{cellWidth:48}},
+    margin:{top:32,left:14,right:14,bottom:20},
+    didDrawPage:()=>{drawFooter(doc.internal.getNumberOfPages());}
+  });
+  drawFooter(doc.internal.getNumberOfPages());
+  doc.save(`historico_os_${p.os||pedidoId}_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('PDF gerado!','tok');
 }
 
 // Reagenda o Prazo de Finalização direto da lista, restrito a Planejamento/admin
