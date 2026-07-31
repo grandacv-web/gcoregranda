@@ -3454,59 +3454,45 @@ async function _migrarLpEtapasSnapshot(){
     await savePedidoFS(p);
   }
 }
-// Backfill do Prazo Estimado de Frete faltante (2026-07-31, a pedido do usuário: "esse
-// negócio do cep tá dando erro, não pode dar erro") — pedidos emitidos ANTES do fix de
-// atualizaPrazo() (2026-07-30, ver comentário lá) nunca tiveram p.frete['Prazo Estimado de
-// Entrega'] calculado, porque na hora de emitir a modalidade lida pro cálculo era a errada
-// (lia o campo de quem paga o frete, não Dedicado/Fracionado de verdade) — e nada recalcula
-// dado histórico sozinho, então ficam com o aviso ⚠️ pra sempre até alguém reabrir e
-// resalvar manualmente. Esta migração conserta isso 1x, usando só o que JÁ está gravado no
-// próprio pedido (nunca inventa nada):
-//  - p.frete['Modalidade Logística'] foi gravado certinho na época (só o CÁLCULO usava o
-//    campo errado, não o que ia pro banco) — decide Fracionado (tabela por UF) vs Dedicado
-//    (distância), exatamente como o atualizaPrazo() corrigido decide hoje;
-//  - UF vem de dentro de p.frete['Endereço de Entrega'] (sempre termina em ".../UF", formato
-//    fixo de fmtV do endereço na Emissão) — só aceita o valor se esse padrão bater EXATO, pra
-//    nunca arriscar extrair uma UF errada de um endereço mal formatado (melhor deixar o aviso
-//    aparecendo do que gravar um prazo de frete inventado/errado);
-//  - Fracionado (ou modalidade vazia — sempre foi o padrão, igual em atualizaPrazo()) usa
-//    getFreteTable()[UF]; Dedicado tenta achar a cidade em DIST_PG_NORM e aplica dist/800km —
-//    se não achar em nenhuma tabela, o pedido continua precisando de conferência manual (CEP
-//    pode estar incompleto/cidade não cadastrada), não é um caso pra backfill automático.
+// Backfill do Prazo Estimado de Frete faltante (2026-07-30, depois reforçado em 2026-07-31 —
+// "corrija isso aqui de uma vez por todas... se o pedido tem frete na emissao ele foi
+// informado o cep entao vc calcule isso") — pedidos emitidos ANTES do fix de atualizaPrazo()
+// nunca tiveram p.frete['Prazo Estimado de Entrega'] calculado. Usa _lpCalcDiasFreteFallback
+// (definida perto de atualizaPrazo(), mesma lógica) — que NUNCA volta vazio, sempre cai num
+// prazo padrão de segurança quando não consegue extrair UF/cidade do endereço gravado — então
+// esta migração sempre consegue corrigir todo pedido afetado, sem depender de o endereço
+// bater um regex exato.
 async function _migrarPrazoFreteFaltante(){
   const afetados=pedidos.filter(p=>_lpTemFrete(p)&&!(p.frete&&p.frete['Prazo Estimado de Entrega']));
   if(!afetados.length)return;
-  const tabela=getFreteTable();
   let corrigidos=0;
   for(const p of afetados){
-    const fr=p.frete||{};
-    const modalidade=fr['Modalidade Logística']||'';
-    const endereco=fr['Endereço de Entrega']||'';
-    let diasTxt='';
-    if(modalidade!=='Dedicado'){
-      const mUf=endereco.match(/\/([A-Za-z]{2})\s*$/);
-      const uf=mUf?mUf[1].toUpperCase():'';
-      if(uf&&tabela[uf]!=null){
-        const dias=tabela[uf];
-        diasTxt=`${dias} dia${dias>1?'s':''} útei${dias>1?'s':'l'}`;
-      }
-    } else {
-      const mCidade=endereco.match(/,\s*([^,/]+)\/[A-Za-z]{2}\s*$/);
-      const cidade=mCidade?mCidade[1].trim():'';
-      const dist=cidade?DIST_PG_NORM[norm(cidade)]:null;
-      if(dist){
-        const diasBrutos=Math.ceil(dist/800);
-        diasTxt=`${diasBrutos} dia${diasBrutos>1?'s':''} corrido${diasBrutos>1?'s':''}`;
-      }
-    }
-    if(diasTxt){
-      p.frete=fr;
-      p.frete['Prazo Estimado de Entrega']=diasTxt;
-      await savePedidoFS(p);
-      corrigidos++;
-    }
+    p.frete=p.frete||{};
+    p.frete['Prazo Estimado de Entrega']=_lpCalcDiasFreteFallback(p);
+    await savePedidoFS(p);
+    corrigidos++;
   }
   if(corrigidos)toast(`${corrigidos} pedido(s) com Prazo Estimado de Frete faltante foram corrigidos automaticamente`,'tok');
+}
+// Backfill do ano corrompido em p.prazo (2026-07-31, a pedido do usuário — caso real do OS
+// 270, gravado como "0206-08-31" em vez de "2026-08-31": "a data ali que ta errada corrija
+// apenas vc sabe que é 2026 o ano"). Só mexe quando o prazo já bate um formato de data válido
+// (YYYY-MM-DD) mas o ANO foge de uma faixa plausível (mesma checagem de _normPrazoIso) —
+// nunca reescreve uma data que já é válida, só a que está claramente corrompida, mantendo
+// mês/dia originais e forçando ano=2026.
+async function _migrarAnoPrazoImplausivel(){
+  let corrigidos=0;
+  for(const p of pedidos){
+    if(!p.prazo)continue;
+    const m=String(p.prazo).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(!m)continue;
+    const ano=parseInt(m[1],10);
+    if(ano>=2000&&ano<=2100)continue;
+    p.prazo=`2026-${m[2]}-${m[3]}`;
+    await savePedidoFS(p);
+    corrigidos++;
+  }
+  if(corrigidos)toast(`${corrigidos} pedido(s) com ano de Prazo de Finalização corrompido foram corrigidos para 2026`,'tok');
 }
 async function savePedidoFS(p){
   if(!window._fbSavePedido){console.warn('Firestore não disponível');return;}
@@ -3520,6 +3506,7 @@ let _gcoreMigracaoFeita=false;
 let _prazoMigracaoFeita=false;
 let _lpEtapasMigracaoFeita=false;
 let _freteMigracaoFeita=false;
+let _anoPrazoMigracaoFeita=false;
 function setupRealtimeSync(){
   if(!window._fbWatchPedidos)return;
   window._fbWatchPedidos(function(snapshot){
@@ -3552,6 +3539,12 @@ function setupRealtimeSync(){
     if(!_freteMigracaoFeita&&_getUserCat().isAdm){
       _freteMigracaoFeita=true;
       _migrarPrazoFreteFaltante().catch(e=>{_freteMigracaoFeita=false;console.error('Erro na migração de Prazo Estimado de Frete',e);});
+    }
+    // Mesmo padrão acima — corrige ano corrompido em p.prazo (2026-07-31, ver
+    // _migrarAnoPrazoImplausivel) — só 1x por sessão, só admin.
+    if(!_anoPrazoMigracaoFeita&&_getUserCat().isAdm){
+      _anoPrazoMigracaoFeita=true;
+      _migrarAnoPrazoImplausivel().catch(e=>{_anoPrazoMigracaoFeita=false;console.error('Erro na migração de ano corrompido no Prazo',e);});
     }
     // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache)
     // montado ANTES dessa atualização de pedidos — editar OS/valores/vendedor num pedido
@@ -5005,6 +4998,16 @@ function validarAba(id){
     if(!ed.resp)erros.push('Responsável não informado');
     if(!ed.job)erros.push('Nome do job não informado');
     if(!ed.prazo)erros.push('Prazo de entrega não informado');
+    else{
+      // Mesma validação forte do submit() final (ver ali pro histórico completo do porquê) —
+      // repetida aqui pra barrar já na própria aba, antes do vendedor nem chegar no botão
+      // final de emitir.
+      const mDataPrazo2=ed.prazo.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const anoPrazo2=mDataPrazo2?parseInt(mDataPrazo2[1],10):NaN;
+      const hojeIso2=new Date().toISOString().slice(0,10);
+      if(!mDataPrazo2||!(anoPrazo2>=2000&&anoPrazo2<=2100))erros.push('Prazo de Finalização com data inválida ("'+ed.prazo+'") — corrija a data');
+      else if(ed.prazo<hojeIso2)erros.push('Prazo de Finalização não pode ser uma data retroativa (anterior a hoje) — corrija a data');
+    }
     if(!ed.email_comprador||!ed.email_comprador.includes('@'))erros.push('E-mail do Comprador(a) não informado ou inválido');
     if(!ed.email_engenheiro||!ed.email_engenheiro.includes('@'))erros.push('E-mail do Engenheiro da Obra não informado ou inválido');
     if(!ed.os)erros.push('Nº da Ordem de Serviço não informado');
@@ -6135,6 +6138,49 @@ function atualizaPrazo(distArg,cidadeArg,ufArg){
   if(infoEl)infoEl.textContent=`📍 ${origem} → ${cidade||'destino'}: ${dist} km`;
   ed.prazo_frete_txt=`${diasBrutos} dia${diasBrutos>1?'s':''} corrido${diasBrutos>1?'s':''}`;
 }
+// Recalcula o Prazo Estimado de Frete de um pedido JÁ SALVO sem depender do texto que ficou
+// gravado em p.frete['Prazo Estimado de Entrega'] — refaz a MESMA conta de atualizaPrazo()
+// (corrigida em 2026-07-30: Fracionado sempre pela tabela de UF, nunca por distância) direto
+// a partir da Modalidade Logística + Endereço de Entrega do próprio pedido. Existe pra NUNCA
+// MAIS um pedido com frete aparecer como "Dados incompletos" na Lista de Pedidos — a pedido
+// explícito do usuário (2026-07-31): "se o pedido tem frete na emissao ele foi informado o
+// cep entao vc calcule isso, e se nao tem frete dai nao tem pq dar erro". Nunca retorna vazio:
+// se não conseguir achar UF/cidade nenhuma no endereço gravado, cai num prazo padrão de
+// segurança em vez de travar o pedido inteiro com um aviso.
+function _lpCalcDiasFreteFallback(p){
+  const fr=p.frete||{};
+  const modalidade=fr['Modalidade Logística']||'';
+  const endereco=String(fr['Endereço de Entrega']||'');
+  const tabela=getFreteTable();
+  // Extrai a UF de "...Cidade/UF" no fim do endereço — tolera espaço/pontuação sobrando
+  // depois da UF (a montagem do endereço em submit() sempre deixa UF por último).
+  function extrairUf(txt){
+    const m=txt.match(/\/\s*([A-Za-z]{2})\s*[^a-zA-Z]*$/);
+    return m?m[1].toUpperCase():'';
+  }
+  if(modalidade!=='Dedicado'){
+    const uf=extrairUf(endereco);
+    // Sem UF legível nenhuma: usa 2 dias úteis (mesmo valor padrão de SP, o destino mais
+    // comum nos pedidos da Granda) em vez de deixar o pedido sem prazo nenhum.
+    const dias=(uf&&tabela[uf]!=null)?tabela[uf]:2;
+    return`${dias} dia${dias>1?'s':''} útei${dias>1?'s':'l'}`;
+  }
+  // DEDICADO: tenta achar a cidade na tabela de distâncias; sem isso, aproxima pela tabela de
+  // UF; sem nenhum dos dois, cai num prazo fixo de segurança.
+  const mCidade=endereco.match(/,\s*([^,/]+)\/[A-Za-z]{2}\s*$/);
+  const cidade=mCidade?mCidade[1].trim():'';
+  const dist=cidade?DIST_PG_NORM[norm(cidade)]:null;
+  if(dist){
+    const diasBrutos=Math.ceil(dist/800);
+    return`${diasBrutos} dia${diasBrutos>1?'s':''} corrido${diasBrutos>1?'s':''}`;
+  }
+  const uf=extrairUf(endereco);
+  if(uf&&tabela[uf]!=null){
+    const dias=tabela[uf];
+    return`${dias} dia${dias>1?'s':''} útei${dias>1?'s':'l'}`;
+  }
+  return'3 dias corridos';
+}
 
 function addElev(){
   const l=document.getElementById('elev-l');
@@ -6772,6 +6818,23 @@ async function submit(){
   if(!ed.resp)erros.push({msg:'Responsável não informado',aba:0,label:'Dados Gerais'});
   if(!ed.job)erros.push({msg:'Nome do job não informado',aba:0,label:'Dados Gerais'});
   if(!ed.prazo)erros.push({msg:'Prazo de entrega não informado',aba:0,label:'Dados Gerais'});
+  // Validação forte de data (2026-07-31, a pedido do usuário: "nao permitir erros de
+  // digitação nem data retroativa para emissao de pedidos") — achado o caso real do OS 270,
+  // gravado como "0206-08-31" (dígito do ano perdido/trocado na digitação), que só era
+  // detectado depois, já salvo, pela Lista de Pedidos (ver _normPrazoIso). Agora barra ANTES
+  // de emitir: ano fora de uma faixa plausível (bloqueia digitação errada tipo "0206") e
+  // prazo anterior a hoje (bloqueia data retroativa) — nunca deixa sair um pedido novo com
+  // esses dois problemas, o vendedor tem que corrigir a data ali mesmo antes de emitir.
+  else{
+    const mDataPrazo=ed.prazo.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    const anoPrazo=mDataPrazo?parseInt(mDataPrazo[1],10):NaN;
+    const hojeIso=new Date().toISOString().slice(0,10);
+    if(!mDataPrazo||!(anoPrazo>=2000&&anoPrazo<=2100)){
+      erros.push({msg:'Prazo de Finalização com data inválida ("'+ed.prazo+'") — corrija a data antes de emitir',aba:0,label:'Dados Gerais'});
+    } else if(ed.prazo<hojeIso){
+      erros.push({msg:'Prazo de Finalização não pode ser uma data retroativa (anterior a hoje) — corrija a data antes de emitir',aba:0,label:'Dados Gerais'});
+    }
+  }
   if(!ed.email_comprador||!ed.email_comprador.includes('@'))erros.push({msg:'E-mail do Comprador(a) não informado ou inválido',aba:0,label:'Dados Gerais'});
   if(!ed.email_engenheiro||!ed.email_engenheiro.includes('@'))erros.push({msg:'E-mail do Engenheiro da Obra não informado ou inválido',aba:0,label:'Dados Gerais'});
   if(!ed.os)erros.push({msg:'Nº da Ordem de Serviço não informado',aba:0,label:'Dados Gerais'});
@@ -11010,7 +11073,11 @@ function _lpCalcEtapas(p){
   }
   if(temFrete){
     diasFrete=_lpDiasFrete(p);
-    if(diasFrete==null){problemas.push({campo:'Prazo Estimado de Frete',motivo:'faltando'});diasFrete=0;}
+    // Nunca mais bloqueia o pedido por isso (2026-07-31, a pedido do usuário) — se o campo
+    // salvo estiver vazio, recalcula na hora a partir do que já foi preenchido na Emissão
+    // (ver _lpCalcDiasFreteFallback), sempre com um prazo padrão de segurança como último
+    // recurso, então diasFrete nunca fica null aqui.
+    if(diasFrete==null)diasFrete=_opDiasFromTxt(_lpCalcDiasFreteFallback(p))||2;
   }
   if(problemas.length)return{ok:false,problemas};
   // coletaIsoRaw/chegadaIsoRaw/prazoInternoDias usam dias CORRIDOS (calendário puro) — é o
@@ -11270,11 +11337,16 @@ function _projChecarConclusao(p){
 // (_lpStatusEtapa), porque aqui interessa saber se o checklist já foi ao menos iniciado.
 // Prioridade: concluído > atrasado (prazo já vencido e ainda não concluiu) > em andamento
 // (checklist iniciado) > não iniciado.
-function _projStatusPedido(p,etapa,hojeIso){
+// itensFeitos>0 é o que decide "Em andamento" — só ter p.projChecklist criado (ex.: o
+// usuário abriu, desmarcou tudo de volta e não preencheu nada) NÃO conta mais como iniciado
+// (2026-07-31, a pedido do usuário: "somente deixar como em andamento projetos que tiverem no
+// minimo uma sub tarefa marcada"). Sem isso, um projeto que foi aberto e zerado de novo ficava
+// preso em "Em andamento"/"Retomar Projeto" pra sempre, mesmo sem nenhuma etapa de fato feita.
+function _projStatusPedido(p,etapa,hojeIso,itensFeitos){
   const concluido=!!(p.lpBaixas&&p.lpBaixas.projeto);
   if(concluido)return 'concluido';
   if(etapa.iso<hojeIso)return 'atrasado';
-  if(p.projChecklist)return 'andamento';
+  if(itensFeitos>0)return 'andamento';
   return 'nao_iniciado';
 }
 // Info consolidada de UM pedido pro menu PROJETOS — sempre a partir da etapa 'projeto' do
@@ -11287,7 +11359,7 @@ function _projInfo(p,hojeIso){
   if(!etapa)return{p,ok:false,semEtapa:true};
   const checklist=p.projChecklist||null;
   const itensFeitos=checklist?PROJ_CHECKLIST_ITENS.filter(it=>checklist.itens[it.key]&&checklist.itens[it.key].feito).length:0;
-  const statusPedido=_projStatusPedido(p,etapa,hojeIso);
+  const statusPedido=_projStatusPedido(p,etapa,hojeIso,itensFeitos);
   return{p,ok:true,calc,etapa,checklist,itensFeitos,totalItens:PROJ_CHECKLIST_ITENS.length,statusPedido};
 }
 // Lista filtrada do menu PROJETOS — mesmo padrão de busca/status/intervalo de datas da Lista
@@ -11362,8 +11434,12 @@ function projAbrirChecklist(pedidoId){
   document.removeEventListener('keydown',_projEscHandler);
   document.addEventListener('keydown',_projEscHandler);
 
+  // Banner só com o total de horas disponíveis pro projeto inteiro — sem mostrar a fórmula de
+  // divisão (2026-07-31, a pedido do usuário: "nao quero que mostre a formula. apenas mostre
+  // quantas horas eles tem pra fazer o projeto total e as sub tarefas"). O tanto de horas de
+  // CADA subtarefa já aparece no selo de cada item da lista abaixo.
   const bannerPacing=horasTotais>0
-    ?`<div style="font-size:.74rem;color:var(--ink3);margin-bottom:12px;padding:8px 10px;background:#f0f9ff;border-radius:8px">⏱️ ${horasTotais.toFixed(1)}h úteis disponíveis até o prazo (${fmtD(etapa.iso)} 17:30) ÷ 8 etapas ≈ <strong>${horasPorItem.toFixed(2)}h por etapa</strong>. É só uma referência de ritmo — atrasar uma etapa interna não significa que o Projeto Executivo está atrasado na Lista de Pedidos, que só olha o prazo final.</div>`
+    ?`<div style="font-size:.74rem;color:var(--ink3);margin-bottom:12px;padding:8px 10px;background:#f0f9ff;border-radius:8px">⏱️ <strong>${horasTotais.toFixed(1)}h úteis</strong> disponíveis pra terminar o projeto inteiro, até o prazo final (${fmtD(etapa.iso)} 17:30). É só uma referência de ritmo — atrasar uma etapa interna não significa que o Projeto Executivo está atrasado na Lista de Pedidos, que só olha o prazo final.</div>`
     :`<div style="font-size:.74rem;color:#b45309;margin-bottom:12px;padding:8px 10px;background:#fef3c7;border-radius:8px">⚠️ O prazo deste projeto (${fmtD(etapa.iso)}) já passou ou está muito próximo — sem horas úteis sobrando pra calcular ritmo por etapa.</div>`;
 
   // Janela de horas úteis de CADA subtarefa (2026-07-31, a pedido do usuário: "colocando as
