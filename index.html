@@ -11353,28 +11353,58 @@ function projAbrirChecklist(pedidoId){
   const old=document.getElementById('proj-check-modal');if(old)old.remove();
   const modal=document.createElement('div');
   modal.id='proj-check-modal';
+  modal.dataset.pedidoId=pedidoId;
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  modal.onclick=e=>{if(e.target===modal)projFecharChecklist(pedidoId);};
+  // ESC fecha a janela do checklist (2026-07-31, a pedido do usuário) — nunca fica mais de um
+  // handler pendurado porque o modal é reaberto/re-renderizado a cada marcação de item (ver
+  // projMarcarItem), então sempre removemos o handler anterior antes de registrar de novo.
+  document.removeEventListener('keydown',_projEscHandler);
+  document.addEventListener('keydown',_projEscHandler);
 
   const bannerPacing=horasTotais>0
     ?`<div style="font-size:.74rem;color:var(--ink3);margin-bottom:12px;padding:8px 10px;background:#f0f9ff;border-radius:8px">⏱️ ${horasTotais.toFixed(1)}h úteis disponíveis até o prazo (${fmtD(etapa.iso)} 17:30) ÷ 8 etapas ≈ <strong>${horasPorItem.toFixed(2)}h por etapa</strong>. É só uma referência de ritmo — atrasar uma etapa interna não significa que o Projeto Executivo está atrasado na Lista de Pedidos, que só olha o prazo final.</div>`
     :`<div style="font-size:.74rem;color:#b45309;margin-bottom:12px;padding:8px 10px;background:#fef3c7;border-radius:8px">⚠️ O prazo deste projeto (${fmtD(etapa.iso)}) já passou ou está muito próximo — sem horas úteis sobrando pra calcular ritmo por etapa.</div>`;
 
+  // Janela de horas úteis de CADA subtarefa (2026-07-31, a pedido do usuário: "colocando as
+  // horas aparentes na lista do prazo que ele tem para cada subtarefa") — não é só uma meta
+  // pontual no fim, é um intervalo [início, fim] próprio de cada etapa, calculado em cadeia a
+  // partir do início do checklist. Mostra a janela por extenso + quantas horas úteis já
+  // sobraram (ou de quanto já atrasou) daquela etapa especificamente — sempre só uma
+  // referência de ritmo interno, nunca conta pro atraso da Lista de Pedidos.
+  const metas=horasTotais>0?PROJ_CHECKLIST_ITENS.map((_,i)=>_addHorasUteis(inicioDate,horasPorItem*(i+1))):[];
+  function _projFmtDataHora(d){return d.toLocaleDateString('pt-BR')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
   const linhas=PROJ_CHECKLIST_ITENS.map((item,idx)=>{
     const dado=checklist.itens[item.key]||{feito:false,quando:null,obs:''};
-    const metaData=horasTotais>0?_addHorasUteis(inicioDate,horasPorItem*(idx+1)):null;
-    const metaAtrasada=!!(metaData&&!dado.feito&&agora>metaData);
-    const metaTxt=metaData?`Meta: até ${metaData.toLocaleDateString('pt-BR')} ${String(metaData.getHours()).padStart(2,'0')}:${String(metaData.getMinutes()).padStart(2,'0')}`:'';
-    const concluidoTxt=dado.feito?`✅ Concluído em ${new Date(dado.quando).toLocaleDateString('pt-BR')} ${new Date(dado.quando).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`:(metaAtrasada?'🔴 '+metaTxt+' (etapa interna atrasada)':metaTxt);
+    const janelaIni=horasTotais>0?(idx===0?inicioDate:metas[idx-1]):null;
+    const janelaFim=horasTotais>0?metas[idx]:null;
+    const metaAtrasada=!!(janelaFim&&!dado.feito&&agora>janelaFim);
+    let ritmoTxt='',ritmoCor='var(--ink4)',ritmoPeso='400';
+    if(janelaIni&&janelaFim){
+      const janelaLbl=`⏱️ Janela desta etapa: ${_projFmtDataHora(janelaIni)} → ${_projFmtDataHora(janelaFim)} (${horasPorItem.toFixed(2)}h úteis)`;
+      if(dado.feito){
+        ritmoTxt=janelaLbl;
+      } else if(metaAtrasada){
+        const horasAtraso=_horasUteisEntre(janelaFim,agora);
+        ritmoTxt=`${janelaLbl} — 🔴 ${horasAtraso.toFixed(2)}h úteis de atraso NESTA etapa`;
+        ritmoCor='#dc2626';ritmoPeso='700';
+      } else {
+        const horasRestantes=_horasUteisEntre(agora,janelaFim);
+        ritmoTxt=`${janelaLbl} — ⏳ ${horasRestantes.toFixed(2)}h úteis restantes nesta etapa`;
+        ritmoCor='#0284c7';ritmoPeso='700';
+      }
+    }
+    const concluidoTxt=dado.feito?`✅ Concluído em ${_projFmtDataHora(new Date(dado.quando))}`:'';
     return `<div style="border:1px solid ${metaAtrasada?'#fca5a5':'var(--border-lt)'};background:${metaAtrasada?'#fef2f2':'#fff'};border-radius:10px;padding:12px;margin-bottom:8px">
       <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
         <input type="checkbox" ${dado.feito?'checked':''} onchange="projMarcarItem('${pedidoId}','${item.key}',this.checked)" style="width:18px;height:18px;margin-top:1px;flex-shrink:0;accent-color:#16a34a">
         <div style="flex:1">
           <div style="font-size:.84rem;font-weight:700;color:var(--ink)">${idx+1}. ${item.label}</div>
-          <div style="font-size:.68rem;color:${metaAtrasada?'#dc2626':'var(--ink4)'};font-weight:${metaAtrasada?'700':'400'};margin-top:1px">${concluidoTxt}</div>
+          ${concluidoTxt?`<div style="font-size:.68rem;color:#16a34a;font-weight:700;margin-top:1px">${concluidoTxt}</div>`:''}
+          ${ritmoTxt?`<div style="font-size:.68rem;color:${ritmoCor};font-weight:${ritmoPeso};margin-top:1px">${ritmoTxt}</div>`:''}
         </div>
       </label>
-      <textarea placeholder="Observação (opcional, pra lembrar depois)..." onblur="projSalvarObs('${pedidoId}','${item.key}',this.value)" style="width:100%;margin-top:8px;padding:7px 9px;border-radius:7px;border:1px solid #e5e7eb;font-size:.78rem;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:36px">${(dado.obs||'').replace(/</g,'&lt;')}</textarea>
+      <textarea data-item-key="${item.key}" placeholder="Observação (opcional, pra lembrar depois)..." onblur="projSalvarObs('${pedidoId}','${item.key}',this.value)" style="width:100%;margin-top:8px;padding:7px 9px;border-radius:7px;border:1px solid #e5e7eb;font-size:.78rem;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:36px">${(dado.obs||'').replace(/</g,'&lt;')}</textarea>
     </div>`;
   }).join('');
 
@@ -11388,14 +11418,14 @@ function projAbrirChecklist(pedidoId){
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">📐 Checklist do Projeto — OS ${p.os||'—'}</div>
         <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${p.cliente||'—'}${p.job?' · '+p.job:''} · Prazo final: ${fmtD(etapa.iso)}</div>
       </div>
-      <button onclick="document.getElementById('proj-check-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+      <button onclick="projFecharChecklist('${pedidoId}')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar (Esc)">✕</button>
     </div>
     ${concluidoTotal?`<div style="padding:10px 12px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.8rem;font-weight:700;margin-bottom:12px">✅ Todas as etapas concluídas — Projeto Executivo já foi dado como concluído automaticamente.</div>`:''}
     <div style="font-size:.74rem;color:var(--ink4);margin-bottom:6px">${feitos}/${PROJ_CHECKLIST_ITENS.length} concluídas</div>
     <div style="background:#e2e8f0;border-radius:20px;height:8px;overflow:hidden;margin-bottom:14px"><div style="background:${concluidoTotal?'#16a34a':'#00bac7'};height:100%;width:${(feitos/PROJ_CHECKLIST_ITENS.length*100)}%"></div></div>
     ${bannerPacing}
     <div>${linhas}</div>
-    ${isAdm&&!concluidoTotal?`<button onclick="document.getElementById('proj-check-modal').remove();lpDarBaixa('${pedidoId}','projeto','PROJETOS');if(typeof projRenderAtivo==='function')projRenderAtivo();" class="dash-btn-conf" style="background:#94a3b8;width:100%;margin-top:6px" type="button">🔒 Admin: marcar concluído manualmente (sem exigir o checklist)</button>`:''}
+    ${isAdm&&!concluidoTotal?`<button onclick="projFecharChecklist('${pedidoId}');lpDarBaixa('${pedidoId}','projeto','PROJETOS');if(typeof projRenderAtivo==='function')projRenderAtivo();" class="dash-btn-conf" style="background:#94a3b8;width:100%;margin-top:6px" type="button">🔒 Admin: marcar concluído manualmente (sem exigir o checklist)</button>`:''}
   </div>`;
   document.body.appendChild(modal);
 }
@@ -11418,6 +11448,28 @@ async function projSalvarObs(pedidoId,itemKey,texto){
   p.projChecklist.itens[itemKey]=p.projChecklist.itens[itemKey]||{feito:false,quando:null,obs:''};
   p.projChecklist.itens[itemKey].obs=texto;
   await savePedidoFS(p);
+}
+// Fecha o checklist salvando primeiro qualquer observação ainda não gravada — usada pelo botão
+// ✕, pelo clique fora do modal (backdrop) e pelo ESC (_projEscHandler). Não dá pra confiar só
+// no onblur da textarea porque remover o modal do DOM enquanto ela está focada nem sempre
+// dispara blur a tempo em todo navegador; lendo o valor atual na hora de fechar garante que
+// nada se perde e o usuário nunca precisa apertar um botão de salvar (2026-07-31, a pedido do
+// usuário: "se ele sair mas marcou algo fica marcado e fica registrado a observação que ele
+// escreveu, nao precisa ele aperta nenhum botao salvar").
+function projFecharChecklist(pedidoId){
+  const modal=document.getElementById('proj-check-modal');
+  if(modal){
+    modal.querySelectorAll('textarea[data-item-key]').forEach(ta=>{
+      projSalvarObs(pedidoId,ta.dataset.itemKey,ta.value);
+    });
+    modal.remove();
+  }
+  document.removeEventListener('keydown',_projEscHandler);
+}
+function _projEscHandler(e){
+  if(e.key!=='Escape')return;
+  const modal=document.getElementById('proj-check-modal');
+  if(modal)projFecharChecklist(modal.dataset.pedidoId);
 }
 // Um dia (ISO) está "dentro" do intervalo De/Até — De/Até vazios não restringem daquele lado
 // (só De = "a partir de"; só Até = "até"; os dois vazios nunca chama esta função porque quem
@@ -11683,7 +11735,10 @@ function renderListaPedidosCalendario(){
       <div style="font-size:.7rem;font-weight:700;color:${nomeFeriado?'#b45309':(ehHoje?'var(--brand-d)':'var(--ink4)')}">${d}</div>
       ${nomeFeriado?`<div style="font-size:.6rem;color:#b45309;font-weight:700;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎌 ${nomeFeriado}</div>`:''}
       <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
-        ${eventos.slice(0,3).map(ev=>`<div onclick="event.stopPropagation();lpAbrirDetalhe('${ev.p.id}')" title="${ev.etapa.label} — OS ${ev.p.os||''} — ${(ev.p.cliente||'').replace(/"/g,'&quot;')}" style="cursor:pointer;font-size:.62rem;background:${_lpCorEtapa(ev.etapa.key)}22;color:${_lpCorEtapa(ev.etapa.key)};border-radius:4px;padding:1px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${ev.p.os||''} · ${ev.etapa.label}</div>`).join('')}
+        ${eventos.slice(0,3).map(ev=>`<div onclick="event.stopPropagation();lpAbrirDetalhe('${ev.p.id}')" title="${ev.etapa.label} — OS ${ev.p.os||''} — ${(ev.p.cliente||'').replace(/"/g,'&quot;')}${ev.p.job?' — JOB '+String(ev.p.job).replace(/"/g,'&quot;'):''}" style="cursor:pointer;font-size:.6rem;background:${_lpCorEtapa(ev.etapa.key)}22;color:${_lpCorEtapa(ev.etapa.key)};border-radius:4px;padding:1px 4px;margin-bottom:1px">
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${ev.p.os||''} · ${ev.p.cliente||'—'}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.85">${ev.p.job?'JOB '+ev.p.job+' · ':''}${ev.etapa.label}</div>
+        </div>`).join('')}
         ${eventos.length>3?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${eventos.length-3} outro(s) — ver dia</div>`:''}
       </div>
     </div>`);
@@ -12151,15 +12206,19 @@ function renderProjLista(){
       const{p,etapa,itensFeitos,totalItens,statusPedido}=x;
       const corLinha=statusPedido==='atrasado'?'color:#dc2626':'';
       const pct=Math.round(itensFeitos/totalItens*100);
-      const acaoLbl=statusPedido==='concluido'?'👁️ Ver Checklist':itensFeitos>0?'▶️ Continuar':'🚀 Iniciar Projeto';
-      return `<tr style="border-bottom:1px solid var(--border-lt);${corLinha}">
+      const acaoLbl=statusPedido==='concluido'?'👁️ Ver Checklist':itensFeitos>0?'🔄 Retomar Projeto':'🚀 Iniciar Projeto';
+      // Linha inteira clicável (2026-07-31, a pedido do usuário: "ele pode clicar no pedido na
+      // lista ou kanban ou calendario e concluir as tarefas, nao precisa clicar somente e
+      // especificamente em iniciar projeto") — o botão continua existindo, só não é mais o
+      // único jeito de abrir o checklist.
+      return `<tr onclick="projIniciarOuAbrirChecklist('${p.id}')" style="border-bottom:1px solid var(--border-lt);cursor:pointer;${corLinha}">
         <td style="padding:8px 10px;font-weight:700;${corLinha}">${p.os||'—'}</td>
         <td style="padding:8px 10px;${corLinha}" title="${(p.cliente||'').replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.cliente||'—'}</div></td>
         <td style="padding:8px 10px;${corLinha}">${p.job||'—'}</td>
         <td style="padding:8px 10px;${corLinha}">${fmtD(etapa.iso)}</td>
         <td style="padding:8px 10px"><div style="background:#e2e8f0;border-radius:20px;height:7px;width:90px;overflow:hidden"><div style="background:${statusPedido==='atrasado'?'#dc2626':'#00bac7'};height:100%;width:${pct}%"></div></div><div style="font-size:.68rem;color:var(--ink4);margin-top:2px">${itensFeitos}/${totalItens}</div></td>
         <td style="padding:8px 10px;font-weight:700;color:${_projStatusCor(statusPedido)}">${_projStatusLabel(statusPedido)}</td>
-        <td style="padding:8px 10px;text-align:right"><button onclick="projIniciarOuAbrirChecklist('${p.id}')" class="dash-btn-conf" style="background:#0891b2;white-space:nowrap">${acaoLbl}</button></td>
+        <td style="padding:8px 10px;text-align:right"><button onclick="event.stopPropagation();projIniciarOuAbrirChecklist('${p.id}')" class="dash-btn-conf" style="background:#0891b2;white-space:nowrap">${acaoLbl}</button></td>
       </tr>`;
     }).join('')}
     </tbody></table></div>`;
@@ -12231,7 +12290,10 @@ function renderProjCalendario(){
       <div style="font-size:.7rem;font-weight:700;color:${nomeFeriado?'#b45309':(ehHoje?'var(--brand-d)':'var(--ink4)')}">${d}</div>
       ${nomeFeriado?`<div style="font-size:.6rem;color:#b45309;font-weight:700;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎌 ${nomeFeriado}</div>`:''}
       <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
-        ${itens.slice(0,3).map(x=>`<div onclick="event.stopPropagation();projIniciarOuAbrirChecklist('${x.p.id}')" title="OS ${x.p.os||''} — ${(x.p.cliente||'').replace(/"/g,'&quot;')}" style="cursor:pointer;font-size:.62rem;background:${_projStatusCor(x.statusPedido)}22;color:${_projStatusCor(x.statusPedido)};border-radius:4px;padding:1px 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${x.p.os||''} · ${x.itensFeitos}/${x.totalItens}</div>`).join('')}
+        ${itens.slice(0,3).map(x=>`<div onclick="event.stopPropagation();projIniciarOuAbrirChecklist('${x.p.id}')" title="OS ${x.p.os||''} — ${(x.p.cliente||'').replace(/"/g,'&quot;')}${x.p.job?' — JOB '+String(x.p.job).replace(/"/g,'&quot;'):''}" style="cursor:pointer;font-size:.6rem;background:${_projStatusCor(x.statusPedido)}22;color:${_projStatusCor(x.statusPedido)};border-radius:4px;padding:1px 4px;margin-bottom:1px">
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${x.p.os||''} · ${x.p.cliente||'—'}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.85">${x.p.job?'JOB '+x.p.job+' · ':''}${x.itensFeitos}/${x.totalItens}</div>
+        </div>`).join('')}
         ${itens.length>3?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${itens.length-3} outro(s) — ver dia</div>`:''}
       </div>
     </div>`);
