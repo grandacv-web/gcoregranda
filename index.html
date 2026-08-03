@@ -9240,7 +9240,13 @@ function getVendaRowsMerged(){
   // editar o pedido de maio e preencher o número/PDF).
   const importadosFSOs=new Set();
   importadosFS.forEach(p=>{importadosFSOs.add(String(p.os));if(p.origPlanilhaOs)importadosFSOs.add(String(p.origPlanilhaOs));});
-  const xlsxSemFS=(typeof XLSX_VENDAS!=='undefined'?XLSX_VENDAS:[]).filter(r=>!importadosFSOs.has(String(r.p)));
+  // Algumas linhas da planilha têm OS composto (ex.: "18711 / 18712", 2 números fechados como
+  // uma venda só) — comparar a string inteira contra importadosFSOs nunca batia se só um dos
+  // dois números virasse pedido no Firestore, duplicando a venda (ex.: BOB'S SALVADOR BA
+  // aparecendo 2x com o mesmo valor, relatado pelo usuário 2026-08-03). Agora quebra o campo
+  // OS em tokens (separador "/" ou ",") e basta UM token bater pra excluir a linha da planilha.
+  const _osTokens=p=>String(p||'').split(/[\/,]/).map(s=>s.trim()).filter(Boolean);
+  const xlsxSemFS=(typeof XLSX_VENDAS!=='undefined'?XLSX_VENDAS:[]).filter(r=>!_osTokens(r.p).some(tok=>importadosFSOs.has(tok)));
   _vrmCache=[
     ...xlsxSemFS,
     ...importadosFS.map(pedidoToVendaRow),
@@ -17723,7 +17729,7 @@ function finVerClienteHistorico(nome){
 // separarFranqueado fica false — soma tudo junto, igual BOB'S.
 function _finGruposPadrao(){
   return [
-    {nome:'BURGER KING',palavras:['BURGER KING'],separarFranqueado:true},
+    {nome:'BURGER KING',palavras:['BURGER KING','BURGER'],separarFranqueado:true},
     {nome:"BOB'S",palavras:["BOB'S","BOBS"],separarFranqueado:false},
     {nome:'C&A',palavras:['C&A'],separarFranqueado:false},
     {nome:'ARCELOR MITTAL',palavras:['ARCELOR MITTAL','ARCELORMITTAL'],separarFranqueado:false}
@@ -17859,9 +17865,21 @@ function renderFaturamentoPorCliente(){
 
   // Visualização simplificada (2026-08-03, a pedido do usuário — a grade de 12 meses "ficou
   // estranha de ver"): só 2 colunas, Cliente/Marca e Faturamento. Empresa (2+ vendas) expande
-  // ao clicar e lista cada venda individual com o NOME COMPLETO da loja + o mês daquela venda
-  // ao lado do valor. Avulso (1 venda só) já mostra direto o nome completo do cliente, sem
-  // precisar expandir (não tem outra venda pra listar).
+  // ao clicar e mostra a quebra por CATEGORIA DE PEDIDO (a pedido do usuário, mesmo dia) — cada
+  // categoria vira um sub-cabeçalho com subtotal, e dentro dela cada venda individual aparece
+  // com o NOME COMPLETO da loja + o mês daquela venda ao lado do valor. Avulso (1 venda só) já
+  // mostra direto o nome completo do cliente, sem precisar expandir.
+  function agruparPorCategoria(vendas){
+    const map={};
+    vendas.forEach(v=>{
+      const cat=v.categoria||'—';
+      if(!map[cat])map[cat]={categoria:cat,vendas:[],totalBr:0,totalLq:0};
+      map[cat].vendas.push(v);
+      map[cat].totalBr+=v.br||0;
+      map[cat].totalLq+=v.lq||0;
+    });
+    return Object.values(map);
+  }
   const head=`<thead><tr><th>Cliente / Marca</th><th style="text-align:right">Faturamento</th></tr></thead>`;
   function linhaEmpresa(g){
     const total=valorG(g);
@@ -17869,10 +17887,21 @@ function renderFaturamentoPorCliente(){
     const aberto=_fatClienteExpandido.has(g.nome);
     const seta=`<span style="display:inline-block;width:14px;color:#94a3b8">${aberto?'▾':'▸'}</span>`;
     const linhaGrupo=`<tr style="background:#f8fafc;cursor:pointer" onclick="_fatClienteToggleGrupo('${nomeEsc}')" title="Clique para ${aberto?'recolher':'ver as '+g.qtdVendas+' vendas'}"><td style="font-weight:800">${seta}${g.nome}<span style="color:#94a3b8;font-size:.7rem;font-weight:700;margin-left:8px">${g.qtdVendas} vendas</span></td><td style="text-align:right;font-weight:800">${fmtR(total)}</td></tr>`;
-    const subLinhas=aberto?g.vendas.map(v=>{
-      const valor=valorV(v);
-      return `<tr><td style="padding-left:22px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente}</td><td style="text-align:right">${fmtR(valor)} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td></tr>`;
-    }).join(''):'';
+    let subLinhas='';
+    if(aberto){
+      const cats=agruparPorCategoria(g.vendas);
+      cats.sort((a,b)=>(campo==='br'?b.totalBr-a.totalBr:b.totalLq-a.totalLq));
+      cats.forEach(c=>c.vendas.sort((a,b)=>(a.mes-b.mes)||(valorV(b)-valorV(a))));
+      subLinhas=cats.map(c=>{
+        const totalC=campo==='br'?c.totalBr:c.totalLq;
+        const header=`<tr><td colspan="2" style="padding-left:22px;padding-top:8px;color:#94a3b8;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.3px">${c.categoria} <span style="color:#cbd5e1">— ${fmtR(totalC)}</span></td></tr>`;
+        const linhas=c.vendas.map(v=>{
+          const valor=valorV(v);
+          return `<tr><td style="padding-left:34px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente}</td><td style="text-align:right">${fmtR(valor)} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td></tr>`;
+        }).join('');
+        return header+linhas;
+      }).join('');
+    }
     return linhaGrupo+subLinhas;
   }
   function linhaAvulso(g){
