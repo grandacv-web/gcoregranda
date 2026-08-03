@@ -2679,7 +2679,7 @@ select.fc{cursor:pointer}
         <div style="font-size:.7rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:1px;margin:22px 0 6px">Capacidade Diária (Produção / Instalação)</div>
         <p style="font-size:.73rem;color:var(--ink4);margin-bottom:10px">Usado pelo 🧮 Simulador de Pedidos e pelo aviso "⚠️ Requer Atenção" na Lista de Pedidos — não bloqueia nada sozinho, só avisa quando o dia passa do limite.</p>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
-          <div class="fg"><label>Limite de Produção por dia (R$ líquido)</label><input class="fc no-upper" type="text" inputmode="numeric" id="cfg-lp-cap-producao" oninput="fmtMoney(this)" placeholder="80.000,00"></div>
+          <div class="fg"><label>Limite de Produção por dia (R$ líquido)</label><input class="fc no-upper" type="text" inputmode="numeric" id="cfg-lp-cap-producao" oninput="fmtMoney(this)" placeholder="75.000,00"></div>
           <div class="fg"><label>Limite de Instalações começando no mesmo dia</label><input class="fc no-upper" type="number" min="1" id="cfg-lp-cap-instalacoes" placeholder="3"></div>
         </div>
       </div>
@@ -11887,12 +11887,12 @@ const LP_ETAPAS_COM_BAIXA=['art',...Object.values(LP_SETORES).reduce((arr,s)=>ar
 // ===================== CAPACIDADE DIÁRIA: PRODUÇÃO E INSTALAÇÃO (2026-08-03) =====================
 // A pedido do usuário: Produção não aguenta mais que um limite de valor LÍQUIDO finalizando no
 // mesmo dia (produtividade real de hoje, configurável em Configurações → Etapas de Pedidos,
-// padrão R$80.000); Instalação não deveria ter mais que um limite de obras COMEÇANDO no mesmo
+// padrão R$75.000); Instalação não deveria ter mais que um limite de obras COMEÇANDO no mesmo
 // dia (padrão 3 — o ideal é distribuir melhor). Isso NÃO trava nem reagenda nada sozinho — só
 // ACUSA "⚠️ Requer Atenção" na Lista de Pedidos real (pra um humano decidir se renegocia prazo
 // ou aceita o risco mesmo assim) e alimenta o 🧮 Simulador de Pedidos (que aí sim sugere o
 // próximo dia com espaço, já que lá é só hipótese, sem compromisso real ainda).
-function _lpCapProducaoDia(){return cfg.lpCapProducaoDia||80000;}
+function _lpCapProducaoDia(){return cfg.lpCapProducaoDia||75000;}
 function _lpCapInstalacoesDia(){return cfg.lpCapInstalacoesDia||3;}
 // Mapa {isoDoDia:{soma,itens:[{p,liquido}]}} de quanto de líquido está previsto FINALIZAR em
 // Produção em cada dia, somando todos os pedidos elegíveis (mesma fonte da Lista de Pedidos).
@@ -18394,7 +18394,29 @@ function renderContasUnificado(){
 
   if(!linhas.length){body.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhum lançamento encontrado com esses filtros.</div>';return;}
 
-  body.innerHTML=`<div style="overflow-x:auto"><table class="dash-table">
+  // Soma do que está filtrado na lista (2026-08-04, a pedido do usuário: "eu quero que
+  // apareça a soma do que eu filtrei") — respeita TODOS os filtros ativos (busca, status,
+  // período, mês da venda, vendedor, empresa, categoria, tipo), porque `linhas` já é o
+  // resultado final depois de tudo isso aplicado, não um recálculo à parte.
+  const totalFiltrado=linhas.reduce((s,l)=>s+(l.valor||0),0);
+  let resumoFiltro;
+  if(tipo===''&&linhasReceber.length&&linhasPagar.length){
+    const totRec=linhasReceber.reduce((s,l)=>s+(l.valor||0),0);
+    const totPag=linhasPagar.reduce((s,l)=>s+(l.valor||0),0);
+    resumoFiltro=`<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:10px 14px;background:#f8fafc;border:1px solid var(--border);border-radius:10px;font-size:.82rem">
+      <div><strong>${linhas.length}</strong> lançamento${linhas.length===1?'':'s'} filtrado${linhas.length===1?'':'s'}</div>
+      <div style="color:#1e40af">📥 Receber: <strong>${fmtR(totRec)}</strong></div>
+      <div style="color:#c2410c">📤 Pagar: <strong>${fmtR(totPag)}</strong></div>
+      <div style="margin-left:auto;font-weight:800;font-size:.95rem">Total filtrado: ${fmtR(totalFiltrado)}</div>
+    </div>`;
+  }else{
+    resumoFiltro=`<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:10px 14px;background:#f8fafc;border:1px solid var(--border);border-radius:10px;font-size:.82rem">
+      <div><strong>${linhas.length}</strong> lançamento${linhas.length===1?'':'s'} filtrado${linhas.length===1?'':'s'}</div>
+      <div style="margin-left:auto;font-weight:800;font-size:.95rem">Total filtrado: ${fmtR(totalFiltrado)}</div>
+    </div>`;
+  }
+
+  body.innerHTML=resumoFiltro+`<div style="overflow-x:auto"><table class="dash-table">
     <thead><tr><th>Data</th><th>Tipo</th><th>Cliente/Fornecedor</th><th>Data de Finalização</th><th>Categoria</th><th>Detalhe</th><th>Valor</th><th>Status</th><th>Atraso/Obs.</th><th>Ação</th></tr></thead>
     <tbody>${linhas.map(l=>{
       const prazoAdiadoTag=l.prazoObraOrig&&l.prazoObraOrig!==l.prazoObra?` <span title="Prazo original: ${fmtD(l.prazoObraOrig)}" style="font-size:.64rem;color:#d97706;cursor:help">(adiado)</span>`:'';
@@ -18599,11 +18621,18 @@ function _fatClienteAgrupar(){
   getVendaRowsMerged().forEach(r=>{
     if(!r.m||r.m<1||r.m>12)return;
     const nomeGrupo=_fatClienteGrupoNome(r);
-    if(!grupos[nomeGrupo])grupos[nomeGrupo]={nome:nomeGrupo,totalBr:0,totalLq:0,vendas:[]};
+    if(!grupos[nomeGrupo])grupos[nomeGrupo]={nome:nomeGrupo,totalBr:0,totalLq:0,totalOp:0,totalFt:0,vendas:[]};
     const g=grupos[nomeGrupo];
     g.totalBr+=r.br||0;
     g.totalLq+=r.lq||0;
-    g.vendas.push({cliente:(r.cl||'—').trim(),categoria:r.cat||'—',mes:r.m,br:r.br||0,lq:r.lq||0});
+    // Despesas Operacionais (op = frete+mobilização+elevação+mão de obra+ART+remoção+medição+
+    // pintura de tubo, ver pedidoToVendaRow) e Frete isolado (ft, um componente de op) — a
+    // pedido do usuário (2026-08-04): "quero que apareça os valores de despesas operacionais,
+    // frete etc etc também nesta soma". Mesmos campos que já existem em toda venda
+    // (getVendaRowsMerged/pedidoToVendaRow/XLSX_VENDAS), só não estavam sendo somados aqui.
+    g.totalOp+=r.op||0;
+    g.totalFt+=r.ft||0;
+    g.vendas.push({cliente:(r.cl||'—').trim(),categoria:r.cat||'—',mes:r.m,br:r.br||0,lq:r.lq||0,op:r.op||0,ft:r.ft||0});
   });
   return Object.values(grupos).map(g=>({...g,qtdVendas:g.vendas.length}));
 }
@@ -18682,31 +18711,38 @@ function renderFaturamentoPorCliente(){
     const map={};
     vendas.forEach(v=>{
       const cat=v.categoria||'—';
-      if(!map[cat])map[cat]={categoria:cat,vendas:[],totalBr:0,totalLq:0};
+      if(!map[cat])map[cat]={categoria:cat,vendas:[],totalBr:0,totalLq:0,totalOp:0,totalFt:0};
       map[cat].vendas.push(v);
       map[cat].totalBr+=v.br||0;
       map[cat].totalLq+=v.lq||0;
+      map[cat].totalOp+=v.op||0;
+      map[cat].totalFt+=v.ft||0;
     });
     return Object.values(map);
   }
   // Bruto e Líquido aparecem juntos, lado a lado, sem precisar clicar no toggle Bruto/Líquido
   // pra ver o outro valor (2026-08-03, a pedido do usuário) — o toggle continua existindo só
   // pra escolher qual dos dois manda na ORDENAÇÃO da tabela e no gráfico (coluna ativa em negrito).
-  const head=`<thead><tr><th>Cliente / Marca</th><th style="text-align:right;${campo==='br'?'font-weight:900':''}">Bruto</th><th style="text-align:right;${campo==='lq'?'font-weight:900':''}">Líquido</th></tr></thead>`;
+  // Despesas Operacionais e Frete somados junto (2026-08-04, a pedido do usuário) — mesmos
+  // campos que Financeiro/Lista de Vendas já usam (op/ft de pedidoToVendaRow), só não
+  // apareciam aqui. Despesas Operacionais é o total (frete+mobilização+elevação+mão de
+  // obra+ART+remoção+medição+pintura de tubo); Frete é só o componente de frete dentro
+  // desse total, mostrado à parte por já ser o maior item variável de custo.
+  const head=`<thead><tr><th>Cliente / Marca</th><th style="text-align:right;${campo==='br'?'font-weight:900':''}">Bruto</th><th style="text-align:right" title="Total de frete+mobilização+elevação+mão de obra+ART+remoção+medição+pintura de tubo">Despesas Operacionais</th><th style="text-align:right" title="Componente de frete dentro das Despesas Operacionais">Frete</th><th style="text-align:right;${campo==='lq'?'font-weight:900':''}">Líquido</th></tr></thead>`;
   function linhaEmpresa(g){
     const nomeEsc=g.nome.replace(/'/g,"\\'");
     const aberto=_fatClienteExpandido.has(g.nome);
     const seta=`<span style="display:inline-block;width:14px;color:#94a3b8">${aberto?'▾':'▸'}</span>`;
-    const linhaGrupo=`<tr style="background:#f8fafc;cursor:pointer" onclick="_fatClienteToggleGrupo('${nomeEsc}')" title="Clique para ${aberto?'recolher':'ver as '+g.qtdVendas+' vendas'}"><td style="font-weight:800">${seta}${g.nome}<span style="color:#94a3b8;font-size:.7rem;font-weight:700;margin-left:8px">${g.qtdVendas} vendas</span></td><td style="text-align:right;font-weight:800">${fmtR(g.totalBr)}</td><td style="text-align:right;font-weight:800">${fmtR(g.totalLq)}</td></tr>`;
+    const linhaGrupo=`<tr style="background:#f8fafc;cursor:pointer" onclick="_fatClienteToggleGrupo('${nomeEsc}')" title="Clique para ${aberto?'recolher':'ver as '+g.qtdVendas+' vendas'}"><td style="font-weight:800">${seta}${g.nome}<span style="color:#94a3b8;font-size:.7rem;font-weight:700;margin-left:8px">${g.qtdVendas} vendas</span></td><td style="text-align:right;font-weight:800">${fmtR(g.totalBr)}</td><td style="text-align:right;font-weight:800;color:#c2410c">${fmtR(g.totalOp)}</td><td style="text-align:right;font-weight:800;color:#c2410c">${fmtR(g.totalFt)}</td><td style="text-align:right;font-weight:800">${fmtR(g.totalLq)}</td></tr>`;
     let subLinhas='';
     if(aberto){
       const cats=agruparPorCategoria(g.vendas);
       cats.sort((a,b)=>(campo==='br'?b.totalBr-a.totalBr:b.totalLq-a.totalLq));
       cats.forEach(c=>c.vendas.sort((a,b)=>(a.mes-b.mes)||(valorV(b)-valorV(a))));
       subLinhas=cats.map(c=>{
-        const header=`<tr><td colspan="3" style="padding-left:22px;padding-top:8px;color:#94a3b8;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.3px">${c.categoria} <span style="color:#cbd5e1">— Bruto ${fmtR(c.totalBr)} · Líquido ${fmtR(c.totalLq)}</span></td></tr>`;
+        const header=`<tr><td colspan="5" style="padding-left:22px;padding-top:8px;color:#94a3b8;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.3px">${c.categoria} <span style="color:#cbd5e1">— Bruto ${fmtR(c.totalBr)} · Desp. Op. ${fmtR(c.totalOp)} · Frete ${fmtR(c.totalFt)} · Líquido ${fmtR(c.totalLq)}</span></td></tr>`;
         const linhas=c.vendas.map(v=>{
-          return `<tr><td style="padding-left:34px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(v.br)}</td><td style="text-align:right">${fmtR(v.lq)}</td></tr>`;
+          return `<tr><td style="padding-left:34px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(v.br)}</td><td style="text-align:right;color:#c2410c">${fmtR(v.op)}</td><td style="text-align:right;color:#c2410c">${fmtR(v.ft)}</td><td style="text-align:right">${fmtR(v.lq)}</td></tr>`;
         }).join('');
         return header+linhas;
       }).join('');
@@ -18715,14 +18751,16 @@ function renderFaturamentoPorCliente(){
   }
   function linhaAvulso(g){
     const v=g.vendas[0];
-    return `<tr><td>${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(g.totalBr)}</td><td style="text-align:right">${fmtR(g.totalLq)}</td></tr>`;
+    return `<tr><td>${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(g.totalBr)}</td><td style="text-align:right;color:#c2410c">${fmtR(g.totalOp)}</td><td style="text-align:right;color:#c2410c">${fmtR(g.totalFt)}</td><td style="text-align:right">${fmtR(g.totalLq)}</td></tr>`;
   }
   const bodyEmpresas=empresas.map(linhaEmpresa).join('');
-  const divisorAvulsos=avulsos.length?`<tr><td colspan="3" style="background:#eef2f7;color:#64748b;font-size:.68rem;font-weight:800;letter-spacing:.5px;padding:8px 10px;text-transform:uppercase">🎲 Clientes avulsos — 1 pedido só até agora, ainda sem histórico de recorrência</td></tr>`:'';
+  const divisorAvulsos=avulsos.length?`<tr><td colspan="5" style="background:#eef2f7;color:#64748b;font-size:.68rem;font-weight:800;letter-spacing:.5px;padding:8px 10px;text-transform:uppercase">🎲 Clientes avulsos — 1 pedido só até agora, ainda sem histórico de recorrência</td></tr>`:'';
   const bodyAvulsos=avulsos.map(linhaAvulso).join('');
   const totGeralBr=grupos.reduce((s,g)=>s+g.totalBr,0);
   const totGeralLq=grupos.reduce((s,g)=>s+g.totalLq,0);
-  const foot=`<tfoot><tr><td style="font-weight:800">TOTAL GERAL</td><td style="text-align:right;font-weight:800">${fmtR(totGeralBr)}</td><td style="text-align:right;font-weight:800">${fmtR(totGeralLq)}</td></tr></tfoot>`;
+  const totGeralOp=grupos.reduce((s,g)=>s+g.totalOp,0);
+  const totGeralFt=grupos.reduce((s,g)=>s+g.totalFt,0);
+  const foot=`<tfoot><tr><td style="font-weight:800">TOTAL GERAL</td><td style="text-align:right;font-weight:800">${fmtR(totGeralBr)}</td><td style="text-align:right;font-weight:800;color:#c2410c">${fmtR(totGeralOp)}</td><td style="text-align:right;font-weight:800;color:#c2410c">${fmtR(totGeralFt)}</td><td style="text-align:right;font-weight:800">${fmtR(totGeralLq)}</td></tr></tfoot>`;
   tbl.innerHTML=head+'<tbody>'+bodyEmpresas+divisorAvulsos+bodyAvulsos+'</tbody>'+foot;
 
   // Gráfico: quanto cada cliente/marca gerou de receita no MÊS atual vs ACUMULADO do ano (a
