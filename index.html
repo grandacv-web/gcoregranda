@@ -1001,7 +1001,7 @@ select.fc{cursor:pointer}
             <input id="fin-fil-busca">
             <select id="fin-fil-mes-venda"><option value=""></option></select>
             <select id="fin-fil-vend"><option value=""></option></select>
-            <select id="fin-fil-status"><option value=""></option></select>
+            <select id="fin-fil-status"><option value=""></option><option value="aberto"></option><option value="pendente"></option><option value="atrasado"></option><option value="confirmado"></option></select>
             <input id="fin-fil-data-ini" type="date">
             <input id="fin-fil-data-fim" type="date">
             <div id="fin-body"></div>
@@ -1009,7 +1009,7 @@ select.fc{cursor:pointer}
             <input id="cp-fil-busca">
             <select id="cp-fil-empresa"><option value=""></option></select>
             <select id="cp-fil-categoria"><option value=""></option></select>
-            <select id="cp-fil-status"><option value=""></option></select>
+            <select id="cp-fil-status"><option value=""></option><option value="aberto"></option><option value="pendente"></option><option value="atrasado"></option><option value="pago"></option></select>
             <input id="cp-fil-data-ini" type="date">
             <input id="cp-fil-data-fim" type="date">
             <div id="cp-body"></div>
@@ -2886,7 +2886,7 @@ select.fc{cursor:pointer}
 <script type="module">
 import{initializeApp,deleteApp}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
 import{getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged,createUserWithEmailAndPassword,sendPasswordResetEmail,EmailAuthProvider,reauthenticateWithCredential}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
-import{getFirestore,collection,doc,setDoc,deleteDoc,onSnapshot,getDocs}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
+import{getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,onSnapshot,getDocs}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-functions.js';
 
 const firebaseConfig={
@@ -2955,6 +2955,18 @@ window._fbWatchLixeira=(cb,errCb)=>onSnapshot(collection(db,'lixeira'),cb,errCb|
 window._fbSaveCfg=(data)=>setDoc(doc(db,'sistema','config'),data);
 window._fbLoadCfg=()=>getDocs(collection(db,'sistema')).then(snap=>{const d=snap.docs.find(x=>x.id==='config');return d?d.data():null;});
 window._fbWatchCfg=(cb)=>onSnapshot(doc(db,'sistema','config'),snap=>{if(snap.exists())cb(snap.data());});
+// Escrita ATÔMICA de um campo aninhado só (2026-08-04) — usada por setPagConf() pra confirmar
+// recebimento/comissão sem correr risco de perder confirmações de outras parcelas. Motivo:
+// _fbSaveCfg(cfg) faz setDoc SEM merge, reescrevendo o documento 'config' INTEIRO com o que
+// tiver na memória local (`cfg`) naquele instante. Se o Financeiro confirmar vários
+// recebimentos em sequência rápida, o listener onSnapshot (`cfg=Object.assign(cfg,data)`) pode
+// receber um snapshot intermediário e substituir `cfg.pagConf` local por uma versão que ainda
+// não tinha a última confirmação — se alguma outra ação disparar _fbSaveCfg(cfg) logo depois
+// (mesmo sem relação nenhuma com pagConf), essa confirmação "perdida" localmente acaba sendo
+// regravada como se nunca tivesse acontecido. updateDoc com um caminho de campo (dot notation,
+// ex.: "pagConf.abc123") evita isso: só toca ESSE campo específico no servidor, nunca depende
+// do resto do `cfg` que está na memória local.
+window._fbUpdatePagConf=(confKey,data)=>updateDoc(doc(db,'sistema','config'),{['pagConf.'+confKey]:data});
 // Funções administrativas (Cloud Functions) — definir senha / apagar usuário direto no Firebase Auth, sem e-mail.
 window._fbAdminSetPassword=(email,newPassword)=>httpsCallable(functions,'adminSetPassword')({email,newPassword});
 window._fbAdminDeleteUser=(email)=>httpsCallable(functions,'adminDeleteUser')({email});
@@ -9415,7 +9427,24 @@ function getPagConf(confKey){return (cfg.pagConf&&cfg.pagConf[confKey])||null;}
 function setPagConf(confKey,data){
   if(!cfg.pagConf)cfg.pagConf={};
   cfg.pagConf[confKey]=data;
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  // Grava só ESSE confKey no Firestore, de forma atômica (updateDoc com dot-path), em vez de
+  // reescrever o documento 'config' inteiro com _fbSaveCfg(cfg) (2026-08-04, a pedido do
+  // usuário: confirmações de recebimento estavam "sumindo" — Financeiro confirmava um lote de
+  // parcelas e algumas voltavam a aparecer como Pendente depois). Causa raiz: setDoc sem merge
+  // é uma sobrescrita total; confirmar várias parcelas em sequência rápida corria risco do
+  // listener (onSnapshot) trocar `cfg.pagConf` local por uma versão intermediária ANTES de
+  // outro save qualquer (de qualquer parte do sistema) acontecer, apagando a confirmação mais
+  // recente sem ninguém perceber. updateDoc com "pagConf.<confKey>" nunca depende do resto do
+  // cfg em memória, então essa perda não pode mais acontecer aqui. Fallback pro método antigo
+  // só se updateDoc não estiver disponível por algum motivo (documento ainda não existe, etc.).
+  if(window._fbUpdatePagConf){
+    window._fbUpdatePagConf(confKey,data).catch(e=>{
+      console.error('Erro ao gravar pagConf via updateDoc, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    });
+  } else if(window._fbSaveCfg){
+    window._fbSaveCfg(cfg);
+  }
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache,
   // montado na primeira renderização da tela) mesmo depois de Confirmar/Não recebido/Adiar
@@ -11621,11 +11650,24 @@ async function _lpToggleTarefa(pedidoId,key){
   const quemPreencheu=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
   if(atual.concluido){
     if(!confirm('Desfazer a conclusão dessa tarefa?'))return;
+    const labelDesfeita=key==='art'?'Recebimento ART':key==='rao'?'RAO':(PLAN_TAREFAS_REGRAS[key]?PLAN_TAREFAS_REGRAS[key].label:key);
     p.planTarefas[key]={concluido:false};
     // ART não pertence a nenhum menu de setor (2026-08-04) — o Planejamento é quem dá a baixa
     // de verdade em p.lpBaixas.art agora, mesmo formato de lpDarBaixa/lpDesfazerBaixa, pra
     // Kanban da Lista de Pedidos e Assertividade Geral continuarem reconhecendo certo.
-    if(key==='art'&&p.lpBaixas)delete p.lpBaixas.art;
+    if(key==='art'&&p.lpBaixas&&p.lpBaixas.art){
+      // Mesmo rastro de lpDesfazerBaixa (2026-08-04, a pedido do usuário: "tudo que acontece
+      // com um pedido precisa constar" no Histórico) — sem isso, desfazer ART aqui fazia o
+      // evento "Etapa concluída — Recebimento ART" sumir sem deixar rastro nenhum.
+      p.lpBaixasDesfeitas=p.lpBaixasDesfeitas||[];
+      p.lpBaixasDesfeitas.push({etapaKey:'art',baixaOriginal:p.lpBaixas.art,desfeitaEm:new Date().toISOString(),desfeitaPor:quemPreencheu});
+      delete p.lpBaixas.art;
+    } else if(key!=='art'&&atual.concluido){
+      // RAO (e qualquer outra tarefa simples de planejamento sem equivalente em lpBaixas) —
+      // log próprio, mesmo motivo acima (2026-08-04).
+      p.planTarefasDesfeitas=p.planTarefasDesfeitas||[];
+      p.planTarefasDesfeitas.push({key,label:labelDesfeita,dataAnterior:atual.data,porAnterior:atual.por,desfeitaEm:new Date().toISOString(),desfeitaPor:quemPreencheu});
+    }
   } else {
     p.planTarefas[key]={concluido:true,data:new Date().toISOString().slice(0,10),por:quemPreencheu};
     if(key==='art'){
@@ -12097,6 +12139,15 @@ async function lpDarBaixa(pedidoId,etapaKey,setorKey){
 async function lpDesfazerBaixa(pedidoId,etapaKey,setorKey){
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
+  // Guarda o que estava sendo desfeito ANTES de apagar (2026-08-04, a pedido do usuário:
+  // "tudo que acontece no sistema com um pedido precisa constar" no Histórico) — sem isso,
+  // desfazer uma baixa fazia o evento "Etapa concluída" simplesmente sumir da timeline, sem
+  // deixar rastro nenhum de que ela existiu e foi desfeita. Ver bloco 9 de _histPedidoEventos.
+  const baixaAnterior=p.lpBaixas&&p.lpBaixas[etapaKey];
+  if(baixaAnterior){
+    p.lpBaixasDesfeitas=p.lpBaixasDesfeitas||[];
+    p.lpBaixasDesfeitas.push({etapaKey,baixaOriginal:baixaAnterior,desfeitaEm:new Date().toISOString(),desfeitaPor:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—')});
+  }
   if(p.lpBaixas)delete p.lpBaixas[etapaKey];
   await savePedidoFS(p);
   toast('Baixa desfeita','twar');
@@ -16733,6 +16784,12 @@ function _histPedidoEventos(p){
       // confirmedAt (só o timestamp de quando o sistema foi mexido), pra esse evento e os
       // indicadores de Histórico refletirem a data certa (2026-07-23, a pedido do usuário).
       add('💰',`Pagamento confirmado — ${item.label}`,conf.dataRecebimentoReal||conf.confirmedAt||item.dataStr,`${fmtR(conf.valorBrutoConfirmado||item.valorBruto||item.valor||0)} recebido em ${fmtD(conf.dataRecebimentoReal)||fmtD(conf.novaData)||item.dataStr}`,'#16a34a');
+    }else if(conf.reabertoEm){
+      // 2026-08-04, a pedido do usuário: reabrir um recebimento também é um evento — antes
+      // esse dado se perdia por completo (reabrirPag() apagava a confirmação inteira), então
+      // a comissão liberada sumia da timeline sem explicação nenhuma. Ver reabrirPag().
+      const confAnt=conf.confirmacaoAnterior;
+      add('↩️',`Pagamento reaberto — ${item.label}`,conf.reabertoEm,`${confAnt?.confirmedAt?`Tinha sido confirmado (recebido) em ${fmtD(confAnt.dataRecebimentoReal)||fmtD(confAnt.confirmedAt)}${confAnt.valorBrutoConfirmado?' — '+fmtR(confAnt.valorBrutoConfirmado):''} — `:''}reaberto por ${conf.reabertoPor||'—'}`,'#b45309');
     }else if(conf.motivoAtraso){
       add('⏳',`Pagamento adiado — ${item.label}`,conf.motivoAtrasoEm||item.dataStr,`Previsto pra ${fmtD(conf.dataPrevistaAnterior)||item.dataStr}, adiado pra ${fmtD(conf.novaData)||'—'} — motivo: ${conf.motivoAtraso}`,'#dc2626');
     }
@@ -16779,6 +16836,42 @@ function _histPedidoEventos(p){
       add(atrasou?'🔴':'✅',`Etapa concluída — ${label}`,baixa.dataHora||baixa.data,detalhe,atrasou?'#dc2626':'#16a34a');
     });
   }
+
+  // 7. Fornecedores definidos (Instalador/Transportadora/Munque, 2026-07-29) — 1 evento com o
+  // estado mais recente, datado pela última atualização. p.fornGestao não guarda histórico de
+  // trocas anteriores, só o estado atual (2026-08-04, a pedido do usuário — antes isso nunca
+  // virava evento nenhum aqui, apesar de ser uma decisão real tomada sobre o pedido).
+  if(p.fornGestao&&p.fornGestao.atualizadoEm){
+    const fg=p.fornGestao;
+    const partes=[];
+    if(fg.instalador)partes.push(`Instalador: ${fg.instalador}`);
+    if(fg.transportadora)partes.push(`Transportadora: ${fg.transportadora}`);
+    if(fg.munque)partes.push(`Munque: ${fg.munque}`);
+    if(partes.length){
+      add('🧰','Fornecedores definidos',fg.atualizadoEm,`${partes.join(' · ')} — por ${fg.atualizadoPor||'—'}`,'#4f46e5');
+    }
+  }
+
+  // 8. RAO — Reunião de Alinhamento Operacional (Planejamento, 2026-08-03). Não tem
+  // equivalente em p.lpBaixas (não é uma "etapa" do motor de prazos) — precisa de evento
+  // próprio aqui. Recebimento ART/Contratar Instalador/Frete/Elevação já aparecem por outras
+  // fontes (bloco 6 via p.lpBaixas.art, e bloco 7 acima via p.fornGestao).
+  if(p.planTarefas&&p.planTarefas.rao&&p.planTarefas.rao.concluido){
+    const t=p.planTarefas.rao;
+    add('🗣️','RAO realizada',t.data,`Reunião de Alinhamento Operacional concluída por ${t.por||'—'}`,'#0891b2');
+  }
+
+  // 9. Desfazimentos/reaberturas de baixa ou tarefa de planejamento (2026-08-04, a pedido do
+  // usuário: "tudo que acontece no sistema com um pedido precisa constar" — inclusive desfazer
+  // algo é uma ação, não deveria simplesmente apagar o rastro do que existia antes).
+  (p.lpBaixasDesfeitas||[]).forEach(d=>{
+    const etapaDef=(typeof LP_ETAPAS_PADRAO!=='undefined'?LP_ETAPAS_PADRAO:[]).find(e=>e.key===d.etapaKey);
+    const label=etapaDef?etapaDef.label:d.etapaKey;
+    add('↩️',`Baixa desfeita — ${label}`,d.desfeitaEm,`Tinha sido concluída em ${fmtD(d.baixaOriginal&&d.baixaOriginal.data)} por ${(d.baixaOriginal&&d.baixaOriginal.por)||'—'} — desfeita por ${d.desfeitaPor||'—'}`,'#b45309');
+  });
+  (p.planTarefasDesfeitas||[]).forEach(d=>{
+    add('↩️',`Tarefa de Planejamento desfeita — ${d.label||d.key}`,d.desfeitaEm,`Tinha sido concluída em ${fmtD(d.dataAnterior)||'—'} por ${d.porAnterior||'—'} — desfeita por ${d.desfeitaPor||'—'}`,'#b45309');
+  });
 
   eventos.sort((a,b)=>a.ts-b.ts);
   return eventos;
@@ -20288,12 +20381,23 @@ async function confPag(confKey,dataStr){
 }
 
 async function reabrirPag(confKey){
-  if(cfg.pagConf)delete cfg.pagConf[confKey];
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg);
-  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
-  // Mesmo motivo do setPagConf() acima — reabrirPag() mexe em cfg.pagConf direto (sem
-  // passar por setPagConf), então precisa invalidar o cache na mão também.
-  if(typeof _invalidateDashCache==='function')_invalidateDashCache();
+  // Reescrito 2026-08-04 (a pedido do usuário: "tudo que acontece no sistema com um pedido
+  // precisa constar" no Histórico). Antes: apagava cfg.pagConf[confKey] inteiro (perdia
+  // confirmedAt/valorBrutoConfirmado pra sempre, sem deixar rastro de que existiu) e salvava
+  // via _fbSaveCfg(cfg) — a MESMA sobrescrita total do documento que causava confirmações
+  // "sumindo" quando várias aconteciam em sequência rápida (ver setPagConf() e
+  // [[project_race_condition_confirmacao_recebimento]]). Agora passa por setPagConf() (escrita
+  // atômica só nesse confKey) e preserva um resumo da confirmação anterior + quem/quando
+  // reabriu, pra virar um evento "Pagamento reaberto" no Histórico (ver _histPedidoEventos).
+  const anterior=getPagConf(confKey);
+  setPagConf(confKey,{
+    status:'pendente',
+    novaData:anterior?.novaData||'',
+    motivoAtraso:'',motivoAtrasoEm:'',
+    reabertoEm:new Date().toISOString(),
+    reabertoPor:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),
+    confirmacaoAnterior:(anterior&&anterior.status==='confirmado')?{confirmedAt:anterior.confirmedAt||null,dataRecebimentoReal:anterior.dataRecebimentoReal||null,valorBrutoConfirmado:anterior.valorBrutoConfirmado||null}:null
+  });
   renderDashComissoes();renderDashCards();
   if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();else if(typeof renderFinanceiro==='function')renderFinanceiro();
   toast('Pagamento reaberto','tok');
