@@ -679,21 +679,24 @@ select.fc{cursor:pointer}
           <div style="overflow-x:auto;margin-top:10px"><table class="dash-table gc-comp25-table" id="gc-comp25-table"></table></div>
         </div>
 
-        <!-- Faturamento por Cliente (2026-08-01, a pedido do usuário) — agrupado por marca
-             (Grupos de Cliente, o mesmo motor do Financeiro) e Categoria de Pedido, mês a mês
-             + acumulado do ano. Ver renderFaturamentoPorCliente(). -->
+        <!-- Faturamento por Cliente (2026-08-01, a pedido do usuário; hierárquico + gráfico
+             desde 2026-08-03) — agrupado por marca (Grupos de Cliente, mesmo motor do
+             Financeiro, + regra própria de ZAMP x Franqueado pra Burger King) com a Categoria
+             de Pedido quebrada em sub-linhas por baixo do total de cada marca. Ver
+             renderFaturamentoPorCliente(). -->
         <div class="gc-chart-card">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
             <div>
               <div class="gc-chart-title">Faturamento por Cliente</div>
-              <div class="gc-chart-sub" style="margin-bottom:0">Agrupado por marca (Grupos de Cliente) e Categoria de Pedido — mês a mês e acumulado do ano</div>
+              <div class="gc-chart-sub" style="margin-bottom:0">Agrupado por marca (Grupos de Cliente) — total da marca com a Categoria de Pedido quebrada embaixo — mês a mês e acumulado do ano</div>
             </div>
             <div class="gc-comp25-toggle">
               <button id="gc-fatcli-btn-br" class="gc-comp25-btn active" onclick="setFatClienteModo('br')">Bruto</button>
               <button id="gc-fatcli-btn-lq" class="gc-comp25-btn" onclick="setFatClienteModo('lq')">Líquido</button>
             </div>
           </div>
-          <div style="overflow-x:auto;margin-top:10px"><table class="dash-table" id="gc-fatcli-table"></table></div>
+          <div style="height:280px;margin-top:10px"><canvas id="gc-cFatCli"></canvas></div>
+          <div style="overflow-x:auto;margin-top:14px"><table class="dash-table" id="gc-fatcli-table"></table></div>
         </div>
       </div>
 
@@ -1396,19 +1399,62 @@ select.fc{cursor:pointer}
       </div>
     </div>
     <div id="sec-cat-COMPRAS" style="display:none">
+      <div class="dash-tabs" style="margin-bottom:14px" id="compras-main-tabs">
+        <button class="dash-tab active compras-main-tab" onclick="comprasSetTab('lista',this)">📋 Lista</button>
+        <button class="dash-tab compras-main-tab" onclick="comprasSetTab('kanban',this)">🗂️ Kanban</button>
+        <button class="dash-tab compras-main-tab" onclick="comprasSetTab('calendario',this)">📅 Calendário</button>
+      </div>
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
-        🛒 Tarefas do setor de Compras — Chegada de Compras, Corte Galvanizado, ART e Adesivo. Dê baixa assim que cada item chegar/estiver pronto de verdade.
+        🛒 Cada compra (Chegada de Compras, Corte Galvanizado, ART ou Adesivo) passa por um checklist de 5 subtarefas — Cotação → Negociação → Comprado → Esperando Chegar → Chegou — antes de a etapa ser considerada pronta. Clique em "Iniciar Compra" pra abrir; dá pra fechar e retomar depois de onde parou. Ao marcar a última subtarefa, a baixa daquela etapa é dada automaticamente (data e hora exatas ficam no Histórico do pedido). Prazo e pedidos vêm da Lista de Pedidos.
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-        <input id="st-compras-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="renderSetorTarefas('COMPRAS')" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
-        <select id="st-compras-fil" onchange="renderSetorTarefas('COMPRAS')" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
-          <option value="">Pendentes + Atrasadas</option>
-          <option value="pendentes">🔵 Pendentes</option>
-          <option value="atrasadas">🔴 Atrasadas</option>
-          <option value="concluidas">✅ Concluídas</option>
+        <input id="compras-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="comprasRenderAtivo()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
+        <select id="compras-fil-etapa" onchange="comprasRenderAtivo()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+          <option value="">🏷️ Todas as etapas</option>
+          <option value="compras">Chegada Compras</option>
+          <option value="corteGalv">Recebimento Corte Galvanizado</option>
+          <option value="art">Recebimento ART</option>
+          <option value="adesivo">Recebimento Adesivo</option>
+        </select>
+        <select id="compras-fil-status" onchange="comprasRenderAtivo()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+          <option value="">Todos (exceto concluídos)</option>
+          <option value="nao_iniciado">⚪ Não iniciados</option>
+          <option value="andamento">🔵 Em andamento</option>
+          <option value="atrasado">🔴 Atrasados</option>
+          <option value="concluido">✅ Concluídos</option>
         </select>
       </div>
-      <div id="st-compras-body"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+        <select id="compras-fil-data-campo" onchange="comprasRenderAtivo()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+          <option value="">📅 Filtrar por data: nenhum</option>
+          <option value="emissao">Data de Emissão/Venda</option>
+          <option value="etapas">Prazo Esperado da Compra</option>
+          <option value="final">Data de Finalização (Prazo Final)</option>
+        </select>
+        <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">De
+          <input type="date" id="compras-fil-data-de" onchange="comprasRenderAtivo()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
+        </label>
+        <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">Até
+          <input type="date" id="compras-fil-data-ate" onchange="comprasRenderAtivo()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
+        </label>
+        <button onclick="document.getElementById('compras-fil-data-campo').value='';document.getElementById('compras-fil-data-de').value='';document.getElementById('compras-fil-data-ate').value='';comprasRenderAtivo();" class="dash-btn-conf" style="background:#94a3b8" type="button">✕ Limpar datas</button>
+      </div>
+      <div id="compras-sec-lista">
+        <div id="compras-body"></div>
+      </div>
+      <div id="compras-sec-kanban" style="display:none">
+        <div id="compras-kanban-body" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px"></div>
+      </div>
+      <div id="compras-sec-calendario" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+          <div class="dash-mes-nav" style="margin:0">
+            <button onclick="comprasCalMov(-1)" type="button">◀</button>
+            <div class="dash-mes-label" id="compras-cal-lbl" style="min-width:150px"></div>
+            <button onclick="comprasCalMov(1)" type="button">▶</button>
+          </div>
+        </div>
+        <div id="compras-cal-body"></div>
+      </div>
     </div>
     <div id="sec-cat-PRODUCAO" style="display:none">
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
@@ -3584,6 +3630,45 @@ async function _migrarProjetosPrazoAte10Ago(){
   }
   if(marcados)toast(`${marcados} pedido(s) com Prazo Final de Finalização até 10/08 concluídos em Projetos (OS ${osMarcados.slice(0,8).join(', ')}${osMarcados.length>8?'...':''})`,'tok');
 }
+// Limpeza pontual (2026-08-03, a pedido do usuário: "remover tudo que tiver atrasado no
+// projetos e no compras e deixar o que tem pra fazer a partir de hoje apenas") — marca como
+// concluído (via checklist, mesma lógica de sempre) qualquer linha de Projetos (etapa
+// 'projeto') ou Compras (etapas compras/corteGalv/art/adesivo) cujo prazo já esteja no
+// passado (statusPedido==='atrasado'), pra sumir das 3 visões e só sobrar o que há pra fazer
+// de hoje em diante. Roda DEPOIS de _migrarProjetosPrazoAte10Ago (mesmo padrão de migração
+// 1x-por-sessão, idempotente — já concluído não entra de novo).
+async function _migrarAtrasadosProjetosComprasHoje(){
+  const hojeIso=new Date().toISOString().slice(0,10);
+  let marcados=0;
+  const osMarcados=[];
+  const infosProj=_lpPedidosElegiveis().map(p=>_projInfo(p,hojeIso)).filter(x=>x.ok);
+  for(const{p,statusPedido}of infosProj){
+    if(statusPedido!=='atrasado')continue;
+    const agora=new Date().toISOString();
+    p.projChecklist=p.projChecklist||{iniciadoEm:agora,itens:{}};
+    PROJ_CHECKLIST_ITENS.forEach(it=>{
+      const jaFeito=p.projChecklist.itens[it.key];
+      p.projChecklist.itens[it.key]=jaFeito&&jaFeito.feito?jaFeito:{feito:true,quando:agora,obs:(jaFeito&&jaFeito.obs)||'Marcado em lote — atrasado antes de hoje.'};
+    });
+    _projChecarConclusao(p);
+    await savePedidoFS(p);
+    marcados++;osMarcados.push(p.os||p.id);
+  }
+  const linhasCompras=_comprasLinhasInfo(hojeIso).filter(x=>x.statusPedido==='atrasado');
+  for(const{p,etapa}of linhasCompras){
+    const agora=new Date().toISOString();
+    p.comprasChecklist=p.comprasChecklist||{};
+    p.comprasChecklist[etapa.key]=p.comprasChecklist[etapa.key]||{iniciadoEm:agora,itens:{}};
+    COMPRAS_CHECKLIST_ITENS.forEach(it=>{
+      const jaFeito=p.comprasChecklist[etapa.key].itens[it.key];
+      p.comprasChecklist[etapa.key].itens[it.key]=jaFeito&&jaFeito.feito?jaFeito:{feito:true,quando:agora,obs:(jaFeito&&jaFeito.obs)||'Marcado em lote — atrasado antes de hoje.'};
+    });
+    _comprasChecarConclusao(p,etapa.key);
+    await savePedidoFS(p);
+    marcados++;osMarcados.push((p.os||p.id)+' ('+etapa.label+')');
+  }
+  if(marcados)toast(`${marcados} item(ns) atrasado(s) concluído(s) em Projetos/Compras (${osMarcados.slice(0,8).join(', ')}${osMarcados.length>8?'...':''})`,'tok');
+}
 async function savePedidoFS(p){
   if(!window._fbSavePedido){console.warn('Firestore não disponível');return;}
   try{await window._fbSavePedido(p);}
@@ -3598,6 +3683,7 @@ let _lpEtapasMigracaoFeita=false;
 let _freteMigracaoFeita=false;
 let _anoPrazoMigracaoFeita=false;
 let _projPrazo10AgoMigracaoFeita=false;
+let _atrasadosProjComprasMigracaoFeita=false;
 function setupRealtimeSync(){
   if(!window._fbWatchPedidos)return;
   window._fbWatchPedidos(function(snapshot){
@@ -3644,6 +3730,13 @@ function setupRealtimeSync(){
     if(!_projPrazo10AgoMigracaoFeita&&_getUserCat().isAdm){
       _projPrazo10AgoMigracaoFeita=true;
       _migrarProjetosPrazoAte10Ago().catch(e=>{_projPrazo10AgoMigracaoFeita=false;console.error('Erro ao concluir pedidos com Prazo Final até 10/08 em Projetos',e);});
+    }
+    // Limpeza pontual (2026-08-03, a pedido do usuário) — some com tudo que estiver atrasado
+    // em Projetos e Compras, deixando só o que há pra fazer a partir de hoje (ver
+    // _migrarAtrasadosProjetosComprasHoje) — só 1x por sessão, só admin, idempotente.
+    if(!_atrasadosProjComprasMigracaoFeita&&_getUserCat().isAdm){
+      _atrasadosProjComprasMigracaoFeita=true;
+      _migrarAtrasadosProjetosComprasHoje().catch(e=>{_atrasadosProjComprasMigracaoFeita=false;console.error('Erro ao concluir itens atrasados em Projetos/Compras',e);});
     }
     // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache)
     // montado ANTES dessa atualização de pedidos — editar OS/valores/vendedor num pedido
@@ -4155,7 +4248,16 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
       _projTabAtiva='lista';
       renderProjLista();
     }catch(e){console.error('Erro ao abrir Projetos',e);}},120);
-    if(isCompras)setTimeout(()=>{try{renderSetorTarefas('COMPRAS');}catch(e){console.error('Erro ao abrir Compras',e);}},120);
+    // COMPRAS ganhou visão própria em Lista/Kanban/Calendário (2026-08-03, mesmo padrão de
+    // PROJETOS) — sempre reabre na aba Lista.
+    if(isCompras)setTimeout(()=>{try{
+      document.querySelectorAll('.compras-main-tab').forEach(b=>b.classList.remove('active'));
+      document.getElementById('compras-main-tabs')?.querySelector('.compras-main-tab')?.classList.add('active');
+      const sl=document.getElementById('compras-sec-lista'),sk=document.getElementById('compras-sec-kanban'),sc=document.getElementById('compras-sec-calendario');
+      if(sl)sl.style.display='';if(sk)sk.style.display='none';if(sc)sc.style.display='none';
+      _comprasTabAtiva='lista';
+      renderComprasLista();
+    }catch(e){console.error('Erro ao abrir Compras',e);}},120);
     if(isProducaoSetor)setTimeout(()=>{try{renderSetorTarefas('PRODUÇÃO');}catch(e){console.error('Erro ao abrir Produção',e);}},120);
   }
   document.querySelectorAll('.sb-btn').forEach(b=>b.classList.remove('active'));
@@ -5146,6 +5248,11 @@ function validarAba(id){
     if(!ed.email_comprador||!ed.email_comprador.includes('@'))erros.push('E-mail do Comprador(a) não informado ou inválido');
     if(!ed.email_engenheiro||!ed.email_engenheiro.includes('@'))erros.push('E-mail do Engenheiro da Obra não informado ou inválido');
     if(!ed.os)erros.push('Nº da Ordem de Serviço não informado');
+    // Campo 8 (Categoria de Pedido, ex.: LETRAS CAIXA/LOJA/MANUTENÇÃO — ver getTiposPedido())
+    // NÃO é o mesmo que o campo 1 (Tipo do Pedido: Venda/Permuta/Garantia/etc, controla
+    // comissão — ver ed.tipo acima). Categoria já tinha o "*" visual desde sempre mas nunca
+    // foi de fato bloqueada aqui — dava pra emitir pedido sem categoria nenhuma.
+    if(!ed.tipoPedido)erros.push('Categoria de Pedido não selecionada');
   }
   if(id==='valores'){
     if(!ed.vtotal)erros.push('Valor total do pedido não informado');
@@ -6982,6 +7089,9 @@ async function submit(){
   if(!ed.email_comprador||!ed.email_comprador.includes('@'))erros.push({msg:'E-mail do Comprador(a) não informado ou inválido',aba:0,label:'Dados Gerais'});
   if(!ed.email_engenheiro||!ed.email_engenheiro.includes('@'))erros.push({msg:'E-mail do Engenheiro da Obra não informado ou inválido',aba:0,label:'Dados Gerais'});
   if(!ed.os)erros.push({msg:'Nº da Ordem de Serviço não informado',aba:0,label:'Dados Gerais'});
+  // Categoria de Pedido (campo 8, ed.tipoPedido) ≠ Tipo do Pedido (campo 1, ed.tipo, já
+  // validado acima) — ver mesma nota em validarAba().
+  if(!ed.tipoPedido)erros.push({msg:'Categoria de Pedido não selecionada',aba:0,label:'Dados Gerais'});
   // OS duplicado (2026-07-22) — só valida se for pedido novo OU se o OS mudou em relação ao
   // que já estava salvo (reabrir o mesmo pedido pra editar sem trocar o OS nunca deve travar
   // aqui, mesmo que esse OS já bata com uma linha da planilha — isso é esperado, ver
@@ -11802,6 +11912,408 @@ function _projEscHandler(e){
   if(e.key!=='Escape')return;
   const modal=document.getElementById('proj-check-modal');
   if(modal)projFecharChecklist(modal.dataset.pedidoId);
+}
+// ===================== CHECKLIST DE COMPRAS (menu COMPRAS, 2026-08-03) =====================
+// Mesmo motor do checklist de PROJETOS acima, só que o setor COMPRAS cobre 4 etapas
+// diferentes da Lista de Pedidos ao mesmo tempo (ver LP_SETORES.COMPRAS: compras/corteGalv/
+// art/adesivo — Chegada Compras, Corte Galvanizado, ART e Adesivo), não uma só. Por isso o
+// checklist aqui é guardado por ETAPA: p.comprasChecklist={<etapaKey>:{iniciadoEm,itens:{}}} —
+// cada (pedido, etapa) tem seu próprio checklist de 5 subtarefas e sua própria baixa
+// independente em p.lpBaixas[etapaKey], exatamente como o resto da Lista de Pedidos já espera.
+// Ordem das subtarefas é a que o usuário pediu, nunca reordenar.
+const COMPRAS_CHECKLIST_ITENS=[
+  {key:'cotacao',label:'COTAÇÃO'},
+  {key:'negociacao',label:'NEGOCIAÇÃO'},
+  {key:'comprado',label:'COMPRADO'},
+  {key:'esperandoChegar',label:'ESPERANDO CHEGAR'},
+  {key:'chegou',label:'CHEGOU'}
+];
+// Confere se as 5 subtarefas de UMA etapa de compra estão concluídas — se sim (e ainda não
+// tinha baixa) dá a baixa automaticamente naquela etapa específica, com data+hora exatas e a
+// marca viaChecklist:true. Só desfaz a baixa automaticamente se algum item for desmarcado
+// depois — e só quando a baixa atual tiver essa mesma marca (nunca mexe numa baixa manual
+// dada por um admin sem passar pelo checklist).
+function _comprasChecarConclusao(p,etapaKey){
+  const checklist=p.comprasChecklist&&p.comprasChecklist[etapaKey];
+  if(!checklist)return;
+  const todosFeitos=COMPRAS_CHECKLIST_ITENS.every(it=>checklist.itens[it.key]&&checklist.itens[it.key].feito);
+  const baixaAtual=p.lpBaixas&&p.lpBaixas[etapaKey];
+  if(todosFeitos&&!baixaAtual){
+    const agora=new Date();
+    p.lpBaixas=p.lpBaixas||{};
+    p.lpBaixas[etapaKey]={data:agora.toISOString().slice(0,10),dataHora:agora.toISOString(),por:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),viaChecklist:true};
+  } else if(!todosFeitos&&baixaAtual&&baixaAtual.viaChecklist){
+    delete p.lpBaixas[etapaKey];
+  }
+}
+// Status de UMA linha (pedido, etapa) no menu COMPRAS — mesma prioridade de PROJETOS:
+// concluído > atrasado (prazo já vencido sem concluir) > em andamento (checklist iniciado,
+// ao menos 1 subtarefa marcada) > não iniciado.
+function _comprasStatusLinha(p,etapa,hojeIso,itensFeitos){
+  const concluido=!!(p.lpBaixas&&p.lpBaixas[etapa.key]);
+  if(concluido)return 'concluido';
+  if(etapa.iso<hojeIso)return 'atrasado';
+  if(itensFeitos>0)return 'andamento';
+  return 'nao_iniciado';
+}
+// Monta TODAS as linhas (pedido, etapa) do setor COMPRAS — uma por etapa aplicável de cada
+// pedido elegível, igual _lpTarefasSetor, só que já com o checklist/status calculados junto
+// (mesmo papel que _projInfo tem pra Projetos).
+function _comprasLinhasInfo(hojeIso){
+  const stages=LP_SETORES.COMPRAS.stages;
+  const linhas=[];
+  _lpPedidosElegiveis().forEach(p=>{
+    const calc=_lpCalcEtapas(p);
+    if(!calc.ok)return;
+    calc.etapas.filter(e=>e.aplicavel&&stages.includes(e.key)).forEach(etapa=>{
+      const checklist=(p.comprasChecklist&&p.comprasChecklist[etapa.key])||null;
+      const itensFeitos=checklist?COMPRAS_CHECKLIST_ITENS.filter(it=>checklist.itens[it.key]&&checklist.itens[it.key].feito).length:0;
+      const statusPedido=_comprasStatusLinha(p,etapa,hojeIso,itensFeitos);
+      linhas.push({p,calc,etapa,checklist,itensFeitos,totalItens:COMPRAS_CHECKLIST_ITENS.length,statusPedido});
+    });
+  });
+  return linhas;
+}
+// Lista filtrada do menu COMPRAS — mesmo padrão de busca/status/intervalo de datas/etapa do
+// menu PROJETOS (ver _projListaFiltrada), lendo os ids próprios do toolbar (compras-fil-*).
+function _comprasListaFiltrada(ignorarPadraoOcultarConcluido){
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const busca=(document.getElementById('compras-fil-busca')?.value||'').toUpperCase().trim();
+  const filEtapa=document.getElementById('compras-fil-etapa')?.value||'';
+  const filStatus=document.getElementById('compras-fil-status')?.value||'';
+  const filDataCampo=document.getElementById('compras-fil-data-campo')?.value||'';
+  const filDataDe=document.getElementById('compras-fil-data-de')?.value||'';
+  const filDataAte=document.getElementById('compras-fil-data-ate')?.value||'';
+  const temFiltroData=!!(filDataCampo&&(filDataDe||filDataAte));
+  let linhas=_comprasLinhasInfo(hojeIso);
+  if(busca)linhas=linhas.filter(({p})=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
+  if(filEtapa)linhas=linhas.filter(x=>x.etapa.key===filEtapa);
+  if(temFiltroData){
+    if(filDataCampo==='emissao')linhas=linhas.filter(x=>_lpDataNoIntervalo(x.calc.emissaoIso,filDataDe,filDataAte));
+    else if(filDataCampo==='final')linhas=linhas.filter(x=>_lpDataNoIntervalo(x.calc.prazoIso,filDataDe,filDataAte));
+    else if(filDataCampo==='etapas')linhas=linhas.filter(x=>_lpDataNoIntervalo(x.etapa.iso,filDataDe,filDataAte));
+  }
+  if(filStatus)linhas=linhas.filter(x=>x.statusPedido===filStatus);
+  else if(!ignorarPadraoOcultarConcluido)linhas=linhas.filter(x=>x.statusPedido!=='concluido');
+  const ordem={atrasado:0,andamento:1,nao_iniciado:2,concluido:3};
+  linhas.sort((a,b)=>ordem[a.statusPedido]-ordem[b.statusPedido]||String(a.etapa.iso||'9999').localeCompare(b.etapa.iso||'9999'));
+  return linhas;
+}
+// Abre o checklist de uma etapa de compra — cria p.comprasChecklist[etapaKey] na hora se
+// ainda não existir (isso já conta como "iniciar a compra": a partir daqui o ritmo por hora
+// útil começa a contar). Chave de linha é sempre (pedidoId, etapaKey) — nunca só pedidoId,
+// porque o mesmo pedido pode ter até 4 compras diferentes em andamento ao mesmo tempo.
+async function comprasIniciarOuAbrirChecklist(pedidoId,etapaKey){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  if(!p.comprasChecklist||!p.comprasChecklist[etapaKey]){
+    p.comprasChecklist=p.comprasChecklist||{};
+    p.comprasChecklist[etapaKey]={iniciadoEm:new Date().toISOString(),itens:{}};
+    await savePedidoFS(p);
+    if(typeof comprasRenderAtivo==='function')comprasRenderAtivo();
+  }
+  comprasAbrirChecklist(pedidoId,etapaKey);
+}
+// Modal do checklist — reaberto (re-renderizado do zero) a cada marcação/desmarcação de item,
+// pra sempre refletir o progresso e o ritmo (horas por subtarefa) atualizados na hora. Ritmo
+// = horas úteis entre o início do checklist e o fim do expediente do dia do PRAZO DAQUELA
+// ETAPA (o "tempo esperado de chegada" da compra, ex.: Chegada Compras/Corte Galvanizado/ART/
+// Adesivo — cada uma com seu próprio prazo), dividido igualmente pelas 5 subtarefas — mesmo
+// critério de PROJETOS (ver _horasUteisEntre/_addHorasUteis), só trocando qual prazo entra na
+// conta.
+function comprasAbrirChecklist(pedidoId,etapaKey){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const calc=_lpCalcEtapas(p);
+  if(!calc.ok){toast('Não foi possível calcular o prazo deste pedido','terr');return;}
+  const etapa=calc.etapas.find(e=>e.key===etapaKey);
+  if(!etapa){toast('Etapa não encontrada neste pedido','terr');return;}
+  if(!p.comprasChecklist)p.comprasChecklist={};
+  if(!p.comprasChecklist[etapaKey])p.comprasChecklist[etapaKey]={iniciadoEm:new Date().toISOString(),itens:{}};
+  const checklist=p.comprasChecklist[etapaKey];
+  const inicioDate=new Date(checklist.iniciadoEm);
+  const prazoFimDia=new Date(etapa.iso+'T17:30:00');
+  const horasTotais=_horasUteisEntre(inicioDate,prazoFimDia);
+  const horasPorItem=horasTotais>0?horasTotais/COMPRAS_CHECKLIST_ITENS.length:0;
+  const agora=new Date();
+
+  const old=document.getElementById('compras-check-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='compras-check-modal';
+  modal.dataset.pedidoId=pedidoId;
+  modal.dataset.etapaKey=etapaKey;
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)comprasFecharChecklist(pedidoId,etapaKey);};
+  document.removeEventListener('keydown',_comprasEscHandler);
+  document.addEventListener('keydown',_comprasEscHandler);
+
+  const bannerPacing=horasTotais>0
+    ?`<div style="font-size:.74rem;color:var(--ink3);margin-bottom:12px;padding:8px 10px;background:#f0f9ff;border-radius:8px">⏱️ <strong>${horasTotais.toFixed(1)}h úteis</strong> disponíveis pra terminar esta compra inteira, até o prazo esperado de chegada (${fmtD(etapa.iso)} 17:30). É só uma referência de ritmo — atrasar uma subtarefa interna não significa que ${etapa.label} está atrasada na Lista de Pedidos, que só olha o prazo final daquela etapa.</div>`
+    :`<div style="font-size:.74rem;color:#b45309;margin-bottom:12px;padding:8px 10px;background:#fef3c7;border-radius:8px">⚠️ O prazo desta compra (${fmtD(etapa.iso)}) já passou ou está muito próximo — sem horas úteis sobrando pra calcular ritmo por subtarefa.</div>`;
+
+  const metas=horasTotais>0?COMPRAS_CHECKLIST_ITENS.map((_,i)=>_addHorasUteis(inicioDate,horasPorItem*(i+1))):[];
+  function _comprasFmtDataHora(d){return d.toLocaleDateString('pt-BR')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+  const linhas=COMPRAS_CHECKLIST_ITENS.map((item,idx)=>{
+    const dado=checklist.itens[item.key]||{feito:false,quando:null,obs:''};
+    const janelaIni=horasTotais>0?(idx===0?inicioDate:metas[idx-1]):null;
+    const janelaFim=horasTotais>0?metas[idx]:null;
+    const metaAtrasada=!!(janelaFim&&!dado.feito&&agora>janelaFim);
+    let janelaTxt='',ritmoCor='var(--ink4)';
+    let badgeTxt=`${horasPorItem.toFixed(2)}h`,badgeCor='#94a3b8';
+    if(janelaIni&&janelaFim){
+      janelaTxt=`⏱️ Janela desta subtarefa: ${_comprasFmtDataHora(janelaIni)} → ${_comprasFmtDataHora(janelaFim)}`;
+      if(dado.feito){
+        badgeTxt=`✅ ${horasPorItem.toFixed(2)}h alocadas`;badgeCor='#16a34a';
+      } else if(metaAtrasada){
+        const horasAtraso=_horasUteisEntre(janelaFim,agora);
+        badgeTxt=`🔴 ${horasAtraso.toFixed(2)}h de atraso`;badgeCor='#dc2626';ritmoCor='#dc2626';
+      } else {
+        const horasRestantes=_horasUteisEntre(agora,janelaFim);
+        badgeTxt=`⏳ ${horasRestantes.toFixed(2)}h restantes`;badgeCor='#0284c7';ritmoCor='#0284c7';
+      }
+    } else {
+      badgeTxt=dado.feito?`✅ ${horasPorItem.toFixed(2)}h alocadas`:`${horasPorItem.toFixed(2)}h alocadas (sem prazo útil sobrando)`;
+    }
+    const concluidoTxt=dado.feito?`✅ Concluído em ${_comprasFmtDataHora(new Date(dado.quando))}`:'';
+    return `<div style="border:1px solid ${metaAtrasada?'#fca5a5':'var(--border-lt)'};background:${metaAtrasada?'#fef2f2':'#fff'};border-radius:10px;padding:12px;margin-bottom:8px">
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+        <input type="checkbox" ${dado.feito?'checked':''} onchange="comprasMarcarItem('${pedidoId}','${etapaKey}','${item.key}',this.checked)" style="width:18px;height:18px;margin-top:1px;flex-shrink:0;accent-color:#16a34a">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="font-size:.84rem;font-weight:700;color:var(--ink)">${idx+1}. ${item.label}</div>
+            <span style="background:${badgeCor}1a;color:${badgeCor};font-weight:800;font-size:.72rem;padding:2px 9px;border-radius:20px;white-space:nowrap;flex-shrink:0">${badgeTxt}</span>
+          </div>
+          ${concluidoTxt?`<div style="font-size:.68rem;color:#16a34a;font-weight:700;margin-top:2px">${concluidoTxt}</div>`:''}
+          ${janelaTxt?`<div style="font-size:.68rem;color:${ritmoCor};margin-top:2px">${janelaTxt}</div>`:''}
+        </div>
+      </label>
+      <textarea data-item-key="${item.key}" placeholder="Observação (opcional, pra lembrar depois)..." onblur="comprasSalvarObs('${pedidoId}','${etapaKey}','${item.key}',this.value)" style="width:100%;margin-top:8px;padding:7px 9px;border-radius:7px;border:1px solid #e5e7eb;font-size:.78rem;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:36px">${(dado.obs||'').replace(/</g,'&lt;')}</textarea>
+    </div>`;
+  }).join('');
+
+  const feitos=COMPRAS_CHECKLIST_ITENS.filter(it=>checklist.itens[it.key]&&checklist.itens[it.key].feito).length;
+  const concluidoTotal=feitos===COMPRAS_CHECKLIST_ITENS.length;
+  const{isAdm}=_getUserCat();
+
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:560px;width:92%;max-height:88vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px">
+      <div>
+        <div style="font-size:1rem;font-weight:800;color:#1a1f36">🛒 Checklist de Compra — ${etapa.label} · OS ${p.os||'—'}</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${p.cliente||'—'}${p.job?' · '+p.job:''} · Prazo esperado: ${fmtD(etapa.iso)}</div>
+      </div>
+      <button onclick="comprasFecharChecklist('${pedidoId}','${etapaKey}')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar (Esc)">✕</button>
+    </div>
+    ${concluidoTotal?`<div style="padding:10px 12px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.8rem;font-weight:700;margin-bottom:12px">✅ Todas as subtarefas concluídas — ${etapa.label} já foi dada como concluída automaticamente.</div>`:''}
+    <div style="font-size:.74rem;color:var(--ink4);margin-bottom:6px">${feitos}/${COMPRAS_CHECKLIST_ITENS.length} concluídas</div>
+    <div style="background:#e2e8f0;border-radius:20px;height:8px;overflow:hidden;margin-bottom:14px"><div style="background:${concluidoTotal?'#16a34a':'#00bac7'};height:100%;width:${(feitos/COMPRAS_CHECKLIST_ITENS.length*100)}%"></div></div>
+    ${bannerPacing}
+    <div>${linhas}</div>
+    ${isAdm&&!concluidoTotal?`<button onclick="comprasFecharChecklist('${pedidoId}','${etapaKey}');lpDarBaixa('${pedidoId}','${etapaKey}','COMPRAS');if(typeof comprasRenderAtivo==='function')comprasRenderAtivo();" class="dash-btn-conf" style="background:#94a3b8;width:100%;margin-top:6px" type="button">🔒 Admin: marcar concluído manualmente (sem exigir o checklist)</button>`:''}
+  </div>`;
+  document.body.appendChild(modal);
+}
+async function comprasMarcarItem(pedidoId,etapaKey,itemKey,feito){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  p.comprasChecklist=p.comprasChecklist||{};
+  p.comprasChecklist[etapaKey]=p.comprasChecklist[etapaKey]||{iniciadoEm:new Date().toISOString(),itens:{}};
+  p.comprasChecklist[etapaKey].itens[itemKey]=p.comprasChecklist[etapaKey].itens[itemKey]||{feito:false,quando:null,obs:''};
+  p.comprasChecklist[etapaKey].itens[itemKey].feito=feito;
+  p.comprasChecklist[etapaKey].itens[itemKey].quando=feito?new Date().toISOString():null;
+  _comprasChecarConclusao(p,etapaKey);
+  await savePedidoFS(p);
+  comprasAbrirChecklist(pedidoId,etapaKey);
+  if(typeof comprasRenderAtivo==='function')comprasRenderAtivo();
+}
+async function comprasSalvarObs(pedidoId,etapaKey,itemKey,texto){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p)return;
+  p.comprasChecklist=p.comprasChecklist||{};
+  p.comprasChecklist[etapaKey]=p.comprasChecklist[etapaKey]||{iniciadoEm:new Date().toISOString(),itens:{}};
+  p.comprasChecklist[etapaKey].itens[itemKey]=p.comprasChecklist[etapaKey].itens[itemKey]||{feito:false,quando:null,obs:''};
+  p.comprasChecklist[etapaKey].itens[itemKey].obs=texto;
+  await savePedidoFS(p);
+}
+// Fecha o checklist salvando primeiro qualquer observação ainda não gravada — mesmo motivo de
+// projFecharChecklist (blur da textarea nem sempre dispara a tempo ao remover o modal do DOM).
+function comprasFecharChecklist(pedidoId,etapaKey){
+  const modal=document.getElementById('compras-check-modal');
+  if(modal){
+    modal.querySelectorAll('textarea[data-item-key]').forEach(ta=>{
+      comprasSalvarObs(pedidoId,etapaKey,ta.dataset.itemKey,ta.value);
+    });
+    modal.remove();
+  }
+  document.removeEventListener('keydown',_comprasEscHandler);
+}
+function _comprasEscHandler(e){
+  if(e.key!=='Escape')return;
+  const modal=document.getElementById('compras-check-modal');
+  if(modal)comprasFecharChecklist(modal.dataset.pedidoId,modal.dataset.etapaKey);
+}
+// ===================== MENU COMPRAS — LISTA/KANBAN/CALENDÁRIO (2026-08-03) =====================
+// Mesmo estilo do menu PROJETOS (ver comentário lá em cima), só que cada "cartão" é uma linha
+// (pedido, etapa) em vez de só um pedido — um mesmo pedido pode aparecer em até 4 linhas
+// diferentes (uma por etapa de compra aplicável a ele).
+let _comprasTabAtiva='lista';
+function comprasSetTab(tab,btn){
+  document.querySelectorAll('.compras-main-tab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  const sl=document.getElementById('compras-sec-lista'),sk=document.getElementById('compras-sec-kanban'),sc=document.getElementById('compras-sec-calendario');
+  if(sl)sl.style.display=tab==='lista'?'':'none';
+  if(sk)sk.style.display=tab==='kanban'?'':'none';
+  if(sc)sc.style.display=tab==='calendario'?'':'none';
+  _comprasTabAtiva=tab;
+  comprasRenderAtivo();
+}
+function comprasRenderAtivo(){
+  if(_comprasTabAtiva==='kanban')renderComprasKanban();
+  else if(_comprasTabAtiva==='calendario')renderComprasCalendario();
+  else renderComprasLista();
+}
+function renderComprasLista(){
+  const body=document.getElementById('compras-body');
+  if(!body)return;
+  if(!_isSetorUser('COMPRAS')){
+    body.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700;font-size:.85rem">🔒 ACESSO NÃO PERMITIDO — apenas Compras ou Administrador podem ver esta lista.</div>';
+    return;
+  }
+  const linhas=_comprasListaFiltrada();
+  if(!linhas.length){body.innerHTML='<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhuma compra encontrada.</div>';return;}
+  body.innerHTML=`<div style="overflow-x:auto"><table class="tbl-acoes-fixa" style="width:100%;border-collapse:collapse;font-size:.82rem">
+    <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
+      <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">JOB</th>
+      <th style="padding:8px 10px">Etapa</th><th style="padding:8px 10px">Prazo Esperado</th><th style="padding:8px 10px">Checklist</th><th style="padding:8px 10px">Status</th><th style="padding:8px 10px"></th>
+    </tr></thead><tbody>
+    ${linhas.map(x=>{
+      const{p,etapa,itensFeitos,totalItens,statusPedido}=x;
+      const corLinha=statusPedido==='atrasado'?'color:#dc2626':'';
+      const pct=Math.round(itensFeitos/totalItens*100);
+      const acaoLbl=statusPedido==='concluido'?'👁️ Ver Checklist':itensFeitos>0?'🔄 Retomar Compra':'🚀 Iniciar Compra';
+      const corEtapa=_lpCorEtapa(etapa.key);
+      return `<tr onclick="comprasIniciarOuAbrirChecklist('${p.id}','${etapa.key}')" style="border-bottom:1px solid var(--border-lt);cursor:pointer;${corLinha}">
+        <td style="padding:8px 10px;font-weight:700;${corLinha}">${p.os||'—'}</td>
+        <td style="padding:8px 10px;${corLinha}" title="${(p.cliente||'').replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.cliente||'—'}</div></td>
+        <td style="padding:8px 10px;${corLinha}">${p.job||'—'}</td>
+        <td style="padding:8px 10px"><span style="background:${corEtapa}22;color:${corEtapa};padding:3px 8px;border-radius:20px;font-size:.68rem;font-weight:700;white-space:nowrap">${etapa.label}</span></td>
+        <td style="padding:8px 10px;${corLinha}">${fmtD(etapa.iso)}</td>
+        <td style="padding:8px 10px"><div style="background:#e2e8f0;border-radius:20px;height:7px;width:90px;overflow:hidden"><div style="background:${statusPedido==='atrasado'?'#dc2626':'#00bac7'};height:100%;width:${pct}%"></div></div><div style="font-size:.68rem;color:var(--ink4);margin-top:2px">${itensFeitos}/${totalItens}</div></td>
+        <td style="padding:8px 10px;font-weight:700;color:${_projStatusCor(statusPedido)}">${_projStatusLabel(statusPedido)}</td>
+        <td style="padding:8px 10px;text-align:right"><button onclick="event.stopPropagation();comprasIniciarOuAbrirChecklist('${p.id}','${etapa.key}')" class="dash-btn-conf" style="background:#0891b2;white-space:nowrap">${acaoLbl}</button></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table></div>`;
+}
+function renderComprasKanban(){
+  const wrap=document.getElementById('compras-kanban-body');
+  if(!wrap)return;
+  if(!_isSetorUser('COMPRAS')){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const linhas=_comprasListaFiltrada(true);
+  const colunas=[{key:'nao_iniciado',label:'⚪ Não Iniciado'},{key:'andamento',label:'🔵 Em Andamento'},{key:'atrasado',label:'🔴 Atrasado'},{key:'concluido',label:'✅ Concluído'}];
+  wrap.innerHTML=colunas.map(col=>{
+    const itens=linhas.filter(x=>x.statusPedido===col.key).sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso));
+    const cor=_projStatusCor(col.key);
+    return `<div style="flex:0 0 240px;background:#f8fafc;border-radius:12px;border:1px solid var(--border-lt);display:flex;flex-direction:column;max-height:70vh">
+      <div style="padding:10px 12px;border-bottom:2px solid ${cor};font-size:.75rem;font-weight:800;color:${cor};display:flex;justify-content:space-between;align-items:center">
+        <span>${col.label}</span><span style="background:${cor};color:#fff;border-radius:20px;padding:1px 8px;font-size:.68rem">${itens.length}</span>
+      </div>
+      <div style="padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px">
+        ${itens.length?itens.map(x=>{
+          const{p,etapa,itensFeitos,totalItens}=x;
+          const corEtapa=_lpCorEtapa(etapa.key);
+          return `<div onclick="comprasIniciarOuAbrirChecklist('${p.id}','${etapa.key}')" style="background:#fff;border:1px solid ${col.key==='atrasado'?'#dc2626':'var(--border-lt)'};border-radius:10px;padding:10px;cursor:pointer">
+            <div style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'}</div>
+            <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(p.cliente||'').replace(/"/g,'&quot;')}">${p.cliente||'—'}</div>
+            ${p.job?`<div style="font-size:.66rem;color:var(--ink4);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(p.job).replace(/"/g,'&quot;')}">JOB: ${p.job}</div>`:''}
+            <span style="background:${corEtapa}22;color:${corEtapa};padding:2px 7px;border-radius:20px;font-size:.62rem;font-weight:700;white-space:nowrap">${etapa.label}</span>
+            <div style="font-size:.68rem;color:var(--ink4);margin-top:3px">Prazo: <strong>${fmtD(etapa.iso)}</strong></div>
+            <div style="font-size:.68rem;font-weight:700;margin-top:2px;color:${cor}">${itensFeitos}/${totalItens} subtarefas</div>
+          </div>`;
+        }).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.72rem">—</div>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+let _comprasCalMes={y:new Date().getFullYear(),m:new Date().getMonth()+1};
+function comprasCalMov(dir){
+  _comprasCalMes.m+=dir;
+  if(_comprasCalMes.m>12){_comprasCalMes.m=1;_comprasCalMes.y++;}
+  if(_comprasCalMes.m<1){_comprasCalMes.m=12;_comprasCalMes.y--;}
+  renderComprasCalendario();
+}
+function renderComprasCalendario(){
+  const lbl=document.getElementById('compras-cal-lbl');
+  const{y,m}=_comprasCalMes;
+  if(lbl)lbl.textContent=MESES_PT[m]+' '+y;
+  const body=document.getElementById('compras-cal-body');
+  if(!body)return;
+  if(!_isSetorUser('COMPRAS')){body.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const porDia={};
+  _comprasListaFiltrada(true).forEach(x=>{
+    const partes=x.etapa.iso.split('-');
+    if(parseInt(partes[0],10)===y&&parseInt(partes[1],10)===m){
+      if(!porDia[x.etapa.iso])porDia[x.etapa.iso]=[];
+      porDia[x.etapa.iso].push(x);
+    }
+  });
+  const primeiroDia=new Date(y,m-1,1);
+  const diasNoMes=new Date(y,m,0).getDate();
+  const offset=primeiroDia.getDay();
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const nomesFeriados=getFeriadosComNome(y);
+  const cabecalho=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map(d=>`<div style="text-align:center;font-size:.68rem;font-weight:700;color:var(--ink4);padding:6px 0">${d}</div>`).join('');
+  let celulas=[];
+  for(let i=0;i<offset;i++)celulas.push('<div></div>');
+  for(let d=1;d<=diasNoMes;d++){
+    const iso=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const itens=porDia[iso]||[];
+    const ehHoje=iso===hojeIso;
+    const nomeFeriado=nomesFeriados[iso];
+    celulas.push(`<div onclick="comprasAbrirDia('${iso}')" title="${nomeFeriado?('Feriado: '+nomeFeriado).replace(/"/g,'&quot;'):''}" style="min-height:88px;min-width:0;overflow:hidden;border:1px solid ${nomeFeriado?'#f59e0b':'var(--border-lt)'};border-radius:8px;padding:5px;cursor:pointer;transition:box-shadow .15s;${nomeFeriado?'background:#fef3c7':(ehHoje?'background:var(--brand-xlt);border-color:var(--brand)':'background:#fff')}" onmouseover="this.style.boxShadow='0 2px 10px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow='none'">
+      <div style="font-size:.7rem;font-weight:700;color:${nomeFeriado?'#b45309':(ehHoje?'var(--brand-d)':'var(--ink4)')}">${d}</div>
+      ${nomeFeriado?`<div style="font-size:.6rem;color:#b45309;font-weight:700;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎌 ${nomeFeriado}</div>`:''}
+      <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
+        ${itens.slice(0,3).map(x=>`<div onclick="event.stopPropagation();comprasIniciarOuAbrirChecklist('${x.p.id}','${x.etapa.key}')" title="OS ${x.p.os||''} — ${(x.p.cliente||'').replace(/"/g,'&quot;')}${x.p.job?' — JOB '+String(x.p.job).replace(/"/g,'&quot;'):''} — ${x.etapa.label}" style="cursor:pointer;font-size:.6rem;background:${_projStatusCor(x.statusPedido)}22;color:${_projStatusCor(x.statusPedido)};border-radius:4px;padding:1px 4px;margin-bottom:1px">
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${x.p.os||''} · ${x.p.cliente||'—'}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.85">${x.etapa.label} · ${x.itensFeitos}/${x.totalItens}</div>
+        </div>`).join('')}
+        ${itens.length>3?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${itens.length-3} outro(s) — ver dia</div>`:''}
+      </div>
+    </div>`);
+  }
+  body.innerHTML=`<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">${cabecalho}${celulas.join('')}</div>`;
+}
+function comprasAbrirDia(iso){
+  const itensDia=_comprasListaFiltrada(true).filter(x=>x.etapa.iso===iso);
+  itensDia.sort((a,b)=>String(a.p.os||'').localeCompare(String(b.p.os||''),'pt-BR',{numeric:true}));
+  const old=document.getElementById('compras-dia-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='compras-dia-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  const dataFmt=new Date(iso+'T00:00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+  const nomeFeriado=getFeriadosComNome(parseInt(iso.slice(0,4),10))[iso];
+  const avisoFeriado=nomeFeriado?`<div style="padding:10px 12px;background:#fef3c7;color:#92400e;border-radius:8px;font-size:.78rem;font-weight:700;margin-bottom:12px">🎌 Feriado: ${nomeFeriado}</div>`:'';
+  const corpo=itensDia.length?itensDia.map(x=>{
+    const cor=_projStatusCor(x.statusPedido);
+    const corEtapa=_lpCorEtapa(x.etapa.key);
+    return `<div onclick="document.getElementById('compras-dia-modal').remove();comprasIniciarOuAbrirChecklist('${x.p.id}','${x.etapa.key}')" style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+      <span style="background:${cor}22;color:${cor};padding:3px 8px;border-radius:20px;font-size:.68rem;font-weight:700;white-space:nowrap;flex-shrink:0">${_projStatusLabel(x.statusPedido)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${x.p.cliente||'—'}</div>
+        <div style="font-size:.7rem;color:var(--ink4)"><span style="color:${corEtapa};font-weight:700">${x.etapa.label}</span> · ${x.p.job||''} · ${x.itensFeitos}/${x.totalItens} subtarefas</div>
+      </div>
+    </div>`;
+  }).join(''):'<div style="text-align:center;padding:30px;color:var(--ink4);font-size:.85rem">Nenhuma compra programada pra este dia.</div>';
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:540px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:10px">
+      <div style="font-size:1rem;font-weight:800;color:#1a1f36;text-transform:capitalize">📅 ${dataFmt}</div>
+      <button onclick="document.getElementById('compras-dia-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
+    </div>
+    ${avisoFeriado}
+    ${corpo}
+  </div>`;
+  document.body.appendChild(modal);
 }
 // Um dia (ISO) está "dentro" do intervalo De/Até — De/Até vazios não restringem daquele lado
 // (só De = "a partir de"; só Até = "até"; os dois vazios nunca chama esta função porque quem
@@ -17150,14 +17662,28 @@ function finVerClienteHistorico(nome){
 // de Cliente) de {nome, palavras, separarFranqueado}. Cada grupo casa por palavra-chave
 // contra o Cliente OU o JOB do pedido (JOB às vezes identifica a marca melhor que a razão
 // social/nome do cliente, que pode vir só com o nome do shopping/endereço).
+// C&A e ARCELOR MITTAL entraram na lista padrão (2026-08-03, a pedido do usuário — apareciam
+// duplicados por unidade em Faturamento por Cliente, ex.: "C&A CATANDUVA SP CTV" e "C&A
+// BLUMENAU SC BLK" como linhas separadas). Nenhuma das duas tem modelo de franquia, então
+// separarFranqueado fica false — soma tudo junto, igual BOB'S.
 function _finGruposPadrao(){
   return [
     {nome:'BURGER KING',palavras:['BURGER KING'],separarFranqueado:true},
-    {nome:"BOB'S",palavras:["BOB'S","BOBS"],separarFranqueado:false}
+    {nome:"BOB'S",palavras:["BOB'S","BOBS"],separarFranqueado:false},
+    {nome:'C&A',palavras:['C&A'],separarFranqueado:false},
+    {nome:'ARCELOR MITTAL',palavras:['ARCELOR MITTAL','ARCELORMITTAL'],separarFranqueado:false}
   ];
 }
 function getGruposClienteFinanceiro(){
-  return (cfg.gruposClienteFinanceiro&&cfg.gruposClienteFinanceiro.length)?cfg.gruposClienteFinanceiro:_finGruposPadrao();
+  if(!cfg.gruposClienteFinanceiro||!cfg.gruposClienteFinanceiro.length)return _finGruposPadrao();
+  // Junta grupos padrão novos (ex.: C&A/ARCELOR MITTAL, adicionados 2026-08-03) que ainda não
+  // estão numa config já salva antes deles existirem — sem isso, quem já tinha aberto
+  // Configurações → Grupos de Cliente antes ficava preso pra sempre na lista antiga, nunca
+  // ganhando os grupos padrão adicionados depois no código. Nunca sobrescreve o que o admin
+  // já customizou (renomeou/removeu) — só ACRESCENTA o que estiver faltando por nome.
+  const nomesExistentes=new Set(cfg.gruposClienteFinanceiro.map(g=>(g.nome||'').toUpperCase()));
+  const faltando=_finGruposPadrao().filter(g=>!nomesExistentes.has(g.nome.toUpperCase()));
+  return faltando.length?[...cfg.gruposClienteFinanceiro,...faltando]:cfg.gruposClienteFinanceiro;
 }
 function _finGrupoCliente(item){
   const cliente=(item.cliente||'').toUpperCase();
@@ -17177,15 +17703,66 @@ function _finGrupoCliente(item){
   return item.cliente||'—'; // sem grupo cadastrado pra essa palavra-chave: cliente individual, como sempre foi
 }
 // Faturamento por Cliente — painel em Visão Comercial → Gráficos (2026-08-01, a pedido do
-// usuário). Agrupa as vendas por MARCA reaproveitando o mesmo motor de Grupos de Cliente do
-// Financeiro (_finGrupoCliente logo acima — casa palavra-chave contra Cliente OU JOB, porque
-// o Cliente é a razão social/CNPJ e o JOB geralmente é quem identifica a marca de verdade:
-// "BURGER KING...", "BOB'S...", "ARCELOR MITTAL..." etc.) cruzada com a Categoria de Pedido
-// (campo já existente, ex.: FRANQUEADO SHOPPING/DRIVE) — cada combinação marca+categoria com
-// venda vira uma linha, mês a mês + acumulado do ano. Fonte de dados: getVendaRowsMerged(), a
-// MESMA base usada em Vendas do Mês/Metas/Comissões — nunca diverge dos números que já
-// existem em outro lugar do sistema. Não depende de ano (o sistema só tem dado corrente de um
-// ano por vez, mesmo princípio já usado em getVendasMes/gcRenderGeralPaineis).
+// usuário; reformulado em 2026-08-03 pra virar hierárquico + ganhar gráfico de verdade).
+// Agrupa as vendas por MARCA reaproveitando o mesmo motor de Grupos de Cliente do Financeiro
+// (_finGrupoCliente — casa palavra-chave contra Cliente OU JOB, porque o Cliente é a razão
+// social/CNPJ e o JOB geralmente é quem identifica a marca de verdade: "BURGER KING...",
+// "BOB'S...", "C&A...", "ARCELOR MITTAL..." etc.) — cada MARCA vira uma linha-TOTAL, com a
+// Categoria de Pedido dela quebrada em sub-linhas por baixo (só quando a marca tiver mais de
+// 1 categoria — senão a sub-linha só repetiria o total, sem ganho nenhum). Fonte de dados:
+// getVendaRowsMerged(), a MESMA base usada em Vendas do Mês/Metas/Comissões.
+//
+// BURGER KING tem um caso especial (a pedido do usuário, 2026-08-03): só a rede ZAMP (lojas
+// próprias — identificada pela Categoria de Pedido citando "ZAMP", ex.: "LOJA NOVA ZAMP")
+// entra no bucket consolidado "BURGER KING". Tudo que NÃO tiver esse sinal de ZAMP é tratado
+// como franqueado — cada franqueado é uma razão social/CNPJ diferente pagando, então continua
+// separado por loja (nunca se mistura com outro franqueado nem com o bucket ZAMP), com a
+// Categoria de Pedido normalizada pra "LOJA FRANQUEADO" quando a categoria original não já diz
+// isso explicitamente (ver _fatClienteCategoriaDisplay). Essa regra vale só aqui — o
+// _finGrupoCliente/Concentração por Cliente do Financeiro continua com o critério antigo
+// (categoria contém "FRANQUEADO"), pra não mudar um número financeiro já validado sem pedido
+// explícito pra isso.
+function _fatClienteEhBurgerKing(r){
+  const cliente=(r.cl||'').toUpperCase();
+  const job=(r.job||'').toUpperCase();
+  return cliente.includes('BURGER KING')||job.includes('BURGER KING');
+}
+function _fatClienteGrupoNome(r){
+  if(_fatClienteEhBurgerKing(r)){
+    const categoria=(r.cat||'').toUpperCase();
+    return categoria.includes('ZAMP')?'BURGER KING':(r.cl||'—');
+  }
+  return _finGrupoCliente({cliente:r.cl,job:r.job,categoria:r.cat});
+}
+function _fatClienteCategoriaDisplay(r){
+  if(_fatClienteEhBurgerKing(r)){
+    const categoria=(r.cat||'').toUpperCase();
+    if(categoria.includes('ZAMP'))return r.cat||'—';
+    return categoria.includes('FRANQUEADO')?(r.cat||'—'):'LOJA FRANQUEADO';
+  }
+  return r.cat||'—';
+}
+function _fatClienteAgrupar(){
+  const grupos={};
+  getVendaRowsMerged().forEach(r=>{
+    if(!r.m||r.m<1||r.m>12)return;
+    const nomeGrupo=_fatClienteGrupoNome(r);
+    const categoria=_fatClienteCategoriaDisplay(r);
+    if(!grupos[nomeGrupo])grupos[nomeGrupo]={nome:nomeGrupo,br:Array(12).fill(0),lq:Array(12).fill(0),categorias:{}};
+    const g=grupos[nomeGrupo];
+    g.br[r.m-1]+=r.br||0;
+    g.lq[r.m-1]+=r.lq||0;
+    if(!g.categorias[categoria])g.categorias[categoria]={categoria,br:Array(12).fill(0),lq:Array(12).fill(0)};
+    const c=g.categorias[categoria];
+    c.br[r.m-1]+=r.br||0;
+    c.lq[r.m-1]+=r.lq||0;
+  });
+  return Object.values(grupos).map(g=>({
+    nome:g.nome,br:g.br,lq:g.lq,
+    totalBr:g.br.reduce((a,b)=>a+b,0),totalLq:g.lq.reduce((a,b)=>a+b,0),
+    categorias:Object.values(g.categorias).map(c=>({...c,totalBr:c.br.reduce((a,b)=>a+b,0),totalLq:c.lq.reduce((a,b)=>a+b,0)}))
+  }));
+}
 let _fatClienteModo='br';
 function setFatClienteModo(modo){
   _fatClienteModo=modo;
@@ -17196,35 +17773,64 @@ function setFatClienteModo(modo){
 function renderFaturamentoPorCliente(){
   const tbl=document.getElementById('gc-fatcli-table');
   if(!tbl)return;
-  const linhas={};
-  getVendaRowsMerged().forEach(r=>{
-    if(!r.m||r.m<1||r.m>12)return;
-    const marca=_finGrupoCliente({cliente:r.cl,job:r.job,categoria:r.cat});
-    const categoria=r.cat||'—';
-    const key=marca+'|||'+categoria;
-    if(!linhas[key])linhas[key]={marca,categoria,br:Array(12).fill(0),lq:Array(12).fill(0)};
-    linhas[key].br[r.m-1]+=r.br||0;
-    linhas[key].lq[r.m-1]+=r.lq||0;
-  });
-  const arr=Object.values(linhas).map(l=>({...l,totalBr:l.br.reduce((a,b)=>a+b,0),totalLq:l.lq.reduce((a,b)=>a+b,0)}));
   const campo=_fatClienteModo;
-  if(!arr.length){
+  const grupos=_fatClienteAgrupar();
+  if(!grupos.length){
     tbl.innerHTML='<tbody><tr><td style="padding:16px 4px;color:#94a3b8;font-size:.85rem">Nenhuma venda encontrada.</td></tr></tbody>';
+    if(gcCharts.fatcli){try{gcCharts.fatcli.destroy();}catch(e){}gcCharts.fatcli=null;}
     return;
   }
-  arr.sort((a,b)=>(campo==='br'?b.totalBr-a.totalBr:b.totalLq-a.totalLq));
+  grupos.sort((a,b)=>(campo==='br'?b.totalBr-a.totalBr:b.totalLq-a.totalLq));
+  grupos.forEach(g=>g.categorias.sort((a,b)=>(campo==='br'?b.totalBr-a.totalBr:b.totalLq-a.totalLq)));
+
   const fmtCel=v=>v?fmtR(v):'<span style="color:#cbd5e1">—</span>';
   const head=`<thead><tr><th>Cliente / Marca</th><th>Categoria</th>${GC_MESES_S.map(m=>`<th style="text-align:right">${m}</th>`).join('')}<th style="text-align:right">Acumulado</th></tr></thead>`;
-  const body=arr.map(l=>{
-    const meses=l[campo];
-    const total=campo==='br'?l.totalBr:l.totalLq;
-    return `<tr><td style="font-weight:700">${l.marca}</td><td style="color:#64748b">${l.categoria}</td>${meses.map(v=>`<td style="text-align:right">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:800">${fmtR(total)}</td></tr>`;
+  const body=grupos.map(g=>{
+    const meses=g[campo];
+    const total=campo==='br'?g.totalBr:g.totalLq;
+    const linhaGrupo=`<tr style="background:#f8fafc"><td style="font-weight:800">${g.nome}</td><td style="color:#94a3b8;font-size:.7rem;font-weight:700">TOTAL</td>${meses.map(v=>`<td style="text-align:right;font-weight:800">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:800">${fmtR(total)}</td></tr>`;
+    // Sub-linha por Categoria de Pedido só aparece quando a marca tem MAIS de uma categoria —
+    // com uma só, a sub-linha ficaria idêntica ao total do grupo (sem ganho, só poluição visual).
+    const subLinhas=g.categorias.length>1?g.categorias.map(c=>{
+      const mesesC=c[campo];
+      const totalC=campo==='br'?c.totalBr:c.totalLq;
+      return `<tr><td style="padding-left:22px;color:#94a3b8;font-size:.72rem">↳</td><td style="color:#64748b">${c.categoria}</td>${mesesC.map(v=>`<td style="text-align:right">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:700">${fmtR(totalC)}</td></tr>`;
+    }).join(''):'';
+    return linhaGrupo+subLinhas;
   }).join('');
   const totMeses=Array(12).fill(0);
-  arr.forEach(l=>l[campo].forEach((v,i)=>totMeses[i]+=v));
+  grupos.forEach(g=>g[campo].forEach((v,i)=>totMeses[i]+=v));
   const totGeral=totMeses.reduce((a,b)=>a+b,0);
-  const foot=`<tfoot><tr><td colspan="2" style="font-weight:800">TOTAL</td>${totMeses.map(v=>`<td style="text-align:right;font-weight:800">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:800">${fmtR(totGeral)}</td></tr></tfoot>`;
+  const foot=`<tfoot><tr><td colspan="2" style="font-weight:800">TOTAL GERAL</td>${totMeses.map(v=>`<td style="text-align:right;font-weight:800">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:800">${fmtR(totGeral)}</td></tr></tfoot>`;
   tbl.innerHTML=head+'<tbody>'+body+'</tbody>'+foot;
+
+  // Gráfico: quanto cada cliente/marca gerou de receita no MÊS atual vs ACUMULADO do ano (a
+  // pedido do usuário) — limitado aos top 12 por faturamento pra não virar um gráfico
+  // ilegível com dezenas de franqueados pequenos; a tabela acima continua mostrando todo mundo,
+  // sem corte nenhum.
+  const cvEl=document.getElementById('gc-cFatCli');
+  if(cvEl){
+    const mesAtual=new Date().getMonth();
+    const top=grupos.slice(0,12);
+    const labels=top.map(g=>g.nome);
+    const dataMes=top.map(g=>g[campo][mesAtual]||0);
+    const dataAno=top.map(g=>campo==='br'?g.totalBr:g.totalLq);
+    if(gcCharts.fatcli){try{gcCharts.fatcli.destroy();}catch(e){}}
+    const wrap=cvEl.parentElement;
+    if(wrap)wrap.style.height=Math.max(220,top.length*34)+'px';
+    gcCharts.fatcli=new Chart(cvEl,{type:'bar',data:{labels,datasets:[
+      {label:'Mês atual ('+GC_MESES_S[mesAtual]+')',data:dataMes,backgroundColor:'#e0245e',borderWidth:0,borderRadius:3},
+      {label:'Acumulado do ano',data:dataAno,backgroundColor:'#1a2b5e',borderWidth:0,borderRadius:3}
+    ]},options:{
+      indexAxis:'y',responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{position:'bottom',labels:{font:{size:10},color:'#888',boxWidth:10}},
+        tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+fmtR(ctx.raw)}}},
+      scales:{
+        x:{grid:{color:'rgba(0,0,0,.05)'},border:{display:false},min:0,ticks:{font:{size:10},color:'#888',callback:v=>'R$'+(v>=1e6?(v/1e6).toFixed(1)+'M':(v/1000).toFixed(0)+'k')}},
+        y:{grid:{display:false},ticks:{font:{size:10},color:'#888'},border:{display:false}}
+      }
+    }});
+  }
 }
 function renderFinFluxo(){
   const el=document.getElementById('fin-view-fluxo');if(!el)return;
