@@ -679,16 +679,16 @@ select.fc{cursor:pointer}
           <div style="overflow-x:auto;margin-top:10px"><table class="dash-table gc-comp25-table" id="gc-comp25-table"></table></div>
         </div>
 
-        <!-- Faturamento por Cliente (2026-08-01, a pedido do usuário; hierárquico + gráfico
-             desde 2026-08-03) — agrupado por marca (Grupos de Cliente, mesmo motor do
-             Financeiro, + regra própria de ZAMP x Franqueado pra Burger King) com a Categoria
-             de Pedido quebrada em sub-linhas por baixo do total de cada marca. Ver
-             renderFaturamentoPorCliente(). -->
+        <!-- Faturamento por Cliente (2026-08-01, simplificado 2026-08-03 a pedido do usuário) —
+             agrupado por marca (1ª palavra do nome + overrides pra marca composta, ver
+             _fatClienteGrupoNome); mostra só cliente + total faturado, sem grade de 12 meses.
+             Clique numa marca com 2+ vendas expande e lista cada venda individual (nome completo
+             da loja + mês). Ver renderFaturamentoPorCliente(). -->
         <div class="gc-chart-card">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
             <div>
               <div class="gc-chart-title">Faturamento por Cliente</div>
-              <div class="gc-chart-sub" style="margin-bottom:0">Agrupado por marca (Grupos de Cliente) — clique numa marca pra ver a quebra por Categoria de Pedido — mês a mês e acumulado do ano</div>
+              <div class="gc-chart-sub" style="margin-bottom:0">Agrupado por marca — clique numa marca pra ver as vendas individuais (loja + mês)</div>
             </div>
             <div class="gc-comp25-toggle">
               <button id="gc-fatcli-btn-br" class="gc-comp25-btn active" onclick="setFatClienteModo('br')">Bruto</button>
@@ -4093,9 +4093,15 @@ function buildSidebarCats(){
   // RH") — quem tem categoria RH e não é admin não deve ver Visão Comercial, Ferramentas nem
   // Histórico, só RH mesmo. _isRhOnly() já exclui admin (Guilherme continua vendo tudo).
   const _rhOnlySidebar=_isRhOnly();
+  // Perfil PLANEJAMENTO puro (2026-08-03) — mesmo tratamento do RH puro: some com "Visão
+  // Comercial" (sb-geral) e o menu vira só Lista de Pedidos + Planejamento. Ver _isPlanejamentoOnly().
+  const _planOnlySidebar=_isPlanejamentoOnly();
   const elSbGeral=document.getElementById('sb-geral');
-  if(elSbGeral)elSbGeral.style.display=_rhOnlySidebar?'none':'';
-  const cats=_rhOnlySidebar?['RH']:['FERRAMENTAS','HISTORICO',...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['LISTA_PEDIDOS','PLANEJAMENTO']:[]),...(_isSetorUser('PROJETOS')?['PROJETOS']:[]),...(_isSetorUser('COMPRAS')?['COMPRAS']:[]),...(_isSetorUser('PRODUÇÃO')?['PRODUÇÃO']:[]),...(_isRhUser()?['RH']:[])];
+  // "Visão Comercial" só aparece pra quem pode ver mesmo (Comercial/Financeiro/admin) — ver
+  // _podeVerVisaoComercial(). Categorias de setor (Compras/Produção/Projetos/PCP/Qualidade)
+  // deixam de ver esse botão (2026-08-03), além de RH/Planejamento puros que já não viam.
+  if(elSbGeral)elSbGeral.style.display=(_rhOnlySidebar||_planOnlySidebar||!_podeVerVisaoComercial())?'none':'';
+  const cats=_rhOnlySidebar?['RH']:_planOnlySidebar?['LISTA_PEDIDOS','PLANEJAMENTO']:['FERRAMENTAS','HISTORICO',...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['LISTA_PEDIDOS','PLANEJAMENTO']:[]),...(_isSetorUser('PROJETOS')?['PROJETOS']:[]),...(_isSetorUser('COMPRAS')?['COMPRAS']:[]),...(_isSetorUser('PRODUÇÃO')?['PRODUÇÃO']:[]),...(_isRhUser()?['RH']:[])];
   const catIcons={'FERRAMENTAS':'🧰','RH':'👥','FINANCEIRO':'💰','COMPRAS':'🛒','PCP':'📋','PRODUÇÃO':'🏭','QUALIDADE':'✅','PLANEJAMENTO':'🏗️','PROJETOS':'📐','HISTORICO':'🔍','COMISSAO_PLANEJAMENTO':'📈','LISTA_PEDIDOS':'📦'};
   const catLabelsSidebar={'FERRAMENTAS':'FERRAMENTAS','HISTORICO':'HISTÓRICO DE PEDIDOS','COMISSAO_PLANEJAMENTO':'COMISSÃO PLANEJAMENTO','LISTA_PEDIDOS':'LISTA DE PEDIDOS'};
   container.innerHTML=cats.map(cat=>`
@@ -4113,6 +4119,15 @@ function _getUserCat(){
   return {cat:usuarioLogado?.categoria||(cfg.usuarioCats&&cfg.usuarioCats[email])||'',email,isAdm:(usuarioLogado?.categoria==='ADMINISTRADOR'||_ADMINS.includes(email))};
 }
 function setSection(sec){
+  // Trava de acesso à "Visão Comercial" (Vendas do Mês/Lista de Emissão/Gráficos/Metas) —
+  // só Comercial, Financeiro ou admin. Bug relatado pela Isabela (Planejamento) conseguindo
+  // ver Vendas do Mês: essa seção não tinha NENHUMA trava antes, só o botão do sidebar era
+  // escondido (e mesmo assim só pra RH puro) — qualquer categoria conseguia entrar via
+  // console ou link direto (2026-08-03).
+  if(sec==='geral'&&!_podeVerVisaoComercial()){
+    toast('ACESSO NÃO PERMITIDO','terr');
+    return;
+  }
   // Trava de acesso ao Financeiro — não basta esconder o botão do sidebar (buildSidebarCats),
   // porque setSection() pode ser chamada de qualquer jeito (ex: console do navegador,
   // link antigo, etc). Se não for admin/categoria FINANCEIRO, barra aqui mesmo, sem trocar
@@ -4149,6 +4164,14 @@ function setSection(sec){
   if(_isRhOnly()&&sec!=='cat:RH'){
     toast('Seu acesso é restrito ao Menu RH','terr');
     setSection('cat:RH');
+    return;
+  }
+  // Perfil PLANEJAMENTO puro (2026-08-03) — mesma trava de verdade que RH: mesmo que tente
+  // forçar setSection('geral') ou outra categoria pelo console, volta pra cat:PLANEJAMENTO.
+  // Lista de Pedidos continua liberada porque usa a mesma trava de acesso (_isPlanejamentoUser).
+  if(_isPlanejamentoOnly()&&sec!=='cat:PLANEJAMENTO'&&sec!=='cat:LISTA_PEDIDOS'){
+    toast('Seu acesso é restrito ao Menu Planejamento','terr');
+    setSection('cat:PLANEJAMENTO');
     return;
   }
   currentSection=sec;
@@ -7970,9 +7993,16 @@ function initAuth(tries){
           if(_vFMesEl){_vFMesEl.value=MESES_PT[new Date().getMonth()+1];}
           // Perfil RH puro (2026-07-30) — abre direto no Menu RH, nunca em Visão Comercial
           // (que nem aparece mais no sidebar pra esse perfil, ver buildSidebarCats/_isRhOnly).
+          // Perfil PLANEJAMENTO puro (2026-08-03, mesmo padrão) — abre direto no Menu
+          // Planejamento. Categorias de setor sem acesso a Visão Comercial (Compras/Produção/
+          // Projetos/PCP/Qualidade) abrem no próprio menu de setor, ou Ferramentas se não
+          // tiver menu dedicado — antes todo mundo caía em "geral" (Vendas do Mês) sem
+          // trava nenhuma, daí o bug relatado pela Isabela.
           if(_isRhOnly()){
             setSection('cat:RH');
-          }else{
+          }else if(_isPlanejamentoOnly()){
+            setSection('cat:PLANEJAMENTO');
+          }else if(_podeVerVisaoComercial()){
             renderAll();
             try{renderDashVendas();}catch(e){}
             // Tela padrão ao abrir o sistema: Geral → Gráficos (pra qualquer usuário) — Gráficos
@@ -7982,6 +8012,12 @@ function initAuth(tries){
               const _btnGraf=document.getElementById('gtab-graficos');
               if(_btnGraf)geralTab('graficos',_btnGraf);
             },50);
+          }else{
+            const{cat:_catLogin}=_getUserCat();
+            if(_catLogin==='PROJETOS')setSection('cat:PROJETOS');
+            else if(_catLogin==='COMPRAS')setSection('cat:COMPRAS');
+            else if(_catLogin==='PRODUÇÃO')setSection('cat:PRODUÇÃO');
+            else setSection('cat:FERRAMENTAS');
           }
         }).catch(()=>{
           usuarioLogado.nomeExibicao=user.email.split('@')[0].replace(/[._]/g,' ').toUpperCase();
@@ -11055,6 +11091,25 @@ function _isFinanceiroUser(){
 function _isPlanejamentoUser(){
   const {cat,isAdm}=_getUserCat();
   return isAdm||cat==='PLANEJAMENTO';
+}
+// Perfil PLANEJAMENTO "puro" (não-admin) — a pedido do usuário (2026-08-03, mesmo padrão do
+// RH puro, ver _isRhOnly()): quem tem categoria PLANEJAMENTO e NÃO é admin só deve enxergar o
+// Menu Planejamento (+ Lista de Pedidos, que já usa a mesma trava). Nada de Visão Comercial,
+// Ferramentas ou Histórico. Motivado pela Isabela (Planejamento) relatando que conseguia ver
+// Vendas do Mês — setSection('geral') não tinha trava nenhuma antes disso. Admin continua
+// vendo tudo normalmente mesmo logando com e-mail cadastrado como PLANEJAMENTO.
+function _isPlanejamentoOnly(){
+  const{cat,isAdm}=_getUserCat();
+  return cat==='PLANEJAMENTO'&&!isAdm;
+}
+// "Visão Comercial" (Vendas do Mês/Lista de Emissão/Gráficos/Metas) só é pra Comercial,
+// Financeiro (extensão já decidida em 2026-07-03 — "só Financeiro fica no menu além de Visão
+// Comercial") ou admin. Categorias de setor (Planejamento, Compras, Produção, Projetos, PCP,
+// Qualidade) nunca tiveram motivo pra ver valor de venda por vendedor, e por engano
+// conseguiam abrir "geral" direto — não existia trava nenhuma nessa seção (2026-08-03).
+function _podeVerVisaoComercial(){
+  const{cat,isAdm}=_getUserCat();
+  return isAdm||cat==='COMERCIAL'||cat==='FINANCEIRO';
 }
 
 // ===================== PLANEJAMENTO — FINALIZAÇÃO DE OBRA (2026-07-22) =====================
@@ -17747,34 +17802,29 @@ function _fatClienteGrupoNome(r){
 function _fatClienteCategoriaDisplay(r){
   return r.cat||'—';
 }
+// Agrupa por marca guardando cada VENDA individual (não mais agregado por Categoria) — corrige
+// o bug de 2026-08-03 onde marcas com 2+ vendas na mesma Categoria (ex.: STARBUCKS, 2 lojas
+// diferentes mas mesma categoria de pedido) não tinham como "abrir" pra mostrar as vendas, já
+// que a quebra antiga era por Categoria (temSub = categorias.length>1) e não por venda.
 function _fatClienteAgrupar(){
   const grupos={};
   getVendaRowsMerged().forEach(r=>{
     if(!r.m||r.m<1||r.m>12)return;
     const nomeGrupo=_fatClienteGrupoNome(r);
-    const categoria=_fatClienteCategoriaDisplay(r);
-    if(!grupos[nomeGrupo])grupos[nomeGrupo]={nome:nomeGrupo,br:Array(12).fill(0),lq:Array(12).fill(0),categorias:{},qtdVendas:0};
+    if(!grupos[nomeGrupo])grupos[nomeGrupo]={nome:nomeGrupo,totalBr:0,totalLq:0,vendas:[]};
     const g=grupos[nomeGrupo];
-    g.br[r.m-1]+=r.br||0;
-    g.lq[r.m-1]+=r.lq||0;
-    g.qtdVendas++;
-    if(!g.categorias[categoria])g.categorias[categoria]={categoria,br:Array(12).fill(0),lq:Array(12).fill(0)};
-    const c=g.categorias[categoria];
-    c.br[r.m-1]+=r.br||0;
-    c.lq[r.m-1]+=r.lq||0;
+    g.totalBr+=r.br||0;
+    g.totalLq+=r.lq||0;
+    g.vendas.push({cliente:(r.cl||'—').trim(),categoria:r.cat||'—',mes:r.m,br:r.br||0,lq:r.lq||0});
   });
-  return Object.values(grupos).map(g=>({
-    nome:g.nome,br:g.br,lq:g.lq,qtdVendas:g.qtdVendas,
-    totalBr:g.br.reduce((a,b)=>a+b,0),totalLq:g.lq.reduce((a,b)=>a+b,0),
-    categorias:Object.values(g.categorias).map(c=>({...c,totalBr:c.br.reduce((a,b)=>a+b,0),totalLq:c.lq.reduce((a,b)=>a+b,0)}))
-  }));
+  return Object.values(grupos).map(g=>({...g,qtdVendas:g.vendas.length}));
 }
 let _fatClienteModo='br';
-// Marcas com a quebra por Categoria ABERTA — recolhida por padrão (2026-08-03, a pedido do
-// usuário: a tabela com todas as categorias sempre visíveis ficava pesada de ler, ex.: BOB'S
-// com 6+ categorias diferentes). Cada marca vira 1 linha só por padrão (nome + seta ▸ + total
-// do mês a mês); clicar na linha expande e mostra a quebra por Categoria embaixo. Guardado por
-// NOME da marca (não por índice) pra sobreviver a reordenações/troca de Bruto↔Líquido.
+// Marcas com a lista de vendas individuais ABERTA — recolhida por padrão (2026-08-03, a pedido
+// do usuário). Toda marca com 2+ vendas (== toda marca no bucket "empresas") pode ser clicada
+// pra expandir e mostrar cada venda (nome completo da loja + mês + valor) — não depende mais de
+// quantas Categorias distintas existem. Guardado por NOME da marca (não por índice) pra
+// sobreviver a reordenações/troca de Bruto↔Líquido.
 let _fatClienteExpandido=new Set();
 function _fatClienteToggleGrupo(nome){
   if(_fatClienteExpandido.has(nome))_fatClienteExpandido.delete(nome);
@@ -17797,42 +17847,44 @@ function renderFaturamentoPorCliente(){
     if(gcCharts.fatcli){try{gcCharts.fatcli.destroy();}catch(e){}gcCharts.fatcli=null;}
     return;
   }
-  grupos.sort((a,b)=>(campo==='br'?b.totalBr-a.totalBr:b.totalLq-a.totalLq));
-  grupos.forEach(g=>g.categorias.sort((a,b)=>(campo==='br'?b.totalBr-a.totalBr:b.totalLq-a.totalLq)));
+  const valorG=g=>campo==='br'?g.totalBr:g.totalLq;
+  const valorV=v=>campo==='br'?v.br:v.lq;
+  grupos.sort((a,b)=>valorG(b)-valorG(a));
+  grupos.forEach(g=>g.vendas.sort((a,b)=>(a.mes-b.mes)||(valorV(b)-valorV(a))));
   // Empresas (2+ vendas registradas — conta como conta recorrente, mesmo que seja só 1 loja
   // pedindo 2x) vão no topo; "avulsos" (1 venda só até agora, sem nada pra agrupar ainda) numa
   // seção separada embaixo — a pedido do usuário (2026-08-03).
   const empresas=grupos.filter(g=>g.qtdVendas>1);
   const avulsos=grupos.filter(g=>g.qtdVendas<=1);
 
-  const fmtCel=v=>v?fmtR(v):'<span style="color:#cbd5e1">—</span>';
-  const head=`<thead><tr><th>Cliente / Marca</th><th>Categoria</th>${GC_MESES_S.map(m=>`<th style="text-align:right">${m}</th>`).join('')}<th style="text-align:right">Acumulado</th></tr></thead>`;
-  function linhasDoGrupo(g){
-    const meses=g[campo];
-    const total=campo==='br'?g.totalBr:g.totalLq;
-    // Sub-linha por Categoria de Pedido só existe quando a marca tem MAIS de uma categoria —
-    // com uma só, ficaria idêntica ao total do grupo (sem ganho, só poluição visual). Marca
-    // sem sub-linha não tem o que expandir, então nem mostra a seta/não fica clicável.
-    const temSub=g.categorias.length>1;
+  // Visualização simplificada (2026-08-03, a pedido do usuário — a grade de 12 meses "ficou
+  // estranha de ver"): só 2 colunas, Cliente/Marca e Faturamento. Empresa (2+ vendas) expande
+  // ao clicar e lista cada venda individual com o NOME COMPLETO da loja + o mês daquela venda
+  // ao lado do valor. Avulso (1 venda só) já mostra direto o nome completo do cliente, sem
+  // precisar expandir (não tem outra venda pra listar).
+  const head=`<thead><tr><th>Cliente / Marca</th><th style="text-align:right">Faturamento</th></tr></thead>`;
+  function linhaEmpresa(g){
+    const total=valorG(g);
     const nomeEsc=g.nome.replace(/'/g,"\\'");
-    const aberto=temSub&&_fatClienteExpandido.has(g.nome);
-    const seta=temSub?`<span style="display:inline-block;width:14px;color:#94a3b8">${aberto?'▾':'▸'}</span>`:'';
-    const rotulo=temSub?`${g.categorias.length} categoria${g.categorias.length!==1?'s':''}`:'TOTAL';
-    const linhaGrupo=`<tr style="background:#f8fafc;${temSub?'cursor:pointer':''}" ${temSub?`onclick="_fatClienteToggleGrupo('${nomeEsc}')" title="Clique para ${aberto?'recolher':'ver a quebra por categoria'}"`:''}><td style="font-weight:800">${seta}${g.nome}</td><td style="color:#94a3b8;font-size:.7rem;font-weight:700">${rotulo}</td>${meses.map(v=>`<td style="text-align:right;font-weight:800">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:800">${fmtR(total)}</td></tr>`;
-    const subLinhas=aberto?g.categorias.map(c=>{
-      const mesesC=c[campo];
-      const totalC=campo==='br'?c.totalBr:c.totalLq;
-      return `<tr><td style="padding-left:22px;color:#94a3b8;font-size:.72rem">↳</td><td style="color:#64748b">${c.categoria}</td>${mesesC.map(v=>`<td style="text-align:right">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:700">${fmtR(totalC)}</td></tr>`;
+    const aberto=_fatClienteExpandido.has(g.nome);
+    const seta=`<span style="display:inline-block;width:14px;color:#94a3b8">${aberto?'▾':'▸'}</span>`;
+    const linhaGrupo=`<tr style="background:#f8fafc;cursor:pointer" onclick="_fatClienteToggleGrupo('${nomeEsc}')" title="Clique para ${aberto?'recolher':'ver as '+g.qtdVendas+' vendas'}"><td style="font-weight:800">${seta}${g.nome}<span style="color:#94a3b8;font-size:.7rem;font-weight:700;margin-left:8px">${g.qtdVendas} vendas</span></td><td style="text-align:right;font-weight:800">${fmtR(total)}</td></tr>`;
+    const subLinhas=aberto?g.vendas.map(v=>{
+      const valor=valorV(v);
+      return `<tr><td style="padding-left:22px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente}</td><td style="text-align:right">${fmtR(valor)} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td></tr>`;
     }).join(''):'';
     return linhaGrupo+subLinhas;
   }
-  const bodyEmpresas=empresas.map(linhasDoGrupo).join('');
-  const divisorAvulsos=avulsos.length?`<tr><td colspan="15" style="background:#eef2f7;color:#64748b;font-size:.68rem;font-weight:800;letter-spacing:.5px;padding:8px 10px;text-transform:uppercase">🎲 Clientes avulsos — 1 pedido só até agora, ainda sem histórico de recorrência</td></tr>`:'';
-  const bodyAvulsos=avulsos.map(linhasDoGrupo).join('');
-  const totMeses=Array(12).fill(0);
-  grupos.forEach(g=>g[campo].forEach((v,i)=>totMeses[i]+=v));
-  const totGeral=totMeses.reduce((a,b)=>a+b,0);
-  const foot=`<tfoot><tr><td colspan="2" style="font-weight:800">TOTAL GERAL</td>${totMeses.map(v=>`<td style="text-align:right;font-weight:800">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:800">${fmtR(totGeral)}</td></tr></tfoot>`;
+  function linhaAvulso(g){
+    const v=g.vendas[0];
+    const total=valorG(g);
+    return `<tr><td>${v.cliente}</td><td style="text-align:right">${fmtR(total)} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td></tr>`;
+  }
+  const bodyEmpresas=empresas.map(linhaEmpresa).join('');
+  const divisorAvulsos=avulsos.length?`<tr><td colspan="2" style="background:#eef2f7;color:#64748b;font-size:.68rem;font-weight:800;letter-spacing:.5px;padding:8px 10px;text-transform:uppercase">🎲 Clientes avulsos — 1 pedido só até agora, ainda sem histórico de recorrência</td></tr>`:'';
+  const bodyAvulsos=avulsos.map(linhaAvulso).join('');
+  const totGeral=grupos.reduce((s,g)=>s+valorG(g),0);
+  const foot=`<tfoot><tr><td style="font-weight:800">TOTAL GERAL</td><td style="text-align:right;font-weight:800">${fmtR(totGeral)}</td></tr></tfoot>`;
   tbl.innerHTML=head+'<tbody>'+bodyEmpresas+divisorAvulsos+bodyAvulsos+'</tbody>'+foot;
 
   // Gráfico: quanto cada cliente/marca gerou de receita no MÊS atual vs ACUMULADO do ano (a
@@ -17844,8 +17896,8 @@ function renderFaturamentoPorCliente(){
     const mesAtual=new Date().getMonth();
     const top=grupos.slice(0,12);
     const labels=top.map(g=>g.nome);
-    const dataMes=top.map(g=>g[campo][mesAtual]||0);
-    const dataAno=top.map(g=>campo==='br'?g.totalBr:g.totalLq);
+    const dataMes=top.map(g=>g.vendas.filter(v=>v.mes===mesAtual+1).reduce((s,v)=>s+valorV(v),0));
+    const dataAno=top.map(g=>valorG(g));
     if(gcCharts.fatcli){try{gcCharts.fatcli.destroy();}catch(e){}}
     const wrap=cvEl.parentElement;
     if(wrap)wrap.style.height=Math.max(220,top.length*34)+'px';
