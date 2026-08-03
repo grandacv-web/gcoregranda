@@ -1256,6 +1256,7 @@ select.fc{cursor:pointer}
         <button class="dash-tab active lp-main-tab" onclick="lpSetTab('lista',this)">📋 Lista</button>
         <button class="dash-tab lp-main-tab" onclick="lpSetTab('kanban',this)">🗂️ Kanban</button>
         <button class="dash-tab lp-main-tab" onclick="lpSetTab('calendario',this)">📅 Calendário</button>
+        <button class="dash-tab lp-main-tab" onclick="lpSetTab('simulador',this)">🧮 Simulador</button>
       </div>
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
         📦 Etapas de confecção de cada pedido — Medição Técnica, Projeto Executivo, Compras, Corte Galvanizado, ART, Adesivo, Produção, Embalagem, Frete e Instalação — calculadas automaticamente a partir do Prazo de Finalização, Estimativa de Instalação e Prazo Estimado de Frete preenchidos na Emissão. Vale pra pedidos emitidos pelo sistema a partir de Julho/2026.
@@ -1311,6 +1312,7 @@ select.fc{cursor:pointer}
         <div id="lp-body"></div>
       </div>
       <div id="lp-sec-kanban" style="display:none">
+        <div id="lp-kanban-atencao"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
           <button onclick="lpExportarKanbanExcel()" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Exportar Excel</button>
           <button onclick="lpExportarKanbanPDF()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
@@ -1318,6 +1320,7 @@ select.fc{cursor:pointer}
         <div id="lp-kanban-body" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px"></div>
       </div>
       <div id="lp-sec-calendario" style="display:none">
+        <div id="lp-cal-atencao"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px">
           <div class="dash-mes-nav" style="margin:0">
             <button onclick="lpCalMov(-1)" type="button">◀</button>
@@ -1330,6 +1333,29 @@ select.fc{cursor:pointer}
           </div>
         </div>
         <div id="lp-cal-body"></div>
+      </div>
+      <!-- SIMULADOR DE PEDIDOS (2026-08-03, a pedido do usuário) — só CONSULTA, não cria/salva
+           pedido nenhum. Reusa o mesmo motor de cálculo de etapas da Lista de Pedidos real
+           (_lpCalcEtapas), mas com dados hipotéticos digitados na hora, e já cruza o resultado
+           com a capacidade diária REAL comprometida por Produção/Instalação (pedidos de
+           verdade já em andamento) — pra responder "dá pra vender com esse prazo?" antes de
+           fechar a venda. Ver _lpSimular(). -->
+      <div id="lp-sec-simulador" style="display:none">
+        <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
+          🧮 Simulação só de consulta — não cria nenhum pedido. Preencha os dados hipotéticos de uma venda e veja o prazo calculado de cada setor interno, já considerando a capacidade diária de Produção e Instalação que os pedidos REAIS em andamento já ocupam hoje.
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px">
+          <div class="fg"><label>Prazo desejado pelo cliente</label><input type="date" class="fc" id="sim-prazo"></div>
+          <div class="fg"><label>Valor Líquido estimado (R$)</label><input class="fc no-upper" type="text" inputmode="numeric" id="sim-liquido" oninput="fmtMoney(this)" placeholder="0,00"></div>
+          <div class="fg"><label>Temos Frete próprio?</label><select class="fc no-upper" id="sim-tem-frete" onchange="_simToggleFrete()"><option value="sim">Sim</option><option value="nao">Não (cliente retira/contrata)</option></select></div>
+          <div class="fg" id="sim-frete-cep-wrap"><label>CEP de entrega</label><input class="fc no-upper" id="sim-cep" placeholder="00000-000" maxlength="9" oninput="_simCepInput(this)"></div>
+          <div class="fg" id="sim-frete-cidade-wrap"><label>Cidade/UF (automático via CEP)</label><input class="fc" id="sim-cidade-uf" disabled placeholder="—"></div>
+          <div class="fg" id="sim-frete-mod-wrap"><label>Modalidade de Frete</label><select class="fc no-upper" id="sim-fmod"><option value="Fracionado">Fracionado</option><option value="Dedicado">Dedicado</option></select></div>
+          <div class="fg"><label>Temos Instalação própria?</label><select class="fc no-upper" id="sim-tem-inst" onchange="_simToggleInstalacao()"><option value="sim">Sim</option><option value="nao">Não</option></select></div>
+          <div class="fg" id="sim-inst-dias-wrap"><label>Dias estimados de Instalação</label><input class="fc no-upper" type="number" min="1" id="sim-dias-inst" value="3"></div>
+        </div>
+        <button onclick="_lpSimular()" class="dash-btn-conf" style="background:#7c3aed" type="button">🧮 Simular Prazo</button>
+        <div id="sim-resultado" style="margin-top:18px"></div>
       </div>
     </div>
     <!-- MENUS DE SETOR (2026-07-31) — cada um lista as tarefas (pedido + etapa) do setor pra
@@ -1407,16 +1433,13 @@ select.fc{cursor:pointer}
         <button class="dash-tab compras-main-tab" onclick="comprasSetTab('calendario',this)">📅 Calendário</button>
       </div>
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
-        🛒 Cada compra (Chegada de Compras, Corte Galvanizado, ART ou Adesivo) passa por um checklist de 5 subtarefas — Cotação → Negociação → Comprado → Esperando Chegar → Chegou — antes de a etapa ser considerada pronta. Clique em "Iniciar Compra" pra abrir; dá pra fechar e retomar depois de onde parou. Ao marcar a última subtarefa, a baixa daquela etapa é dada automaticamente (data e hora exatas ficam no Histórico do pedido). Prazo e pedidos vêm da Lista de Pedidos.
+        🛒 Chegada de Compras passa por um checklist de 5 subtarefas — Cotação → Negociação → Comprado → Esperando Chegar → Chegou — antes de a etapa ser considerada pronta. Clique em "Iniciar Compra" pra abrir; dá pra fechar e retomar depois de onde parou. Ao marcar a última subtarefa, a baixa é dada automaticamente (data e hora exatas ficam no Histórico do pedido). Prazo e pedidos vêm da Lista de Pedidos. (Corte Galvanizado e Adesivo agora ficam na Lista de Tarefas de Produção; Recebimento ART fica no Planejamento — 2026-08-04.)
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
         <input id="compras-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="comprasRenderAtivo()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
         <select id="compras-fil-etapa" onchange="comprasRenderAtivo()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
           <option value="">🏷️ Todas as etapas</option>
           <option value="compras">Chegada Compras</option>
-          <option value="corteGalv">Recebimento Corte Galvanizado</option>
-          <option value="art">Recebimento ART</option>
-          <option value="adesivo">Recebimento Adesivo</option>
         </select>
         <select id="compras-fil-status" onchange="comprasRenderAtivo()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
           <option value="">Todos (exceto concluídos)</option>
@@ -1460,7 +1483,7 @@ select.fc{cursor:pointer}
     </div>
     <div id="sec-cat-PRODUCAO" style="display:none">
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
-        🏭 Tarefas do setor de Produção — dê baixa em cada pedido assim que a produção estiver pronta pra embalagem.
+        🏭 Tarefas do setor de Produção — Produção, Recebimento de Corte Galvanizado e Recebimento de Adesivo (2026-08-04, saíram de Compras). Dê baixa em cada uma assim que estiver pronta.
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
         <input id="st-producao-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="renderSetorTarefas('PRODUÇÃO')" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
@@ -2650,6 +2673,15 @@ select.fc{cursor:pointer}
         <div style="font-size:.7rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:1px;margin:18px 0 6px">Etapas Personalizadas</div>
         <p style="font-size:.73rem;color:var(--ink4);margin-bottom:8px">Uma por linha, no formato <strong>Nome da Etapa=Percentual</strong>. Entram na ordem, logo depois de Embalagem. Ex.: <code>Inspeção de Qualidade=95</code></p>
         <textarea class="fc" id="cfg-lp-extras" rows="4" placeholder="Inspeção de Qualidade=95" style="font-size:.83rem"></textarea>
+        <!-- Capacidade Diária (2026-08-03, a pedido do usuário) — limites reais de produtividade
+             usados pelo Simulador de Pedidos e pelo aviso "Requer Atenção" da Lista de Pedidos.
+             Ver _lpCapProducaoDia()/_lpCapInstalacoesDia(). -->
+        <div style="font-size:.7rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:1px;margin:22px 0 6px">Capacidade Diária (Produção / Instalação)</div>
+        <p style="font-size:.73rem;color:var(--ink4);margin-bottom:10px">Usado pelo 🧮 Simulador de Pedidos e pelo aviso "⚠️ Requer Atenção" na Lista de Pedidos — não bloqueia nada sozinho, só avisa quando o dia passa do limite.</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+          <div class="fg"><label>Limite de Produção por dia (R$ líquido)</label><input class="fc no-upper" type="text" inputmode="numeric" id="cfg-lp-cap-producao" oninput="fmtMoney(this)" placeholder="80.000,00"></div>
+          <div class="fg"><label>Limite de Instalações começando no mesmo dia</label><input class="fc no-upper" type="number" min="1" id="cfg-lp-cap-instalacoes" placeholder="3"></div>
+        </div>
       </div>
       <!-- AVISOS -->
       <div class="cfg-sec" id="cfg-sec-avisos" style="display:none">
@@ -3671,6 +3703,59 @@ async function _migrarAtrasadosProjetosComprasHoje(){
   }
   if(marcados)toast(`${marcados} item(ns) atrasado(s) concluído(s) em Projetos/Compras (${osMarcados.slice(0,8).join(', ')}${osMarcados.length>8?'...':''})`,'tok');
 }
+// Limpeza pontual (2026-08-04, a pedido do usuário: "os projetos que mandei vc tirar da lista
+// de projetos porque estavam entregues já vc não baixou da lista de pedidos... pode remover
+// tudo que tiver atrasado da lista de pedidos"). A limpeza de 2026-08-03
+// (_migrarAtrasadosProjetosComprasHoje) só marcava concluído em p.projChecklist/
+// p.comprasChecklist (Menu Projetos/Compras) — NUNCA dava baixa em p.lpBaixas, que é o controle
+// PRÓPRIO da Lista de Pedidos/Kanban (independente dos menus de setor) — por isso pedidos já
+// entregues continuavam com "🔴 Atrasado" no Kanban da Lista de Pedidos mesmo depois daquela
+// limpeza. Esta aqui dá baixa (mesmo formato de lpDarBaixa) em toda etapa de
+// LP_ETAPAS_COM_BAIXA cujo prazo já passou e ainda não tem baixa nenhuma.
+//
+// DIFERENTE das migrações de Projetos/Compras acima: aquelas rodam de novo a cada sessão
+// (guardadas só por uma variável em memória, que reseta a cada F5/login) — na prática isso
+// significa que elas continuam, pra sempre, completando automaticamente qualquer coisa nova
+// que fique atrasada. Pra não repetir esse comportamento aqui (que apagaria silenciosamente o
+// aviso de atraso pra sempre, não só dessa vez), esta migração grava um flag PERSISTIDO
+// (cfg.migAtrasadosLpFeita, salvo no Firestore) — roda de verdade só 1 vez, nunca mais depois
+// disso, mesmo em sessões futuras. Se precisar rodar de novo (ex.: outro lote de atrasados
+// antigos aparecer), é só zerar esse campo em cfg.
+async function _migrarAtrasadosListaPedidosHoje(){
+  if(cfg.migAtrasadosLpFeita)return;
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const agora=new Date();
+  const quemPreencheu='Migração automática — limpeza de atrasados 2026-08-04';
+  let marcados=0;
+  const osMarcados=[];
+  for(const p of _lpPedidosElegiveis()){
+    const calc=_lpCalcEtapas(p);
+    if(!calc.ok)continue;
+    let mudou=false;
+    calc.etapas.filter(e=>e.aplicavel&&LP_ETAPAS_COM_BAIXA.includes(e.key)&&e.iso<hojeIso).forEach(e=>{
+      p.lpBaixas=p.lpBaixas||{};
+      if(!p.lpBaixas[e.key]){
+        p.lpBaixas[e.key]={data:hojeIso,dataHora:agora.toISOString(),por:quemPreencheu,viaLimpezaLote:true};
+        mudou=true;
+      }
+      // ART é dado via Planejamento agora (ver LP_SETORES) — espelha em p.planTarefas.art
+      // também, senão a coluna "Recebimento ART" de lá continuaria mostrando pendente/atrasado
+      // pra um pedido que acabou de ser limpo aqui.
+      if(e.key==='art'&&!(p.planTarefas&&p.planTarefas.art&&p.planTarefas.art.concluido)){
+        p.planTarefas=p.planTarefas||{};
+        p.planTarefas.art={concluido:true,data:hojeIso,por:quemPreencheu};
+        mudou=true;
+      }
+    });
+    if(mudou){
+      await savePedidoFS(p);
+      marcados++;osMarcados.push(p.os||p.id);
+    }
+  }
+  cfg.migAtrasadosLpFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  if(marcados)toast(`${marcados} pedido(s) com etapa(s) atrasada(s) da Lista de Pedidos concluída(s) em lote (OS ${osMarcados.slice(0,8).join(', ')}${osMarcados.length>8?'...':''})`,'tok');
+}
 async function savePedidoFS(p){
   if(!window._fbSavePedido){console.warn('Firestore não disponível');return;}
   try{await window._fbSavePedido(p);}
@@ -3686,6 +3771,7 @@ let _freteMigracaoFeita=false;
 let _anoPrazoMigracaoFeita=false;
 let _projPrazo10AgoMigracaoFeita=false;
 let _atrasadosProjComprasMigracaoFeita=false;
+let _atrasadosLpMigracaoFeita=false;
 function setupRealtimeSync(){
   if(!window._fbWatchPedidos)return;
   window._fbWatchPedidos(function(snapshot){
@@ -3739,6 +3825,15 @@ function setupRealtimeSync(){
     if(!_atrasadosProjComprasMigracaoFeita&&_getUserCat().isAdm){
       _atrasadosProjComprasMigracaoFeita=true;
       _migrarAtrasadosProjetosComprasHoje().catch(e=>{_atrasadosProjComprasMigracaoFeita=false;console.error('Erro ao concluir itens atrasados em Projetos/Compras',e);});
+    }
+    // Limpeza pontual (2026-08-04, a pedido do usuário) — mesma ideia acima, mas dando baixa de
+    // verdade em p.lpBaixas (controle próprio da Lista de Pedidos/Kanban, que a limpeza de
+    // 2026-08-03 acima nunca tocou). Ver _migrarAtrasadosListaPedidosHoje — só admin, guardada
+    // por um flag PERSISTIDO (cfg.migAtrasadosLpFeita), roda de verdade só 1x pra sempre, não a
+    // cada sessão.
+    if(!_atrasadosLpMigracaoFeita&&_getUserCat().isAdm){
+      _atrasadosLpMigracaoFeita=true;
+      _migrarAtrasadosListaPedidosHoje().catch(e=>{_atrasadosLpMigracaoFeita=false;console.error('Erro ao concluir itens atrasados na Lista de Pedidos',e);});
     }
     // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache)
     // montado ANTES dessa atualização de pedidos — editar OS/valores/vendedor num pedido
@@ -7393,6 +7488,12 @@ function saveCfg(){
     });
     cfg.lpEtapasExtras=extras;
   }
+  // Capacidade Diária de Produção/Instalação (2026-08-03) — usada pelo Simulador de Pedidos e
+  // pelo aviso "Requer Atenção" da Lista de Pedidos. Ver _lpCapProducaoDia()/_lpCapInstalacoesDia().
+  const capProdEl=document.getElementById('cfg-lp-cap-producao');
+  if(capProdEl){const v=moneyToNum(capProdEl.value);if(v>0)cfg.lpCapProducaoDia=v;}
+  const capInstEl=document.getElementById('cfg-lp-cap-instalacoes');
+  if(capInstEl){const v=parseInt(capInstEl.value,10);if(v>0)cfg.lpCapInstalacoesDia=v;}
   // Salvar permissões por categoria (quem pode emitir novo pedido)
   const kPermChks=document.querySelectorAll('.kperm-chk');
   if(kPermChks.length){
@@ -11293,6 +11394,10 @@ function _plPedidosElegiveis(){
 // pra pedidos antigos que ainda não tinham esse campo (_migrarLpEtapasSnapshot congela esses
 // na config de hoje assim que o sistema carrega, pra nunca mudar de novo depois).
 const LP_PCT_PADRAO={medicao:15,projeto:15,compras:31,corteGalv:31,art:38,adesivo:38,producao:88,embalagem:100};
+// Embalagem sempre com 2 dias ÚTEIS fixos antes da Saída do Frete (2026-08-04, a pedido do
+// usuário) — ver uso em _lpCalcEtapas/_lpSimular. producao:88 em LP_PCT_PADRAO acima vira só
+// um fallback (usado apenas se a etapa Embalagem for removida em Configurações).
+const LP_DIAS_EMBALAGEM=2;
 const LP_ETAPAS_PADRAO=[
   {key:'medicao',label:'Medição Técnica',cond:'medicao',editavel:true},
   {key:'projeto',label:'Projeto Executivo',editavel:true},
@@ -11433,6 +11538,106 @@ function _lpTemMedicao(p){return (p.instalacao&&p.instalacao['Medição Técnica
 function _lpTemInstalacao(p){return moneyToNum((p.instalacao&&p.instalacao['Valor da Instalação'])||'0')>0.005;}
 function _lpTemFrete(p){return moneyToNum((p.frete&&p.frete['Valor do Frete'])||'0')>0.005;}
 function _lpTemArt(p){return moneyToNum((p.projetos&&p.projetos['Valor da ART'])||'0')>0.005;}
+function _lpTemElevacao(p){return (p.valores&&p.valores['Elevações'])==='Sim'||moneyToNum((p.valores&&p.valores['Valor das Elevações'])||'0')>0.005;}
+// ===================== TAREFAS DE PLANEJAMENTO & LOGÍSTICA (2026-08-03) =====================
+// A pedido do usuário: colunas novas na tela de Obras (Planejamento) pra cada tarefa de
+// contratação/preparação (Recebimento ART, Contratar Instalador, Contratar Frete, Contratar
+// Elevação, RAO), com prazo calculado em dias ÚTEIS antes do Início da Instalação/Frete
+// (regra da "tabela azul" que o usuário anexou) e cor por proximidade do vencimento — verde
+// em dia, amarelo a partir de 7 dias do vencimento, vermelho a partir de 3 dias ou já
+// vencido. Usuário marca concluído clicando na célula (Recebimento ART/RAO) ou, pras 3
+// tarefas de contratação, clicando abre a janela de Fornecedores já existente
+// (abrirFgLancar) — salvar um fornecedor lá marca a tarefa como concluída sozinho, ver
+// salvarFgLancamento(). Dados gravados em p.planTarefas={<key>:{concluido,data,por}}, mesmo
+// padrão de p.diarios/p.finalizacao/p.lpBaixas.
+const PLAN_TAREFAS_REGRAS={
+  instalador:{label:'Contratar Instalador',diasUteis:7,base:'chegada'}, // 7 dias úteis antes do Início da Instalação
+  frete:{label:'Contratar Frete',diasUteis:6,base:'coleta'},            // 6 dias úteis antes do Início do Frete (coleta)
+  elevacao:{label:'Contratar Elevação',diasUteis:5,base:'chegada'},     // 5 dias úteis antes do Início da Instalação
+  rao:{label:'RAO',diasUteis:2,base:'chegada'}                         // 2 dias úteis antes do Início da Instalação
+};
+// N dias ÚTEIS antes de uma data ISO (conta pra trás pulando sáb/dom/feriado) — diferente de
+// _lpAjustaDiaUtil (que só empurra/puxa UMA data já definida pro dia útil mais próximo, não
+// conta N dias). Usado só pelas regras de PLAN_TAREFAS_REGRAS acima.
+function _lpSubtraiDiasUteis(iso,n){
+  if(!iso)return null;
+  let d=new Date(iso+'T00:00:00'),restante=n;
+  while(restante>0){
+    d.setDate(d.getDate()-1);
+    const dow=d.getDay();
+    if(dow!==0&&dow!==6&&!getFeriadosTodos(d.getFullYear()).has(fmtISOLocal(d)))restante--;
+  }
+  return fmtISOLocal(d);
+}
+// Data-alvo de UMA tarefa de planejamento pra um pedido, usando o MESMO _lpCalcEtapas já usado
+// nas outras colunas de prazo (nunca inventa conta própria). `aplicavel:false` = pedido não
+// tem esse item (ex.: sem Elevação, sem Frete próprio) — a coluna fica zerada ("—").
+function _lpTarefaData(key,p,calc){
+  if(!calc||!calc.ok)return{aplicavel:false,iso:null};
+  if(key==='art'){
+    const et=calc.etapas.find(e=>e.key==='art');
+    return{aplicavel:calc.temArt&&!!et,iso:et?et.iso:null};
+  }
+  const regra=PLAN_TAREFAS_REGRAS[key];
+  const baseIso=regra.base==='coleta'?calc.coletaIso:calc.chegadaIso;
+  const aplicavelMap={instalador:calc.temInst,frete:calc.temFrete,elevacao:_lpTemElevacao(p),rao:calc.temInst};
+  const aplicavel=!!aplicavelMap[key];
+  return{aplicavel,iso:aplicavel?_lpSubtraiDiasUteis(baseIso,regra.diasUteis):null};
+}
+// Cor por proximidade do vencimento — verde em dia, amarelo ≤7 dias, vermelho ≤3 dias ou já
+// vencido (regra do usuário, 2026-08-03). Concluído sempre mostra verde, não importa a data.
+function _lpCorPrazoTarefa(iso,concluido,hojeIso){
+  if(concluido)return{cor:'#15803d',bg:'#dcfce7'};
+  if(!iso)return{cor:'#6b7280',bg:'#f3f4f6'};
+  const dias=Math.round((new Date(iso+'T00:00:00')-new Date(hojeIso+'T00:00:00'))/86400000);
+  if(dias<=3)return{cor:'#dc2626',bg:'#fee2e2'};
+  if(dias<=7)return{cor:'#b45309',bg:'#fef9c3'};
+  return{cor:'#15803d',bg:'#dcfce7'};
+}
+// Célula de UMA tarefa (Recebimento ART/RAO — clique simples marca concluído; Contratar
+// Instalador/Frete/Elevação — clique abre a janela de Fornecedores, que já marca concluído
+// sozinha ao salvar um fornecedor, ver salvarFgLancamento()).
+function _lpCellTarefa(p,key,hojeIso){
+  const calc=_lpCalcEtapas(p);
+  const{aplicavel,iso}=_lpTarefaData(key,p,calc);
+  const label=key==='art'?'Recebimento ART':key==='rao'?'RAO':PLAN_TAREFAS_REGRAS[key].label;
+  if(!aplicavel)return `<td style="padding:8px 10px;color:var(--ink4)" title="Pedido não tem ${label.replace('Contratar ','')}">—</td>`;
+  const t=(p.planTarefas&&p.planTarefas[key])||{};
+  const corInfo=_lpCorPrazoTarefa(iso,t.concluido,hojeIso);
+  const abreFornecedor=key==='instalador'||key==='frete'||key==='elevacao';
+  const onclick=abreFornecedor?`abrirFgLancar('${p.id}')`:`_lpToggleTarefa('${p.id}','${key}')`;
+  const conteudo=t.concluido?`✅ ${fmtD(t.data)}`:(iso?fmtD(iso):'—');
+  const tip=t.concluido?`Concluído em ${fmtD(t.data)} por ${t.por||'—'}${abreFornecedor?'':'. Clique pra desfazer.'}`:(abreFornecedor?`Clique pra abrir Fornecedores e registrar ${label}`:'Clique pra marcar como concluído');
+  return `<td style="padding:8px 10px;white-space:nowrap"><span onclick="${onclick}" title="${tip}" style="cursor:pointer;background:${corInfo.bg};color:${corInfo.cor};padding:3px 8px;border-radius:6px;font-weight:700;font-size:.76rem;display:inline-block">${conteudo}</span></td>`;
+}
+// Marca/desmarca uma tarefa SIMPLES (Recebimento ART/RAO) como concluída — mesmo padrão de
+// lpDarBaixa/lpDesfazerBaixa. Instalador/Frete/Elevação NÃO passam por aqui — são marcadas
+// automaticamente ao salvar um fornecedor em salvarFgLancamento().
+async function _lpToggleTarefa(pedidoId,key){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  p.planTarefas=p.planTarefas||{};
+  const atual=p.planTarefas[key]||{};
+  const quemPreencheu=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
+  if(atual.concluido){
+    if(!confirm('Desfazer a conclusão dessa tarefa?'))return;
+    p.planTarefas[key]={concluido:false};
+    // ART não pertence a nenhum menu de setor (2026-08-04) — o Planejamento é quem dá a baixa
+    // de verdade em p.lpBaixas.art agora, mesmo formato de lpDarBaixa/lpDesfazerBaixa, pra
+    // Kanban da Lista de Pedidos e Assertividade Geral continuarem reconhecendo certo.
+    if(key==='art'&&p.lpBaixas)delete p.lpBaixas.art;
+  } else {
+    p.planTarefas[key]={concluido:true,data:new Date().toISOString().slice(0,10),por:quemPreencheu};
+    if(key==='art'){
+      p.lpBaixas=p.lpBaixas||{};
+      p.lpBaixas.art={data:new Date().toISOString().slice(0,10),dataHora:new Date().toISOString(),por:quemPreencheu};
+    }
+  }
+  await savePedidoFS(p);
+  toast(atual.concluido?'Desfeito':'Marcado como concluído ✅','tok');
+  renderPlanejamentoObras();
+}
+// ===================== FIM TAREFAS DE PLANEJAMENTO & LOGÍSTICA =====================
 // Config atual (ao vivo) de Configurações → Etapas de Pedidos — usada pra pedidos NOVOS (no
 // momento da emissão, vira o snapshot congelado do pedido) e como fallback pra pedidos
 // antigos que ainda não têm p.lpEtapasCfg (antes da migração rodar).
@@ -11476,6 +11681,10 @@ function _lpRenderCfgEtapas(){
   }).join('');
   const extrasEl=document.getElementById('cfg-lp-extras');
   if(extrasEl)extrasEl.value=(cfg.lpEtapasExtras||[]).map(x=>x.label+'='+x.pct).join('\n');
+  const capProdEl=document.getElementById('cfg-lp-cap-producao');
+  if(capProdEl)capProdEl.value=fmtR(_lpCapProducaoDia()).replace('R$','').trim();
+  const capInstEl=document.getElementById('cfg-lp-cap-instalacoes');
+  if(capInstEl)capInstEl.value=_lpCapInstalacoesDia();
 }
 // Calcula as datas de todas as etapas de um pedido.
 // Retorno de erro: {ok:false,problemas:[{campo,motivo:'faltando'|'invalido',valor}]} quando
@@ -11523,9 +11732,21 @@ function _lpCalcEtapas(p){
   const coletaIso=_lpAjustaDiaUtil(coletaIsoRaw);
   const chegadaIso=_lpAjustaDiaUtil(chegadaIsoRaw);
   const CONDS={medicao:temMedicao,art:temArt,frete:temFrete,instalacao:temInst};
-  const etapas=_lpEtapasDefParaPedido(p).map(def=>{
+  // Embalagem agora tem uma janela própria de LP_DIAS_EMBALAGEM dias ÚTEIS, terminando no dia
+  // da Saída do Frete (embalagem continua em pct:100 = coletaIso, sem mudança) — Produção
+  // precisa liberar o material ANTES dessa janela em vez de terminar no mesmo dia da coleta
+  // (2026-08-04, a pedido do usuário: "a embalagem vai subtrair o dia de produção, ao invés da
+  // produção terminar no mesmo dia que vai o frete... embalagem com 2 dias úteis pra fazer seu
+  // trabalho e o frete sai neste 2º dia"). Só entra em vigor se a etapa Embalagem estiver
+  // ativa (não removida em Configurações → Etapas de Pedidos); sem Embalagem, Produção volta a
+  // usar o % normal (LP_PCT_PADRAO.producao) como fallback.
+  const _etapasDefLp=_lpEtapasDefParaPedido(p);
+  const _embalagemAtiva=_etapasDefLp.some(d=>d.key==='embalagem');
+  const _producaoBufferIso=_embalagemAtiva?_lpSubtraiDiasUteis(coletaIso,LP_DIAS_EMBALAGEM):null;
+  const etapas=_etapasDefLp.map(def=>{
     let iso;
-    if(def.special==='chegada')iso=chegadaIso;
+    if(def.key==='producao'&&_producaoBufferIso)iso=_producaoBufferIso;
+    else if(def.special==='chegada')iso=chegadaIso;
     else if(def.special==='final')iso=prazoIso;
     else iso=_lpAjustaDiaUtil(_opAddDias(emissaoIso,Math.round(prazoInternoDias*def.pct/100)));
     return Object.assign({},def,{iso,aplicavel:def.cond?CONDS[def.cond]:true});
@@ -11606,12 +11827,162 @@ function _lpInfo(p,hojeIso){
 // faça isso e vamos avançar depois", a pedido do usuário. Substitui a antiga coluna "Etapa
 // Atual" da Lista de Pedidos: "essa etapa atual na lista pode tirar e vamos colocar uma barra
 // ASSERTIVIDADE".
+// Reorganizado 2026-08-04, a pedido do usuário: "SOLICITAÇÃO DE ART vai para coluna de
+// planejamento... e não é do Compras. Recebimento de Adesivo e Corte vai na lista de tarefas
+// da Produção". ART saiu de qualquer setor daqui — quem dá baixa nela agora é só o Planejamento
+// (coluna "Recebimento ART" de renderPlanejamentoObras, ver _lpToggleTarefa, que grava
+// p.lpBaixas.art igualzinho a lpDarBaixa faria, pra Kanban/Assertividade continuarem
+// reconhecendo). Corte Galvanizado e Adesivo saíram de Compras e entraram em Produção.
 const LP_SETORES={
   PROJETOS:{label:'Projetos',stages:['projeto']},
-  COMPRAS:{label:'Compras',stages:['compras','corteGalv','art','adesivo']},
-  'PRODUÇÃO':{label:'Produção',stages:['producao']}
+  COMPRAS:{label:'Compras',stages:['compras']},
+  'PRODUÇÃO':{label:'Produção',stages:['producao','corteGalv','adesivo']}
 };
-const LP_ETAPAS_COM_BAIXA=Object.values(LP_SETORES).reduce((arr,s)=>arr.concat(s.stages),[]);
+// 'art' não pertence a nenhum LP_SETORES (não é mais tarefa de nenhum menu de setor), mas
+// continua contando pra Assertividade/Kanban — incluído aqui manualmente porque quem dá baixa
+// nela agora é o Planejamento (_lpToggleTarefa), não um menu de setor com _lpTarefasSetor.
+const LP_ETAPAS_COM_BAIXA=['art',...Object.values(LP_SETORES).reduce((arr,s)=>arr.concat(s.stages),[])];
+// ===================== CAPACIDADE DIÁRIA: PRODUÇÃO E INSTALAÇÃO (2026-08-03) =====================
+// A pedido do usuário: Produção não aguenta mais que um limite de valor LÍQUIDO finalizando no
+// mesmo dia (produtividade real de hoje, configurável em Configurações → Etapas de Pedidos,
+// padrão R$80.000); Instalação não deveria ter mais que um limite de obras COMEÇANDO no mesmo
+// dia (padrão 3 — o ideal é distribuir melhor). Isso NÃO trava nem reagenda nada sozinho — só
+// ACUSA "⚠️ Requer Atenção" na Lista de Pedidos real (pra um humano decidir se renegocia prazo
+// ou aceita o risco mesmo assim) e alimenta o 🧮 Simulador de Pedidos (que aí sim sugere o
+// próximo dia com espaço, já que lá é só hipótese, sem compromisso real ainda).
+function _lpCapProducaoDia(){return cfg.lpCapProducaoDia||80000;}
+function _lpCapInstalacoesDia(){return cfg.lpCapInstalacoesDia||3;}
+// Mapa {isoDoDia:{soma,itens:[{p,liquido}]}} de quanto de líquido está previsto FINALIZAR em
+// Produção em cada dia, somando todos os pedidos elegíveis (mesma fonte da Lista de Pedidos).
+// Pedido que já deu baixa em Produção (p.lpBaixas.producao) não ocupa mais espaço — já foi
+// entregue, não compete por capacidade de verdade nenhuma.
+function _lpMapaProducaoPorDia(){
+  const mapa={};
+  _lpPedidosElegiveis().forEach(p=>{
+    if(p.lpBaixas&&p.lpBaixas.producao)return;
+    const calc=_lpCalcEtapas(p);
+    if(!calc.ok)return;
+    const etProd=calc.etapas.find(e=>e.key==='producao');
+    if(!etProd||!etProd.aplicavel)return;
+    const liquido=(pedidoToVendaRow(p).lq)||0;
+    if(!mapa[etProd.iso])mapa[etProd.iso]={soma:0,itens:[]};
+    mapa[etProd.iso].soma+=liquido;
+    mapa[etProd.iso].itens.push({p,liquido});
+  });
+  return mapa;
+}
+// Mesma ideia, mas contando QUANTAS instalações (não valor) começam no mesmo dia
+// (chegadaIso = etapa "Início da Instalação"). Instalação não tem baixa própria na Lista de
+// Pedidos ainda (só Projetos/Compras/Produção têm, ver LP_SETORES), então conta todo pedido
+// com instalação aplicável, sem excluir por baixa.
+function _lpMapaInstalacoesPorDia(){
+  const mapa={};
+  _lpPedidosElegiveis().forEach(p=>{
+    const calc=_lpCalcEtapas(p);
+    if(!calc.ok||!calc.temInst)return;
+    if(!mapa[calc.chegadaIso])mapa[calc.chegadaIso]={qtd:0,itens:[]};
+    mapa[calc.chegadaIso].qtd++;
+    mapa[calc.chegadaIso].itens.push(p);
+  });
+  return mapa;
+}
+// Limiares de "muita coisa caindo no mesmo dia" por setor — só um alerta visual no Simulador
+// (não trava nem impede venda nenhuma, decisão continua humana, igual _lpRequerAtencao).
+// Projetos (≥4) e Compras (≥5) foram os 2 números que o usuário deu explicitamente
+// (2026-08-04). Corte Galvanizado/ART/Adesivo usam o mesmo limiar de Compras por serem o
+// mesmo time (ver LP_SETORES.COMPRAS, as 4 stages são o mesmo setor); Medição/Embalagem são
+// estimativa própria (times menores/mais pontuais) — ajuste fácil aqui se não bater com a
+// realidade do time. Produção (usa R$, não quantidade) e Instalação (já tem limite próprio)
+// não entram aqui, ver _lpCapProducaoDia/_lpCapInstalacoesDia.
+const LP_LIMITE_ATIVIDADES_ETAPA={medicao:4,projeto:4,compras:5,corteGalv:5,art:4,adesivo:5,embalagem:5};
+// Mapa genérico {isoDoDia:{qtd,itens:[pedido,...]}} — quantos pedidos reais têm UMA etapa
+// específica (por key) caindo em cada dia. Usado só pelo Simulador, pra avisar se o dia
+// sugerido pra medição/projeto/compras/corte galvanizado/ART/adesivo/embalagem já está
+// sobrecarregado pra aquele setor especificamente (2026-08-04, a pedido do usuário).
+function _lpMapaAtividadesPorEtapa(etapaKey){
+  const mapa={};
+  _lpPedidosElegiveis().forEach(p=>{
+    const calc=_lpCalcEtapas(p);
+    if(!calc.ok)return;
+    const et=calc.etapas.find(e=>e.key===etapaKey);
+    if(!et||!et.aplicavel||!et.iso)return;
+    if(!mapa[et.iso])mapa[et.iso]={qtd:0,itens:[]};
+    mapa[et.iso].qtd++;
+    mapa[et.iso].itens.push(p);
+  });
+  return mapa;
+}
+// Quantos dias ÚTEIS um setor tem, na prática, entre o fim da etapa ANTERIOR (ou hoje, se for
+// a primeira etapa da sequência) e o prazo da PRÓPRIA etapa — "quanto tempo de trabalho essa
+// equipe realmente tem pra entregar sua parte" (2026-08-04, a pedido do usuário, só pro
+// Simulador por enquanto). Conta o dia final, não conta o dia inicial (janela aberta-fechada).
+function _lpDiasUteisJanela(isoIni,isoFim){
+  if(!isoIni||!isoFim)return 0;
+  let d=new Date(isoIni+'T00:00:00');
+  const fim=new Date(isoFim+'T00:00:00');
+  if(d>=fim)return 0;
+  let dias=0;
+  while(d<fim){
+    d.setDate(d.getDate()+1);
+    const dow=d.getDay();
+    if(dow!==0&&dow!==6&&!getFeriadosTodos(d.getFullYear()).has(fmtISOLocal(d)))dias++;
+  }
+  return dias;
+}
+// Cascateia dia a dia (só dias úteis) a partir de um ISO até achar um dia onde o líquido novo
+// ainda cabe dentro do limite diário de Produção — usado só pelo Simulador (hipótese), nunca
+// pra mexer em pedido real.
+// _lpAjustaDiaUtil PUXA sábado pra sexta-feira ANTERIOR (regra certa pra calcular o prazo de
+// UMA etapa, ver comentário da própria função) — mas isso quebra uma cascata que só deve
+// ANDAR PRA FRENTE: dia cheio (sexta) → +1 (sábado) → ajusta puxa de volta pra sexta → mesmo
+// dia de novo, sempre cheio, loop nunca progride. Este normalizador só empurra pra frente
+// (nunca puxa pra trás), seguro de usar dentro de um cascateamento dia-a-dia.
+function _lpProximoDiaUtilForward(iso){
+  let d=new Date(iso+'T00:00:00');
+  while(true){
+    const dow=d.getDay();
+    if(dow!==0&&dow!==6&&!getFeriadosTodos(d.getFullYear()).has(fmtISOLocal(d)))return fmtISOLocal(d);
+    d.setDate(d.getDate()+1);
+  }
+}
+function _lpProximoDiaLivreProducao(isoDesejado,liquidoNovo,mapa){
+  const cap=_lpCapProducaoDia();
+  let iso=_lpProximoDiaUtilForward(isoDesejado),tentativas=0;
+  while(((mapa[iso]&&mapa[iso].soma||0)+liquidoNovo)>cap&&tentativas<90){
+    iso=_lpProximoDiaUtilForward(_opAddDias(iso,1));
+    tentativas++;
+  }
+  return iso;
+}
+function _lpProximoDiaLivreInstalacao(isoDesejado,mapa){
+  const cap=_lpCapInstalacoesDia();
+  let iso=_lpProximoDiaUtilForward(isoDesejado),tentativas=0;
+  while((mapa[iso]&&mapa[iso].qtd||0)>=cap&&tentativas<90){
+    iso=_lpProximoDiaUtilForward(_opAddDias(iso,1));
+    tentativas++;
+  }
+  return iso;
+}
+// Diagnóstico "requer atenção" de UM pedido já lançado de verdade — usado na Lista de Pedidos
+// real. Retorna null se está tudo dentro da capacidade, ou um array de motivos (texto) se
+// algum dos dois limites estourou no dia calculado desse pedido.
+function _lpRequerAtencao(x,mapaProducao,mapaInstalacao){
+  if(!x.ok)return null;
+  const motivos=[];
+  const cap=_lpCapProducaoDia();
+  const etProd=x.calc.etapas.find(e=>e.key==='producao');
+  if(etProd&&etProd.aplicavel){
+    const dia=mapaProducao[etProd.iso];
+    if(dia&&dia.soma>cap+0.005)motivos.push(`Produção: ${fmtR(dia.soma)} previstos pra ${fmtD(etProd.iso)} (${dia.itens.length} pedido${dia.itens.length!==1?'s':''}), limite é ${fmtR(cap)}`);
+  }
+  if(x.calc.temInst){
+    const capI=_lpCapInstalacoesDia();
+    const dia=mapaInstalacao[x.calc.chegadaIso];
+    if(dia&&dia.qtd>capI)motivos.push(`Instalação: ${dia.qtd} obras começando em ${fmtD(x.calc.chegadaIso)}, ideal é até ${capI}`);
+  }
+  return motivos.length?motivos:null;
+}
+// ===================== FIM CAPACIDADE DIÁRIA =====================
 function _isSetorUser(setorKey){
   const{cat,isAdm}=_getUserCat();
   return isAdm||cat===setorKey;
@@ -12461,19 +12832,81 @@ function _lpEventosFiltrados(){
   return eventos;
 }
 let _lpTabAtiva='lista';
+// Cache do que gerou a badge "⚠️ N pedidos requerem atenção" no último render de
+// renderListaPedidos() — clicar na badge abre _lpAbrirModalAtencao() listando exatamente esses
+// pedidos, sem recalcular nada de novo (2026-08-04, a pedido do usuário: "ao clicar preciso que
+// me mostre quais são eles").
+let _lpPedidosAtencaoCache=[];
+// Badge "⚠️ N pedidos requerem atenção" — compartilhada pelos 3 modos de visualização da Lista
+// de Pedidos (Lista/Kanban/Calendário), pra avisar em qualquer um deles, não só na Lista
+// (2026-08-04, a pedido do usuário: "isso precisa aparecer em todos os modos de visualização").
+// Recalcula toda vez que é chamada (respeitando busca/status/data aplicados no momento) e
+// atualiza _lpPedidosAtencaoCache, então o clique abre sempre o modal com a lista certa,
+// não importa em qual visão o usuário clicou. "Requer Atenção" é um conceito por PEDIDO
+// inteiro (não por etapa), por isso usa _lpListaFiltrada() em vez do _lpEventosFiltrados() que
+// Kanban/Calendário usam pras próprias colunas/dias.
+function _lpBadgeAtencaoHtml(){
+  const infos=_lpListaFiltrada();
+  const mapaProd=_lpMapaProducaoPorDia();
+  const mapaInst=_lpMapaInstalacoesPorDia();
+  infos.forEach(x=>{x._atencao=_lpRequerAtencao(x,mapaProd,mapaInst);});
+  _lpPedidosAtencaoCache=infos.filter(x=>x._atencao);
+  const qtd=_lpPedidosAtencaoCache.length;
+  if(!qtd)return '';
+  return `<div onclick="_lpAbrirModalAtencao()" title="Clique pra ver quais pedidos" style="cursor:pointer;background:#fee2e2;color:#b91c1c;font-weight:800;font-size:.78rem;padding:8px 14px;border-radius:20px;white-space:nowrap;margin-bottom:12px;display:inline-block">⚠️ ${qtd} pedido${qtd!==1?'s':''} requer${qtd!==1?'em':''} atenção — limite de Produção ou Instalação estourado</div>`;
+}
+// Lista os pedidos que estão com a badge "⚠️ Requer Atenção" ligada (limite de Produção ou
+// Instalação estourado no dia calculado) — usa o cache montado no último render (Lista,
+// Kanban ou Calendário, ver _lpBadgeAtencaoHtml), então respeita o mesmo filtro que gerou o
+// número da badge que foi clicada.
+function _lpAbrirModalAtencao(){
+  const old=document.getElementById('lp-atencao-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='lp-atencao-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  const linhas=_lpPedidosAtencaoCache.map(x=>{
+    const{p,_atencao}=x;
+    return `<div onclick="_lpFecharEFiltrarAtencao('${p.id}','${(p.os||'').replace(/'/g,"\\'")}')" style="cursor:pointer;border:1px solid #fecaca;background:#fef2f2;border-radius:10px;padding:12px;margin-bottom:8px">
+      <div style="font-size:.84rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'} · ${(p.cliente||'—').replace(/</g,'&lt;')}</div>
+      ${p.job?`<div style="font-size:.7rem;color:var(--ink4);margin-top:1px">JOB: ${String(p.job).replace(/</g,'&lt;')}</div>`:''}
+      <div style="font-size:.74rem;color:#b91c1c;font-weight:700;margin-top:4px">⚠️ ${(_atencao||[]).join(' | ')}</div>
+    </div>`;
+  }).join('');
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:560px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:10px">
+      <div>
+        <div style="font-size:1rem;font-weight:800;color:#1a1f36">⚠️ Pedidos que requerem atenção</div>
+        <div style="font-size:.78rem;color:var(--ink3);margin-top:2px">${_lpPedidosAtencaoCache.length} pedido${_lpPedidosAtencaoCache.length!==1?'s':''} com o limite diário de Produção ou Instalação estourado no dia calculado. Clique num pedido pra abrir ele filtrado na lista.</div>
+      </div>
+      <button onclick="document.getElementById('lp-atencao-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px">✕</button>
+    </div>
+    ${linhas||'<div style="text-align:center;padding:20px;color:var(--ink4);font-size:.85rem">Nenhum pedido no momento.</div>'}
+  </div>`;
+  document.body.appendChild(modal);
+}
+// Fecha o modal e filtra a Lista de Pedidos direto pra esse OS, pra não precisar digitar na
+// busca manualmente.
+function _lpFecharEFiltrarAtencao(pedidoId,os){
+  const m=document.getElementById('lp-atencao-modal');if(m)m.remove();
+  const busca=document.getElementById('lp-fil-busca');
+  if(busca){busca.value=os||'';lpRenderAtivo();}
+}
 function lpSetTab(tab,btn){
   document.querySelectorAll('.lp-main-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  const sl=document.getElementById('lp-sec-lista'),sk=document.getElementById('lp-sec-kanban'),sc=document.getElementById('lp-sec-calendario');
+  const sl=document.getElementById('lp-sec-lista'),sk=document.getElementById('lp-sec-kanban'),sc=document.getElementById('lp-sec-calendario'),ss=document.getElementById('lp-sec-simulador');
   if(sl)sl.style.display=tab==='lista'?'':'none';
   if(sk)sk.style.display=tab==='kanban'?'':'none';
   if(sc)sc.style.display=tab==='calendario'?'':'none';
+  if(ss)ss.style.display=tab==='simulador'?'':'none';
   _lpTabAtiva=tab;
   lpRenderAtivo();
 }
 function lpRenderAtivo(){
   if(_lpTabAtiva==='kanban')renderListaPedidosKanban();
   else if(_lpTabAtiva==='calendario')renderListaPedidosCalendario();
+  else if(_lpTabAtiva==='simulador'){/* só popula quando o usuário clica "Simular" — nada pra renderizar ao abrir a aba */}
   else renderListaPedidos();
 }
 function _lpMiniBarraHtml(progresso,atrasado,concluido){
@@ -12492,12 +12925,26 @@ function renderListaPedidos(){
   // sempre, mesmo com filtro aplicado, pra dar o retrato real do time (2026-07-31, a pedido
   // do usuário, no lugar da antiga coluna "Etapa Atual").
   const assertGeral=_lpAssertividadeGeral();
+  // Capacidade diária (2026-08-03, a pedido do usuário) — calcula os mapas de Produção/
+  // Instalação UMA vez por render (não por linha) e já anexa em cada info pra reaproveitar
+  // no resumo do topo e na badge de cada linha. Ver _lpRequerAtencao().
+  const _lpMapaProd=_lpMapaProducaoPorDia();
+  const _lpMapaInst=_lpMapaInstalacoesPorDia();
+  infos.forEach(x=>{x._atencao=_lpRequerAtencao(x,_lpMapaProd,_lpMapaInst);});
+  const qtdAtencao=infos.filter(x=>x._atencao).length;
+  // Cache do que gerou o resumo acima — clicar na badge "⚠️ N pedidos requerem atenção" abre um
+  // modal listando exatamente esses pedidos, com o motivo de cada um (2026-08-04, a pedido do
+  // usuário: "aqui ao clicar preciso que me mostre quais são eles"). Guardado à parte pra não
+  // recalcular tudo de novo no clique — sempre reflete o mesmo filtro que está na tela no
+  // momento (busca/etapa/status/data), igual o número da badge.
+  _lpPedidosAtencaoCache=infos.filter(x=>x._atencao);
   const geralHtml=`<div style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:#f8fafc;border:1px solid var(--border);border-radius:12px;margin-bottom:14px;flex-wrap:wrap">
     <div style="font-size:.8rem;font-weight:800;color:var(--ink);white-space:nowrap">🎯 Assertividade Geral</div>
     ${assertGeral.pct===null?`<div style="font-size:.76rem;color:var(--ink4)">Sem baixas registradas ainda em Projetos/Compras/Produção.</div>`
       :`<div style="background:#e2e8f0;border-radius:20px;height:9px;width:160px;overflow:hidden"><div style="background:${assertGeral.pct>=90?'#16a34a':assertGeral.pct>=70?'#d97706':'#dc2626'};height:100%;width:${assertGeral.pct}%"></div></div>
       <div style="font-size:.8rem;font-weight:800;color:${assertGeral.pct>=90?'#16a34a':assertGeral.pct>=70?'#d97706':'#dc2626'}">${assertGeral.pct}%</div>
       <div style="font-size:.7rem;color:var(--ink4)">${assertGeral.ok} etapa(s) no prazo de ${assertGeral.resolvidas} já resolvida(s) — Projeto, Compras, Corte Galvanizado, ART, Adesivo e Produção</div>`}
+    ${qtdAtencao>0?`<div onclick="_lpAbrirModalAtencao()" title="Clique pra ver quais pedidos" style="cursor:pointer;margin-left:auto;background:#fee2e2;color:#b91c1c;font-weight:800;font-size:.78rem;padding:6px 12px;border-radius:20px;white-space:nowrap">⚠️ ${qtdAtencao} pedido${qtdAtencao!==1?'s':''} requer${qtdAtencao!==1?'em':''} atenção — limite de Produção ou Instalação estourado</div>`:''}
   </div>`;
   if(!infos.length){
     body.innerHTML=geralHtml+'<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum pedido encontrado.</div>';
@@ -12530,11 +12977,16 @@ function renderListaPedidos(){
           <td colspan="4" style="padding:8px 10px;color:#b45309;font-size:.76rem" title="${_lpProblemasTexto(x.calc.problemas).replace(/"/g,'&quot;')}">⚠️ Dados incompletos — ${_lpProblemasTexto(x.calc.problemas)}</td>
         </tr>`;
       }
-      const{calc,atrasado,concluido,progresso,assert:assertPedido}=x;
+      const{calc,atrasado,concluido,progresso,assert:assertPedido,_atencao}=x;
       const corLinha=atrasado?'color:#dc2626':'';
       const statusHtml=concluido?'<span style="color:var(--success);font-weight:700">✅ Concluído</span>'
         :atrasado?'<span style="color:#dc2626;font-weight:700">🔴 Atrasado</span>'
         :'<span style="color:#0284c7;font-weight:700">🔵 Em andamento</span>';
+      // ⚠️ Requer Atenção (2026-08-03) — Produção estourou o limite diário de líquido ou
+      // Instalação passou do limite de obras começando no mesmo dia. Empilhado embaixo do
+      // Status, com o motivo detalhado no title (tooltip) — não esconde nem substitui o
+      // status normal, só soma um alerta.
+      const atencaoHtml=_atencao?`<div style="margin-top:4px"><span style="background:#fee2e2;color:#b91c1c;font-weight:800;font-size:.66rem;padding:2px 8px;border-radius:20px;white-space:nowrap;cursor:help" title="${_atencao.join(' | ').replace(/"/g,'&quot;')}">⚠️ Requer Atenção</span></div>`:'';
       return `<tr style="border-bottom:1px solid var(--border-lt);${corLinha}">
         <td style="padding:8px 10px;font-weight:700;${corLinha}">${p.os||'—'}</td>
         <td style="padding:8px 10px;${corLinha}" title="${(p.cliente||'').replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.cliente||'—'}</div></td>
@@ -12544,12 +12996,171 @@ function renderListaPedidos(){
         <td style="padding:8px 10px;${corLinha}">${fmtD(calc.prazoIso)}</td>
         <td style="padding:8px 10px;${corLinha};white-space:nowrap">${_lpAssertividadeBarraHtml(assertPedido)}</td>
         <td style="padding:8px 10px">${_lpMiniBarraHtml(progresso,atrasado,concluido)}<div style="font-size:.68rem;color:var(--ink4);margin-top:2px">${progresso}%</div></td>
-        <td style="padding:8px 10px">${statusHtml}</td>
+        <td style="padding:8px 10px">${statusHtml}${atencaoHtml}</td>
         <td style="padding:8px 10px;text-align:right"><button onclick="lpAbrirDetalhe('${p.id}')" class="dash-btn-conf" style="background:#0891b2;white-space:nowrap">👁️ Ver Etapas</button></td>
       </tr>`;
     }).join('')}
     </tbody></table></div>`;
 }
+// ===================== SIMULADOR DE PEDIDOS (2026-08-03) =====================
+// Só consulta — não cria nem salva nenhum pedido. Serve pra responder "dá pra vender com esse
+// prazo?" ANTES de fechar a venda, cruzando o mesmo motor de etapas da Lista de Pedidos real
+// (_lpCalcEtapas) com a capacidade diária que os pedidos reais já ocupam hoje.
+function _simToggleFrete(){
+  const temFrete=document.getElementById('sim-tem-frete')?.value==='sim';
+  ['sim-frete-cep-wrap','sim-frete-cidade-wrap','sim-frete-mod-wrap'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.style.display=temFrete?'':'none';
+  });
+}
+function _simToggleInstalacao(){
+  const temInst=document.getElementById('sim-tem-inst')?.value==='sim';
+  const el=document.getElementById('sim-inst-dias-wrap');if(el)el.style.display=temInst?'':'none';
+}
+let _simCepInfo=null;
+async function _simCepInput(el){
+  const digits=el.value.replace(/\D/g,'');
+  const out=document.getElementById('sim-cidade-uf');
+  if(digits.length!==8){_simCepInfo=null;if(out)out.value='';return;}
+  if(out)out.value='Buscando...';
+  try{
+    const r=await fetch(`https://viacep.com.br/ws/${digits}/json/`);
+    const d=await r.json();
+    if(d.erro){_simCepInfo=null;if(out)out.value='⚠️ CEP não encontrado';return;}
+    _simCepInfo={cidade:d.localidade||'',uf:(d.uf||'').toUpperCase()};
+    if(out)out.value=`${d.localidade||'?'}/${d.uf||'?'}`;
+  }catch(e){_simCepInfo=null;if(out)out.value='⚠️ Erro ao buscar CEP';}
+}
+// Mesma conta de atualizaPrazo()/_lpCalcDiasFreteFallback() (Fracionado sempre pela Tabela de
+// Fretes por UF; Dedicado por distância de Ponta Grossa ÷ 800km/dia), só que como função pura
+// (sem mexer no objeto `ed` nem em DOM da Emissão) pra poder rodar aqui no Simulador.
+function _simDiasFrete(cidade,uf,modalidade){
+  const tabela=getFreteTable();
+  if(modalidade!=='Dedicado'){
+    if(uf&&tabela[uf]!=null)return{dias:tabela[uf],texto:`${tabela[uf]} dia(s) útil(eis) — Tabela de Fretes Fracionados (${uf})`};
+    return{dias:3,texto:'3 dias úteis (padrão — UF não configurado na Tabela de Fretes)'};
+  }
+  const origemCidade=((cfg.freteOrigem||'PONTA GROSSA/PR').split('/')[0]||'').trim();
+  if(cidade&&norm(cidade)===norm(origemCidade))return{dias:1,texto:'1 dia útil (entrega na própria cidade de origem)'};
+  const dist=DIST_PG_NORM[norm(cidade||'')]||null;
+  if(!dist)return{dias:3,texto:'3 dias corridos (cidade fora da tabela de distâncias — estimativa padrão)'};
+  const dias=Math.ceil(dist/800);
+  return{dias,texto:`${dias} dia(s) corrido(s) — ${dist}km de ${cfg.freteOrigem||'Ponta Grossa/PR'}`};
+}
+function _lpSimular(){
+  if(!_isPlanejamentoUser()){toast('Só Planejamento ou administrador pode usar o Simulador.','terr');return;}
+  const out=document.getElementById('sim-resultado');
+  if(!out)return;
+  const prazoIso=document.getElementById('sim-prazo')?.value||'';
+  if(!prazoIso){toast('Informe o prazo desejado pelo cliente.','terr');return;}
+  const liquido=moneyToNum(document.getElementById('sim-liquido')?.value||'0');
+  const temFrete=document.getElementById('sim-tem-frete')?.value==='sim';
+  const temInst=document.getElementById('sim-tem-inst')?.value==='sim';
+  const fmod=document.getElementById('sim-fmod')?.value||'Fracionado';
+  const diasInstManual=parseInt(document.getElementById('sim-dias-inst')?.value,10)||3;
+
+  let diasFrete=0,freteTxt='sem frete próprio (cliente retira/contrata)';
+  if(temFrete){
+    if(!_simCepInfo){toast('Informe um CEP de entrega válido pra calcular o frete.','terr');return;}
+    const r=_simDiasFrete(_simCepInfo.cidade,_simCepInfo.uf,fmod);
+    diasFrete=r.dias;freteTxt=r.texto;
+  }
+  const diasInst=temInst?diasInstManual:0;
+
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const coletaIsoRaw=_opAddDias(prazoIso,-(diasInst+diasFrete));
+  const chegadaIsoRaw=_opAddDias(prazoIso,-diasInst);
+  const prazoInternoDias=coletaIsoRaw?Math.round((new Date(coletaIsoRaw+'T00:00:00')-new Date(hojeIso+'T00:00:00'))/86400000):0;
+  if(!coletaIsoRaw||!(prazoInternoDias>0)){
+    out.innerHTML=`<div style="padding:14px 16px;background:#fee2e2;border-radius:10px;color:#b91c1c;font-weight:700">⚠️ Prazo curto demais: ${temFrete?`${diasFrete} dia(s) de frete`:'sem frete'}${temInst?` + ${diasInst} dia(s) de instalação`:''} não cabem entre hoje e ${fmtD(prazoIso)}. Esse prazo não é seguro pra vender — peça mais dias ao cliente.</div>`;
+    return;
+  }
+  const coletaIso=_lpAjustaDiaUtil(coletaIsoRaw);
+  const chegadaIso=_lpAjustaDiaUtil(chegadaIsoRaw);
+  const condsSim={medicao:true,art:true,frete:temFrete,instalacao:temInst};
+  // Mesma regra de Embalagem (2 dias úteis fixos antes da Saída do Frete) aplicada aqui pra
+  // nunca divergir do que _lpCalcEtapas calcula pra pedido de verdade — ver comentário lá
+  // (2026-08-04).
+  const _etapasDefSim=_lpEtapasDefParaPedido(null).filter(d=>!d.cond||condsSim[d.cond]);
+  const _embalagemAtivaSim=_etapasDefSim.some(d=>d.key==='embalagem');
+  const _producaoBufferIsoSim=_embalagemAtivaSim?_lpSubtraiDiasUteis(coletaIso,LP_DIAS_EMBALAGEM):null;
+  const etapas=_etapasDefSim.map(def=>{
+    let iso;
+    if(def.key==='producao'&&_producaoBufferIsoSim)iso=_producaoBufferIsoSim;
+    else if(def.special==='chegada')iso=chegadaIso;
+    else if(def.special==='final')iso=prazoIso;
+    else iso=_lpAjustaDiaUtil(_opAddDias(hojeIso,Math.round(prazoInternoDias*def.pct/100)));
+    return Object.assign({},def,{iso});
+  });
+
+  const mapaProd=_lpMapaProducaoPorDia();
+  const mapaInst=_lpMapaInstalacoesPorDia();
+  let prodHtml='',instHtml='';
+  const etProd=etapas.find(e=>e.key==='producao');
+  if(etProd){
+    const cap=_lpCapProducaoDia();
+    const diaAtual=mapaProd[etProd.iso]||{soma:0,itens:[]};
+    const cabe=(diaAtual.soma+liquido)<=cap;
+    if(cabe){
+      prodHtml=`<div style="padding:10px 14px;background:#dcfce7;border-radius:8px;color:#15803d;font-weight:700">✅ Produção (${fmtD(etProd.iso)}): já tem ${fmtR(diaAtual.soma)} comprometido de ${fmtR(cap)} — cabe esse pedido de ${fmtR(liquido)} (sobra ${fmtR(Math.max(0,cap-diaAtual.soma-liquido))}).</div>`;
+    } else {
+      const sugestao=_lpProximoDiaLivreProducao(etProd.iso,liquido,mapaProd);
+      prodHtml=`<div style="padding:10px 14px;background:#fee2e2;border-radius:8px;color:#b91c1c;font-weight:700">❌ Produção (${fmtD(etProd.iso)}): já tem ${fmtR(diaAtual.soma)} comprometido de ${fmtR(cap)} — não cabe mais ${fmtR(liquido)} nesse dia. Próximo dia com espaço: <u>${fmtD(sugestao)}</u> (empurraria o prazo final em ${_lpDiferencaDias(etProd.iso,sugestao)} dia(s) útil(eis)).</div>`;
+    }
+  }
+  if(temInst){
+    const capI=_lpCapInstalacoesDia();
+    const diaAtualI=mapaInst[chegadaIso]||{qtd:0,itens:[]};
+    const cabeI=diaAtualI.qtd<capI;
+    if(cabeI){
+      instHtml=`<div style="padding:10px 14px;background:#dcfce7;border-radius:8px;color:#15803d;font-weight:700;margin-top:8px">✅ Instalação (${fmtD(chegadaIso)}): ${diaAtualI.qtd} obra(s) já começando nesse dia, cabe mais 1 (limite ${capI}).</div>`;
+    } else {
+      const sugestaoI=_lpProximoDiaLivreInstalacao(chegadaIso,mapaInst);
+      instHtml=`<div style="padding:10px 14px;background:#fee2e2;border-radius:8px;color:#b91c1c;font-weight:700;margin-top:8px">❌ Instalação (${fmtD(chegadaIso)}): ${diaAtualI.qtd} obra(s) já começando nesse dia (limite ${capI}) — sugerimos começar em <u>${fmtD(sugestaoI)}</u> pra não sobrecarregar a equipe.</div>`;
+    }
+  }
+  // Dias úteis + atividades por setor (2026-08-04, a pedido do usuário) — pra cada etapa, além
+  // da data, mostra quantos dias ÚTEIS aquele setor realmente tem (do fim da etapa anterior até
+  // o prazo desta) e quantos pedidos REAIS já caem na mesma data pra esse setor especificamente
+  // (contando também este pedido hipotético), com aviso vermelho quando estoura o limiar de
+  // LP_LIMITE_ATIVIDADES_ETAPA. Produção (usa R$, já mostrado acima em prodHtml) e
+  // Frete/Instalação (logística, já mostrado em instHtml ou são só data de referência) não têm
+  // limiar de quantidade aqui — ficam com "—" na coluna de Atividades.
+  const tabelaEtapas=`<table style="width:100%;border-collapse:collapse;font-size:.82rem;margin-top:16px">
+    <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
+      <th style="padding:6px 8px">Etapa</th><th style="padding:6px 8px">Data calculada</th>
+      <th style="padding:6px 8px" title="Dias úteis que esse setor tem, do fim da etapa anterior até este prazo">Dias Úteis do Setor</th>
+      <th style="padding:6px 8px" title="Quantos pedidos reais já têm essa etapa na mesma data, contando este pedido hipotético">Atividades Nesse Dia</th>
+    </tr></thead>
+    <tbody>${etapas.map((e,i)=>{
+      const isoIni=i===0?hojeIso:etapas[i-1].iso;
+      const diasSetor=_lpDiasUteisJanela(isoIni,e.iso);
+      const limite=LP_LIMITE_ATIVIDADES_ETAPA[e.key];
+      let ativHtml='<span style="color:var(--ink4)">—</span>';
+      if(limite!=null){
+        const mapaE=_lpMapaAtividadesPorEtapa(e.key);
+        const qtdAtual=(mapaE[e.iso]||{qtd:0}).qtd;
+        const qtdComEste=qtdAtual+1;
+        const estourou=qtdComEste>=limite;
+        ativHtml=`<span style="font-weight:700;color:${estourou?'#dc2626':'#15803d'}">${estourou?'🔴':'🟢'} ${qtdAtual} já + este pedido = ${qtdComEste} (limite ${limite})</span>`;
+      }
+      return `<tr style="border-bottom:1px solid var(--border-lt)">
+        <td style="padding:6px 8px;font-weight:600">${e.label}</td>
+        <td style="padding:6px 8px">${fmtD(e.iso)}</td>
+        <td style="padding:6px 8px">${diasSetor} dia(s) útil(eis)</td>
+        <td style="padding:6px 8px">${ativHtml}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+  out.innerHTML=`
+    <div style="font-size:.8rem;color:var(--ink4);margin-bottom:10px">📅 Emissão hipotética: hoje (${fmtD(hojeIso)}) · Frete: ${freteTxt} · Instalação: ${temInst?diasInst+' dia(s) estimado(s)':'sem instalação própria'} · Dias internos disponíveis pro time (Projeto→Embalagem): ${prazoInternoDias}</div>
+    ${prodHtml}${instHtml}${tabelaEtapas}`;
+}
+// Diferença em dias corridos entre 2 ISO — só pra dar uma ideia de tamanho no aviso do
+// Simulador ("empurraria X dias"), não é usado em nenhum cálculo de prazo de verdade.
+function _lpDiferencaDias(isoA,isoB){
+  return Math.round((new Date(isoB+'T00:00:00')-new Date(isoA+'T00:00:00'))/86400000);
+}
+// ===================== FIM SIMULADOR DE PEDIDOS =====================
 // Kanban (2026-07-30, redesenhado a pedido do usuário) — lança um card do pedido em TODAS as
 // etapas aplicáveis dele AO MESMO TEMPO, desde o dia da emissão, cada um com o prazo daquela
 // atividade especificamente. Antes só aparecia 1 card, na "etapa atual" (esperando a anterior
@@ -12562,6 +13173,10 @@ function renderListaPedidosKanban(){
   const wrap=document.getElementById('lp-kanban-body');
   if(!wrap)return;
   if(!_isPlanejamentoUser()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  // Badge "⚠️ Requer Atenção" também no Kanban (2026-08-04, a pedido do usuário — antes só
+  // aparecia na Lista). Ver _lpBadgeAtencaoHtml().
+  const atencaoElKb=document.getElementById('lp-kanban-atencao');
+  if(atencaoElKb)atencaoElKb.innerHTML=_lpBadgeAtencaoHtml();
   // Eventos já vêm com filtro de etapa/data aplicado — ver _lpEventosFiltrados() (2026-07-31,
   // centraliza o que antes era duplicado aqui, no Calendário e no modal do dia).
   const eventosKb=_lpEventosFiltrados();
@@ -12617,6 +13232,10 @@ function renderListaPedidosCalendario(){
   const body=document.getElementById('lp-cal-body');
   if(!body)return;
   if(!_isPlanejamentoUser()){body.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  // Badge "⚠️ Requer Atenção" também no Calendário (2026-08-04, a pedido do usuário — antes só
+  // aparecia na Lista). Ver _lpBadgeAtencaoHtml().
+  const atencaoElCal=document.getElementById('lp-cal-atencao');
+  if(atencaoElCal)atencaoElCal.innerHTML=_lpBadgeAtencaoHtml();
   // Eventos já vêm com filtro de etapa/data aplicado — ver _lpEventosFiltrados().
   const porDia={};
   _lpEventosFiltrados().forEach(ev=>{
@@ -14127,10 +14746,21 @@ async function salvarFgLancamento(){
     atualizadoPor:usuarioLogado?.nomeExibicao||usuarioLogado?.email||'',
     atualizadoEm:new Date().toISOString()
   };
+  // Espelha em p.planTarefas — salvar um fornecedor aqui já marca a coluna correspondente de
+  // Planejamento (Contratar Instalador/Frete/Elevação) como concluída sozinha, sem precisar de
+  // outro clique (2026-08-03, a pedido do usuário). "Munque" cobre tanto Elevação quanto o
+  // próprio Munque — reaproveita o mesmo fornecedor selecionado pra marcar a tarefa Elevação.
+  p.planTarefas=p.planTarefas||{};
+  const quemPreencheu=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
+  const hojeTarefa=new Date().toISOString().slice(0,10);
+  if(instalador)p.planTarefas.instalador={concluido:true,data:hojeTarefa,por:quemPreencheu};
+  if(transportadora)p.planTarefas.frete={concluido:true,data:hojeTarefa,por:quemPreencheu};
+  if(munque)p.planTarefas.elevacao={concluido:true,data:hojeTarefa,por:quemPreencheu};
   await savePedidoFS(p);
   toast('Lançamento de fornecedores salvo','tok');
   closeM('mo-fg-lancar');
   renderFgAll();
+  renderPlanejamentoObras(); // atualiza as colunas de Contratar Instalador/Frete/Elevação se a tela de Obras estiver aberta por baixo
 }
 // ===================== FIM GESTÃO DE FORNECEDORES =====================
 
@@ -15490,11 +16120,16 @@ function renderPlanejamentoObras(){
     <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
       <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">Tipo</th>
       <th style="padding:8px 10px">Vendedor</th><th style="padding:8px 10px">Data da Venda</th><th style="padding:8px 10px">Prazo de Finalização</th>
+      <th style="padding:8px 10px;white-space:nowrap" title="Prazo pra receber a ART do projeto">Recebimento ART</th>
       <th style="padding:8px 10px;white-space:nowrap" title="Prazo Final de Embalagem">Prazo Embalagem</th>
-      <th style="padding:8px 10px;white-space:nowrap" title="Prazo de Coleta do Frete">Prazo Coleta Frete</th>
-      <th style="padding:8px 10px;white-space:nowrap" title="Prazo de Chegada do Frete">Prazo Chegada Frete</th>
-      <th style="padding:8px 10px;white-space:nowrap" title="Prazo de Início da Instalação">Prazo Início Instalação</th>
-      <th style="padding:8px 10px;white-space:nowrap" title="Prazo Final da Instalação">Prazo Final Instalação</th>
+      <th style="padding:8px 10px;white-space:nowrap" title="7 dias úteis antes do Início da Instalação — clique abre Fornecedores">Contratar Instalador</th>
+      <th style="padding:8px 10px;white-space:nowrap" title="6 dias úteis antes do Início do Frete — clique abre Fornecedores">Contratar Frete</th>
+      <th style="padding:8px 10px;white-space:nowrap" title="5 dias úteis antes do Início da Instalação — clique abre Fornecedores">Contratar Elevação</th>
+      <th style="padding:8px 10px;white-space:nowrap" title="2 dias úteis antes do Início da Instalação — Reunião de Alinhamento Operacional">RAO</th>
+      <th style="padding:8px 10px;white-space:nowrap" title="Prazo de Coleta do Frete (Início do Frete)">Início do Frete</th>
+      <th style="padding:8px 10px;white-space:nowrap" title="Prazo de Chegada do Frete (Fim do Frete)">Fim do Frete</th>
+      <th style="padding:8px 10px;white-space:nowrap" title="Prazo de Início da Instalação">Início da Instalação</th>
+      <th style="padding:8px 10px;white-space:nowrap" title="Prazo Final da Instalação">Fim da Instalação</th>
       <th style="padding:8px 10px">Cidade/UF</th><th style="padding:8px 10px">Status</th><th style="padding:8px 10px"></th>
     </tr></thead>
     <tbody>
@@ -15530,11 +16165,32 @@ function renderPlanejamentoObras(){
       // (2026-07-30, correção a pedido do usuário — não inventa prazo de frete/instalação pra
       // quem não tem esse item no pedido).
       const _lpc=_lpCalcEtapas(p);
-      const _lpCell=(iso,naoTemTexto)=>iso?`<td style="padding:8px 10px;white-space:nowrap;${corLinha}">${fmtD(iso)}</td>`:`<td style="padding:8px 10px;color:var(--ink4)" title="${naoTemTexto||''}">—</td>`;
+      // Célula de prazo "read-only" (Embalagem/Início-Fim Frete/Início-Fim Instalação) — cor
+      // por proximidade do vencimento (2026-08-03, mesma régua das colunas de tarefa: verde em
+      // dia, amarelo ≤7 dias, vermelho ≤3 dias/vencido). Diferente de _lpCellTarefa: não tem
+      // clique nem "concluído" — é só a data calculada da etapa.
+      const _lpCell=(iso,naoTemTexto)=>{
+        if(!iso)return `<td style="padding:8px 10px;color:var(--ink4)" title="${naoTemTexto||''}">—</td>`;
+        const ci=_lpCorPrazoTarefa(iso,false,hojeISO);
+        return `<td style="padding:8px 10px;white-space:nowrap"><span style="background:${ci.bg};color:${ci.cor};padding:3px 8px;border-radius:6px;font-weight:700;font-size:.76rem;display:inline-block">${fmtD(iso)}</span></td>`;
+      };
+      // 5 colunas de tarefa (Recebimento ART fica fora deste bloco, logo após Prazo de
+      // Finalização) + 5 colunas de prazo de etapa, na mesma ordem do <thead> acima
+      // (2026-08-03, a pedido do usuário — "tabela azul" com os offsets de dias úteis de cada
+      // tarefa, ver PLAN_TAREFAS_REGRAS).
+      const _lpArtHtml=_lpCellTarefa(p,'art',hojeISO);
       const _lpPrazosHtml=_lpc.ok
-        ?(_lpCell(_lpc.coletaIso)+_lpCell(_lpc.temFrete?_lpc.coletaIso:null,'Pedido sem Frete — cliente retira')+_lpCell(_lpc.temFrete?_lpc.chegadaIso:null,'Pedido sem Frete')+_lpCell(_lpc.temInst?_lpc.chegadaIso:null,'Pedido sem Instalação')+_lpCell(_lpc.temInst?_lpc.prazoIso:null,'Pedido sem Instalação'))
-        :_lpc.curto?`<td colspan="5" style="padding:8px 10px;color:#b45309;font-size:.72rem" title="Prazo de Finalização curto demais pro Frete + Instalação informados">⚠️ Prazo curto demais — confira o prazo do pedido</td>`
-        :`<td colspan="5" style="padding:8px 10px;color:#b45309;font-size:.72rem" title="${_lpProblemasTexto(_lpc.problemas).replace(/"/g,'&quot;')}">⚠️ ${_lpProblemasTexto(_lpc.problemas)}</td>`;
+        ?(_lpCell(_lpc.coletaIso)
+          +_lpCellTarefa(p,'instalador',hojeISO)
+          +_lpCellTarefa(p,'frete',hojeISO)
+          +_lpCellTarefa(p,'elevacao',hojeISO)
+          +_lpCellTarefa(p,'rao',hojeISO)
+          +_lpCell(_lpc.temFrete?_lpc.coletaIso:null,'Pedido sem Frete — cliente retira')
+          +_lpCell(_lpc.temFrete?_lpc.chegadaIso:null,'Pedido sem Frete')
+          +_lpCell(_lpc.temInst?_lpc.chegadaIso:null,'Pedido sem Instalação')
+          +_lpCell(_lpc.temInst?_lpc.prazoIso:null,'Pedido sem Instalação'))
+        :_lpc.curto?`<td colspan="9" style="padding:8px 10px;color:#b45309;font-size:.72rem" title="Prazo de Finalização curto demais pro Frete + Instalação informados">⚠️ Prazo curto demais — confira o prazo do pedido</td>`
+        :`<td colspan="9" style="padding:8px 10px;color:#b45309;font-size:.72rem" title="${_lpProblemasTexto(_lpc.problemas).replace(/"/g,'&quot;')}">⚠️ ${_lpProblemasTexto(_lpc.problemas)}</td>`;
       // Unificação 2026-07-29: Diário de Obra e Definir Fornecedores viram botões diretos
       // nesta mesma lista, reaproveitando os modais já existentes (abrirDiarioObra/
       // abrirFgLancar), sem precisar de aba separada.
@@ -15545,6 +16201,7 @@ function renderPlanejamentoObras(){
         <td style="padding:8px 10px;${corLinha}">${p.responsavel||'—'}</td>
         <td style="padding:8px 10px;${corLinha};white-space:nowrap">${dataVendaTxt}</td>
         <td style="padding:8px 10px;${corLinha}">${fmtD(p.prazo)||'—'}${prazoOrigTag}${editPrazoBtn}</td>
+        ${_lpArtHtml}
         ${_lpPrazosHtml}
         <td style="padding:8px 10px;${corLinha}">${loc}</td>
         <td style="padding:8px 10px">${statusHtml}</td>
