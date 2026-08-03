@@ -688,7 +688,7 @@ select.fc{cursor:pointer}
           <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
             <div>
               <div class="gc-chart-title">Faturamento por Cliente</div>
-              <div class="gc-chart-sub" style="margin-bottom:0">Agrupado por marca (Grupos de Cliente) — total da marca com a Categoria de Pedido quebrada embaixo — mês a mês e acumulado do ano</div>
+              <div class="gc-chart-sub" style="margin-bottom:0">Agrupado por marca (Grupos de Cliente) — clique numa marca pra ver a quebra por Categoria de Pedido — mês a mês e acumulado do ano</div>
             </div>
             <div class="gc-comp25-toggle">
               <button id="gc-fatcli-btn-br" class="gc-comp25-btn active" onclick="setFatClienteModo('br')">Bruto</button>
@@ -2532,8 +2532,8 @@ select.fc{cursor:pointer}
         </div>
         <div class="admin-only" style="background:#fff;border-radius:12px;padding:20px;border:1.5px solid var(--border);margin-top:16px">
           <div style="font-size:.78rem;font-weight:700;color:var(--ink2);margin-bottom:6px">🔐 Senha/PIN de Administrador</div>
-          <p style="font-size:.73rem;color:var(--ink4);margin-bottom:14px">Usada para excluir pedido, cancelar venda e desbloquear o painel de Metas/Comissões. Padrão: 2024.</p>
-          <div class="fg" style="max-width:200px"><label>Senha/PIN</label><input class="fc no-upper" type="password" id="cfg-senha-admin" maxlength="30" placeholder="2024"></div>
+          <p style="font-size:.73rem;color:var(--ink4);margin-bottom:14px">Usada para excluir pedido, cancelar venda e desbloquear o painel de Metas/Comissões. Defina sua própria senha abaixo — enquanto não for definida, o sistema usa "2024" como valor temporário de fábrica.</p>
+          <div class="fg" style="max-width:200px"><label>Senha/PIN</label><input class="fc no-upper" type="password" id="cfg-senha-admin" maxlength="30" placeholder="Defina sua senha"></div>
         </div>
       </div>
       <!-- METAS -->
@@ -17722,24 +17722,18 @@ function _finGrupoCliente(item){
 // _finGrupoCliente/Concentração por Cliente do Financeiro continua com o critério antigo
 // (categoria contém "FRANQUEADO"), pra não mudar um número financeiro já validado sem pedido
 // explícito pra isso.
-function _fatClienteEhBurgerKing(r){
-  const cliente=(r.cl||'').toUpperCase();
-  const job=(r.job||'').toUpperCase();
-  return cliente.includes('BURGER KING')||job.includes('BURGER KING');
-}
+// Correção 2026-08-03 (a pedido do usuário): a versão anterior só agrupava em "BURGER KING"
+// as linhas cuja Categoria citava "ZAMP" — na prática quase nenhuma (a maioria das vendas de
+// Burger King usa categorias como "BK É FOGO"/"MANUTENÇÃO"/"FRANQUEADO SHOPPING"/"COROAS
+// KIDS", sem a palavra ZAMP), então quase toda loja de Burger King continuava aparecendo
+// separada — exatamente o problema que o usuário queria resolver. Burger King agora agrupa
+// 100% junto, no MESMO padrão simples de BOB'S/C&A/ARCELOR MITTAL: tudo soma num "BURGER
+// KING" só, sem distinguir ZAMP x franqueado aqui (Financeiro → Concentração por Cliente
+// continua com o critério próprio dele, sem mudança).
 function _fatClienteGrupoNome(r){
-  if(_fatClienteEhBurgerKing(r)){
-    const categoria=(r.cat||'').toUpperCase();
-    return categoria.includes('ZAMP')?'BURGER KING':(r.cl||'—');
-  }
   return _finGrupoCliente({cliente:r.cl,job:r.job,categoria:r.cat});
 }
 function _fatClienteCategoriaDisplay(r){
-  if(_fatClienteEhBurgerKing(r)){
-    const categoria=(r.cat||'').toUpperCase();
-    if(categoria.includes('ZAMP'))return r.cat||'—';
-    return categoria.includes('FRANQUEADO')?(r.cat||'—'):'LOJA FRANQUEADO';
-  }
   return r.cat||'—';
 }
 function _fatClienteAgrupar(){
@@ -17764,6 +17758,17 @@ function _fatClienteAgrupar(){
   }));
 }
 let _fatClienteModo='br';
+// Marcas com a quebra por Categoria ABERTA — recolhida por padrão (2026-08-03, a pedido do
+// usuário: a tabela com todas as categorias sempre visíveis ficava pesada de ler, ex.: BOB'S
+// com 6+ categorias diferentes). Cada marca vira 1 linha só por padrão (nome + seta ▸ + total
+// do mês a mês); clicar na linha expande e mostra a quebra por Categoria embaixo. Guardado por
+// NOME da marca (não por índice) pra sobreviver a reordenações/troca de Bruto↔Líquido.
+let _fatClienteExpandido=new Set();
+function _fatClienteToggleGrupo(nome){
+  if(_fatClienteExpandido.has(nome))_fatClienteExpandido.delete(nome);
+  else _fatClienteExpandido.add(nome);
+  renderFaturamentoPorCliente();
+}
 function setFatClienteModo(modo){
   _fatClienteModo=modo;
   document.getElementById('gc-fatcli-btn-br')?.classList.toggle('active',modo==='br');
@@ -17788,10 +17793,16 @@ function renderFaturamentoPorCliente(){
   const body=grupos.map(g=>{
     const meses=g[campo];
     const total=campo==='br'?g.totalBr:g.totalLq;
-    const linhaGrupo=`<tr style="background:#f8fafc"><td style="font-weight:800">${g.nome}</td><td style="color:#94a3b8;font-size:.7rem;font-weight:700">TOTAL</td>${meses.map(v=>`<td style="text-align:right;font-weight:800">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:800">${fmtR(total)}</td></tr>`;
-    // Sub-linha por Categoria de Pedido só aparece quando a marca tem MAIS de uma categoria —
-    // com uma só, a sub-linha ficaria idêntica ao total do grupo (sem ganho, só poluição visual).
-    const subLinhas=g.categorias.length>1?g.categorias.map(c=>{
+    // Sub-linha por Categoria de Pedido só existe quando a marca tem MAIS de uma categoria —
+    // com uma só, ficaria idêntica ao total do grupo (sem ganho, só poluição visual). Marca
+    // sem sub-linha não tem o que expandir, então nem mostra a seta/não fica clicável.
+    const temSub=g.categorias.length>1;
+    const nomeEsc=g.nome.replace(/'/g,"\\'");
+    const aberto=temSub&&_fatClienteExpandido.has(g.nome);
+    const seta=temSub?`<span style="display:inline-block;width:14px;color:#94a3b8">${aberto?'▾':'▸'}</span>`:'';
+    const rotulo=temSub?`${g.categorias.length} categoria${g.categorias.length!==1?'s':''}`:'TOTAL';
+    const linhaGrupo=`<tr style="background:#f8fafc;${temSub?'cursor:pointer':''}" ${temSub?`onclick="_fatClienteToggleGrupo('${nomeEsc}')" title="Clique para ${aberto?'recolher':'ver a quebra por categoria'}"`:''}><td style="font-weight:800">${seta}${g.nome}</td><td style="color:#94a3b8;font-size:.7rem;font-weight:700">${rotulo}</td>${meses.map(v=>`<td style="text-align:right;font-weight:800">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:800">${fmtR(total)}</td></tr>`;
+    const subLinhas=aberto?g.categorias.map(c=>{
       const mesesC=c[campo];
       const totalC=campo==='br'?c.totalBr:c.totalLq;
       return `<tr><td style="padding-left:22px;color:#94a3b8;font-size:.72rem">↳</td><td style="color:#64748b">${c.categoria}</td>${mesesC.map(v=>`<td style="text-align:right">${fmtCel(v)}</td>`).join('')}<td style="text-align:right;font-weight:700">${fmtR(totalC)}</td></tr>`;
