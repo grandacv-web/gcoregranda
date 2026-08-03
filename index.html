@@ -681,18 +681,20 @@ select.fc{cursor:pointer}
 
         <!-- Faturamento por Cliente (2026-08-01, simplificado 2026-08-03 a pedido do usuário) —
              agrupado por marca (1ª palavra do nome + overrides pra marca composta, ver
-             _fatClienteGrupoNome); mostra só cliente + total faturado, sem grade de 12 meses.
-             Clique numa marca com 2+ vendas expande e lista cada venda individual (nome completo
-             da loja + mês). Ver renderFaturamentoPorCliente(). -->
+             _fatClienteGrupoNome); Bruto e Líquido aparecem juntos, lado a lado, sem precisar
+             trocar de aba (2026-08-03). Clique numa marca com 2+ vendas expande e mostra a
+             quebra por Categoria de Pedido, com cada venda individual (nome completo da loja +
+             mês) dentro dela. Toggle Bruto/Líquido só controla ordenação + gráfico agora. Ver
+             renderFaturamentoPorCliente(). -->
         <div class="gc-chart-card">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
             <div>
               <div class="gc-chart-title">Faturamento por Cliente</div>
-              <div class="gc-chart-sub" style="margin-bottom:0">Agrupado por marca — clique numa marca pra ver as vendas individuais (loja + mês)</div>
+              <div class="gc-chart-sub" style="margin-bottom:0">Agrupado por marca, Bruto e Líquido lado a lado — clique numa marca pra ver a quebra por categoria e vendas individuais</div>
             </div>
-            <div class="gc-comp25-toggle">
-              <button id="gc-fatcli-btn-br" class="gc-comp25-btn active" onclick="setFatClienteModo('br')">Bruto</button>
-              <button id="gc-fatcli-btn-lq" class="gc-comp25-btn" onclick="setFatClienteModo('lq')">Líquido</button>
+            <div class="gc-comp25-toggle" title="Define a ordenação da tabela e qual valor aparece no gráfico">
+              <button id="gc-fatcli-btn-br" class="gc-comp25-btn active" onclick="setFatClienteModo('br')">Ordenar por Bruto</button>
+              <button id="gc-fatcli-btn-lq" class="gc-comp25-btn" onclick="setFatClienteModo('lq')">Ordenar por Líquido</button>
             </div>
           </div>
           <div style="height:280px;margin-top:10px"><canvas id="gc-cFatCli"></canvas></div>
@@ -9951,6 +9953,15 @@ function renderContasPagar(){
   if(selCat&&selCat.options.length<=1)selCat.innerHTML='<option value="">Todas as categorias</option>'+getPlanoContasDespesas().map(c=>`<option value="${c.id}">${c.nome}</option>`).join('');
 
   const items=_cpFilteredItems();
+  // _cpItemsAtuais precisa ser atualizado ANTES do "if(!items.length) return" logo abaixo —
+  // bug real encontrado 2026-08-03 (usuário reportou "filtros parecem não funcionar" na tela
+  // unificada Contas a Pagar/Receber): quando o filtro deixava Contas a Pagar sem NENHUM
+  // resultado, essa função retornava cedo demais e nunca zerava _cpItemsAtuais, então
+  // renderContasUnificado() (que lê _cpItemsAtuais por baixo dos panos) continuava mostrando
+  // os itens de Pagar da renderização ANTERIOR, como se o filtro novo não tivesse sido
+  // aplicado. Contas a Receber (_finItemsAtuais, ver renderFinanceiro()) já fazia certo, só
+  // faltava espelhar aqui.
+  _cpItemsAtuais=items;
   const cardsEl=document.getElementById('cp-cards');
   if(cardsEl){
     const totPendente=items.filter(c=>c.statusCalc!=='pago').reduce((s,c)=>s+_cpValorAjustado(c),0);
@@ -9968,7 +9979,6 @@ function renderContasPagar(){
     body.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhum lançamento encontrado com esses filtros.</div>';
     return;
   }
-  _cpItemsAtuais=items;
   const statusBadge=c=>{
     if(c.statusCalc==='pago')return'<span style="background:#dcfce7;color:#16a34a;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">✅ Pago</span>';
     if(c.statusCalc==='atrasado')return'<span style="background:#fee2e2;color:#dc2626;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">⚠️ Atrasado</span>';
@@ -17404,8 +17414,22 @@ function _fcAtualizarLabelMes(){
   const lbl=document.getElementById('fc-mes-lbl');
   if(!lbl)return;
   const di=document.getElementById('fc-fil-data-ini')?.value||'';
+  const df=document.getElementById('fc-fil-data-fim')?.value||'';
   if(!di){lbl.textContent='—';return;}
   const d=new Date(di+'T00:00:00');
+  // Se alguém editar "De"/"Até" na mão (os dois são <input type=date> livres) e os dois
+  // acabarem em meses diferentes, o rótulo antes mostrava só o mês de "De" — parecendo que
+  // o filtro só pega 1 mês (ex.: "JANEIRO 2026"), quando na real o período aplicado vai até
+  // muito depois (ex.: até Agosto). Isso lia como "o filtro não funciona" (2026-08-03,
+  // usuário reportou valores estranhos com o rótulo mostrando um mês só). Agora, se "De" e
+  // "Até" caem em mês/ano diferentes, o rótulo mostra o intervalo inteiro pra não enganar.
+  if(df){
+    const d2=new Date(df+'T00:00:00');
+    if(!isNaN(d2)&&(d2.getMonth()!==d.getMonth()||d2.getFullYear()!==d.getFullYear())){
+      lbl.textContent=`${MESES_PT[d.getMonth()+1]} ${d.getFullYear()} → ${MESES_PT[d2.getMonth()+1]} ${d2.getFullYear()}`;
+      return;
+    }
+  }
   lbl.textContent=`${MESES_PT[d.getMonth()+1]} ${d.getFullYear()}`;
 }
 function fcSetOrdem(v){_fcOrdem=v;renderContasUnificado();}
@@ -17851,6 +17875,33 @@ function setFatClienteModo(modo){
   document.getElementById('gc-fatcli-btn-lq')?.classList.toggle('active',modo==='lq');
   renderFaturamentoPorCliente();
 }
+// Plugin caseiro (2026-08-03, a pedido do usuário: "na barra de progresso mostrar o número
+// também pra facilitar a leitura") pra escrever o valor logo depois do fim de cada barra —
+// mesma ideia do _rhPluginValorBarra do RH, só que adaptado pra barra HORIZONTAL
+// (indexAxis:'y': a barra cresce pra direita, então o texto vai à direita da ponta, centralizado
+// verticalmente). Sem dependência nova (chartjs-plugin-datalabels não está carregado no sistema).
+const _fatCliPluginValorBarra={
+  id:'_fatCliValorBarra',
+  afterDatasetsDraw(chart){
+    const{ctx}=chart;
+    ctx.save();
+    ctx.font='700 9px inherit';
+    ctx.textAlign='left';
+    ctx.textBaseline='middle';
+    chart.data.datasets.forEach((ds,di)=>{
+      const meta=chart.getDatasetMeta(di);
+      if(meta.hidden)return;
+      ctx.fillStyle=ds.backgroundColor||'#555';
+      meta.data.forEach((bar,i)=>{
+        const val=ds.data[i];
+        if(!val)return;
+        const txt='R$'+(val>=1e6?(val/1e6).toFixed(1)+'M':(val/1000).toFixed(0)+'k');
+        ctx.fillText(txt, bar.x+4, bar.y);
+      });
+    });
+    ctx.restore();
+  }
+};
 function renderFaturamentoPorCliente(){
   const tbl=document.getElementById('gc-fatcli-table');
   if(!tbl)return;
@@ -17888,24 +17939,24 @@ function renderFaturamentoPorCliente(){
     });
     return Object.values(map);
   }
-  const head=`<thead><tr><th>Cliente / Marca</th><th style="text-align:right">Faturamento</th></tr></thead>`;
+  // Bruto e Líquido aparecem juntos, lado a lado, sem precisar clicar no toggle Bruto/Líquido
+  // pra ver o outro valor (2026-08-03, a pedido do usuário) — o toggle continua existindo só
+  // pra escolher qual dos dois manda na ORDENAÇÃO da tabela e no gráfico (coluna ativa em negrito).
+  const head=`<thead><tr><th>Cliente / Marca</th><th style="text-align:right;${campo==='br'?'font-weight:900':''}">Bruto</th><th style="text-align:right;${campo==='lq'?'font-weight:900':''}">Líquido</th></tr></thead>`;
   function linhaEmpresa(g){
-    const total=valorG(g);
     const nomeEsc=g.nome.replace(/'/g,"\\'");
     const aberto=_fatClienteExpandido.has(g.nome);
     const seta=`<span style="display:inline-block;width:14px;color:#94a3b8">${aberto?'▾':'▸'}</span>`;
-    const linhaGrupo=`<tr style="background:#f8fafc;cursor:pointer" onclick="_fatClienteToggleGrupo('${nomeEsc}')" title="Clique para ${aberto?'recolher':'ver as '+g.qtdVendas+' vendas'}"><td style="font-weight:800">${seta}${g.nome}<span style="color:#94a3b8;font-size:.7rem;font-weight:700;margin-left:8px">${g.qtdVendas} vendas</span></td><td style="text-align:right;font-weight:800">${fmtR(total)}</td></tr>`;
+    const linhaGrupo=`<tr style="background:#f8fafc;cursor:pointer" onclick="_fatClienteToggleGrupo('${nomeEsc}')" title="Clique para ${aberto?'recolher':'ver as '+g.qtdVendas+' vendas'}"><td style="font-weight:800">${seta}${g.nome}<span style="color:#94a3b8;font-size:.7rem;font-weight:700;margin-left:8px">${g.qtdVendas} vendas</span></td><td style="text-align:right;font-weight:800">${fmtR(g.totalBr)}</td><td style="text-align:right;font-weight:800">${fmtR(g.totalLq)}</td></tr>`;
     let subLinhas='';
     if(aberto){
       const cats=agruparPorCategoria(g.vendas);
       cats.sort((a,b)=>(campo==='br'?b.totalBr-a.totalBr:b.totalLq-a.totalLq));
       cats.forEach(c=>c.vendas.sort((a,b)=>(a.mes-b.mes)||(valorV(b)-valorV(a))));
       subLinhas=cats.map(c=>{
-        const totalC=campo==='br'?c.totalBr:c.totalLq;
-        const header=`<tr><td colspan="2" style="padding-left:22px;padding-top:8px;color:#94a3b8;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.3px">${c.categoria} <span style="color:#cbd5e1">— ${fmtR(totalC)}</span></td></tr>`;
+        const header=`<tr><td colspan="3" style="padding-left:22px;padding-top:8px;color:#94a3b8;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.3px">${c.categoria} <span style="color:#cbd5e1">— Bruto ${fmtR(c.totalBr)} · Líquido ${fmtR(c.totalLq)}</span></td></tr>`;
         const linhas=c.vendas.map(v=>{
-          const valor=valorV(v);
-          return `<tr><td style="padding-left:34px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente}</td><td style="text-align:right">${fmtR(valor)} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td></tr>`;
+          return `<tr><td style="padding-left:34px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(v.br)}</td><td style="text-align:right">${fmtR(v.lq)}</td></tr>`;
         }).join('');
         return header+linhas;
       }).join('');
@@ -17914,14 +17965,14 @@ function renderFaturamentoPorCliente(){
   }
   function linhaAvulso(g){
     const v=g.vendas[0];
-    const total=valorG(g);
-    return `<tr><td>${v.cliente}</td><td style="text-align:right">${fmtR(total)} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td></tr>`;
+    return `<tr><td>${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(g.totalBr)}</td><td style="text-align:right">${fmtR(g.totalLq)}</td></tr>`;
   }
   const bodyEmpresas=empresas.map(linhaEmpresa).join('');
-  const divisorAvulsos=avulsos.length?`<tr><td colspan="2" style="background:#eef2f7;color:#64748b;font-size:.68rem;font-weight:800;letter-spacing:.5px;padding:8px 10px;text-transform:uppercase">🎲 Clientes avulsos — 1 pedido só até agora, ainda sem histórico de recorrência</td></tr>`:'';
+  const divisorAvulsos=avulsos.length?`<tr><td colspan="3" style="background:#eef2f7;color:#64748b;font-size:.68rem;font-weight:800;letter-spacing:.5px;padding:8px 10px;text-transform:uppercase">🎲 Clientes avulsos — 1 pedido só até agora, ainda sem histórico de recorrência</td></tr>`:'';
   const bodyAvulsos=avulsos.map(linhaAvulso).join('');
-  const totGeral=grupos.reduce((s,g)=>s+valorG(g),0);
-  const foot=`<tfoot><tr><td style="font-weight:800">TOTAL GERAL</td><td style="text-align:right;font-weight:800">${fmtR(totGeral)}</td></tr></tfoot>`;
+  const totGeralBr=grupos.reduce((s,g)=>s+g.totalBr,0);
+  const totGeralLq=grupos.reduce((s,g)=>s+g.totalLq,0);
+  const foot=`<tfoot><tr><td style="font-weight:800">TOTAL GERAL</td><td style="text-align:right;font-weight:800">${fmtR(totGeralBr)}</td><td style="text-align:right;font-weight:800">${fmtR(totGeralLq)}</td></tr></tfoot>`;
   tbl.innerHTML=head+'<tbody>'+bodyEmpresas+divisorAvulsos+bodyAvulsos+'</tbody>'+foot;
 
   // Gráfico: quanto cada cliente/marca gerou de receita no MÊS atual vs ACUMULADO do ano (a
@@ -17938,6 +17989,10 @@ function renderFaturamentoPorCliente(){
     if(gcCharts.fatcli){try{gcCharts.fatcli.destroy();}catch(e){}}
     const wrap=cvEl.parentElement;
     if(wrap)wrap.style.height=Math.max(220,top.length*34)+'px';
+    const _fmtAbrev=v=>'R$'+(v>=1e6?(v/1e6).toFixed(1)+'M':(v/1000).toFixed(0)+'k');
+    // 20% de folga no eixo pra sobrar espaço pro número escrito depois da barra (senão corta
+    // nas marcas com valor perto do máximo) — mesma ideia do maxValor abaixo.
+    const maiorValor=Math.max(1,...dataMes,...dataAno);
     gcCharts.fatcli=new Chart(cvEl,{type:'bar',data:{labels,datasets:[
       {label:'Mês atual ('+GC_MESES_S[mesAtual]+')',data:dataMes,backgroundColor:'#e0245e',borderWidth:0,borderRadius:3},
       {label:'Acumulado do ano',data:dataAno,backgroundColor:'#1a2b5e',borderWidth:0,borderRadius:3}
@@ -17946,10 +18001,10 @@ function renderFaturamentoPorCliente(){
       plugins:{legend:{position:'bottom',labels:{font:{size:10},color:'#888',boxWidth:10}},
         tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+fmtR(ctx.raw)}}},
       scales:{
-        x:{grid:{color:'rgba(0,0,0,.05)'},border:{display:false},min:0,ticks:{font:{size:10},color:'#888',callback:v=>'R$'+(v>=1e6?(v/1e6).toFixed(1)+'M':(v/1000).toFixed(0)+'k')}},
+        x:{grid:{color:'rgba(0,0,0,.05)'},border:{display:false},min:0,suggestedMax:maiorValor*1.28,ticks:{font:{size:10},color:'#888',callback:_fmtAbrev}},
         y:{grid:{display:false},ticks:{font:{size:10},color:'#888'},border:{display:false}}
       }
-    }});
+    },plugins:[_fatCliPluginValorBarra]});
   }
 }
 function renderFinFluxo(){
