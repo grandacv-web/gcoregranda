@@ -18616,23 +18616,46 @@ function _fatClienteCategoriaDisplay(r){
 // o bug de 2026-08-03 onde marcas com 2+ vendas na mesma Categoria (ex.: STARBUCKS, 2 lojas
 // diferentes mas mesma categoria de pedido) não tinham como "abrir" pra mostrar as vendas, já
 // que a quebra antiga era por Categoria (temSub = categorias.length>1) e não por venda.
+// Campos de despesa separados COLUNA A COLUNA, na mesma ordem/rótulo que aparecem na Emissão e
+// em "Editar Valores" (ver ev-ft/ev-mo/ev-vi/ev-el/ev-art/ev-rem/ev-med por volta da linha 1790)
+// — a pedido do usuário (2026-08-04): "quero separado igual sai no pedido, frete, instalação,
+// etc etc. coluna a coluna", depois de eu ter mostrado só um total lumped de "Despesas
+// Operacionais" + Frete separado (não era o suficiente). 'outras' é a soma de r.ba+r.ou — 2
+// campos legados só da planilha antiga (reconciliada, antes de rem/med/pintub existirem no
+// sistema), que HOJE nunca aparecem em pedido emitido direto (não têm campo próprio na
+// Emissão/Editar Valores) — mantidos aqui só pra a soma de todas as colunas sempre bater com
+// Bruto-Líquido exatamente, mesmo pra venda antiga que tinha esse tipo de custo.
+const FATCLI_CAMPOS_DESPESA=[
+  {key:'ft',label:'Frete'},
+  {key:'mo',label:'Instalação'},
+  {key:'vi',label:'Mobilização'},
+  {key:'el',label:'Elevações'},
+  {key:'art',label:'ART'},
+  {key:'rem',label:'Remoção'},
+  {key:'med',label:'Medição'},
+  {key:'pintub',label:'Pintura de Tubo'},
+  {key:'outras',label:'Outras',title:'Custos legados de planilha antiga (antes de existirem campos próprios de Remoção/Medição/Pintura de Tubo no sistema) — normalmente zero em pedido emitido direto.'}
+];
 function _fatClienteAgrupar(){
   const grupos={};
   getVendaRowsMerged().forEach(r=>{
     if(!r.m||r.m<1||r.m>12)return;
     const nomeGrupo=_fatClienteGrupoNome(r);
-    if(!grupos[nomeGrupo])grupos[nomeGrupo]={nome:nomeGrupo,totalBr:0,totalLq:0,totalOp:0,totalFt:0,vendas:[]};
+    if(!grupos[nomeGrupo]){
+      grupos[nomeGrupo]={nome:nomeGrupo,totalBr:0,totalLq:0,vendas:[]};
+      FATCLI_CAMPOS_DESPESA.forEach(c=>grupos[nomeGrupo]['total_'+c.key]=0);
+    }
     const g=grupos[nomeGrupo];
     g.totalBr+=r.br||0;
     g.totalLq+=r.lq||0;
-    // Despesas Operacionais (op = frete+mobilização+elevação+mão de obra+ART+remoção+medição+
-    // pintura de tubo, ver pedidoToVendaRow) e Frete isolado (ft, um componente de op) — a
-    // pedido do usuário (2026-08-04): "quero que apareça os valores de despesas operacionais,
-    // frete etc etc também nesta soma". Mesmos campos que já existem em toda venda
-    // (getVendaRowsMerged/pedidoToVendaRow/XLSX_VENDAS), só não estavam sendo somados aqui.
-    g.totalOp+=r.op||0;
-    g.totalFt+=r.ft||0;
-    g.vendas.push({cliente:(r.cl||'—').trim(),categoria:r.cat||'—',mes:r.m,br:r.br||0,lq:r.lq||0,op:r.op||0,ft:r.ft||0});
+    const outras=(r.ba||0)+(r.ou||0);
+    const venda={cliente:(r.cl||'—').trim(),categoria:r.cat||'—',mes:r.m,br:r.br||0,lq:r.lq||0,outras};
+    FATCLI_CAMPOS_DESPESA.forEach(c=>{
+      const v=c.key==='outras'?outras:(r[c.key]||0);
+      g['total_'+c.key]+=v;
+      venda[c.key]=v;
+    });
+    g.vendas.push(venda);
   });
   return Object.values(grupos).map(g=>({...g,qtdVendas:g.vendas.length}));
 }
@@ -18711,38 +18734,42 @@ function renderFaturamentoPorCliente(){
     const map={};
     vendas.forEach(v=>{
       const cat=v.categoria||'—';
-      if(!map[cat])map[cat]={categoria:cat,vendas:[],totalBr:0,totalLq:0,totalOp:0,totalFt:0};
+      if(!map[cat]){
+        map[cat]={categoria:cat,vendas:[],totalBr:0,totalLq:0};
+        FATCLI_CAMPOS_DESPESA.forEach(c=>map[cat]['total_'+c.key]=0);
+      }
       map[cat].vendas.push(v);
       map[cat].totalBr+=v.br||0;
       map[cat].totalLq+=v.lq||0;
-      map[cat].totalOp+=v.op||0;
-      map[cat].totalFt+=v.ft||0;
+      FATCLI_CAMPOS_DESPESA.forEach(c=>map[cat]['total_'+c.key]+=v[c.key]||0);
     });
     return Object.values(map);
   }
   // Bruto e Líquido aparecem juntos, lado a lado, sem precisar clicar no toggle Bruto/Líquido
   // pra ver o outro valor (2026-08-03, a pedido do usuário) — o toggle continua existindo só
   // pra escolher qual dos dois manda na ORDENAÇÃO da tabela e no gráfico (coluna ativa em negrito).
-  // Despesas Operacionais e Frete somados junto (2026-08-04, a pedido do usuário) — mesmos
-  // campos que Financeiro/Lista de Vendas já usam (op/ft de pedidoToVendaRow), só não
-  // apareciam aqui. Despesas Operacionais é o total (frete+mobilização+elevação+mão de
-  // obra+ART+remoção+medição+pintura de tubo); Frete é só o componente de frete dentro
-  // desse total, mostrado à parte por já ser o maior item variável de custo.
-  const head=`<thead><tr><th>Cliente / Marca</th><th style="text-align:right;${campo==='br'?'font-weight:900':''}">Bruto</th><th style="text-align:right" title="Total de frete+mobilização+elevação+mão de obra+ART+remoção+medição+pintura de tubo">Despesas Operacionais</th><th style="text-align:right" title="Componente de frete dentro das Despesas Operacionais">Frete</th><th style="text-align:right;${campo==='lq'?'font-weight:900':''}">Líquido</th></tr></thead>`;
+  // Despesas separadas coluna a coluna (2026-08-04, a pedido do usuário: "quero separado igual
+  // sai no pedido, frete, instalação, etc etc. coluna a coluna" — antes só tinha um total lumped
+  // de "Despesas Operacionais" + Frete à parte, não bastava). NCOLS = Cliente/Marca + Bruto + N
+  // colunas de despesa + Líquido — usado nos colspan dos separadores.
+  const NCOLS=3+FATCLI_CAMPOS_DESPESA.length;
+  const head=`<thead><tr><th>Cliente / Marca</th><th style="text-align:right;${campo==='br'?'font-weight:900':''}">Bruto</th>${FATCLI_CAMPOS_DESPESA.map(c=>`<th style="text-align:right"${c.title?` title="${c.title.replace(/"/g,'&quot;')}"`:''}>${c.label}</th>`).join('')}<th style="text-align:right;${campo==='lq'?'font-weight:900':''}">Líquido</th></tr></thead>`;
+  const _tdDespesas=obj=>FATCLI_CAMPOS_DESPESA.map(c=>`<td style="text-align:right;color:#c2410c">${fmtR(obj['total_'+c.key]!=null?obj['total_'+c.key]:obj[c.key])}</td>`).join('');
   function linhaEmpresa(g){
     const nomeEsc=g.nome.replace(/'/g,"\\'");
     const aberto=_fatClienteExpandido.has(g.nome);
     const seta=`<span style="display:inline-block;width:14px;color:#94a3b8">${aberto?'▾':'▸'}</span>`;
-    const linhaGrupo=`<tr style="background:#f8fafc;cursor:pointer" onclick="_fatClienteToggleGrupo('${nomeEsc}')" title="Clique para ${aberto?'recolher':'ver as '+g.qtdVendas+' vendas'}"><td style="font-weight:800">${seta}${g.nome}<span style="color:#94a3b8;font-size:.7rem;font-weight:700;margin-left:8px">${g.qtdVendas} vendas</span></td><td style="text-align:right;font-weight:800">${fmtR(g.totalBr)}</td><td style="text-align:right;font-weight:800;color:#c2410c">${fmtR(g.totalOp)}</td><td style="text-align:right;font-weight:800;color:#c2410c">${fmtR(g.totalFt)}</td><td style="text-align:right;font-weight:800">${fmtR(g.totalLq)}</td></tr>`;
+    const linhaGrupo=`<tr style="background:#f8fafc;cursor:pointer" onclick="_fatClienteToggleGrupo('${nomeEsc}')" title="Clique para ${aberto?'recolher':'ver as '+g.qtdVendas+' vendas'}"><td style="font-weight:800">${seta}${g.nome}<span style="color:#94a3b8;font-size:.7rem;font-weight:700;margin-left:8px">${g.qtdVendas} vendas</span></td><td style="text-align:right;font-weight:800">${fmtR(g.totalBr)}</td>${_tdDespesas(g)}<td style="text-align:right;font-weight:800">${fmtR(g.totalLq)}</td></tr>`;
     let subLinhas='';
     if(aberto){
       const cats=agruparPorCategoria(g.vendas);
       cats.sort((a,b)=>(campo==='br'?b.totalBr-a.totalBr:b.totalLq-a.totalLq));
       cats.forEach(c=>c.vendas.sort((a,b)=>(a.mes-b.mes)||(valorV(b)-valorV(a))));
       subLinhas=cats.map(c=>{
-        const header=`<tr><td colspan="5" style="padding-left:22px;padding-top:8px;color:#94a3b8;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.3px">${c.categoria} <span style="color:#cbd5e1">— Bruto ${fmtR(c.totalBr)} · Desp. Op. ${fmtR(c.totalOp)} · Frete ${fmtR(c.totalFt)} · Líquido ${fmtR(c.totalLq)}</span></td></tr>`;
+        const resumoDesp=FATCLI_CAMPOS_DESPESA.map(cd=>`${cd.label} ${fmtR(c['total_'+cd.key])}`).join(' · ');
+        const header=`<tr><td colspan="${NCOLS}" style="padding-left:22px;padding-top:8px;color:#94a3b8;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.3px">${c.categoria} <span style="color:#cbd5e1">— Bruto ${fmtR(c.totalBr)} · ${resumoDesp} · Líquido ${fmtR(c.totalLq)}</span></td></tr>`;
         const linhas=c.vendas.map(v=>{
-          return `<tr><td style="padding-left:34px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(v.br)}</td><td style="text-align:right;color:#c2410c">${fmtR(v.op)}</td><td style="text-align:right;color:#c2410c">${fmtR(v.ft)}</td><td style="text-align:right">${fmtR(v.lq)}</td></tr>`;
+          return `<tr><td style="padding-left:34px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(v.br)}</td>${_tdDespesas(v)}<td style="text-align:right">${fmtR(v.lq)}</td></tr>`;
         }).join('');
         return header+linhas;
       }).join('');
@@ -18751,16 +18778,16 @@ function renderFaturamentoPorCliente(){
   }
   function linhaAvulso(g){
     const v=g.vendas[0];
-    return `<tr><td>${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(g.totalBr)}</td><td style="text-align:right;color:#c2410c">${fmtR(g.totalOp)}</td><td style="text-align:right;color:#c2410c">${fmtR(g.totalFt)}</td><td style="text-align:right">${fmtR(g.totalLq)}</td></tr>`;
+    return `<tr><td>${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(g.totalBr)}</td>${_tdDespesas(g)}<td style="text-align:right">${fmtR(g.totalLq)}</td></tr>`;
   }
   const bodyEmpresas=empresas.map(linhaEmpresa).join('');
-  const divisorAvulsos=avulsos.length?`<tr><td colspan="5" style="background:#eef2f7;color:#64748b;font-size:.68rem;font-weight:800;letter-spacing:.5px;padding:8px 10px;text-transform:uppercase">🎲 Clientes avulsos — 1 pedido só até agora, ainda sem histórico de recorrência</td></tr>`:'';
+  const divisorAvulsos=avulsos.length?`<tr><td colspan="${NCOLS}" style="background:#eef2f7;color:#64748b;font-size:.68rem;font-weight:800;letter-spacing:.5px;padding:8px 10px;text-transform:uppercase">🎲 Clientes avulsos — 1 pedido só até agora, ainda sem histórico de recorrência</td></tr>`:'';
   const bodyAvulsos=avulsos.map(linhaAvulso).join('');
   const totGeralBr=grupos.reduce((s,g)=>s+g.totalBr,0);
   const totGeralLq=grupos.reduce((s,g)=>s+g.totalLq,0);
-  const totGeralOp=grupos.reduce((s,g)=>s+g.totalOp,0);
-  const totGeralFt=grupos.reduce((s,g)=>s+g.totalFt,0);
-  const foot=`<tfoot><tr><td style="font-weight:800">TOTAL GERAL</td><td style="text-align:right;font-weight:800">${fmtR(totGeralBr)}</td><td style="text-align:right;font-weight:800;color:#c2410c">${fmtR(totGeralOp)}</td><td style="text-align:right;font-weight:800;color:#c2410c">${fmtR(totGeralFt)}</td><td style="text-align:right;font-weight:800">${fmtR(totGeralLq)}</td></tr></tfoot>`;
+  const totGeral={};
+  FATCLI_CAMPOS_DESPESA.forEach(c=>totGeral['total_'+c.key]=grupos.reduce((s,g)=>s+(g['total_'+c.key]||0),0));
+  const foot=`<tfoot><tr><td style="font-weight:800">TOTAL GERAL</td><td style="text-align:right;font-weight:800">${fmtR(totGeralBr)}</td>${FATCLI_CAMPOS_DESPESA.map(c=>`<td style="text-align:right;font-weight:800;color:#c2410c">${fmtR(totGeral['total_'+c.key])}</td>`).join('')}<td style="text-align:right;font-weight:800">${fmtR(totGeralLq)}</td></tr></tfoot>`;
   tbl.innerHTML=head+'<tbody>'+bodyEmpresas+divisorAvulsos+bodyAvulsos+'</tbody>'+foot;
 
   // Gráfico: quanto cada cliente/marca gerou de receita no MÊS atual vs ACUMULADO do ano (a
@@ -20691,17 +20718,24 @@ function pedidoToVendaRow(p){
   // divergindo da planilha colada agora. (corrigido 2026-07-10 — antes só valia pra
   // p.importadoPlanilha===true, deixando pedidos emitidos com valores errados)
   const xlsxRow=(typeof XLSX_VENDAS_BY_OS!=='undefined')?XLSX_VENDAS_BY_OS[String(p.os)]:null;
-  let br,ft,vi,mo,el,art,rem,med,laudo,pintub,op,lq;
+  let br,ft,vi,mo,el,art,rem,med,laudo,pintub,ba,ou,op,lq;
   if(xlsxRow){
     br=xlsxRow.br||0;ft=xlsxRow.ft||0;vi=xlsxRow.vi||0;el=xlsxRow.el||0;mo=xlsxRow.mo||0;
     art=xlsxRow.art||0;rem=xlsxRow.rem||0;med=xlsxRow.med||0;
     // Pintura de Tubo é uma despesa NOVA (2026-07-23), assim como Laudo Técnico foi antes —
     // planilha reconciliada (dados anteriores) nunca tem esse campo.
     pintub=xlsxRow.pintub||0;
-    // Laudo Técnico é uma despesa NOVA (2026-07-16), só existe pra pedido emitido a partir
-    // de agora — planilha reconciliada (dados anteriores) nunca tem esse campo, por pedido
-    // explícito do usuário ("as vendas anteriores... deixa como está").
-    op=ft+vi+el+mo+art+rem+med+pintub;
+    // "ba"/"ou" são campos legados da planilha original (categorias de custo de antes de
+    // Remoção/Medição/Pintura de Tubo terem campo próprio no sistema) — corrigido 2026-08-04
+    // (bug achado montando as colunas de Faturamento por Cliente, ver
+    // project_faturamento_cliente_desp_operacionais_frete.md): antes esse "op" NÃO incluía
+    // ba/ou, e o "return" mais abaixo sempre zerava ba/ou pra 0, mesmo quando a linha da
+    // planilha tinha valor real ali (ex.: OS 5, BURGER KING ITAGUAI, ba:25000) — br-op ficava
+    // 25.000 mais alto que o líquido real (lq vinha certo, direto de xlsxRow.lq, só "op"
+    // reportado é que ficava sub-contado). Sem impacto em Comissão/Metas (usam lq direto, nunca
+    // recalculam a partir de op) — só telas que exibem/somam "op"/despesas por componente.
+    ba=xlsxRow.ba||0;ou=xlsxRow.ou||0;
+    op=ft+vi+el+mo+art+rem+med+pintub+ba+ou;
     lq=xlsxRow.lq!=null?xlsxRow.lq:(br-op);
   } else {
     br=moneyToNum(v['Valor Bruto']||v['Valor Total']||'0');
@@ -20714,6 +20748,9 @@ function pedidoToVendaRow(p){
     med=moneyToNum(inst['Valor da Medição']||'0');
     laudo=moneyToNum(proj['Valor do Laudo Técnico']||'0');
     pintub=moneyToNum(inst['Valor Mão de Obra (Pintura de Tubo)']||'0');
+    // Pedido emitido direto no sistema nunca tem "ba"/"ou" — são conceitos só da planilha
+    // antiga, sem campo próprio na Emissão.
+    ba=0;ou=0;
     op=ft+vi+el+mo+art+rem+med+laudo+pintub;
     // Usa o líquido salvo (mesma fonte usada pelo cálculo de comissão), com fallback ao cálculo direto
     lq=v['Valor Líquido do Pedido']!=null?moneyToNum(v['Valor Líquido do Pedido']):(br-op);
@@ -20753,7 +20790,7 @@ function pedidoToVendaRow(p){
   // contando no vendedor errado (ou "sem vendedor") por nome divergente/vazio no Firestore.
   const vendaVend=xlsxRow?(mapVendedorName(xlsxRow.v)||p.responsavel||''):(p.responsavel||'');
   return {mes,m,p:p.os,cl:p.cliente,cat:p.tipoPedido||'',v:vendaVend,
-    br,ft,vi,el,mo,art,rem,med,pintub,ba:0,ou:0,lq,op,entrega:p.prazo,parcelas:undefined,_pid:p.id,
+    br,ft,vi,el,mo,art,rem,med,pintub,ba,ou,lq,op,entrega:p.prazo,parcelas:undefined,_pid:p.id,
     numOC:p.numOC||'',ocUrl:p.ocUrl||'',pedidoPdfUrl:p.arq_os_url||'',job:p.job||'',cidade:p.locCidade||'',
     // prazoOriginal só existe se o prazo já foi alterado em Planejamento (abrirAlterarPrazoObra)
     // — usado na Lista de Vendas pra mostrar "(adiado)" quando entrega!==prazoOriginal
