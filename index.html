@@ -8997,12 +8997,23 @@ function parseDataBR(s){
 }
 
 function getQuinzenaInfo(dataStr){
-  // Returns the COMMISSION WINDOW for a given CLIENT payment date:
-  //   client pays days 1-14  → commission on 15th of same month  (half='II')
-  //   client pays days 15-31 → commission on  5th of next month  (half='I')
+  // Returns the COMMISSION WINDOW for a given CLIENT payment date (corrigido 2026-08-04,
+  // regra confirmada explicitamente pelo usuário — fecha comissão todo dia 5 e todo dia 15,
+  // cada fechamento com base no que foi RECEBIDO desde o fechamento anterior):
+  //   client pays days 1-4   → commission on  5th of SAME month  (half='I')
+  //   client pays days 5-14  → commission on 15th of SAME month  (half='II')
+  //   client pays days 15-31 → commission on  5th of NEXT month  (half='I')
+  // Antes, dias 1-4 caíam junto com 5-14 no fechamento de dia 15 — errado: o fechamento de
+  // dia 5 já tinha passado quando o pagamento de dia 1-4 daquele mês foi considerado, mas
+  // esse pagamento é justamente o que deveria ENTRAR nesse fechamento de dia 5 (é recebido
+  // ANTES dele). Motivou a correção: usuário confirmou uma leva grande de recebimentos e o
+  // fechamento de dia 5/08 não batia.
   const d=parseDataBR(dataStr);
   if(!d||isNaN(d))return null;
-  if(d.getDate()<=14){
+  const dia=d.getDate();
+  if(dia<=4){
+    return {y:d.getFullYear(),m:d.getMonth()+1,half:'I'};
+  } else if(dia<=14){
     return {y:d.getFullYear(),m:d.getMonth()+1,half:'II'};
   } else {
     const next=new Date(d.getFullYear(),d.getMonth()+1,1);
@@ -9021,6 +9032,34 @@ function getComissaoQuinzena(p, dataStr){
     return {y:d.getFullYear(),m:d.getMonth()+1,half:day<=7?'I':'II'};
   }
   return getQuinzenaInfo(dataStr);
+}
+// Quinzena usada pra achar em QUAL fechamento de comissão (dia 5 ou dia 15) um item entra
+// (2026-08-04, regra confirmada pelo usuário: "as comissões são pagas todo dia 05 e todo
+// dia 15 com base naquilo que foi RECEBIDO entre esses períodos"). Depois de CONFIRMADO em
+// Contas a Receber, a data que manda é a data REAL em que o dinheiro entrou
+// (conf.dataRecebimentoReal, pedida no modal de Confirmar Recebimento) — nunca mais a data
+// PREVISTA (dataAtiva/parc.dataStr), que só é um chute de quando o cliente ia pagar. Sem
+// isso, confirmar hoje uma leva de recebimentos atrasados jogava cada um pra quinzena da
+// data ORIGINALMENTE prevista (muitas vezes em mês já fechado há tempos), em vez de entrar
+// no fechamento de agora (dia 5 ou dia 15 mais próximo a partir de quando o dinheiro
+// realmente entrou) — exatamente o sintoma relatado ("confirmei quase R$1 milhão e não caiu
+// no fechamento de dia 05/08"). Pedido AINDA pendente (sem confirmação/sem data real) continua
+// usando a data prevista como estimativa — é só o que dá pra mostrar em Pagamentos Futuros.
+// Regra "day<=7 mesmo mês" de pedido importadoPlanilha (getComissaoQuinzena acima) NUNCA se
+// aplica aqui: aquela regra existe só porque a data da PLANILHA já É a própria marcação de
+// quinzena, sem ligação com calendário real — mas dataRecebimentoReal é sempre uma data de
+// calendário genuína (digitada num <input type=date>), então sempre usa a janela universal
+// (getQuinzenaInfo), mesmo pra pedido vindo da planilha.
+function _quinzenaParaComissao(p,dataAtiva,conf){
+  if(conf&&conf.status==='confirmado'&&conf.dataRecebimentoReal){
+    const iso=String(conf.dataRecebimentoReal);
+    const partes=iso.split('-');
+    if(partes.length===3){
+      const[y,m,d]=partes;
+      return getQuinzenaInfo(`${d}/${m}/${y}`);
+    }
+  }
+  return getComissaoQuinzena(p,dataAtiva);
 }
 // Data de pagamento da COMISSÃO (dia 5 ou 15, já no y/m corrigido por getComissaoQuinzena/
 // getQuinzenaInfo) — diferente da data real que o CLIENTE paga (i.dataAtiva, mostrada em
@@ -9913,7 +9952,7 @@ function getComissaoItemsAll(){
     getParcelas(p).forEach(parc=>{
       const conf=getPagConf(parc.confKey);
       const dataAtiva=conf&&conf.novaData?conf.novaData:parc.dataStr;
-      let qi=getComissaoQuinzena(p,dataAtiva);
+      let qi=_quinzenaParaComissao(p,dataAtiva,conf);
       if(!qi)return;
       // Usa XLSX_VENDAS como fonte autoritativa do mês de venda (evita mês errado salvo no Firestore)
       const xlsxRef=(XLSX_VENDAS||[]).find(x=>String(x.p)===String(p.os));
@@ -9964,7 +10003,7 @@ function getComissaoItemsAll(){
       const confKey=`xlsxv::${x.p}::${idx}`;
       const conf=getPagConf(confKey);
       const dataAtiva=conf&&conf.novaData?conf.novaData:parc.dataStr;
-      let qi=getComissaoQuinzena(synP,dataAtiva);
+      let qi=_quinzenaParaComissao(synP,dataAtiva,conf);
       if(!qi)return;
       const emM=x.m,emY=2026;
       qi=_empurraQuinzenaMesFechado(qi,emY,emM);
@@ -9999,7 +10038,7 @@ function getComissaoItemsAll(){
   (cfg.saldosDevedores||[]).forEach(sd=>{
     const conf=getPagConf(sd.confKey);
     const dataAtiva=conf&&conf.novaData?conf.novaData:sd.dataStr;
-    let qi=getQuinzenaInfo(dataAtiva);
+    let qi=_quinzenaParaComissao(null,dataAtiva,conf);
     if(!qi)return;
     qi=_empurraQuinzenaMesFechado(qi,sd.emY,sd.emM);
     const pct=getPctComissao(sd.emY,sd.emM,sd.nomeVend);
