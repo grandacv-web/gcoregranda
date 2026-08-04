@@ -3042,6 +3042,23 @@ window._fbSaveContasPagarBatch=async(arr)=>{
     await lote.commit();
   }
 };
+// Remoção em lote (2026-08-04) — a importação automática de Contas a Pagar pode remover
+// centenas de lançamentos de uma vez (tudo que sumiu da planilha). Fazer isso um por um
+// (_lixeiraAdicionar + deleteContaPagarFS, um await de cada por item) travava a tela em
+// "Gravando..." por minutos com 200+ remoções — mesmo problema já corrigido pras GRAVAÇÕES em
+// _fbSaveContasPagarBatch, só que ninguém tinha replicado pras REMOÇÕES ainda. Cada item usa 2
+// operações no lote (grava cópia na Lixeira + apaga o original), por isso o chunk é menor.
+window._fbRemoverContasPagarBatch=async(itens)=>{
+  const CHUNK=200; // 2 operações por item = até 400 por lote, com folga do limite de 500
+  for(let i=0;i<itens.length;i+=CHUNK){
+    const lote=writeBatch(db);
+    itens.slice(i,i+CHUNK).forEach(({lixeiraItem,contaId})=>{
+      lote.set(doc(db,'lixeira',String(lixeiraItem.id)),lixeiraItem);
+      lote.delete(doc(db,'contasPagar',String(contaId)));
+    });
+    await lote.commit();
+  }
+};
 // Receita manual (2026-08-04, a pedido do usuário — botão "+ Nova receita" ao lado de "+ Nova
 // despesa") — coleção própria 'contasReceberManual', mesmo padrão de contasPagar. Só pra
 // entrada de caixa que NÃO vem de venda/pedido (ex.: outras receitas, reembolso, empréstimo
@@ -11340,13 +11357,46 @@ async function confirmarImportacaoContasPagar(){
     if(window._fbSaveContasPagarBatch)await window._fbSaveContasPagarBatch(docsParaGravar);
     else for(const c of docsParaGravar)await saveContaPagarFS(c); // fallback se writeBatch não estiver disponível
     // Remove o que não está mais na planilha (sumiu de verdade OU era cópia duplicada excedente
-    // — ver _cpCalcularPlanoImportacao) — sempre pela Lixeira antes de apagar de vez.
-    for(const c of plano.remover){
-      try{
-        await _lixeiraAdicionar('contaPagar',c,{resumo:`Fora da planilha importada — ${c.fornecedor||'Lançamento'} — R$ ${(c.valor||0).toFixed?c.valor.toFixed(2):c.valor}`});
-        await deleteContaPagarFS(c.id);
-        rem++;
-      }catch(e){console.error(e);}
+    // — ver _cpCalcularPlanoImportacao) — sempre pela Lixeira antes de apagar de vez. EM LOTE
+    // (2026-08-04, ver window._fbRemoverContasPagarBatch): a versão anterior fazia 2 awaits
+    // sequenciais POR ITEM (Lixeira + delete) — com a planilha real trazendo 263 remoções de
+    // uma vez (contas antigas nunca reconhecidas por causa do bug de origem "pdf_import" vs
+    // "xlsx_import"), isso travava a tela em "Gravando..." por vários minutos, igual ao
+    // problema já corrigido antes só pras gravações.
+    if(plano.remover.length){
+      const itensLixeira=plano.remover.map((c,i)=>({
+        lixeiraItem:{
+          id:'lix_'+Date.now()+'_'+i+'_'+Math.random().toString(36).slice(2,8),
+          tipo:'contaPagar',
+          dados:JSON.parse(JSON.stringify(c)),
+          apagadoPor:(window._fbAuth&&window._fbAuth.currentUser&&window._fbAuth.currentUser.email)||'desconhecido',
+          apagadoEm:new Date().toISOString(),
+          resumo:`Fora da planilha importada — ${c.fornecedor||'Lançamento'} — R$ ${(c.valor||0).toFixed?c.valor.toFixed(2):c.valor}`
+        },
+        contaId:c.id
+      }));
+      if(window._fbRemoverContasPagarBatch){
+        await window._fbRemoverContasPagarBatch(itensLixeira);
+        rem=itensLixeira.length;
+      }else{
+        for(const c of plano.remover){ // fallback se writeBatch não estiver disponível
+          try{
+            await _lixeiraAdicionar('contaPagar',c,{resumo:`Fora da planilha importada — ${c.fornecedor||'Lançamento'} — R$ ${(c.valor||0).toFixed?c.valor.toFixed(2):c.valor}`});
+            await deleteContaPagarFS(c.id);
+            rem++;
+          }catch(e){console.error(e);}
+        }
+      }
+      // Purga o excedente da Lixeira ALÉM do limite (best-effort, uma vez só depois do lote —
+      // não mais uma checagem por item removido, que seria mais um monte de deletes sequenciais).
+      if(window._fbDeleteLixeiraItem){
+        const novoTotal=lixeira.length+itensLixeira.length;
+        if(novoTotal>_LIXEIRA_MAX){
+          const ordenado=[...lixeira].sort((a,b)=>(a.apagadoEm||'').localeCompare(b.apagadoEm||''));
+          const excedente=ordenado.slice(0,novoTotal-_LIXEIRA_MAX);
+          excedente.forEach(x=>window._fbDeleteLixeiraItem(x.id).catch(()=>{}));
+        }
+      }
     }
   }catch(e){
     console.error(e);
