@@ -1029,7 +1029,15 @@ select.fc{cursor:pointer}
             <button onclick="dreMov(-1)">◀</button>
             <div class="dash-mes-label" id="dre-mes-lbl">—</div>
             <button onclick="dreMov(1)">▶</button>
-            <select id="dre-fil-empresa" onchange="dreSetEmpresa(this.value)" style="margin-left:auto;padding:8px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+            <!-- flex-basis:100% (2026-08-04) — quebra-linha forçado: select+botões de
+                 exportar SEMPRE caem numa linha própria, nunca disputam espaço com a
+                 navegação de mês. Sem isso, o flex-wrap da .dash-mes-nav só quebra quando
+                 o navegador decide que não cabe mais nada, e o botão "Exportar Excel"
+                 podia ficar cortado na borda antes de a quebra acontecer (mesmo bug de
+                 antes, agora resolvido de forma garantida em vez de depender do cálculo
+                 do navegador). Ver [[feedback_cuidar_design_texto_cortado]]. -->
+            <div style="flex-basis:100%;height:0"></div>
+            <select id="dre-fil-empresa" onchange="dreSetEmpresa(this.value)" style="margin-left:auto;padding:8px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer;min-width:0;max-width:100%">
               <option value="">🏢 Todas as empresas (consolidado)</option>
             </select>
             <button onclick="gerarPDFDRE()" class="dash-btn-conf" style="white-space:nowrap">📄 Gerar PDF</button>
@@ -2961,7 +2969,7 @@ select.fc{cursor:pointer}
 <script type="module">
 import{initializeApp,deleteApp}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
 import{getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged,createUserWithEmailAndPassword,sendPasswordResetEmail,EmailAuthProvider,reauthenticateWithCredential}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
-import{getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,onSnapshot,getDocs,FieldPath}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
+import{getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,onSnapshot,getDocs,FieldPath,writeBatch}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-functions.js';
 
 const firebaseConfig={
@@ -3005,6 +3013,20 @@ window._fbWatchPedidos=(cb)=>onSnapshot(collection(db,'pedidos'),cb);
 window._fbSaveContaPagar=(c)=>setDoc(doc(db,'contasPagar',String(c.id)),c);
 window._fbDeleteContaPagar=(id)=>deleteDoc(doc(db,'contasPagar',String(id)));
 window._fbWatchContasPagar=(cb)=>onSnapshot(collection(db,'contasPagar'),cb);
+// Gravação EM LOTE (2026-08-04) — a importação de Excel de Contas a Pagar pode trazer 400-500+
+// lançamentos de uma vez; gravar um por um (setDoc sequencial, um await por linha) travava a
+// tela em "Gravando..." por minutos, porque CADA gravação dispara o onSnapshot de
+// setupContasPagarSync() e redesenha a lista inteira atrás do modal. writeBatch agrupa até 500
+// gravações num ÚNICO round-trip ao servidor — dispara o onSnapshot uma vez só (ou poucas
+// vezes, se passar de 500 e precisar de mais de um lote), em vez de uma vez por lançamento.
+window._fbSaveContasPagarBatch=async(arr)=>{
+  const CHUNK=450; // margem de segurança abaixo do limite de 500 operações por lote do Firestore
+  for(let i=0;i<arr.length;i+=CHUNK){
+    const lote=writeBatch(db);
+    arr.slice(i,i+CHUNK).forEach(c=>lote.set(doc(db,'contasPagar',String(c.id)),c));
+    await lote.commit();
+  }
+};
 // Receita manual (2026-08-04, a pedido do usuário — botão "+ Nova receita" ao lado de "+ Nova
 // despesa") — coleção própria 'contasReceberManual', mesmo padrão de contasPagar. Só pra
 // entrada de caixa que NÃO vem de venda/pedido (ex.: outras receitas, reembolso, empréstimo
@@ -3980,10 +4002,17 @@ function setupRealtimeSync(){
 }
 // Mesmo padrão de setupRealtimeSync() (pedidos), só que pra Contas a Pagar — coleção
 // separada porque o volume é alto (importação de PDF traz centenas de lançamentos por mês).
+// Suspensa durante a importação em massa (ver confirmarImportacaoContasPagar) — com writeBatch
+// já reduzimos pra 1 evento de onSnapshot por lote de até 450, mas ainda assim não faz sentido
+// redesenhar a tela inteira de Contas a Pagar atrás do modal de importação enquanto ele está
+// aberto; o array `contasPagar` já fica atualizado, só o RE-RENDER fica pra depois de fechar
+// o modal (a própria confirmarImportacaoContasPagar chama o render uma vez ao final).
+let _cpImportEmAndamento=false;
 function setupContasPagarSync(){
   if(!window._fbWatchContasPagar)return;
   window._fbWatchContasPagar(function(snapshot){
     contasPagar=snapshot.docs.map(d=>d.data());
+    if(_cpImportEmAndamento)return;
     const elFin=document.getElementById('sec-cat-FINANCEIRO');
     if(elFin&&elFin.style.display!=='none'){
       if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();
@@ -11091,8 +11120,25 @@ async function _cpImportFileSelected(file){
 // trazer a mesma parcela já marcada como paga no sistema de origem — nesse caso a linha some
 // como duplicado "puro" (nada mudou), mas se o status mudou a tela oferece SINCRONIZAR em vez
 // de simplesmente pular ou lançar de novo (ver renderImportPreview()/confirmarImportacaoContasPagar()).
+// Comparação tolerante (2026-08-04, pedido do usuário: "não pode duplicar, mas também não
+// pode esquecer de cadastrar novas") — antes comparava fornecedor/parcela com === (string
+// exata), então "ACME LTDA" vs "Acme Ltda " (maiúscula/espaço diferente entre duas exportações
+// do mesmo sistema de origem) NÃO batia como duplicado e lançava de novo. Normaliza acento/
+// caixa/espaço nos dois lados antes de comparar.
+const _cpxNorm=s=>_normSemAcento(String(s||'')).trim().toUpperCase();
 function _cpAcharDuplicado(r){
-  return contasPagar.find(c=>c.fornecedor===r.fornecedor&&c.vencimento===r.vencimento&&Math.abs(c.valor-r.valor)<0.01&&c.parcela===r.parcela)||null;
+  return contasPagar.find(c=>{
+    if(_cpxNorm(c.fornecedor)!==_cpxNorm(r.fornecedor))return false;
+    if(c.vencimento!==r.vencimento)return false;
+    if(Math.abs((c.valor||0)-(r.valor||0))>=0.01)return false;
+    if(_cpxNorm(c.parcela)!==_cpxNorm(r.parcela))return false;
+    // Nota Fiscal desempata coincidência: mesmo fornecedor+vencimento+valor+parcela podem ser
+    // duas notas fiscais DIFERENTES por acaso — se as duas linhas têm NF preenchida e são
+    // diferentes, não trata como duplicado (são lançamentos de verdade distintos, não pode
+    // fundir um no outro nem descartar o novo como se já existisse).
+    if(c.nf&&r.nf&&_cpxNorm(c.nf)!==_cpxNorm(r.nf))return false;
+    return true;
+  })||null;
 }
 function renderImportPreview(fileName){
   const statusEl=document.getElementById('cp-import-status');
@@ -11166,31 +11212,55 @@ async function confirmarImportacaoContasPagar(){
   const lote=fileName+' @ '+new Date().toLocaleString('pt-BR');
   const btnEl=document.getElementById('cp-import-confirmar-btn');
   btnEl.disabled=true;btnEl.textContent='Gravando...';
+  // Monta a lista de documentos ANTES de gravar (sem await no meio) e manda tudo de uma vez
+  // via writeBatch (ver window._fbSaveContasPagarBatch) — antes era um setDoc + 1 await POR
+  // LINHA (até 500 round-trips numa importação grande), e cada gravação disparava o onSnapshot
+  // redesenhando a tela inteira atrás do modal; nas planilhas com centenas de lançamentos isso
+  // travava a tela em "Gravando..." por vários minutos (2026-08-04, reportado pelo usuário).
+  _cpImportEmAndamento=true;
   let ok=0,sync=0;
-  for(const r of selecionados){
-    if(r._tipoImport==='sync'&&r._dupId){
-      // Não cria um segundo lançamento — só atualiza o status do que já existe, igual
-      // marcarContaPagarPaga() faria manualmente.
-      const existente=contasPagar.find(c=>c.id===r._dupId);
-      if(existente){
-        existente.status=r.status;
-        existente.dataPagamento=r.status==='pago'?new Date().toISOString().slice(0,10):null;
-        await saveContaPagarFS(existente);
-        sync++;
+  try{
+    const docsParaGravar=[];
+    for(const r of selecionados){
+      if(r._tipoImport==='sync'&&r._dupId){
+        // Não cria um segundo lançamento — só atualiza o status do que já existe, igual
+        // marcarContaPagarPaga() faria manualmente.
+        const existente=contasPagar.find(c=>c.id===r._dupId);
+        if(existente){
+          existente.status=r.status;
+          existente.dataPagamento=r.status==='pago'?new Date().toISOString().slice(0,10):null;
+          docsParaGravar.push(existente);
+          sync++;
+        }
+        continue;
       }
-      continue;
+      const c=novaContaPagar({
+        origem:'xlsx_import',empresa:r.empresa,fornecedor:r.fornecedor,cnpjCpf:r.cnpjCpf,
+        despesaDesc:r.despesaRaw,categoria:r._categoria,centroCusto:r.centroCusto,nf:r.nf,formaPagamento:r.titulo,
+        parcela:r.parcela,vencimento:r.vencimento,valor:r.valor,juros:r.juros,multa:r.multa,
+        desconto:r.desconto,status:r.status,dataPagamento:r.dataPagamento,
+        valorPagoParcial:r.valorPagoParcial,statusOrigemPlanilha:r.statusOrigemPlanilha,loteImportacao:lote
+      });
+      docsParaGravar.push(c);
+      ok++;
     }
-    const c=novaContaPagar({
-      origem:'xlsx_import',empresa:r.empresa,fornecedor:r.fornecedor,cnpjCpf:r.cnpjCpf,
-      despesaDesc:r.despesaRaw,categoria:r._categoria,centroCusto:r.centroCusto,nf:r.nf,formaPagamento:r.titulo,
-      parcela:r.parcela,vencimento:r.vencimento,valor:r.valor,juros:r.juros,multa:r.multa,
-      desconto:r.desconto,status:r.status,dataPagamento:r.dataPagamento,
-      valorPagoParcial:r.valorPagoParcial,statusOrigemPlanilha:r.statusOrigemPlanilha,loteImportacao:lote
-    });
-    await salvarContaPagar(c);
-    ok++;
+    if(window._fbSaveContasPagarBatch)await window._fbSaveContasPagarBatch(docsParaGravar);
+    else for(const c of docsParaGravar)await saveContaPagarFS(c); // fallback se writeBatch não estiver disponível
+  }catch(e){
+    console.error(e);
+    toast('Erro ao gravar a importação: '+e.message,'terr');
+  }finally{
+    _cpImportEmAndamento=false;
+    btnEl.disabled=false;
   }
-  btnEl.disabled=false;
+  // Redesenha a tela de Contas a Pagar uma única vez, agora que a importação inteira terminou
+  // (ver _cpImportEmAndamento em setupContasPagarSync) — sem isso, a lista atrás do modal só
+  // atualizaria sozinha no próximo onSnapshot, que pode demorar um instante.
+  const elFin=document.getElementById('sec-cat-FINANCEIRO');
+  if(elFin&&elFin.style.display!=='none'){
+    if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();
+    else if(typeof renderContasPagar==='function')renderContasPagar();
+  }
   closeM('mo-cp-import');
   toast(`${ok} lançamento(s) importado(s)${sync?' e '+sync+' status atualizado(s)':''}! ✅`,'tok');
 }
