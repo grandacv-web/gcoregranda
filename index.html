@@ -1022,8 +1022,15 @@ select.fc{cursor:pointer}
           </div>
         </div>
         <div id="fin-sec-dre" style="display:none">
-          <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
+          <div id="dre-aviso-regime" style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
             📊 DRE gerencial por regime de competência — Receita pelo mês da venda, despesas de Contas a Pagar pelo mês de vencimento de cada lançamento. Comissões calculadas pela mesma venda que as gerou, independente de já terem sido pagas.
+          </div>
+          <!-- Alternador Competência/Realizado (2026-08-04, a pedido do usuário) — ver
+               dreSetRegime()/calcularDRE(). Fica no HTML fixo, só a cor de "ativo" muda a cada
+               render (ver renderDRE()). -->
+          <div id="dre-regime-wrap" style="display:flex;gap:6px;background:#f1f5f9;padding:4px;border-radius:9px;margin-bottom:10px;width:fit-content">
+            <button id="dre-regime-competencia" onclick="dreSetRegime('competencia')" style="border:none;border-radius:7px;padding:7px 14px;font-size:.78rem;font-weight:700;cursor:pointer;font-family:inherit;background:#1d4ed8;color:#fff">Competência</button>
+            <button id="dre-regime-realizado" onclick="dreSetRegime('realizado')" style="border:none;border-radius:7px;padding:7px 14px;font-size:.78rem;font-weight:700;cursor:pointer;font-family:inherit;background:#fff;color:#475569">Realizado (caixa)</button>
           </div>
           <div class="dash-mes-nav" style="margin-bottom:10px">
             <button onclick="dreMov(-1)">◀</button>
@@ -2548,8 +2555,13 @@ select.fc{cursor:pointer}
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
     <input type="file" id="cp-import-file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="_cpImportFileSelected(this.files[0])">
   </div>
+  <label style="display:flex;align-items:flex-start;gap:8px;font-size:.76rem;color:var(--ink3);margin-bottom:10px;padding:8px 12px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca;cursor:pointer">
+    <input type="checkbox" id="cp-import-reconciliar" style="margin-top:2px" onchange="_cpImportRecords.length&&renderImportPreview(_cpImportFileName)">
+    <span>🗑️ <strong>Modo Reconciliação Total</strong> — também mostra, pra revisão e exclusão opcional, os lançamentos importados de planilha que já estão no sistema mas NÃO aparecem mais nesta planilha (assumindo que ela tem tudo que deveria existir). Nunca marca lançamentos manuais nem os que já estão pagos — sempre vai pra Lixeira antes de excluir de vez.</span>
+  </label>
   <div id="cp-import-status" style="font-size:.8rem;color:var(--ink3);margin-bottom:10px"></div>
   <div id="cp-import-body" style="overflow-y:auto;flex:1"></div>
+  <div id="cp-import-reconciliacao-body"></div>
   <button id="cp-import-confirmar-btn" onclick="confirmarImportacaoContasPagar()" style="display:none;margin-top:12px;width:100%;background:#16a34a;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">Confirmar importação</button>
 </div>
 </div>
@@ -10466,6 +10478,15 @@ function novaContaPagar(dados){
     // perde, mesmo sem o sistema ter um 3º estado de verdade ainda.
     valorPagoParcial:Number(dados.valorPagoParcial)||0,
     statusOrigemPlanilha:dados.statusOrigemPlanilha||'',
+    // Auditoria (2026-08-04) — os valores BRUTOS como vieram da planilha de origem, antes de
+    // qualquer decisão de qual usar como `valor` de verdade (ver parseContasPagarXLSX). Nunca
+    // entram em nenhuma soma/cálculo do sistema, só ficam guardados pra conferência manual se
+    // um dia precisar auditar por que um lançamento tem o valor que tem.
+    valorPrincipalOrigemPlanilha:Number(dados.valorPrincipalOrigemPlanilha)||0,
+    jurosOrigemPlanilha:Number(dados.jurosOrigemPlanilha)||0,
+    multaOrigemPlanilha:Number(dados.multaOrigemPlanilha)||0,
+    descontoOrigemPlanilha:Number(dados.descontoOrigemPlanilha)||0,
+    valorAtualizadoOrigemPlanilha:Number(dados.valorAtualizadoOrigemPlanilha)||0,
     loteImportacao:dados.loteImportacao||'',
     criadoEm:new Date().toISOString(),
     criadoPor:usuarioLogado?.nomeExibicao||''
@@ -10999,7 +11020,7 @@ const _CPX_COLS={
   parcela:['Parcela'],titulo:['Título','Titulo'],planoContas:['Plano de Contas'],
   centroCusto:['Centro de custos','Centro de Custo','Centro de Custos'],
   vencimento:['Vencimento'],valor:['Valor principal'],juros:['Valor juros'],
-  multa:['Valor multa'],desconto:['Valor descontos'],
+  multa:['Valor multa'],desconto:['Valor descontos'],valorAtualizado:['Valor atualizado'],
   valorPagamento:['Valor pagamento'],dataPagamento:['Pagamento'],status:['Status']
 };
 function _cpxAcharColuna(headerRow,nomes){
@@ -11059,20 +11080,48 @@ async function parseContasPagarXLSX(arrayBuffer){
     const planoContasTxt=getTxt(row,'planoContas');
     const centroCustoTxt=getTxt(row,'centroCusto');
     const statusOrigemPlanilha=getTxt(row,'status');
+    // Valor de verdade do lançamento (2026-08-04, a pedido do usuário: "puxe pelo valor
+    // atualizado, esse é o valor correto") — "Valor principal" é só o valor ORIGINAL da
+    // negociação, sem nenhum ajuste; "Valor atualizado" já vem líquido de juros/multa/desconto
+    // E de qualquer pagamento parcial já feito (é o que ainda falta pagar de verdade, ver
+    // conferência linha a linha contra Resultado_03_08_2026 (2).xlsx). Por isso, quando existe
+    // e é maior que zero, usa ela sozinha SEM somar juros/multa/desconto de novo (senão
+    // contaria em dobro) — esses 3 campos só ficam como referência/auditoria
+    // (jurosOrigemPlanilha etc.), zerados nos campos "de verdade" usados em qualquer soma.
+    // Caso especial: quando o Status é "Pago", a planilha zera Principal E Atualizado (não
+    // deve mais nada) — nesse caso usa "Valor pagamento" (o que foi efetivamente pago), senão
+    // um lançamento já quitado apareceria como R$0,00 no sistema. Fallback final (planilha sem
+    // a coluna "Valor atualizado", ou linha atípica sem nenhum dos três): mantém a conta antiga
+    // (principal+juros+multa-desconto).
+    const valorPrincipalTxt=_cpxParseValor(get(row,'valor'));
+    const jurosTxt=_cpxParseValor(get(row,'juros'));
+    const multaTxt=_cpxParseValor(get(row,'multa'));
+    const descontoTxt=_cpxParseValor(get(row,'desconto'));
+    const valorAtualizadoTxt=col.valorAtualizado!==-1?_cpxParseValor(get(row,'valorAtualizado')):0;
+    const valorPagamentoTxt=_cpxParseValor(get(row,'valorPagamento'));
+    const ehPago=_normSemAcento(statusOrigemPlanilha)==='PAGO';
+    let valor,juros=0,multa=0,desconto=0;
+    if(valorAtualizadoTxt>0.005){
+      valor=valorAtualizadoTxt;
+    }else if(ehPago&&valorPagamentoTxt>0.005){
+      valor=valorPagamentoTxt;
+    }else{
+      valor=valorPrincipalTxt;juros=jurosTxt;multa=multaTxt;desconto=descontoTxt;
+    }
     records.push({
       fornecedor,cnpjCpf:getTxt(row,'cnpjCpf'),nf:getTxt(row,'nf'),
       empresa:_empresaFromParaTexto(getTxt(row,'emitente')),
       despesaRaw,planoContasTxt,
       parcela:getTxt(row,'parcela'),titulo:getTxt(row,'titulo')||'Boleto',
       vencimento,
-      valor:_cpxParseValor(get(row,'valor')),
-      juros:_cpxParseValor(get(row,'juros')),
-      multa:_cpxParseValor(get(row,'multa')),
-      desconto:_cpxParseValor(get(row,'desconto')),
-      valorPagoParcial:_cpxParseValor(get(row,'valorPagamento')),
+      valor,juros,multa,desconto,
+      valorPrincipalOrigemPlanilha:valorPrincipalTxt,
+      jurosOrigemPlanilha:jurosTxt,multaOrigemPlanilha:multaTxt,descontoOrigemPlanilha:descontoTxt,
+      valorAtualizadoOrigemPlanilha:valorAtualizadoTxt,
+      valorPagoParcial:valorPagamentoTxt,
       dataPagamento:_cpxParseData(get(row,'dataPagamento'))||null,
       statusOrigemPlanilha,
-      status:_normSemAcento(statusOrigemPlanilha)==='PAGO'?'pago':'pendente',
+      status:ehPago?'pago':'pendente',
       centroCusto:_centroCustoResolver(centroCustoTxt)
     });
   }
@@ -11080,17 +11129,24 @@ async function parseContasPagarXLSX(arrayBuffer){
 }
 
 let _cpImportRecords=[];
+let _cpImportFileName='';
+let _cpItensReconciliacao=[]; // preenchido em renderImportPreview quando "Modo Reconciliação Total" está marcado
 function abrirImportarContasPagarXLSX(){
   if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem importar contas a pagar','terr');return;}
   document.getElementById('cp-import-file').value='';
   document.getElementById('cp-import-status').innerHTML='';
   document.getElementById('cp-import-body').innerHTML='';
+  document.getElementById('cp-import-reconciliacao-body').innerHTML='';
+  document.getElementById('cp-import-reconciliar').checked=false;
   document.getElementById('cp-import-confirmar-btn').style.display='none';
   _cpImportRecords=[];
+  _cpItensReconciliacao=[];
+  _cpImportFileName='';
   openM('mo-cp-import');
 }
 async function _cpImportFileSelected(file){
   if(!file)return;
+  _cpImportFileName=file.name;
   const statusEl=document.getElementById('cp-import-status');
   const bodyEl=document.getElementById('cp-import-body');
   const btnEl=document.getElementById('cp-import-confirmar-btn');
@@ -11130,15 +11186,42 @@ function _cpAcharDuplicado(r){
   return contasPagar.find(c=>{
     if(_cpxNorm(c.fornecedor)!==_cpxNorm(r.fornecedor))return false;
     if(c.vencimento!==r.vencimento)return false;
-    if(Math.abs((c.valor||0)-(r.valor||0))>=0.01)return false;
     if(_cpxNorm(c.parcela)!==_cpxNorm(r.parcela))return false;
-    // Nota Fiscal desempata coincidência: mesmo fornecedor+vencimento+valor+parcela podem ser
-    // duas notas fiscais DIFERENTES por acaso — se as duas linhas têm NF preenchida e são
-    // diferentes, não trata como duplicado (são lançamentos de verdade distintos, não pode
-    // fundir um no outro nem descartar o novo como se já existisse).
-    if(c.nf&&r.nf&&_cpxNorm(c.nf)!==_cpxNorm(r.nf))return false;
+    // Nota Fiscal é a chave mais forte quando as DUAS linhas têm: se bate, é o MESMO
+    // lançamento mesmo que o valor tenha mudado entre uma importação e outra — o que agora é
+    // normal, já que `valor` vem de "Valor atualizado" (2026-08-04) e esse número muda sozinho
+    // com o tempo (juros correndo num boleto vencido, por exemplo). Sem exigir valor igual
+    // aqui, evita duplicar a mesma conta só porque ela ficou mais cara entre duas importações.
+    // Se NF está vazia de um dos dois lados (ou dos dois), cai no valor com tolerância de 1
+    // centavo, como sempre foi — só desempata por NF quando ela realmente existe nos dois.
+    if(c.nf&&r.nf)return _cpxNorm(c.nf)===_cpxNorm(r.nf);
+    if(Math.abs((c.valor||0)-(r.valor||0))>=0.01)return false;
     return true;
   })||null;
+}
+// Reconciliação Total (2026-08-04, a pedido do usuário: "todas as contas a pagar são essas da
+// planilha, o que tiver que não seja da planilha pode excluir"). É o inverso de
+// _cpAcharDuplicado: dado um lançamento JÁ NO SISTEMA, procura ele dentro da planilha nova.
+// Não compara valor aqui de propósito — valor pode ter mudado (juros/pagamento parcial) sem que
+// isso signifique que o lançamento sumiu; fornecedor+vencimento+parcela (+NF quando os dois têm)
+// já identifica a linha com segurança.
+function _cpAcharNaImportacao(c){
+  return _cpImportRecords.find(r=>{
+    if(_cpxNorm(c.fornecedor)!==_cpxNorm(r.fornecedor))return false;
+    if(c.vencimento!==r.vencimento)return false;
+    if(_cpxNorm(c.parcela)!==_cpxNorm(r.parcela))return false;
+    if(c.nf&&r.nf)return _cpxNorm(c.nf)===_cpxNorm(r.nf);
+    return true;
+  })||null;
+}
+// Candidatos a exclusão: só lançamentos que VIERAM de planilha (origem='xlsx_import') — nunca
+// mexe em lançamento manual/fora do planejado, que não tem por que aparecer numa planilha nunca.
+// Também nunca propõe excluir o que já está PAGO: a planilha exportada pode ter uma janela de
+// datas menor que o histórico completo, e um pago sumir do relatório recente não quer dizer que
+// ele deixou de existir — só que caiu fora do recorte.
+function _cpCalcularItensReconciliacao(){
+  if(!_cpImportRecords.length)return[];
+  return (contasPagar||[]).filter(c=>c.origem==='xlsx_import'&&c.status!=='pago'&&!_cpAcharNaImportacao(c));
 }
 function renderImportPreview(fileName){
   const statusEl=document.getElementById('cp-import-status');
@@ -11147,21 +11230,26 @@ function renderImportPreview(fileName){
   const somaCalculada=_cpImportRecords.reduce((s,r)=>s+r.valor,0);
 
   // Classifica cada linha: 'novo' (não existe ainda) | 'duplicado' (já existe, nada mudou,
-  // fica desmarcado) | 'sync' (já existe mas o status mudou — ex.: virou Pago — fica marcado
-  // pra ATUALIZAR o existente em vez de criar um segundo lançamento).
+  // fica desmarcado) | 'sync' (já existe mas o status OU o valor mudou — fica marcado pra
+  // ATUALIZAR o existente em vez de criar um segundo lançamento). Sync por VALOR (2026-08-04,
+  // além do já existente sync por status) — como `valor` agora vem de "Valor atualizado", ele
+  // muda sozinho com o tempo (juros correndo, pagamento parcial registrado depois) mesmo sem o
+  // status mudar; sem isso o sistema nunca atualizava o valor de uma conta em aberto reimportada
+  // depois, deixando o "valor certo" desatualizado justamente no caso que mais importa.
   _cpImportRecords.forEach(r=>{
     const dup=_cpAcharDuplicado(r);
     r._dupId=dup?dup.id:null;
+    const valorMudou=dup&&Math.abs((dup.valor||0)-(r.valor||0))>=0.01;
     if(!dup){r._tipoImport='novo';r._selecionado=true;}
-    else if(dup.status===r.status){r._tipoImport='duplicado';r._selecionado=false;}
-    else{r._tipoImport='sync';r._selecionado=true;}
+    else if(dup.status===r.status&&!valorMudou){r._tipoImport='duplicado';r._selecionado=false;}
+    else{r._tipoImport='sync';r._selecionado=true;r._valorAnterior=dup.valor;}
   });
   const qtdDuplicado=_cpImportRecords.filter(r=>r._tipoImport==='duplicado').length;
   const qtdSync=_cpImportRecords.filter(r=>r._tipoImport==='sync').length;
   const naoReconhecidos=_cpImportRecords.filter(r=>r.centroCusto===CENTRO_CUSTO_NAO_RECONHECIDO).length;
   statusEl.innerHTML=`📄 <strong>${fileName}</strong> — ${_cpImportRecords.length} lançamento(s) encontrado(s), soma <strong>${fmtR(somaCalculada)}</strong>.`
     +(qtdDuplicado?` <span style="color:#d97706">⚠️ ${qtdDuplicado} já lançado(s) sem mudança — desmarcados.</span>`:'')
-    +(qtdSync?` <span style="color:#1d4ed8">🔄 ${qtdSync} já lançado(s) com status diferente — vão só atualizar o status.</span>`:'')
+    +(qtdSync?` <span style="color:#1d4ed8">🔄 ${qtdSync} já lançado(s) com status e/ou valor diferente — vão só atualizar o existente.</span>`:'')
     +(naoReconhecidos?` <span style="color:#dc2626">${naoReconhecidos} com Centro de Custo "${CENTRO_CUSTO_NAO_RECONHECIDO}" (célula vazia na planilha) — revise antes ou corrija depois na lista.</span>`:'');
 
   bodyEl.innerHTML=`<div style="overflow-x:auto"><table class="dash-table">
@@ -11171,7 +11259,10 @@ function renderImportPreview(fileName){
       const statusLbl={pendente:'⏳ Pendente',pago:'✅ Pago'}[r.status]||r.status;
       let tag='';
       if(isDup)tag=' <span style="color:#d97706;font-weight:700">(já lançado — sem mudança)</span>';
-      else if(isSync)tag=` <span style="color:#1d4ed8;font-weight:700">(🔄 status vai virar ${statusLbl})</span>`;
+      else if(isSync){
+        const mudouValor=r._valorAnterior!=null&&Math.abs(r._valorAnterior-r.valor)>=0.01;
+        tag=` <span style="color:#1d4ed8;font-weight:700">(🔄 ${mudouValor?`valor era ${fmtR(r._valorAnterior)}, vai virar ${fmtR(r.valor)}`:`status vai virar ${statusLbl}`})</span>`;
+      }
       return`
       <tr style="${isDup?'opacity:.55':''}${isSync?'background:#eff6ff':''}">
         <td><input type="checkbox" ${r._selecionado?'checked':''} onchange="_cpImportRecords[${idx}]._selecionado=this.checked;_cpAtualizaContadorImport()"></td>
@@ -11196,6 +11287,73 @@ function renderImportPreview(fileName){
     </tbody>
   </table></div>`;
   _cpAtualizaContadorImport();
+  renderReconciliacaoContasPagar();
+}
+// Seção separada da tabela principal — exclusão é uma ação distinta e mais perigosa que
+// importar, então tem botão de confirmação próprio (com senha de admin, igual excluirContaPagar)
+// em vez de entrar junto no "Confirmar importação".
+function renderReconciliacaoContasPagar(){
+  const wrap=document.getElementById('cp-import-reconciliacao-body');
+  const ligado=document.getElementById('cp-import-reconciliar')?.checked;
+  if(!ligado){wrap.innerHTML='';_cpItensReconciliacao=[];return;}
+  _cpItensReconciliacao=_cpCalcularItensReconciliacao().map(c=>({...c,_selecionadoExcluir:true}));
+  if(!_cpItensReconciliacao.length){
+    wrap.innerHTML=`<div style="margin-top:14px;font-size:.8rem;color:#16a34a;padding:8px 12px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0">✅ Nenhum lançamento de planilha no sistema ficou de fora desta importação — nada pra excluir.</div>`;
+    return;
+  }
+  const soma=_cpItensReconciliacao.reduce((s,c)=>s+(c.valor||0),0);
+  wrap.innerHTML=`<div style="margin-top:14px">
+    <div style="font-size:.8rem;color:#991b1b;margin-bottom:8px;padding:8px 12px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca">
+      🗑️ <strong>${_cpItensReconciliacao.length} lançamento(s)</strong> já estão no sistema (vindos de planilha) mas não aparecem nesta planilha nova — soma <strong>${fmtR(soma)}</strong>. Desmarque o que NÃO deve ser excluído.
+    </div>
+    <div style="overflow-x:auto"><table class="dash-table">
+      <thead><tr><th></th><th>Empresa</th><th>Fornecedor</th><th>Vencimento</th><th>Parcela</th><th>Valor</th><th>Status</th></tr></thead>
+      <tbody>${_cpItensReconciliacao.map((c,idx)=>`
+      <tr>
+        <td><input type="checkbox" checked onchange="_cpItensReconciliacao[${idx}]._selecionadoExcluir=this.checked;_cpAtualizaBtnReconciliacao()"></td>
+        <td>${(EMPRESAS_CONTAS_PAGAR.find(e=>e.id===c.empresa)||{}).label||c.empresa||'—'}</td>
+        <td title="${(c.fornecedor||'').replace(/"/g,'&quot;')}" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.fornecedor||'—'}</td>
+        <td style="white-space:nowrap">${fmtD(c.vencimento)}</td>
+        <td>${c.parcela||'—'}</td>
+        <td style="font-weight:700;white-space:nowrap">${fmtR(c.valor)}</td>
+        <td style="white-space:nowrap">${({pendente:'⏳ Pendente',vencido:'🔴 Vencido',parcial:'🟡 Parcial'})[c.status]||c.status}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table></div>
+    <button id="cp-reconciliar-btn" onclick="_cpConfirmarReconciliacao()" style="margin-top:10px;width:100%;background:#dc2626;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">Excluir ${_cpItensReconciliacao.length} lançamento(s) selecionado(s)</button>
+  </div>`;
+}
+function _cpAtualizaBtnReconciliacao(){
+  const btn=document.getElementById('cp-reconciliar-btn');if(!btn)return;
+  const n=_cpItensReconciliacao.filter(c=>c._selecionadoExcluir).length;
+  btn.textContent=`Excluir ${n} lançamento(s) selecionado(s)`;
+  btn.disabled=!n;
+  btn.style.opacity=n?'1':'.5';
+}
+// Mesma trava de senha usada em excluirContaPagar() — exclusão em massa é ainda mais sensível,
+// então merece a mesma confirmação explícita, feita UMA vez pro lote inteiro (não uma por linha).
+// Cada item passa pela Lixeira antes de ser apagado de verdade (ver _lixeiraAdicionar), então dá
+// pra restaurar em caso de engano.
+async function _cpConfirmarReconciliacao(){
+  if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem excluir contas a pagar','terr');return;}
+  const selecionados=(_cpItensReconciliacao||[]).filter(c=>c._selecionadoExcluir);
+  if(!selecionados.length){toast('Nenhum lançamento selecionado para excluir','terr');return;}
+  if(!confirm(`Excluir ${selecionados.length} lançamento(s) que não aparecem mais na planilha (soma ${fmtR(selecionados.reduce((s,c)=>s+(c.valor||0),0))})? Essa ação não pode ser desfeita (mas fica na Lixeira).`))return;
+  const senha=await pedirSenhaAdmin('Confirmar reconciliação','Digite a senha de administrador para excluir estes lançamentos de Contas a Pagar:');
+  if(!senha){toast('Exclusão cancelada','tinf');return;}
+  if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
+  const btn=document.getElementById('cp-reconciliar-btn');
+  if(btn){btn.disabled=true;btn.textContent='Excluindo...';}
+  let n=0;
+  for(const c of selecionados){
+    try{
+      await _lixeiraAdicionar('contaPagar',c,{resumo:`Reconciliação — ${c.fornecedor||'Lançamento'} — R$ ${(c.valor||0).toFixed?c.valor.toFixed(2):c.valor}`});
+      await deleteContaPagarFS(c.id);
+      n++;
+    }catch(e){console.error(e);}
+  }
+  toast(`${n} lançamento(s) excluído(s) na reconciliação`,'tok');
+  renderReconciliacaoContasPagar();
 }
 function _cpAtualizaContadorImport(){
   const btnEl=document.getElementById('cp-import-confirmar-btn');if(!btnEl)return;
@@ -11223,12 +11381,21 @@ async function confirmarImportacaoContasPagar(){
     const docsParaGravar=[];
     for(const r of selecionados){
       if(r._tipoImport==='sync'&&r._dupId){
-        // Não cria um segundo lançamento — só atualiza o status do que já existe, igual
-        // marcarContaPagarPaga() faria manualmente.
+        // Não cria um segundo lançamento — atualiza o EXISTENTE em vez disso. Antes só o status
+        // era sincronizado; agora também o valor/juros/multa/desconto/pago-parcial (2026-08-04)
+        // — necessário porque `valor` vem de "Valor atualizado", que muda sozinho com o tempo
+        // (juros correndo, pagamento parcial novo) mesmo sem o status mudar. Nunca mexe em
+        // campos que o usuário pode ter editado manualmente na tela (empresa/centroCusto/
+        // categoria/formaPagamento) — só nos campos que vêm de fato da planilha.
         const existente=contasPagar.find(c=>c.id===r._dupId);
         if(existente){
           existente.status=r.status;
           existente.dataPagamento=r.status==='pago'?new Date().toISOString().slice(0,10):null;
+          existente.valor=r.valor;existente.juros=r.juros;existente.multa=r.multa;existente.desconto=r.desconto;
+          existente.valorPagoParcial=r.valorPagoParcial;existente.statusOrigemPlanilha=r.statusOrigemPlanilha;
+          existente.valorPrincipalOrigemPlanilha=r.valorPrincipalOrigemPlanilha;
+          existente.jurosOrigemPlanilha=r.jurosOrigemPlanilha;existente.multaOrigemPlanilha=r.multaOrigemPlanilha;
+          existente.descontoOrigemPlanilha=r.descontoOrigemPlanilha;existente.valorAtualizadoOrigemPlanilha=r.valorAtualizadoOrigemPlanilha;
           docsParaGravar.push(existente);
           sync++;
         }
@@ -11239,7 +11406,10 @@ async function confirmarImportacaoContasPagar(){
         despesaDesc:r.despesaRaw,categoria:r._categoria,centroCusto:r.centroCusto,nf:r.nf,formaPagamento:r.titulo,
         parcela:r.parcela,vencimento:r.vencimento,valor:r.valor,juros:r.juros,multa:r.multa,
         desconto:r.desconto,status:r.status,dataPagamento:r.dataPagamento,
-        valorPagoParcial:r.valorPagoParcial,statusOrigemPlanilha:r.statusOrigemPlanilha,loteImportacao:lote
+        valorPagoParcial:r.valorPagoParcial,statusOrigemPlanilha:r.statusOrigemPlanilha,loteImportacao:lote,
+        valorPrincipalOrigemPlanilha:r.valorPrincipalOrigemPlanilha,jurosOrigemPlanilha:r.jurosOrigemPlanilha,
+        multaOrigemPlanilha:r.multaOrigemPlanilha,descontoOrigemPlanilha:r.descontoOrigemPlanilha,
+        valorAtualizadoOrigemPlanilha:r.valorAtualizadoOrigemPlanilha
       });
       docsParaGravar.push(c);
       ok++;
@@ -11266,31 +11436,42 @@ async function confirmarImportacaoContasPagar(){
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// DRE — Fase 3 (2026-07-21): motor de resultado mensal, regime de COMPETÊNCIA.
+// DRE — Fase 3 (2026-07-21): motor de resultado mensal, com DOIS regimes (2026-08-04, a pedido
+// do usuário: "quero dre pelo realizado") — Competência (padrão original) e Realizado (caixa),
+// alternáveis na tela (ver _dreRegimeAtual/dreSetRegime).
 //
+// COMPETÊNCIA (como sempre foi):
 // RECEITA: mesma fonte de "Vendas do Mês"/Metas (getVendaRowsMerged(), já mescla planilha+
 // Firestore e já filtra Garantia/Amostra/Interno/Brinde via isComercialPedido) — conta pelo
 // MÊS DA VENDA (r.m: mesVendaOverride > mês reconciliado da planilha > emissão), não pelo
 // mês de recebimento da parcela. r.op (frete+mobilização+elevação+instalação+ART+remoção+
 // medição+laudo) é o custo direto de entrega já registrado em cada pedido — entra como CMV
 // interno.
+// COMISSÕES: getComissaoItemsAll() filtrado por emY/emM (mês da VENDA) — soma de TODAS as
+// parcelas da venda, esteja o recebimento confirmado ou não.
+// DESPESAS: Contas a Pagar pelo mês de VENCIMENTO, independente de já terem sido pagas.
 //
-// COMISSÕES: getComissaoItemsAll() filtrado por emY/emM (mês da VENDA, igual acima, não a
-// quinzena de pagamento) — soma valor*pct/100 (vendedor) + valor*pctClab/100 (Clabonde/
-// gerente) de TODAS as parcelas da venda, esteja o recebimento confirmado ou não (é assim
-// que a Receita Bruta também já conta — pra não misturar regime dentro do mesmo DRE).
-//
-// DESPESAS (Contas a Pagar): mês de VENCIMENTO de cada lançamento (não existe uma "data de
-// competência" separada nesse cadastro hoje — é a aproximação possível com o dado disponível,
-// deixada explícita na tela). Agrupadas pelo grupo do plano de contas (CMV/OPERACIONAL/
-// FINANCEIRA/IMPOSTOS/NAO_CLASSIFICADO, ver getPlanoContasDespesas()).
+// REALIZADO (regime de caixa, novo):
+// RECEITA: só parcela EFETIVAMENTE recebida (status confirmado em Recebimentos & Comissões),
+// contada no mês em que o dinheiro entrou de verdade — conf.dataRecebimentoReal (campo
+// obrigatório na tela "Confirmar Recebimento" desde 2026-07-23), com confirmedAt e por último a
+// própria data prevista como fallback pra confirmações antigas sem esse campo (ver
+// _dreMesRealItem). Custo de produção interno (mão de obra/frete/etc., que não tem uma "data de
+// pagamento" própria no cadastro) é reconhecido PRORATEADO pela mesma fração do líquido total
+// do pedido que entrou neste mês — aproximação necessária, deixada explícita na tela.
+// COMISSÕES: só o que já foi CONFIRMADO, contado no mês da QUINZENA DE PAGAMENTO (qy/qm) —
+// quando o vendedor/Clabonde efetivamente recebe, não o mês da venda que a originou.
+// DESPESAS: Contas a Pagar com status='pago', pelo mês em que foi PAGA de verdade
+// (c.dataPagamento), não o vencimento.
 //
 // Limitação conhecida (igual ao resto do sistema, ver getVendasMes()): não existe um campo
-// de ANO separado nas linhas de venda — o filtro de mês (r.m) não distingue anos. Contas a
-// Pagar tem vencimento completo (AAAA-MM-DD), então essa parte já é filtrada por ano certo.
+// de ANO separado nas linhas de venda — o filtro de mês por competência (r.m) não distingue
+// anos. Contas a Pagar e as confirmações de recebimento têm data completa (AAAA-MM-DD), então
+// essas partes já são filtradas por ano certo nos dois regimes.
 // ══════════════════════════════════════════════════════════════════════════
 let _dreMesAtual={y:new Date().getFullYear(),m:new Date().getMonth()+1};
 let _dreEmpresaFiltro='';
+let _dreRegimeAtual='competencia'; // 'competencia' | 'realizado'
 function dreMov(dir){
   _dreMesAtual.m+=dir;
   if(_dreMesAtual.m>12){_dreMesAtual.m=1;_dreMesAtual.y++;}
@@ -11298,25 +11479,67 @@ function dreMov(dir){
   renderDRE();
 }
 function dreSetEmpresa(v){_dreEmpresaFiltro=v;renderDRE();}
-function calcularDRE(y,m,empresaFiltro){
+function dreSetRegime(v){_dreRegimeAtual=v;renderDRE();}
+// Mês/ano em que uma parcela de comissão CONFIRMADA foi efetivamente recebida — usado só pelo
+// regime Realizado. Prioridade: data real digitada em "Confirmar Recebimento"
+// (conf.dataRecebimentoReal, formato AAAA-MM-DD) > confirmedAt (timestamp de quando alguém deu
+// o clique de confirmar, pra confirmação antiga anterior a esse campo existir) > a própria data
+// prevista da parcela (dataAtiva, formato BR DD/MM/AAAA) como último recurso.
+function _dreMesRealItem(i){
+  const conf=getPagConf(i.confKey);
+  let iso=conf&&conf.dataRecebimentoReal;
+  if(!iso&&conf&&conf.confirmedAt)iso=String(conf.confirmedAt).slice(0,10);
+  if(iso&&/^\d{4}-\d{2}-\d{2}/.test(iso)){const pp=iso.split('-');return{y:parseInt(pp[0],10),m:parseInt(pp[1],10)};}
+  const d=parseDataBR(i.dataAtiva);
+  if(d)return{y:d.getFullYear(),m:d.getMonth()+1};
+  return{y:i.emY,m:i.emM};
+}
+function calcularDRE(y,m,empresaFiltro,regime){
+  regime=regime||'competencia';
   _invalidateDashCache();
   // Só a Granda tem vendas rastreadas neste sistema — Gnove/GRND só entram pelo lado da
   // despesa (Contas a Pagar). Ver aviso mostrado em renderDRE() quando esse for o caso.
   const incluirReceita=!empresaFiltro||empresaFiltro==='GRANDA';
 
-  const vendasMes=incluirReceita?getVendaRowsMerged().filter(r=>r.m===m):[];
-  const receitaBruta=vendasMes.reduce((s,r)=>s+(r.br||0),0);
-  const custoProducaoInterno=vendasMes.reduce((s,r)=>s+(r.op||0),0);
-
-  const comItens=incluirReceita?getComissaoItemsAll().filter(i=>i.emY===y&&i.emM===m):[];
-  const comissaoVendedores=comItens.reduce((s,i)=>s+(i.valor*(i.pct||0)/100),0);
-  const comissaoGerente=comItens.reduce((s,i)=>s+(i.valor*(i.pctClab||0)/100),0);
+  let receitaBruta=0,custoProducaoInterno=0,comissaoVendedores=0,comissaoGerente=0;
+  if(regime==='realizado'){
+    if(incluirReceita){
+      // Lookup OS→{op,lq} da venda inteira, pra ratear o custo de produção interno na mesma
+      // proporção do líquido recebido neste mês (ver comentário grande acima do bloco).
+      const opPorOs={};
+      getVendaRowsMerged().forEach(r=>{_osTokens(r.p).forEach(tok=>{opPorOs[tok]={op:r.op||0,lq:r.lq||0};});});
+      getComissaoItemsAll().filter(i=>i.status==='confirmado').forEach(i=>{
+        const real=_dreMesRealItem(i);
+        if(real.y!==y||real.m!==m)return;
+        receitaBruta+=i.valorBruto||0;
+        const row=_osTokens(i.pedidoOs).map(t=>opPorOs[t]).find(Boolean);
+        if(row&&row.lq>0.005)custoProducaoInterno+=(i.valor/row.lq)*row.op;
+      });
+      getComissaoItemsAll().filter(i=>i.status==='confirmado'&&i.qy===y&&i.qm===m).forEach(i=>{
+        comissaoVendedores+=i.valor*(i.pct||0)/100;
+        comissaoGerente+=i.valor*(i.pctClab||0)/100;
+      });
+    }
+  }else{
+    const vendasMes=incluirReceita?getVendaRowsMerged().filter(r=>r.m===m):[];
+    receitaBruta=vendasMes.reduce((s,r)=>s+(r.br||0),0);
+    custoProducaoInterno=vendasMes.reduce((s,r)=>s+(r.op||0),0);
+    const comItens=incluirReceita?getComissaoItemsAll().filter(i=>i.emY===y&&i.emM===m):[];
+    comissaoVendedores=comItens.reduce((s,i)=>s+(i.valor*(i.pct||0)/100),0);
+    comissaoGerente=comItens.reduce((s,i)=>s+(i.valor*(i.pctClab||0)/100),0);
+  }
   const totalComissoes=comissaoVendedores+comissaoGerente;
 
   const cpMes=contasPagar.filter(c=>{
-    if(!c.vencimento)return false;
-    const partes=c.vencimento.split('-');
-    if(parseInt(partes[0],10)!==y||parseInt(partes[1],10)!==m)return false;
+    if(regime==='realizado'){
+      if(c.status!=='pago'||!c.dataPagamento)return false;
+      const partes=c.dataPagamento.split('-');
+      if(parseInt(partes[0],10)!==y||parseInt(partes[1],10)!==m)return false;
+    }else{
+      if(!c.vencimento)return false;
+      const partes=c.vencimento.split('-');
+      if(parseInt(partes[0],10)!==y||parseInt(partes[1],10)!==m)return false;
+    }
     if(empresaFiltro&&c.empresa!==empresaFiltro)return false;
     return true;
   });
@@ -11353,7 +11576,7 @@ function calcularDRE(y,m,empresaFiltro){
     porCategoria[key].total+=_cpValorAjustado(c);
   });
 
-  return{y,m,empresaFiltro,incluirReceita,
+  return{y,m,empresaFiltro,incluirReceita,regime,
     receitaBruta,custoProducaoInterno,cmvExterno,custoProducaoTotal,lucroBruto,
     comissaoVendedores,comissaoGerente,totalComissoes,
     despOperacionais,resultadoOperacional,
@@ -11376,9 +11599,24 @@ function renderDRE(){
 
   const{y,m}=_dreMesAtual;
   if(lbl)lbl.textContent=MESES_PT[m]+' '+y;
-  const d=calcularDRE(y,m,_dreEmpresaFiltro);
+  const d=calcularDRE(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
   const pctOf=(v,base)=>base>0.005?(v/base*100).toFixed(1).replace('.',',')+'%':'—';
   const pctCor=v=>v>=0?'#16a34a':'#dc2626';
+  // Alternador Competência/Realizado (2026-08-04, a pedido do usuário) — mesma célula de
+  // avisos que já existia, só que agora troca de texto conforme o regime escolhido em
+  // dreSetRegime(). O botão em si fica no HTML fixo do toolbar (ver #dre-regime-wrap).
+  const regimeBtnComp=document.getElementById('dre-regime-competencia');
+  const regimeBtnReal=document.getElementById('dre-regime-realizado');
+  if(regimeBtnComp&&regimeBtnReal){
+    regimeBtnComp.style.background=_dreRegimeAtual==='competencia'?'#1d4ed8':'#fff';
+    regimeBtnComp.style.color=_dreRegimeAtual==='competencia'?'#fff':'#475569';
+    regimeBtnReal.style.background=_dreRegimeAtual==='realizado'?'#1d4ed8':'#fff';
+    regimeBtnReal.style.color=_dreRegimeAtual==='realizado'?'#fff':'#475569';
+  }
+  const avisoRegime=document.getElementById('dre-aviso-regime');
+  if(avisoRegime)avisoRegime.innerHTML=_dreRegimeAtual==='realizado'
+    ?'📊 DRE pelo <strong>Realizado (regime de caixa)</strong> — Receita só quando a parcela é efetivamente recebida (data real confirmada), despesas de Contas a Pagar só quando pagas de verdade, comissões só quando confirmadas (contadas no mês da quinzena de pagamento). Custo de produção interno é rateado proporcionalmente ao que foi recebido, por não ter data de pagamento própria.'
+    :'📊 DRE pelo <strong>Competência</strong> — Receita pelo mês da venda, despesas de Contas a Pagar pelo mês de vencimento de cada lançamento. Comissões calculadas pela mesma venda que as gerou, independente de já terem sido pagas.';
 
   if(cardsEl){
     const margemLiq=pctOf(d.lucroLiquido,d.receitaBruta);
@@ -11864,16 +12102,17 @@ function _dreLinhasExport(d){
 function exportarExcelDRE(){
   if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem exportar','terr');return;}
   const{y,m}=_dreMesAtual;
-  const d=calcularDRE(y,m,_dreEmpresaFiltro);
+  const d=calcularDRE(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
   const linhas=_dreLinhasExport(d);
   const headers=['DRE','Valor (R$)'];
   const rows=[
     ['Período',MESES_PT[m]+' '+y],
     ['Empresa',_dreEmpresaFiltro?_capLabel(_dreEmpresaFiltro):'Consolidado (todas)'],
+    ['Regime',_dreRegimeAtual==='realizado'?'Realizado (caixa)':'Competência'],
     ['',''],
     ...linhas.map(l=>[(l.indent?'    ':'')+l.label,l.valor.toFixed(2).replace('.',',')])
   ];
-  _csvDownload(`dre_${(_dreEmpresaFiltro||'consolidado').toLowerCase()}_${y}_${String(m).padStart(2,'0')}.csv`,headers,rows);
+  _csvDownload(`dre_${_dreRegimeAtual}_${(_dreEmpresaFiltro||'consolidado').toLowerCase()}_${y}_${String(m).padStart(2,'0')}.csv`,headers,rows);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
 }
 async function gerarPDFDRE(){
@@ -11881,9 +12120,10 @@ async function gerarPDFDRE(){
   if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
   const{jsPDF}=window.jspdf;
   const{y,m}=_dreMesAtual;
-  const d=calcularDRE(y,m,_dreEmpresaFiltro);
+  const d=calcularDRE(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
   const linhas=_dreLinhasExport(d);
   const empresaLbl=_dreEmpresaFiltro?_capLabel(_dreEmpresaFiltro):'Consolidado (todas as empresas)';
+  const regimeLbl=_dreRegimeAtual==='realizado'?'regime realizado (caixa)':'regime de competência';
 
   const doc=new jsPDF();
   const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139],GREEN=[22,163,74],RED=[220,38,38];
@@ -11904,7 +12144,7 @@ async function gerarPDFDRE(){
     doc.setTextColor(...GRAY);
     doc.setFont('helvetica','normal');
     doc.setFontSize(8.5);
-    doc.text('Período: '+MESES_PT[m]+' de '+y+'  ·  regime de competência',pageW-14,26.5,{align:'right'});
+    doc.text('Período: '+MESES_PT[m]+' de '+y+'  ·  '+regimeLbl,pageW-14,26.5,{align:'right'});
     doc.setDrawColor(...PINK);
     doc.setLineWidth(0.7);
     doc.line(14,30,pageW-14,30);
@@ -11996,7 +12236,7 @@ async function gerarPDFDRE(){
   for(let p=1;p<=doc.internal.getNumberOfPages();p++)drawFooter(p);
 
   const stamp=y+String(m).padStart(2,'0');
-  doc.save(`dre_${(_dreEmpresaFiltro||'consolidado').toLowerCase()}_${stamp}.pdf`);
+  doc.save(`dre_${_dreRegimeAtual}_${(_dreEmpresaFiltro||'consolidado').toLowerCase()}_${stamp}.pdf`);
   toast('PDF gerado! 📄','tok');
 }
 
@@ -12683,11 +12923,16 @@ function _lpCapInstalacoesDia(){return cfg.lpCapInstalacoesDia||3;}
 //      o que sobra e continua recuando com o restante) — isso já produz sozinho o exemplo dado
 //      pelo usuário: pedido de R$225 mil com prazo em 07/08, sem nada mais ocupando a agenda,
 //      vira 75 mil em 05/08, 75 mil em 06/08 e 75 mil em 07/08 (as 2 datas antes do prazo).
-//   2) Recuo NUNCA passa de 50% da janela de dias internos (emissão → prazo-limite de Produção,
-//      contados em dias ÚTEIS) — "sempre 50% mais até a data limite, nunca 50% menos". Bateu
-//      nesse piso e ainda sobra valor pra alocar: aloca mesmo assim no dia-piso, estourando a
-//      capacidade se precisar (nunca deixa produção "sem dia nenhum") e marca
-//      `estourouJanela:true` — vira o aviso "⚠️ Requer Atenção" na Lista de Pedidos real.
+//   2) Recuo NUNCA passa de 50% A MAIS do que o mínimo de dias que ESTE PEDIDO precisaria sem
+//      conflito nenhum (diasMinimos=ceil(líquido/75000)) — "sempre 50% mais até a data limite,
+//      nunca 50% menos" quer dizer: no máximo 1,5×diasMinimos dias úteis contados a partir do
+//      prazo-limite. Ex.: pedido de R$225 mil (3 dias mínimos) pode recuar até ~5 dias úteis
+//      buscando espaço; um pedido pequeno de 1 dia só ganha +1 dia de folga. Isso garante que o
+//      caso simples (sem conflito) NUNCA esbarra no piso, e que pedido maior ganha
+//      proporcionalmente mais chance de achar espaço. Bateu nesse piso e ainda sobra valor pra
+//      alocar: aloca mesmo assim no dia-piso, estourando a capacidade se precisar (nunca deixa
+//      produção "sem dia nenhum") e marca `estourouJanela:true` — vira o aviso "⚠️ Requer
+//      Atenção" na Lista de Pedidos real.
 // Isso vale IGUAL pros pedidos reais (Kanban/Calendário/Lista, ver _lpMapaProducaoPorDia) e pro
 // 🧮 Simulador (que roda a mesma função numa CÓPIA do mapa real, sem gravar nada de verdade).
 //
@@ -12699,9 +12944,15 @@ function _lpAlocarProducao(liquido,inicioIso,deadlineIso,mapa,refItem){
   const resultado={chunks:[],estourouJanela:false,deadlineIso,floorIso:deadlineIso};
   let restante=liquido||0;
   if(restante<=0.005||!deadlineIso||!inicioIso)return resultado;
-  const totalDiasUteis=Math.max(1,_lpDiasUteisJanela(inicioIso,deadlineIso));
-  const metade=Math.max(1,Math.ceil(totalDiasUteis/2));
-  const floorIso=_lpSubtraiDiasUteis(deadlineIso,metade-1);
+  // Piso de recuo = no máximo 50% de dias A MAIS do que o mínimo necessário PRA ESTE PEDIDO
+  // (diasMinimos = quantas fatias de R$75.000 cabem no líquido dele), nunca uma fração de
+  // alguma janela alheia — garante que o caso simples (pedido cabe justo, sem conflito nenhum)
+  // NUNCA esbarra no piso, e que pedidos maiores ganham proporcionalmente mais folga pra achar
+  // espaço. Ex.: pedido de R$225 mil = 3 dias mínimos → recua no máximo até 1,5×3≈5 dias úteis
+  // contados a partir do prazo-limite; pedido de 1 dia só ganha +1 dia útil de folga.
+  const diasMinimos=Math.max(1,Math.ceil(restante/cap));
+  const diasMaximoPermitido=Math.max(diasMinimos+1,Math.ceil(diasMinimos*1.5));
+  const floorIso=_lpSubtraiDiasUteis(deadlineIso,diasMaximoPermitido-1);
   resultado.floorIso=floorIso;
   let iso=deadlineIso,guard=0;
   while(restante>0.005&&guard<400){
@@ -12709,14 +12960,12 @@ function _lpAlocarProducao(liquido,inicioIso,deadlineIso,mapa,refItem){
     const ehFloor=iso<=floorIso;
     const ocupado=(mapa[iso]&&mapa[iso].soma)||0;
     const livre=cap-ocupado;
-    let usar=0,estouroDoDia=false;
-    if(ehFloor){
-      usar=restante; // chegou no piso de 50% — aloca o que sobrar mesmo, não dá mais pra recuar
-      estouroDoDia=livre<restante-0.005;
-      if(estouroDoDia)resultado.estourouJanela=true;
-    }else if(livre>0.005){
-      usar=Math.min(livre,restante);
-    }
+    // Tenta a capacidade normal do dia primeiro, estoure ou não o piso — só quando é o piso E
+    // a capacidade normal não é suficiente pra cobrir o que sobra é que o restante TODO é
+    // empurrado pra esse mesmo dia mesmo passando de R$75.000 (não dá mais pra recuar).
+    let usar=livre>0.005?Math.min(livre,restante):0;
+    const estouroDoDia=ehFloor&&(livre<restante-0.005);
+    if(estouroDoDia){usar=restante;resultado.estourouJanela=true;}
     if(usar>0.005){
       resultado.chunks.push({iso,valor:usar,estouro:estouroDoDia});
       if(!mapa[iso])mapa[iso]={soma:0,itens:[]};
@@ -12889,7 +13138,7 @@ function _lpRequerAtencao(x,mapaProducao,mapaInstalacao){
   const alocProd=_lpProdAlocCache[x.p.id];
   if(alocProd&&alocProd.estourouJanela){
     const distrib=alocProd.chunks.map(c=>`${fmtD(c.iso)}: ${fmtR(c.valor)}${c.estouro?' ⚠️':''}`).join(', ');
-    motivos.push(`Produção: não coube recuando até 50% dos dias internos (limite ${fmtR(_lpCapProducaoDia())}/dia útil, prazo ${fmtD(alocProd.deadlineIso)}) — precisou estourar a capacidade perto do prazo. Distribuição: ${distrib}`);
+    motivos.push(`Produção: não coube nem recuando até o limite de 50% a mais de dias (folga máx. até ${fmtD(alocProd.floorIso)}, limite ${fmtR(_lpCapProducaoDia())}/dia útil, prazo ${fmtD(alocProd.deadlineIso)}) — precisou estourar a capacidade perto do prazo. Distribuição: ${distrib}`);
   }
   if(x.calc.temInst){
     const capI=_lpCapInstalacoesDia();
@@ -14059,7 +14308,7 @@ function _lpSimular(){
         <td style="padding:5px 8px;text-align:right;font-weight:700;color:${c.estouro?'#b91c1c':'var(--ink)'}">${fmtR(c.valor)}${c.estouro?' ⚠️':''}</td>
       </tr>`).join('');
     prodHtml=`<div style="padding:10px 14px;background:${alocSim.estourouJanela?'#fee2e2':'#dcfce7'};border-radius:8px">
-      <div style="font-weight:700;color:${alocSim.estourouJanela?'#b91c1c':'#15803d'}">${alocSim.estourouJanela?'⚠️ Produção vai precisar estourar a capacidade':'✅ Produção cabe dentro da capacidade normal'} — limite ${fmtR(cap)}/dia útil, distribuído recuando a partir do prazo-limite (${fmtD(etProd.iso)}), nunca mais de 50% da janela interna pra trás (recuo máximo até ${fmtD(alocSim.floorIso)}).</div>
+      <div style="font-weight:700;color:${alocSim.estourouJanela?'#b91c1c':'#15803d'}">${alocSim.estourouJanela?'⚠️ Produção vai precisar estourar a capacidade':'✅ Produção cabe dentro da capacidade normal'} — limite ${fmtR(cap)}/dia útil, distribuído recuando a partir do prazo-limite (${fmtD(etProd.iso)}), no máximo 50% a mais de dias do que o mínimo necessário pra este pedido (recuo até ${fmtD(alocSim.floorIso)}).</div>
       <table style="width:100%;border-collapse:collapse;font-size:.8rem;margin-top:8px">
         <thead><tr style="text-align:left"><th style="padding:5px 8px">Dia</th><th style="padding:5px 8px;text-align:right">Líquido alocado</th></tr></thead>
         <tbody>${linhasDia}</tbody>
