@@ -88,8 +88,14 @@ body{font-family:'Inter',system-ui,sans-serif;background:#f4f6f8;color:var(--ink
 .dash-tab{flex:1;padding:9px;border:none;border-radius:7px;background:transparent;font-size:.78rem;font-weight:600;color:#6b7280;cursor:pointer;font-family:inherit;transition:all .2s}
 .dash-tab.active{background:#fff;color:#111827;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 .dash-card{background:#fff;border-radius:12px;padding:18px 20px;border:1px solid #e5e7eb;margin-bottom:16px}
-.dash-mes-nav{display:flex;align-items:center;gap:12px;margin-bottom:16px}
-.dash-mes-nav button{width:32px;height:32px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;transition:all .2s}
+/* flex-wrap:wrap (2026-08-04) — sem isso, em telas menores o <select> de empresa e os
+   botões de PDF/Excel ficavam espremidos pelos irmãos flex (que não encolhem por causa do
+   white-space:nowrap) até cortar o texto do próprio select, ex.: "🏢 Todas as empresas
+   (consolidado)" cortado no meio na aba DRE. Agora o que não cabe numa linha só desce pra
+   próxima, em vez de espremer/cortar. Ver [[feedback_cuidar_design_texto_cortado]]. */
+.dash-mes-nav{display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.dash-mes-nav button{width:32px;height:32px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.dash-mes-nav>select,.dash-mes-nav>.dash-btn-conf{flex-shrink:0}
 .dash-mes-nav button:hover{background:#f1f5f9}
 .dash-mes-label{font-size:1rem;font-weight:700;color:#111827;min-width:180px;text-align:center}
 .dash-table{width:100%;border-collapse:collapse;font-size:.82rem}
@@ -2937,7 +2943,7 @@ select.fc{cursor:pointer}
 <script type="module">
 import{initializeApp,deleteApp}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
 import{getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged,createUserWithEmailAndPassword,sendPasswordResetEmail,EmailAuthProvider,reauthenticateWithCredential}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
-import{getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,onSnapshot,getDocs}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
+import{getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,onSnapshot,getDocs,FieldPath}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-functions.js';
 
 const firebaseConfig={
@@ -3025,7 +3031,16 @@ window._fbWatchCfg=(cb)=>onSnapshot(doc(db,'sistema','config'),snap=>{if(snap.ex
 // regravada como se nunca tivesse acontecido. updateDoc com um caminho de campo (dot notation,
 // ex.: "pagConf.abc123") evita isso: só toca ESSE campo específico no servidor, nunca depende
 // do resto do `cfg` que está na memória local.
-window._fbUpdatePagConf=(confKey,data)=>updateDoc(doc(db,'sistema','config'),{['pagConf.'+confKey]:data});
+// FieldPath (não string com ponto) — 2026-08-04, corrige bug grave introduzido na própria
+// atomização de hoje: confKey costuma vir com "/" dentro (datas "DD/MM/AAAA" ou OS composto
+// "18711 / 18712" embutidos no confKey de getParcelas()) e a forma em string ('pagConf.'+
+// confKey) faz o SDK interpretar "/" como caractere reservado de field path e LANÇAR ERRO
+// SÍNCRONO antes até de criar a Promise — travava o botão "Confirmar Recebimento" (e
+// qualquer outro que passe por setPagConf) sem toast nem console.error nenhum, pra qualquer
+// confKey com "/", "~", "*", "[", "]" ou "." no meio (ex.: BURGER KING COLOMBO/BURGER KING
+// ITAQUA GARDEN SHOP, ambos com data de parcela no confKey). new FieldPath(...) trata cada
+// parte como valor literal, sem parsear caractere nenhum dentro dela.
+window._fbUpdatePagConf=(confKey,data)=>updateDoc(doc(db,'sistema','config'),new FieldPath('pagConf',confKey),data);
 // Funções administrativas (Cloud Functions) — definir senha / apagar usuário direto no Firebase Auth, sem e-mail.
 window._fbAdminSetPassword=(email,newPassword)=>httpsCallable(functions,'adminSetPassword')({email,newPassword});
 window._fbAdminDeleteUser=(email)=>httpsCallable(functions,'adminDeleteUser')({email});
@@ -9507,25 +9522,41 @@ function getPagConf(confKey){return (cfg.pagConf&&cfg.pagConf[confKey])||null;}
 function setPagConf(confKey,data){
   if(!cfg.pagConf)cfg.pagConf={};
   cfg.pagConf[confKey]=data;
-  // Grava só ESSE confKey no Firestore, de forma atômica (updateDoc com dot-path), em vez de
+  // Grava só ESSE confKey no Firestore, de forma atômica (updateDoc com FieldPath), em vez de
   // reescrever o documento 'config' inteiro com _fbSaveCfg(cfg) (2026-08-04, a pedido do
   // usuário: confirmações de recebimento estavam "sumindo" — Financeiro confirmava um lote de
   // parcelas e algumas voltavam a aparecer como Pendente depois). Causa raiz: setDoc sem merge
   // é uma sobrescrita total; confirmar várias parcelas em sequência rápida corria risco do
   // listener (onSnapshot) trocar `cfg.pagConf` local por uma versão intermediária ANTES de
   // outro save qualquer (de qualquer parte do sistema) acontecer, apagando a confirmação mais
-  // recente sem ninguém perceber. updateDoc com "pagConf.<confKey>" nunca depende do resto do
-  // cfg em memória, então essa perda não pode mais acontecer aqui. Fallback pro método antigo
-  // só se updateDoc não estiver disponível por algum motivo (documento ainda não existe, etc.).
-  if(window._fbUpdatePagConf){
-    window._fbUpdatePagConf(confKey,data).catch(e=>{
-      console.error('Erro ao gravar pagConf via updateDoc, tentando fallback completo',e);
-      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
-    });
-  } else if(window._fbSaveCfg){
-    window._fbSaveCfg(cfg);
+  // recente sem ninguém perceber. updateDoc com FieldPath('pagConf',confKey) nunca depende do
+  // resto do cfg em memória, então essa perda não pode mais acontecer aqui. Fallback pro
+  // método antigo só se updateDoc não estiver disponível (documento ainda não existe, etc.).
+  //
+  // Tudo dentro de try/catch (2026-08-04, no mesmo dia — corrigindo a própria mudança acima):
+  // um erro síncrono aqui (ex.: field path inválido, localStorage cheio) travava o botão
+  // "Confirmar Recebimento"/"Não recebido"/"Adiar" inteiro sem toast nem console.error — quem
+  // clicava via essa função achava que o sistema "não fazia nada" (mesmo bug silencioso já
+  // visto antes em Salvar Configurações, ver [[project_bug_modal_mo_cfg_inexistente]]). Agora
+  // qualquer falha aqui vira aviso visível em vez de travar o clique sem explicação.
+  try{
+    if(window._fbUpdatePagConf){
+      window._fbUpdatePagConf(confKey,data).catch(e=>{
+        console.error('Erro ao gravar pagConf via updateDoc, tentando fallback completo',e);
+        if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+      });
+    } else if(window._fbSaveCfg){
+      window._fbSaveCfg(cfg);
+    }
+  }catch(e){
+    console.error('Erro síncrono ao gravar pagConf, tentando fallback completo',e);
+    if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   }
-  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  try{
+    localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  }catch(e){
+    console.error('Erro ao gravar cache local (gcore_cfg) — provavelmente localStorage cheio; a gravação no Firestore acima não é afetada por isso',e);
+  }
   // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache,
   // montado na primeira renderização da tela) mesmo depois de Confirmar/Não recebido/Adiar
   // — a linha nunca desaparecia da lista filtrada por Status (ex.: "Em atraso") porque o
@@ -10165,10 +10196,19 @@ async function marcarContaPagarPaga(id,pago){
   await saveContaPagarFS(c);
   toast(pago?'Marcado como pago! ✅':'Reaberto como pendente','tok');
 }
+// Exclusão pede senha de admin (2026-08-04, a pedido do usuário) — antes bastava ser
+// Financeiro/Admin + confirmar num prompt comum; excluir mexe direto na base de Contas a
+// Pagar sem passar por Aprovação nenhuma, então virou o mesmo padrão de segurança já usado
+// pra excluir pedido (delP()) e cancelar venda (cancelarVenda()): exige a senha (mesma chave
+// cfg.senhaAdmin/cfg.senhaExclusao/cfg.dashMetasPin usada nessas duas). O item vai pra
+// Lixeira antes de apagar de verdade, então ainda dá pra restaurar em caso de engano.
 async function excluirContaPagar(id){
   if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem excluir contas a pagar','terr');return;}
-  if(!confirm('Excluir este lançamento de contas a pagar? Essa ação não pode ser desfeita.'))return;
   const c=(contasPagar||[]).find(x=>String(x.id)===String(id));
+  if(!confirm(`Excluir o lançamento "${c?.fornecedor||c?.descricao||'—'}" (R$ ${(c?.valor||0).toFixed?c.valor.toFixed(2):c?.valor||0})? Essa ação não pode ser desfeita.`))return;
+  const senha=await pedirSenhaAdmin('Confirmar exclusão','Digite a senha de administrador para excluir este lançamento de Contas a Pagar:');
+  if(!senha){toast('Exclusão cancelada','tinf');return;}
+  if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
   if(c)await _lixeiraAdicionar('contaPagar',c,{resumo:`${c.fornecedor||c.descricao||'Lançamento'} — R$ ${(c.valor||0).toFixed?c.valor.toFixed(2):c.valor}`});
   await deleteContaPagarFS(id);
   toast('Lançamento excluído','tok');
@@ -10212,10 +10252,15 @@ async function marcarContaReceberManualRecebida(id,recebido){
   toast(recebido?'Marcado como recebido! ✅':'Reaberto como pendente','tok');
   if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();
 }
+// Mesma trava de senha de admin do excluirContaPagar() acima, agora pro lado de receita
+// manual (2026-08-04, a pedido do usuário).
 async function excluirContaReceberManual(id){
   if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem excluir receitas','terr');return;}
-  if(!confirm('Excluir esta receita manual? Essa ação não pode ser desfeita.'))return;
   const c=(contasReceberManual||[]).find(x=>String(x.id)===String(id));
+  if(!confirm(`Excluir a receita "${c?.cliente||c?.descricao||'—'}" (R$ ${(c?.valor||0).toFixed?c.valor.toFixed(2):c?.valor||0})? Essa ação não pode ser desfeita.`))return;
+  const senha=await pedirSenhaAdmin('Confirmar exclusão','Digite a senha de administrador para excluir esta receita:');
+  if(!senha){toast('Exclusão cancelada','tinf');return;}
+  if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
   if(c)await _lixeiraAdicionar('contaReceberManual',c,{resumo:`${c.cliente||c.descricao||'Receita'} — R$ ${(c.valor||0).toFixed?c.valor.toFixed(2):c.valor}`});
   await deleteContaReceberManualFS(id);
   toast('Receita excluída','tok');
