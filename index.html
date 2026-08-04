@@ -1701,7 +1701,11 @@ select.fc{cursor:pointer}
 </div>
 
 <!-- EDITAR VALORES MODAL -->
-<div class="mov" id="mo-ev" onclick="if(event.target.id==='mo-ev')closeM('mo-ev')">
+<!-- Sem fechar ao clicar fora (2026-08-04, a pedido do usuário: "quando vou editar um pedido
+     se eu clico fora ele sai e perde tudo") — modal de formulário grande, clique acidental
+     no fundo escuro apagava tudo que já tinha sido digitado sem confirmação nenhuma. Agora só
+     fecha pelo X (closeM direto) ou Esc (ver listener perto de _updEvLiq()/updParcEV()). -->
+<div class="mov" id="mo-ev">
 <div class="mvmod" style="width:500px;max-width:98vw;max-height:90vh;display:flex;flex-direction:column;padding:0">
   <div style="padding:24px 24px 0;flex-shrink:0">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -1838,12 +1842,12 @@ select.fc{cursor:pointer}
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px">
       <div>
         <label id="ev-ve-label" style="font-size:.64rem;font-weight:600;color:#1d4ed8;display:block;margin-bottom:3px">Entrada — Bruto (cliente paga)</label>
-        <input id="ev-ve" type="text" inputmode="numeric" oninput="fmtMoney(this);_updEvPagCheck()" placeholder="0,00"
+        <input id="ev-ve" type="text" inputmode="numeric" oninput="fmtMoney(this);_evAutoCalcLiq()" placeholder="0,00"
           style="width:100%;padding:7px 8px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.82rem;font-family:inherit;box-sizing:border-box;background:#fff">
       </div>
       <div>
-        <label style="font-size:.64rem;font-weight:600;color:#7c3aed;display:block;margin-bottom:3px">Entrada — Líquido (comissão)</label>
-        <input id="ev-ve-liq" type="text" inputmode="numeric" oninput="fmtMoney(this);_updEvPagCheck()" placeholder="0,00"
+        <label style="font-size:.64rem;font-weight:600;color:#7c3aed;display:block;margin-bottom:3px">Entrada — Líquido (comissão) <span style="font-weight:400;color:#94a3b8">· automático</span> <span onclick="_evResetLiqManual(document.getElementById('ev-ve-liq'))" title="Voltar a calcular automaticamente" style="cursor:pointer">↺</span></label>
+        <input id="ev-ve-liq" type="text" inputmode="numeric" oninput="fmtMoney(this);this.dataset.manual='1';_updEvPagCheck()" placeholder="0,00"
           style="width:100%;padding:7px 8px;border:1.5px solid #e9d5ff;border-radius:7px;font-size:.82rem;font-family:inherit;box-sizing:border-box;background:#fff">
       </div>
       <div>
@@ -4685,7 +4689,42 @@ function _updEvLiq(){
   const el=document.getElementById('ev-liq');if(!el)return;
   el.textContent='R$ '+liq.toLocaleString('pt-BR',{minimumFractionDigits:2});
   el.style.color=liq<0?'#f87171':'#fff';
+  _evAutoCalcLiq();
+}
+// Líquido de Entrada/Parcela = Bruto da própria linha × (Líquido do pedido / Bruto do
+// pedido) — igual à regra antiga (2026-08-04, voltando a pedido do usuário: "o valor líquido
+// é automático... ele divide conforme for ali"). Chamado sempre que Bruto/Frete/Instalação/
+// Mobilização/Elevações/ART/Remoção/Medição do pedido mudam (via _updEvLiq) e sempre que o
+// Bruto de Entrada ou de alguma parcela muda. Só recalcula o que NÃO foi editado à mão
+// (dataset.manual!=='1') — se alguém digitar um Líquido diferente (caso legítimo, quando o
+// desconto da parcela específica não segue a proporção do pedido — ver bug OS 56 "BURGER
+// KING COLOMBO" de 2026-07-13 que motivou o campo existir separado), esse valor fica travado
+// até clicar no ↺ (_evResetLiqManual) pra voltar a calcular sozinho.
+function _evAutoCalcLiq(){
+  const gv=id=>{const el=document.getElementById(id);return el?moneyToNum(el.value):0;};
+  const br=gv('ev-br'),ft=gv('ev-ft'),mo=gv('ev-mo'),vi=gv('ev-vi'),el2=gv('ev-el'),art=gv('ev-art'),rem=gv('ev-rem'),med=gv('ev-med');
+  const liqTotal=br-ft-mo-vi-el2-art-rem-med;
+  const ratio=br>0?(liqTotal/br):1;
+  const fmt=n=>n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2}):'';
+  const veLiqEl=document.getElementById('ev-ve-liq');
+  if(veLiqEl&&veLiqEl.dataset.manual!=='1'){
+    const v=gv('ev-ve')*ratio;
+    veLiqEl.value=fmt(v);veLiqEl.dataset.raw=String(v);
+  }
+  document.querySelectorAll('#ev-parc-c > div').forEach(row=>{
+    const valInp=row.querySelector('.ev-pd-val'),liqInp=row.querySelector('.ev-pd-liq');
+    if(!valInp||!liqInp||liqInp.dataset.manual==='1')return;
+    const v=moneyToNum(valInp.value||'0')*ratio;
+    liqInp.value=fmt(v);liqInp.dataset.raw=String(v);
+  });
   _updEvPagCheck();
+}
+// Botão ↺ ao lado de cada Líquido — destrava o campo travado por edição manual e recalcula
+// pela proporção automática de novo.
+function _evResetLiqManual(el){
+  if(!el)return;
+  delete el.dataset.manual;
+  _evAutoCalcLiq();
 }
 // Converte data BR (DD/MM/YYYY, formato salvo em p.pagamento) pro formato ISO usado
 // pelos <input type=date> — inverso de fmtD(), só usado aqui pra pré-preencher a edição.
@@ -4702,21 +4741,25 @@ function updParcEV(){
   const c=document.getElementById('ev-parc-c');if(!c)return;
   const n=parseInt(document.getElementById('ev-np')?.value)||0;
   if(!n){c.innerHTML='';_updEvPagCheck();return}
-  // Cada parcela agora pede BRUTO (o que o cliente paga — libera Contas a Receber) e
-  // LÍQUIDO (base da comissão) separados, digitados os dois na hora — em vez de inferir
-  // o líquido por uma proporção do pedido inteiro, que na prática não bate quando o
-  // desconto não vem só de frete/mobilização/elevação/ART/remoção/medição.
+  // Cada parcela pede BRUTO (o que o cliente paga — libera Contas a Receber); o LÍQUIDO
+  // (base da comissão) é preenchido AUTOMATICAMENTE pela mesma proporção Bruto/Líquido do
+  // pedido inteiro assim que o Bruto é digitado (ver _evAutoCalcLiq(), 2026-08-04, a pedido
+  // do usuário: "o valor líquido é automático... ele divide conforme for ali"). Continua
+  // editável pra quando o desconto real da parcela não segue essa proporção (caso raro, ex.:
+  // OS 56 "BURGER KING COLOMBO" — ver bug de 2026-07-13 que motivou o campo separado
+  // existir) — digitar nele manualmente trava o valor (não sobrescreve mais sozinho) até
+  // clicar no ↺ pra voltar a calcular automático.
   c.innerHTML=[...Array(n)].map((_,i)=>
     `<div style="border:1.5px solid #bfdbfe;border-radius:8px;padding:7px;background:#fff">
       <div style="font-size:.7rem;font-weight:700;color:#1d4ed8;margin-bottom:5px">Parc. ${i+1}/${n}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
         <div>
           <label style="font-size:.6rem;font-weight:600;color:#1d4ed8;display:block;margin-bottom:2px">Bruto (cliente paga)</label>
-          <input type="text" inputmode="numeric" placeholder="R$ 0,00" class="fc ev-pd-val" style="font-size:.78rem;padding:7px 8px;border:1.5px solid #bfdbfe;border-radius:7px;font-family:inherit;box-sizing:border-box;background:#fff;width:100%" oninput="fmtMoney(this);_updEvPagCheck()">
+          <input type="text" inputmode="numeric" placeholder="R$ 0,00" class="fc ev-pd-val" style="font-size:.78rem;padding:7px 8px;border:1.5px solid #bfdbfe;border-radius:7px;font-family:inherit;box-sizing:border-box;background:#fff;width:100%" oninput="fmtMoney(this);_evAutoCalcLiq()">
         </div>
         <div>
-          <label style="font-size:.6rem;font-weight:600;color:#7c3aed;display:block;margin-bottom:2px">Líquido (comissão)</label>
-          <input type="text" inputmode="numeric" placeholder="R$ 0,00" class="fc ev-pd-liq" style="font-size:.78rem;padding:7px 8px;border:1.5px solid #e9d5ff;border-radius:7px;font-family:inherit;box-sizing:border-box;background:#fff;width:100%" oninput="fmtMoney(this);_updEvPagCheck()">
+          <label style="font-size:.6rem;font-weight:600;color:#7c3aed;display:block;margin-bottom:2px">Líquido <span style="font-weight:400;color:#94a3b8">· auto</span> <span onclick="_evResetLiqManual(this.parentElement.parentElement.querySelector('.ev-pd-liq'))" title="Voltar a calcular automaticamente" style="cursor:pointer">↺</span></label>
+          <input type="text" inputmode="numeric" placeholder="R$ 0,00" class="fc ev-pd-liq" style="font-size:.78rem;padding:7px 8px;border:1.5px solid #e9d5ff;border-radius:7px;font-family:inherit;box-sizing:border-box;background:#fff;width:100%" oninput="fmtMoney(this);this.dataset.manual='1';_updEvPagCheck()">
         </div>
         <div>
           <label style="font-size:.6rem;font-weight:600;color:#64748b;display:block;margin-bottom:2px">Data prevista</label>
@@ -4912,16 +4955,21 @@ async function editarValoresPedido(pedidoId){
     let nm=pdfZone.querySelector('.uz-file');if(nm)nm.remove();
   }
   // Pagamento: pré-preenche com o que já estiver salvo em p.pagamento (Entrada + Parcelas).
-  // Regra (revisada 2026-07-10, v2): Bruto (o que o cliente paga) e Líquido (base da
-  // comissão) são dois valores digitados separados — ver updParcEV/_updEvPagCheck. Pedido
-  // antigo, salvo antes dessa mudança, só tem o Bruto — o campo Líquido some vazio até
-  // alguém preencher (getParcelas cai numa estimativa por proporção nesse meio tempo).
+  // Líquido (base da comissão) é AUTOMÁTICO por padrão — calculado pela proporção Bruto/
+  // Líquido do pedido inteiro (ver _evAutoCalcLiq(), 2026-08-04). Pedido antigo/já salvo com
+  // um Líquido explícito diferente da proporção (override manual de um caso excepcional, ex.:
+  // OS 56 "BURGER KING COLOMBO") preserva esse valor travado (dataset.manual) em vez de
+  // recalcular por cima dele sem avisar; pedido sem Líquido salvo (nunca editado, ou igual a
+  // zero) fica destravado e recebe o valor automático assim que o modal abre.
   const pagExist=p.pagamento||{};
   const evVeLabel=document.getElementById('ev-ve-label'),evPagHint=document.getElementById('ev-pag-hint');
   if(evVeLabel)evVeLabel.textContent='Entrada — Bruto (cliente paga)';
-  if(evPagHint)evPagHint.textContent='Bruto é o que o cliente efetivamente paga (libera Contas a Receber). Líquido é a base sobre a qual a comissão do vendedor é calculada — pode ser diferente do bruto por qualquer desconto, não só frete/mobilização/elevação/ART/remoção/medição. Preencha os dois.';
+  if(evPagHint)evPagHint.textContent='Bruto é o que o cliente efetivamente paga (libera Contas a Receber). Líquido é calculado automaticamente pela proporção do pedido — só mexa nele se o desconto dessa parcela específica for diferente do resto.';
   setV('ev-ve',pagExist['Valor de Entrada']);
   setV('ev-ve-liq',pagExist['Valor de Entrada (Líquido)']);
+  const veLiqPreExistente=moneyToNum(pagExist['Valor de Entrada (Líquido)']||'0')>0;
+  const veLiqElL=document.getElementById('ev-ve-liq');
+  if(veLiqElL){if(veLiqPreExistente)veLiqElL.dataset.manual='1';else delete veLiqElL.dataset.manual;}
   setIn2('ev-de',_brToIso(pagExist['Data da Entrada']||''));
   const parcEntries=Object.entries(pagExist).map(([k,val])=>{
     const mt=k.match(/^Parcela\s+(\d+)\s+·\s+(.+)$/);
@@ -4935,7 +4983,11 @@ async function editarValoresPedido(pedidoId){
     const row=parcRows[i];if(!row)return;
     const valInp=row.querySelector('.ev-pd-val'),liqInp=row.querySelector('.ev-pd-liq'),dateInp=row.querySelector('.ev-pd-date');
     if(valInp){const n=moneyToNum(pe.val||'0');valInp.value=n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2}):'';valInp.dataset.raw=String(n);}
-    if(liqInp){const liqVal=pagExist[`Parcela ${pe.idx} (Líquido)`];const n=moneyToNum(liqVal||'0');liqInp.value=n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2}):'';liqInp.dataset.raw=String(n);}
+    if(liqInp){
+      const liqVal=pagExist[`Parcela ${pe.idx} (Líquido)`];const n=moneyToNum(liqVal||'0');
+      liqInp.value=n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2}):'';liqInp.dataset.raw=String(n);
+      if(n>0)liqInp.dataset.manual='1';else delete liqInp.dataset.manual;
+    }
     if(dateInp)dateInp.value=_brToIso(pe.date);
   });
   // Categoria (2026-07-22, separada do Tipo) — antes o único <select> aqui era de Tipo
@@ -5631,6 +5683,17 @@ document.addEventListener('keydown',function(e){
   if(e.key!=='Escape')return;
   const mo=document.getElementById('mo-vv');
   if(mo&&mo.classList.contains('open'))closeM('mo-vv');
+});
+// ESC fecha "Editar Valores" (mo-ev) e "Emissão de Pedido" (mo-em) — 2026-08-04, a pedido do
+// usuário ("clico fora perde tudo... só fechar clicando em fechar ou apertando esc"). Os dois
+// já não fecham mais clicando no fundo escuro (ver onclick removido do mo-ev / mo-em nunca
+// teve esse onclick); Esc continua funcionando como atalho de fechar, igual ao X.
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Escape')return;
+  const ev=document.getElementById('mo-ev');
+  if(ev&&ev.classList.contains('open')){closeM('mo-ev');return;}
+  const em=document.getElementById('mo-em');
+  if(em&&em.classList.contains('open'))closeEM();
 });
 
 function saveSt(){
@@ -18763,6 +18826,7 @@ function renderContasUnificado(){
     const ck=i.confKey.replace(/'/g,"\\'");
     const da=(i.dataAtiva||'').replace(/'/g,"\\'");
     const cl=(i.cliente||'').replace(/'/g,"\\'");
+    const pid=(i._pid||'').replace(/'/g,"\\'");
     const statusLbl=i.statusCalc==='confirmado'?'<span class="dash-badge ok">✅ Recebido</span>':i.statusCalc==='atrasado'?'<span class="dash-badge no">⚠️ Atrasado</span>':'<span class="dash-badge pend">⏳ Pendente</span>';
     const acoes=i.statusCalc==='confirmado'
       ?(isFinAdm?`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span> <button onclick="if(confirm('Reabrir este recebimento? Ele volta a aparecer como pendente e a comissão correspondente deixa de estar liberada.'))reabrirPag('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.68rem;color:#64748b;cursor:pointer;margin-left:6px" title="Reabrir">↩ Reabrir</button>`:'<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span>')
@@ -18775,12 +18839,33 @@ function renderContasUnificado(){
     // no planejamento, se a data mudar lá, muda na lista também").
     const prazoObra=i.pedido?.prazo||'';
     const prazoObraOrig=i.pedido?.prazoOriginal||'';
+    // Nome do cliente clicável (2026-08-04, a pedido do usuário) — abre o mesmo resumo de
+    // emissão (viewP/mo-vp) usado na Lista de Vendas, reaproveitando 100% o modal que já
+    // existe em vez de duplicar HTML. Só funciona quando existe um pedido emitido de verdade
+    // no Firestore (i._pid) — venda que só existe na planilha (XLSX_VENDAS, pré-julho/2026,
+    // nunca emitida no sistema) não tem "resumo de emissão" pra mostrar, então o clique avisa
+    // isso em vez de abrir um modal vazio/quebrado.
+    const quemHtml=pid
+      ?`<span onclick="viewP('${pid}')" style="cursor:pointer;color:#1d4ed8;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px" title="Ver resumo da emissão">${i.cliente||'—'}</span>`
+      :`<span onclick="toast('Essa venda só existe na planilha importada — nunca teve emissão no sistema pra mostrar um resumo.','tinf')" style="cursor:pointer;color:#64748b;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px" title="Sem emissão no sistema — venda vinda direto da planilha">${i.cliente||'—'}</span>`;
+    // Mês/quinzena em que a COMISSÃO deste recebimento aparece em Metas & Comissões
+    // (2026-08-04, a pedido do usuário: confirmou vários recebimentos aqui e não achou as
+    // baixas em Metas & Comissões). Não é bug de dado sumido — Metas & Comissões agrupa pela
+    // data de PAGAMENTO DA COMISSÃO (dia 5 ou 15, ver getQuinzenaInfo/_quinzenaPagDate), que
+    // é DIFERENTE da data real que o cliente paga mostrada aqui: cliente paga entre dia 1-14
+    // → comissão cai no dia 15 do MESMO mês; cliente paga dia 15-31 → comissão só cai no dia
+    // 5 do mês SEGUINTE. Mostrando isso direto na linha pra nunca mais parecer que uma
+    // confirmação "sumiu" só porque caiu num mês diferente do que Metas & Comissões está
+    // aberto no momento.
+    const qDia=i.qhalf==='I'?'05':'15';
+    const qLabel=`${qDia}/${String(i.qm).padStart(2,'0')}/${i.qy}`;
+    const comissaoInfo=i.qy&&i.qm?`<div style="font-size:.62rem;color:#7c3aed;margin-top:2px" title="Data em que a comissão deste recebimento aparece em Metas & Comissões (Contas a Receber mostra a data real do cliente; a comissão só é liberada na quinzena de pagamento)">💰 Comissão: ${qLabel}</div>`:'';
     return{
       iso,dataLabel:i.dataAtiva||'—',
       tipoBadge:'<span style="background:#dbeafe;color:#1e40af;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">📥 Receber</span>',
-      quem:i.cliente||'—',quemSub:pedidoDisplay(i.pedidoOs)||i.mesPedido||'',
+      quem:quemHtml,quemSub:pedidoDisplay(i.pedidoOs)||i.mesPedido||'',
       prazoObra,prazoObraOrig,
-      detalhe:(i.nomeVend||'—')+(i.label?' · '+i.label:''),
+      detalhe:(i.nomeVend||'—')+(i.label?' · '+i.label:'')+comissaoInfo,
       // Contas a Receber não tem conceito de categoria (isso é só de Contas a Pagar,
       // ver plano de contas em getPlanoContasDespesas()) — fica vazio de propósito.
       categoria:'<span style="color:#94a3b8">—</span>',
