@@ -3059,10 +3059,6 @@ window._fbWatchCfg=(cb)=>onSnapshot(doc(db,'sistema','config'),snap=>{if(snap.ex
 // ITAQUA GARDEN SHOP, ambos com data de parcela no confKey). new FieldPath(...) trata cada
 // parte como valor literal, sem parsear caractere nenhum dentro dela.
 window._fbUpdatePagConf=(confKey,data)=>updateDoc(doc(db,'sistema','config'),new FieldPath('pagConf',confKey),data);
-// Mesmo padrão do pagConf acima (updateDoc atômico por FieldPath) — usado por
-// setComissaoPagaVend() pra marcar/desmarcar "comissão já paga ao vendedor" sem depender do
-// resto do cfg em memória (2026-08-04).
-window._fbUpdateComissaoPagaVend=(confKey,data)=>updateDoc(doc(db,'sistema','config'),new FieldPath('comissaoPagaVend',confKey),data);
 // Funções administrativas (Cloud Functions) — definir senha / apagar usuário direto no Firebase Auth, sem e-mail.
 window._fbAdminSetPassword=(email,newPassword)=>httpsCallable(functions,'adminSetPassword')({email,newPassword});
 window._fbAdminDeleteUser=(email)=>httpsCallable(functions,'adminDeleteUser')({email});
@@ -3864,41 +3860,6 @@ async function _migrarAtrasadosListaPedidosHoje(){
   if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   if(marcados)toast(`${marcados} pedido(s) com etapa(s) atrasada(s) da Lista de Pedidos concluída(s) em lote (OS ${osMarcados.slice(0,8).join(', ')}${osMarcados.length>8?'...':''})`,'tok');
 }
-// Lote pontual 2026-08-04 (ver chamada em setupRealtimeSync) — marca comissaoPagaVend=true
-// pras parcelas específicas que o usuário confirmou por print, uma a uma, que já pagou ao
-// vendedor há semanas: OS 109, 120, 169, 171, 180, 184, 188 e 218, todas "Parcela 1". Casa
-// por OS (token, ver _osTokens) + data original da parcela (dataStr), não pelo confKey
-// (que tem o ID do pedido no Firestore embutido — não dá pra saber esse ID sem consultar o
-// banco ao vivo, que este código não tem acesso fora do navegador do usuário). Depende de
-// getComissaoItemsAll() já estar disponível (pedidos carregados) — por isso roda no mesmo
-// gatilho (primeiro snapshot de pedidos) das outras migrações acima.
-const _LOTE_COMISSAO_PAGA_0804=[
-  {os:'109',dataStr:'15/06/2026'},
-  {os:'120',dataStr:'05/07/2026'},
-  {os:'169',dataStr:'15/06/2026'},
-  {os:'171',dataStr:'15/06/2026'},
-  {os:'180',dataStr:'05/07/2026'},
-  {os:'184',dataStr:'15/07/2026'},
-  {os:'188',dataStr:'15/06/2026'},
-  {os:'218',dataStr:'15/07/2026'},
-];
-async function _migrarComissaoPagaLote0804(){
-  if(cfg.migComissaoPagaLote0804Feita)return;
-  if(typeof getComissaoItemsAll!=='function')return;
-  const all=getComissaoItemsAll();
-  let marcados=0;
-  const achados=[];
-  _LOTE_COMISSAO_PAGA_0804.forEach(alvo=>{
-    const item=all.find(i=>_osTokens(i.pedidoOs).includes(alvo.os)&&i.dataStr===alvo.dataStr&&i.status!=='confirmado');
-    if(item&&!isComissaoPagaVend(item.confKey)){
-      setComissaoPagaVend(item.confKey,{pago:true,pagoEm:new Date().toISOString(),viaLoteMigracao:true});
-      marcados++;achados.push(alvo.os);
-    }
-  });
-  cfg.migComissaoPagaLote0804Feita=true;
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
-  if(marcados)toast(`✅ ${marcados} comissão(ões) já paga(s) marcada(s) automaticamente (OS ${achados.join(', ')}) — sumiram de Pendentes de Revisão`,'tok');
-}
 async function savePedidoFS(p){
   if(!window._fbSavePedido){console.warn('Firestore não disponível');return;}
   try{await window._fbSavePedido(p);}
@@ -3915,7 +3876,6 @@ let _anoPrazoMigracaoFeita=false;
 let _projPrazo10AgoMigracaoFeita=false;
 let _atrasadosProjComprasMigracaoFeita=false;
 let _atrasadosLpMigracaoFeita=false;
-let _comissaoPagaLoteMigracaoFeita=false;
 function setupRealtimeSync(){
   if(!window._fbWatchPedidos)return;
   window._fbWatchPedidos(function(snapshot){
@@ -3978,15 +3938,6 @@ function setupRealtimeSync(){
     if(!_atrasadosLpMigracaoFeita&&_getUserCat().isAdm){
       _atrasadosLpMigracaoFeita=true;
       _migrarAtrasadosListaPedidosHoje().catch(e=>{_atrasadosLpMigracaoFeita=false;console.error('Erro ao concluir itens atrasados na Lista de Pedidos',e);});
-    }
-    // Lote pontual (2026-08-04, itens que o usuário confirmou um a um por print — Parcela 1
-    // de OS 109/120/169/171/180/184/188/218, todos já pagos ao vendedor há semanas mas presos
-    // em "Pendentes de Revisão" pra sempre por falta da flag comissaoPagaVend, que só passou a
-    // existir agora). Ver _migrarComissaoPagaLote0804 — mesmo padrão de flag PERSISTIDO
-    // (cfg.migComissaoPagaLote0804Feita), roda de verdade só 1x pra sempre.
-    if(!_comissaoPagaLoteMigracaoFeita&&_getUserCat().isAdm){
-      _comissaoPagaLoteMigracaoFeita=true;
-      _migrarComissaoPagaLote0804().catch(e=>{_comissaoPagaLoteMigracaoFeita=false;console.error('Erro na migração de comissão paga em lote',e);});
     }
     // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache)
     // montado ANTES dessa atualização de pedidos — editar OS/valores/vendedor num pedido
@@ -8822,6 +8773,23 @@ function getParcelas(p){
     const mt=k.match(/^Parcela\s+(\d+)\s+·\s+(.+)$/);
     if(mt)pushItem(k,v,`Parcela ${mt[1]} (Líquido)`,mt[2].trim(),`${p.id}::${k}`);
   });
+  // BUG corrigido 2026-08-04 (OS 235 "BURGUER M2A COMERCIO LTDA" e 236 "MISS BURGUER
+  // COMERCIO LTDA" aparecendo 2x em Recebimentos & Comissões, Contas a Receber e Pagamentos
+  // Futuros, com a comissão contada em dobro): o pedido tinha o MESMO pagamento salvo duas
+  // vezes em p.pagamento — uma vez como "Entrada" e de novo como "Parcela 1 · <data>", os
+  // dois com o Bruto batendo (dentro de centavos de arredondamento). getParcelas() lia os
+  // dois campos como se fossem parcelas diferentes. Detecta e remove a duplicata: quando
+  // "Entrada" e alguma "Parcela N" têm Bruto batendo (tolerância R$0,05 — cobre
+  // arredondamento de proporção, mas nunca bate por coincidência entre duas parcelas reais
+  // de valor diferente), mantém só a Parcela (tem data explícita) e descarta a Entrada
+  // solta. Roda ANTES da reconciliação com a planilha logo abaixo, pra não distorcer a soma.
+  if(res.length>1){
+    const entradaIdx=res.findIndex(r=>r.label==='Entrada');
+    if(entradaIdx>-1){
+      const dupIdx=res.findIndex((r,idx)=>idx!==entradaIdx&&Math.abs(r.valorBruto-res[entradaIdx].valorBruto)<0.05);
+      if(dupIdx>-1)res.splice(entradaIdx,1);
+    }
+  }
   // Planilha vence: se a OS bate com uma linha da planilha colada, a SOMA das parcelas
   // (bruto e líquido) tem que fechar com o Bruto/Líquido daquela linha. Se não fechar —
   // ex.: valor digitado errado numa parcela específica ao emitir/editar o pedido, como
@@ -9120,6 +9088,22 @@ function _quinzenaParaComissao(p,dataAtiva,conf){
 function _quinzenaPagDate(qy,qm,qhalf){
   const dia=qhalf==='I'?5:15;
   return String(dia).padStart(2,'0')+'/'+String(qm).padStart(2,'0')+'/'+qy;
+}
+// Quinzena já fechada = dia de pagamento (5 ou 15) já passou (2026-08-04, pedido do
+// usuário): pedido antigo sem confirmação formal no Financeiro que já teve sua janela de
+// pagamento encerrada é tratado como "passado, já resolvido" e some de "Pendentes de
+// Revisão" — na prática o usuário sempre paga a comissão inteira de cada quinzena fechada,
+// então deixar isso acumulando ali pra sempre só suja a lista sem ajudar em nada (ele
+// confirmou explicitamente: "isso é passado... remove e pronto... deixa no financeiro os
+// futuros"). NÃO mexe no status real do item (continua 'pendente' nos dados — se o
+// Financeiro confirmar depois, aparece normalmente em Consolidados) nem em Contas a
+// Receber/Pagamentos Futuros, que precisam continuar mostrando tudo em aberto pro
+// Financeiro cobrar/reconciliar — o corte vale só pra esta lista específica.
+function _quinzenaJaFechou(qy,qm,qhalf){
+  const dia=qhalf==='I'?5:15;
+  const payday=new Date(qy,qm-1,dia);
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  return payday<hoje;
 }
 
 // Regra de data de pagamento pra "Adicionar Pagamento" (bônus/extra), baseada no
@@ -9742,57 +9726,6 @@ function setPagConf(confKey,data){
   // reportou que "Não recebido" não sumia da lista com filtro Atrasado, mesmo com o motivo
   // e a nova data corretamente salvos em cfg.pagConf).
   if(typeof _invalidateDashCache==='function')_invalidateDashCache();
-}
-
-// ════════════════════════════════════════
-// COMISSÃO PAGA AO VENDEDOR (2026-08-04) — flag SEPARADA de pagConf/confirmado.
-// Motivo: "confirmado" é o CLIENTE tendo pago (Financeiro, Contas a Receber); mas o usuário
-// paga a comissão ao vendedor a cada quinzena de qualquer forma, muitas vezes ANTES do
-// Financeiro ter formalizado a confirmação do recebimento daquele cliente específico
-// (relatado 2026-08-04: vários pedidos de Abril/Maio, com Parcela 1 de junho/julho, já
-// tinham comissão paga ao vendedor há semanas mas continuavam aparecendo em "Pendentes de
-// Revisão" pra sempre, porque nunca tinham sido "Confirmados" formalmente em Financeiro).
-// Sem essa flag não existia NENHUMA forma de dizer "já paguei isso" sem mexer no status do
-// recebimento do cliente (que é uma informação diferente e não deve ser forjada). Mesmo
-// padrão de persistência de setPagConf (updateDoc atômico por FieldPath + fallback + cache
-// local), só que gravando em cfg.comissaoPagaVend em vez de cfg.pagConf.
-function getComissaoPagaVend(confKey){return (cfg.comissaoPagaVend&&cfg.comissaoPagaVend[confKey])||null;}
-function isComissaoPagaVend(confKey){return !!(getComissaoPagaVend(confKey)&&getComissaoPagaVend(confKey).pago);}
-function setComissaoPagaVend(confKey,data){
-  if(!cfg.comissaoPagaVend)cfg.comissaoPagaVend={};
-  cfg.comissaoPagaVend[confKey]=data;
-  try{
-    if(window._fbUpdateComissaoPagaVend){
-      window._fbUpdateComissaoPagaVend(confKey,data).catch(e=>{
-        console.error('Erro ao gravar comissaoPagaVend via updateDoc, tentando fallback completo',e);
-        if(window._fbSaveCfg)window._fbSaveCfg(cfg);
-      });
-    } else if(window._fbSaveCfg){
-      window._fbSaveCfg(cfg);
-    }
-  }catch(e){
-    console.error('Erro síncrono ao gravar comissaoPagaVend, tentando fallback completo',e);
-    if(window._fbSaveCfg)window._fbSaveCfg(cfg);
-  }
-  try{
-    localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
-  }catch(e){
-    console.error('Erro ao gravar cache local (gcore_cfg)',e);
-  }
-  if(typeof _invalidateDashCache==='function')_invalidateDashCache();
-}
-// Marca/desmarca a partir do botão na tabela "Pendentes de Revisão" — chamado direto do HTML.
-function marcarComissaoPagaVend(confKey){
-  setComissaoPagaVend(confKey,{pago:true,pagoEm:new Date().toISOString()});
-  toast('✅ Marcado como já pago ao vendedor','tok');
-  if(typeof renderDashComissoes==='function')renderDashComissoes();
-  if(typeof renderDashCards==='function')renderDashCards();
-}
-function desfazerComissaoPagaVend(confKey){
-  setComissaoPagaVend(confKey,{pago:false,pagoEm:new Date().toISOString()});
-  toast('↩ Voltou pra pendente','tok');
-  if(typeof renderDashComissoes==='function')renderDashComissoes();
-  if(typeof renderDashCards==='function')renderDashCards();
 }
 
 function _dashShowPinModal(){
@@ -20176,16 +20109,11 @@ function renderDashComissoes(){
         // (2026-07-16) — aqui em Metas & Comissões fica só leitura, pra não ter duas telas
         // com regras diferentes (Financeiro exige motivo/nova data no adiamento, aqui não
         // exigia nada). Ver [[project_pagamento_extra_clabonde_quinzena]] pro fluxo de pagConf.
-        // Comissão paga ao vendedor (2026-08-04) — ação nova, independente do status do
-        // recebimento do cliente. Item pendente/adiado que o usuário já pagou manualmente ao
-        // vendedor ganha botão "Marcar Comissão Paga"; uma vez marcado, some de "Pendentes de
-        // Revisão" e passa a aparecer em "✅ Pagas manualmente ao vendedor", com botão pra
-        // desfazer se for engano.
-        const pagoManual=isComissaoPagaVend(ck);
-        const ac=i.status==='confirmado'?`<span style="font-size:.72rem;color:#16a34a">Pago ✓</span>`
-          :pagoManual?`<button class="btn-mini" style="background:#fef3c7;color:#92400e;border:none;border-radius:6px;padding:3px 8px;font-size:.65rem;font-weight:700;cursor:pointer" onclick="desfazerComissaoPagaVend('${ck}')">↩ Desfazer</button>`
-          :i.status==='adiado'?`<span style="font-size:.72rem;color:#b45309" title="Adiado — veja o motivo em Financeiro → Contas a Receber">⏭ Adiado</span><br><button class="btn-mini" style="background:#dcfce7;color:#166534;border:none;border-radius:6px;padding:2px 7px;font-size:.62rem;font-weight:700;cursor:pointer;margin-top:3px" title="Marca que você já pagou essa comissão ao vendedor, mesmo com o adiamento no Financeiro." onclick="marcarComissaoPagaVend('${ck}')">✅ Marcar Paga</button>`
-          :`<button class="btn-mini" style="background:#dcfce7;color:#166534;border:none;border-radius:6px;padding:3px 8px;font-size:.65rem;font-weight:700;cursor:pointer" title="Marca que você já pagou essa comissão ao vendedor, mesmo sem o Financeiro ter confirmado o recebimento do cliente ainda — ela some de Pendentes de Revisão." onclick="marcarComissaoPagaVend('${ck}')">✅ Marcar Comissão Paga</button>`;
+        // "Marcar Comissão Paga" REMOVIDO (2026-08-04, mesmo dia — o usuário rejeitou a ideia:
+        // o fluxo dele é só Financeiro confirmar em Contas a Receber, cair em Consolidado, e
+        // então pagar a comissão — sem nenhum passo manual extra aqui). Voltou ao
+        // comportamento original: só leitura, ação de verdade é sempre em Financeiro.
+        const ac=i.status==='confirmado'?`<span style="font-size:.72rem;color:#16a34a">Pago ✓</span>`:i.status==='adiado'?`<span style="font-size:.72rem;color:#b45309" title="Adiado — veja o motivo em Financeiro → Contas a Receber">⏭ Adiado</span>`:`<span style="font-size:.68rem;color:#94a3b8" title="Confirmar ou marcar como não recebido agora é só em Financeiro → Contas a Receber">Ver em Financeiro</span>`;
         return`<tr style="${i.status==='confirmado'?'background:#f0fdf4;':''}">
           <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${i.mesPedido||'—'}</td>
           <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${pedidoDisplay(i.pedidoOs)||'—'}</td>
@@ -20226,7 +20154,11 @@ function renderDashComissoes(){
         <td><span style="font-size:.68rem;color:#94a3b8" title="Reabrir agora é só em Financeiro → Contas a Receber">Ver em Financeiro</span></td>
       </tr>`;
     }).join('');
-    return`<details style="margin:6px 0 16px">
+    // Abre sozinho quando tem busca ativa (2026-08-04) — antes ficava sempre fechado por
+    // padrão, então um resultado batendo aqui dentro (ex.: pedido já Confirmado) ficava
+    // filtrado corretamente mas invisível pro usuário sem clicar pra expandir, dando a
+    // falsa impressão de que "a busca só olha Pendentes de Revisão".
+    return`<details${busca?' open':''} style="margin:6px 0 16px">
       <summary style="cursor:pointer;font-size:.72rem;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">✅ Consolidados desta quinzena (${items.length}) — Valor: ${fmtR(totalVal)} · Comissão: ${fmtR(totalCom)}</summary>
       <div style="overflow-x:auto;margin-top:8px"><table class="dash-table">
         <thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor Bruto</th><th>Valor Líquido</th><th>%</th><th>Comissão</th><th>Confirmado em</th><th>Detalhes</th><th>Ação</th></tr></thead>
@@ -20261,17 +20193,6 @@ function renderDashComissoes(){
       <div style="margin-top:6px">${mkTable(items,emptyMsg)}</div>
     </details>`;
   }
-  // Lista dos que foram tirados de "Pendentes de Revisão" via "✅ Marcar Comissão Paga"
-  // (2026-08-04) — recolhida por padrão (fechada), já que é só histórico/conferência, não
-  // algo que precisa de ação. Some inteiramente só se a lista estiver vazia.
-  function mkPagoManual(items){
-    if(!items.length)return'';
-    return`<details style="margin:6px 0 16px">
-      <summary style="cursor:pointer;font-size:.72rem;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">✅ Comissão já paga ao vendedor, cliente ainda não confirmado (${items.length})</summary>
-      <div style="margin-top:6px">${mkTable(items,'')}</div>
-    </details>`;
-  }
-
   function mkVendResume(items,incluirExtras){
     if(!items.length)return'';
     const vends=[...new Set(items.map(i=>(i.nomeVend||'').trim()).filter(Boolean))].filter(v=>!v.toUpperCase().includes('KELLEN')).sort();
@@ -20358,32 +20279,33 @@ function renderDashComissoes(){
   // postergar/adiar em financeiro já suma dessa lista de pendentes [em Comissões]".
   const itemsIView=itemsI.filter(i=>i.status==='confirmado'||!i.motivoAtraso);
   const itemsIIView=itemsII.filter(i=>i.status==='confirmado'||!i.motivoAtraso);
-  // "Comissão já paga ao vendedor" (2026-08-04) sai de "Pendentes de Revisão" — o usuário
-  // paga a comissão a cada quinzena independente do Financeiro ter confirmado o cliente,
-  // então um item marcado aqui não pode continuar aparecendo como pendência pra sempre. Vai
-  // pra uma seção própria ("✅ Pagas manualmente"), não simplesmente some, pra continuar
-  // auditável (mesmo princípio de nunca esconder dinheiro sem rastro, ver [[project_auditoria_historico_pedidos_vinculos]]).
+  // "Comissão paga ao vendedor" manual REMOVIDO (2026-08-04, mesmo dia — rejeitado pelo
+  // usuário: o fluxo dele é só Financeiro confirmar em Contas a Receber → cai em
+  // Consolidado → comissão paga a partir dali, sem nenhum passo/marcação manual extra
+  // aqui). No lugar, pendência de quinzena JÁ FECHADA (dia 5/15 já passou) some sozinha de
+  // "Pendentes de Revisão" — ver _quinzenaJaFechou — porque isso é passado assumido como já
+  // resolvido; só continua aparecendo aqui pendência de quinzena ainda ABERTA.
   const consI=itemsIView.filter(i=>i.status==='confirmado');
-  const pendI=itemsIView.filter(i=>i.status!=='confirmado'&&!isComissaoPagaVend(i.confKey));
-  const pagoManualI=itemsIView.filter(i=>i.status!=='confirmado'&&isComissaoPagaVend(i.confKey));
+  const pendI=itemsIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
   const consII=itemsIIView.filter(i=>i.status==='confirmado');
-  const pendII=itemsIIView.filter(i=>i.status!=='confirmado'&&!isComissaoPagaVend(i.confKey));
-  const pagoManualII=itemsIIView.filter(i=>i.status!=='confirmado'&&isComissaoPagaVend(i.confKey));
+  const pendII=itemsIIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
 
   el.innerHTML=
     filterBar+
-    `<div style="border-left:4px solid #111827;padding-left:12px;margin-bottom:16px;margin-top:4px">
-       <div style="font-size:.85rem;font-weight:700;color:#111827">1ª Quinzena · pagar dia 5</div>
+    // Barra de título de quinzena virou fundo escuro sólido, de ponta a ponta (2026-08-04, a
+    // pedido do usuário: só a borda esquerda fina não separava bem as duas seções visualmente).
+    `<div style="background:#111827;padding:10px 16px;border-radius:8px;margin-bottom:16px;margin-top:4px">
+       <div style="font-size:.85rem;font-weight:700;color:#fff;letter-spacing:.3px">1ª Quinzena · pagar dia 5</div>
      </div>
      ${mkExtras(5)}
      ${mkCards(itemsIView)}${mkVendResume(itemsIView,true)}
-     ${mkPendentes(pendI,'Nenhum lançamento pendente nesta quinzena.')}${mkPagoManual(pagoManualI)}${mkConsolidado(consI)}
-     <div style="border-left:4px solid #6366f1;padding-left:12px;margin:24px 0 16px">
-       <div style="font-size:.85rem;font-weight:700;color:#6366f1">2ª Quinzena · pagar dia 15</div>
+     ${mkPendentes(pendI,'Nenhum lançamento pendente nesta quinzena.')}${mkConsolidado(consI)}
+     <div style="background:#4338ca;padding:10px 16px;border-radius:8px;margin:24px 0 16px">
+       <div style="font-size:.85rem;font-weight:700;color:#fff;letter-spacing:.3px">2ª Quinzena · pagar dia 15</div>
      </div>
      ${mkExtras(15)}
      ${mkCards(itemsIIView)}${mkVendResume(itemsIIView)}
-     ${mkPendentes(pendII,'Nenhum lançamento pendente nesta quinzena.')}${mkPagoManual(pagoManualII)}${mkConsolidado(consII)}`;
+     ${mkPendentes(pendII,'Nenhum lançamento pendente nesta quinzena.')}${mkConsolidado(consII)}`;
 }
 
 // ════════════════════════════════════════
