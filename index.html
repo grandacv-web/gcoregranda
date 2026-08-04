@@ -20032,7 +20032,16 @@ function renderDashComissoes(){
       <thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Parcela</th><th>Valor Bruto</th><th>Valor Líquido</th><th>Pagto comissão</th><th>%</th><th>Comissão</th><th>Status</th><th>Detalhes</th><th>Ação</th></tr></thead>
       <tbody>${items.map(i=>{
         const com=i.valor*i.pct/100;
-        const sb=i.status==='confirmado'?(i.historicoAutoConfirmado?'<span class="dash-badge ok" title="Parcela de Julho I/2026 ou anterior — considerada já recebida e com comissão já paga antes deste sistema existir (marcado automaticamente, sem confirmação manual). Confira na planilha antiga se sobrar dúvida.">✅ Confirmado (histórico)</span>':'<span class="dash-badge ok">✅ Confirmado</span>'):i.status==='adiado'?'<span class="dash-badge pend">⏭ Adiado</span>':'<span class="dash-badge pend">⏳ Pendente</span>';
+        // Data de confirmação exposta direto na linha (2026-08-04, a pedido do usuário depois
+        // de desconfiar que itens confirmados HOJE estavam caindo no mês errado) — assim dá
+        // pra auditar cada pedido sem precisar abrir console: se aparece "✅ Confirmado" com
+        // "em 04/08/2026" mas o pedido está listado dentro do mês/quinzena de Julho, é porque
+        // a quinzena usa o dia em que foi CONFIRMADO (não o mês da venda) — ver
+        // _quinzenaParaComissao. Pedido confirmado dia 31/07 cai na quinzena de 05/08 (regra
+        // "dia 15-31 → quinzena do mês seguinte"), então nunca deveria aparecer dentro do mês
+        // de Julho salvo se a confirmação em si foi feita ANTES do dia 15/07.
+        const confDataTag=(i.status==='confirmado'&&!i.historicoAutoConfirmado&&i.confirmedAt)?`<br><span style="font-size:.6rem;color:#16a34a;font-weight:600">confirmado em ${new Date(i.confirmedAt).toLocaleDateString('pt-BR')}</span>`:'';
+        const sb=(i.status==='confirmado'?(i.historicoAutoConfirmado?'<span class="dash-badge ok" title="Parcela de Julho I/2026 ou anterior — considerada já recebida e com comissão já paga antes deste sistema existir (marcado automaticamente, sem confirmação manual). Confira na planilha antiga se sobrar dúvida.">✅ Confirmado (histórico)</span>':'<span class="dash-badge ok">✅ Confirmado</span>'):i.status==='adiado'?'<span class="dash-badge pend">⏭ Adiado</span>':'<span class="dash-badge pend">⏳ Pendente</span>')+confDataTag;
         const ck=i.confKey.replace(/'/g,"\\'");
         const da=i.dataAtiva.replace(/'/g,"\\'");
         // Confirmar/Adiar/Não recebido agora só existem em Financeiro → Contas a Receber
@@ -20098,7 +20107,7 @@ function renderDashComissoes(){
       <div style="background:#dbeafe;border-radius:8px;padding:10px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#1e40af">Receb. cliente</div><div style="font-size:.95rem;font-weight:800;color:#1e40af">${fmtR(prev)}</div><div style="font-size:.6rem;color:#93c5fd;margin-top:2px">a receber dos clientes</div></div>
       <div style="background:#dcfce7;border-radius:8px;padding:10px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#16a34a">Receb. confirmado</div><div style="font-size:.95rem;font-weight:800;color:#16a34a">${fmtR(conf)}</div><div style="font-size:.6rem;color:#86efac;margin-top:2px">pagos pelos clientes</div></div>
       <div style="background:#fce7f3;border-radius:8px;padding:10px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#be185d">Comissão a pagar</div><div style="font-size:.95rem;font-weight:800;color:#be185d">${fmtR(cp)}</div><div style="font-size:.6rem;color:#f9a8d4;margin-top:2px">a pagar ao vendedor</div></div>
-      <div style="background:#f3e8ff;border-radius:8px;padding:10px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#7c3aed">Comissão paga</div><div style="font-size:.95rem;font-weight:800;color:#7c3aed">${fmtR(cc)}</div><div style="font-size:.6rem;color:#c4b5fd;margin-top:2px">comissão já confirmada</div></div>
+      <div style="background:#f3e8ff;border-radius:8px;padding:10px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#7c3aed">Comissão liberada</div><div style="font-size:.95rem;font-weight:800;color:#7c3aed">${fmtR(cc)}</div><div style="font-size:.6rem;color:#c4b5fd;margin-top:2px" title="Cliente já pagou (confirmado em Financeiro), então esta comissão está pronta pra entrar no pagamento do dia 5 ou 15 — isso NÃO significa que o valor já foi transferido/pago ao vendedor.">recebido do cliente · ainda não paga ao vendedor</div></div>
     </div>`;
   }
 
@@ -20141,7 +20150,7 @@ function renderDashComissoes(){
     return`<details style="margin-bottom:12px">
       <summary style="cursor:pointer;font-size:.72rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">📊 Resumo por vendedor</summary>
       <div style="overflow-x:auto;margin-top:8px"><table class="dash-table">
-        <thead><tr><th>Vendedor</th><th>Total clientes</th><th>Comissão a pagar</th><th>Comissão paga</th>${incluirExtras?'<th>🎁 Extras</th>':''}</tr></thead>
+        <thead><tr><th>Vendedor</th><th>Total clientes</th><th>Comissão a pagar</th><th title="Cliente já pagou — pronta pra entrar no pagamento do dia 5/15, mas ainda NÃO foi transferida ao vendedor">Comissão liberada</th>${incluirExtras?'<th>🎁 Extras</th>':''}</tr></thead>
         <tbody>${rows}${rowClab}</tbody>
       </table></div>
       ${incluirExtras?'<p style="font-size:.68rem;color:#94a3b8;margin-top:4px">Coluna "Extras" já soma nos totais de comissão ao lado. Passe o mouse sobre o valor pra ver o motivo.</p>':''}
