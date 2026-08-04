@@ -495,7 +495,7 @@ select.fc{cursor:pointer}
 <div id="sec-geral">
   <div class="hdr">
     <div class="hdr-l">
-      <img src="logo_granda_branca.png" style="height:32px;object-fit:contain;flex-shrink:0">
+      <img src="logo_granda_branca.png" onclick="irParaHome()" title="Ir para a Home" style="height:32px;object-fit:contain;flex-shrink:0;cursor:pointer">
       <div class="hdr-divider"></div>
       <div><h2 id="geral-hdr-h2">Vendas do Mês</h2><p id="geral-hdr-p">Vendas da categoria "Venda" — mesma base usada nas comissões</p></div>
       <div class="hdr-divider"></div>
@@ -829,7 +829,7 @@ select.fc{cursor:pointer}
   <!-- Header da seção de categoria (espelha o .hdr do sec-geral) -->
   <div class="cat-hdr">
     <div class="hdr-l">
-      <img src="logo_granda_branca.png" style="height:32px;object-fit:contain;flex-shrink:0">
+      <img src="logo_granda_branca.png" onclick="irParaHome()" title="Ir para a Home" style="height:32px;object-fit:contain;flex-shrink:0;cursor:pointer">
       <div class="hdr-divider"></div>
       <div><h2 id="cat-hdr-name">Comercial</h2><p id="cat-hdr-desc" style="font-size:.67rem;color:#9ca3af;margin-top:1px;font-weight:400"></p></div>
     </div>
@@ -4395,6 +4395,9 @@ function setSection(sec){
     return;
   }
   currentSection=sec;
+  // Lembra a última seção visitada (2026-08-04, pedido do usuário: dar F5 não pode voltar
+  // pra home, tem que continuar na mesma tela) — restaurado no boot do login, ver load().
+  try{localStorage.setItem('gcore_lastSection',sec);}catch(e){}
   const isGeral=sec==='geral';
 
 document.getElementById('sec-geral').style.display=isGeral?'':'none';
@@ -4520,6 +4523,9 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
 // de Emissão — continua admin-only, ver bloco abaixo e buildSidebarCats()). Vendas do Mês
 // é a aba padrão — antes vivia só dentro de Comercial > Vendas do Ano.
 function geralTab(tab,btn){
+  // Lembra a última sub-aba de Geral (Vendas/Emissão/Gráficos/Metas), mesmo motivo do
+  // gcore_lastSection em setSection() — restaurado no boot do login (ver load()).
+  try{localStorage.setItem('gcore_lastGeralTab',tab);}catch(e){}
   document.querySelectorAll('#sec-geral .dash-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
   const elVendas=document.getElementById('geral-tab-vendas');
@@ -4562,6 +4568,16 @@ function geralTab(tab,btn){
     if(p)p.textContent='Todos os pedidos emitidos, de qualquer categoria';
     renderAll();
   }
+}
+// Clique na logo (header) = ir pra Home (2026-08-04, pedido do usuário — F5 agora fica na
+// mesma tela, então precisa de um jeito explícito de voltar pra Geral/Gráficos de novo).
+function irParaHome(){
+  if(!_podeVerVisaoComercial()){toast('ACESSO NÃO PERMITIDO','terr');return;}
+  setSection('geral');
+  setTimeout(()=>{
+    const _btn=document.getElementById('gtab-graficos');
+    if(_btn)geralTab('graficos',_btn);
+  },50);
 }
 // Atalho pra ver o ano inteiro consolidado (mesmo efeito de escolher "Todos os meses"
 // no filtro, só que num botão visível — sem isso, o padrão ao abrir é sempre o mês atual).
@@ -8289,6 +8305,34 @@ function initAuth(tries){
             setSection('cat:RH');
           }else if(_isPlanejamentoOnly()){
             setSection('cat:PLANEJAMENTO');
+          }else if((()=>{
+            // Restaura a última tela visitada antes do F5 (2026-08-04, pedido do usuário:
+            // "ao dar f5 quero que o sistema... permaneça na mesma página que eu tava, não vá
+            // pra home"). setSection() já tem toda trava de permissão internamente — se o
+            // acesso mudou desde a última visita (ex.: perdeu a categoria), ela barra sozinha
+            // e currentSection não muda, então cai pro comportamento padrão de sempre.
+            // Sentinela '__none__' evita falso-positivo: currentSection começa em 'geral' por
+            // padrão (linha ~4335), então sem isso um savedSec='geral' bloqueado pareceria
+            // "restaurado com sucesso" mesmo tendo sido rejeitado.
+            const _savedSec=localStorage.getItem('gcore_lastSection');
+            if(!_savedSec)return false;
+            currentSection='__none__';
+            setSection(_savedSec);
+            const ok=currentSection===_savedSec;
+            if(!ok)currentSection='geral';
+            if(ok&&_savedSec==='geral'){
+              renderAll();
+              try{renderDashVendas();}catch(e){}
+              setTimeout(()=>{
+                const _tab=localStorage.getItem('gcore_lastGeralTab')||'graficos';
+                const _btn=document.getElementById('gtab-'+_tab);
+                if(_btn&&_btn.style.display!=='none')geralTab(_tab,_btn);
+                else{const _bg=document.getElementById('gtab-graficos');if(_bg)geralTab('graficos',_bg);}
+              },50);
+            }
+            return ok;
+          })()){
+            // já restaurado acima (geral ou categoria) — nada mais a fazer aqui.
           }else if(_podeVerVisaoComercial()){
             renderAll();
             try{renderDashVendas();}catch(e){}
@@ -20211,12 +20255,11 @@ function renderDashComissoes(){
     </div>`;
   }
 
-  // Recolher (2026-08-04, pedido do usuário): "Pendentes de Revisão" virou um <details>
-  // clicável, igual "Consolidados"/"Resumo por vendedor" logo abaixo — abre expandido por
-  // padrão (mesmo comportamento de antes), mas agora dá pra recolher clicando no título
-  // quando a lista tá grande e atrapalha rolar a tela até o resto.
+  // Recolhido por padrão (2026-08-04, ajustado no mesmo dia — pedido do usuário: "deixar
+  // sempre recolhido e eu abro se eu quiser"), igual "Consolidados"/"Resumo por vendedor".
+  // Só abre sozinho quando tem busca ativa, mesma lógica de mkConsolidado/mkPagoManual.
   function mkPendentes(items,emptyMsg){
-    return`<details open style="margin:10px 0 16px">
+    return`<details${busca?' open':''} style="margin:10px 0 16px">
       <summary style="cursor:pointer;font-size:.72rem;font-weight:700;color:#be185d;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">⏳ Pendentes de Revisão (${items.length})</summary>
       <div style="margin-top:6px">${mkTable(items,emptyMsg)}</div>
     </details>`;
@@ -21151,7 +21194,7 @@ async function gerarPDFComissao(vend,quinzena){
     doc.setFont('helvetica','normal');
     doc.setFontSize(7.5);
     doc.setTextColor(...GRAY);
-    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda · build 2026-07-03-1',14,pageH-9);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
     doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
     doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
   }
