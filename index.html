@@ -11186,9 +11186,18 @@ const _cpxNorm=s=>_normSemAcento(String(s||'')).trim().toUpperCase();
 // INDIVIDUALMENTE com a mesma linha (find() sem consumir), então nenhuma era sinalizada — bug
 // real encontrado 2026-08-04 (fornecedor "GNOVE INSTALAÇÃO/INSS" e "GRANDA/CONSTRUTIVA"
 // repetidos 2-3x no sistema, inflando o card "A Pagar" ~250-570 mil acima da planilha).
+// BUG REAL ENCONTRADO 2026-08-04: lançamento importado ANTES de hoje (importador antigo, era
+// PDF) ficou gravado no Firestore com origem:"pdf_import" — o filtro abaixo só pegava
+// "xlsx_import" (nome novo), então TODO lançamento antigo ficava fora do casamento pra sempre:
+// nunca era achado, nunca era atualizado, nunca era removido, e a cada reimportação o sistema
+// criava uma cópia NOVA (xlsx_import) por cima dele. Por isso "nada pra fazer" aparecia mesmo com
+// o card "A Pagar" muito acima da planilha — o algoritmo nem enxergava a maioria das contas
+// antigas. Os dois nomes são a mesma coisa (lançamento que veio de relatório importado, nunca
+// digitado à mão), então entram juntos no casamento; ao sincronizar, o registro antigo é
+// normalizado pra "xlsx_import" (ver plano.syncs mais abaixo), se autocorrigindo com o tempo.
 function _cpCalcularPlanoImportacao(){
   const usado=new Array(_cpImportRecords.length).fill(false);
-  const candidatos=(contasPagar||[]).filter(c=>c.origem==='xlsx_import');
+  const candidatos=(contasPagar||[]).filter(c=>c.origem==='xlsx_import'||c.origem==='pdf_import');
   const ordenado=[...candidatos].sort((a,b)=>String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')));
   const claims={}; // índice em _cpImportRecords -> lançamento existente que reivindicou aquela linha
   const remover=[];
@@ -11324,6 +11333,7 @@ async function confirmarImportacaoContasPagar(){
       existente.jurosOrigemPlanilha=r.jurosOrigemPlanilha;existente.multaOrigemPlanilha=r.multaOrigemPlanilha;
       existente.descontoOrigemPlanilha=r.descontoOrigemPlanilha;existente.valorAtualizadoOrigemPlanilha=r.valorAtualizadoOrigemPlanilha;
       existente.empresa=r.empresa;existente.centroCusto=r.centroCusto;
+      existente.origem='xlsx_import'; // normaliza registro antigo ("pdf_import") pro nome atual
       docsParaGravar.push(existente);
       sync++;
     });
