@@ -3388,6 +3388,12 @@ async function adicionarTarefaComercialAvulsa(pedidoId,tipo,responsavel,prazoTar
   if(!tipo||!tipo.trim()){toast('Dê um título pra tarefa','terr');return;}
   if(!p.tarefasComerciais)p.tarefasComerciais=[];
   const novaT=novaTarefaComercial(tipo.trim(),responsavel||'',prazoTarefa||'',usuarioLogado?.nomeExibicao||'',(descricao||'').trim());
+  // avulsa:true = tarefa lançada manualmente por alguém pelo formulário "+ Nova tarefa" (pra
+  // si mesmo ou pra outro colega) — não conta no Relatório de aproveitamento a menos que quem
+  // lançou seja administrador (ver _criadoPorAdmin() e _tfRelDadosMes(), 2026-08-04, pedido do
+  // usuário: tarefa que o próprio time cria pra se organizar não pode virar cobrança/avaliação
+  // de desempenho, só a que o admin manda entra nessa conta).
+  novaT.avulsa=true;
   p.tarefasComerciais.push(novaT);
   await savePedidoFS(p);
   renderTarefasComerciais();
@@ -3405,6 +3411,7 @@ async function adicionarTarefaGeralAvulsa(tipo,responsavel,prazoTarefa,descricao
   if(!tipo||!tipo.trim()){toast('Dê um título pra tarefa','terr');return;}
   if(!cfg.tarefasGerais)cfg.tarefasGerais=[];
   const novaT=novaTarefaComercial(tipo.trim(),responsavel||'',prazoTarefa||'',usuarioLogado?.nomeExibicao||'',(descricao||'').trim());
+  novaT.avulsa=true; // ver comentário em adicionarTarefaComercialAvulsa()
   cfg.tarefasGerais.push(novaT);
   if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
@@ -20840,6 +20847,20 @@ function _addTarefaAvulsaFromForm(){
 // mesmo que já vencida, fica numa contagem separada até ser concluída, pra não travar o
 // número final de ninguém num veredito ainda não definitivo. Tarefa sem prazoTarefa nunca
 // entra aqui (não tem o que medir).
+// Verifica se quem lançou a tarefa (t.criadoPor, um nome de exibição) é administrador —
+// usado pra decidir se uma tarefa avulsa entra no Relatório de aproveitamento (ver
+// _tfRelDadosMes() logo abaixo). Resolve o nome pro e-mail (mesmo mapa usado pra notificação
+// por e-mail, _getEmailPorNome()) e confere contra a lista de admins do sistema OU a categoria
+// cadastrada em cfg.usuarioCats — cobre tanto o Guilherme (hardcoded) quanto qualquer outro
+// usuário que um dia seja promovido a ADMINISTRADOR pelo cadastro normal.
+function _criadoPorAdmin(criadoPor){
+  if(!criadoPor)return false;
+  const email=_getEmailPorNome(criadoPor);
+  if(!email)return false;
+  if(_ADMINS.includes(email))return true;
+  if(cfg.usuarioCats&&cfg.usuarioCats[email]==='ADMINISTRADOR')return true;
+  return false;
+}
 let _tfRelMes={y:new Date().getFullYear(),m:new Date().getMonth()+1};
 function tfRelMov(dir){
   _tfRelMes.m+=dir;
@@ -20852,6 +20873,13 @@ function _tfRelDadosMes(){
   const meuNome=usuarioLogado?.nomeExibicao||'';
   const {y,m}=_tfRelMes;
   let todas=[...getTarefasComerciaisPendentes(),...getTarefasComerciaisConcluidas()];
+  // Tarefa avulsa (lançada pelo formulário "+ Nova tarefa", ver adicionarTarefaComercialAvulsa/
+  // adicionarTarefaGeralAvulsa) só entra no Relatório se quem lançou for administrador — tarefa
+  // que o próprio usuário criou pra si mesmo ou pra um colega se organizar é só isso, organização
+  // pessoal, não pode virar cobrança/avaliação de desempenho (pedido do usuário, 2026-08-04).
+  // Tarefa automática (gerada na emissão do pedido, sem avulsa:true) nunca é afetada por essa
+  // regra — continua contando normalmente, é o núcleo do que esse relatório sempre mediu.
+  todas=todas.filter(t=>!t.avulsa||_criadoPorAdmin(t.criadoPor));
   if(!isAdm)todas=todas.filter(t=>t.responsavel===meuNome);
   const doMes=todas.filter(t=>{
     if(!t.prazoTarefa)return false;
