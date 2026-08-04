@@ -986,6 +986,7 @@ select.fc{cursor:pointer}
             <span style="font-size:.75rem;color:#94a3b8;font-weight:600">até</span>
             <input id="fc-fil-data-fim" type="date" style="width:150px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit" onchange="fcAplicarFiltros()">
             <button onclick="abrirImportarContasPagarXLSX()" class="dash-btn-conf" style="white-space:nowrap">📥 Importar Excel (Pagar)</button>
+            <button onclick="abrirDuplicadosContasPagar()" class="dash-btn-conf" style="white-space:nowrap;background:#dc2626">🔎 Duplicados (Pagar)</button>
             <button onclick="abrirNovaContaPagar()" class="dash-btn-conf" style="white-space:nowrap;background:#1d4ed8">+ Nova despesa</button>
             <button onclick="abrirNovaContaReceber()" class="dash-btn-conf" style="white-space:nowrap;background:#16a34a">+ Nova receita</button>
             <button onclick="gerarPDFFinanceiro()" class="dash-btn-conf" style="white-space:nowrap">📄 PDF (Receber)</button>
@@ -2563,6 +2564,27 @@ select.fc{cursor:pointer}
   <div id="cp-import-body" style="overflow-y:auto;flex:1"></div>
   <div id="cp-import-reconciliacao-body"></div>
   <button id="cp-import-confirmar-btn" onclick="confirmarImportacaoContasPagar()" style="display:none;margin-top:12px;width:100%;background:#16a34a;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">Confirmar importação</button>
+</div>
+</div>
+
+<!-- CONTA A PAGAR — DUPLICADOS INTERNOS (2026-08-04): a Reconciliação Total (acima) só compara
+     "existe ou não na planilha nova" — se o MESMO lançamento foi importado 2-3 vezes em ciclos
+     passados (antes da normalização de fornecedor/parcela existir), cada cópia bate
+     individualmente com a mesma linha da planilha e nenhuma é sinalizada. Esta tela resolve o
+     caso complementar: agrupa o que já está no sistema por fornecedor+vencimento+parcela e
+     mostra grupos com mais de 1 lançamento, pra excluir os excedentes. -->
+<div class="mov" id="mo-cp-duplicados" onclick="cio(event,'mo-cp-duplicados')">
+<div class="mvmod" style="width:980px;max-width:98vw;max-height:92vh;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <h3 style="margin-bottom:0">🔎 Duplicados Internos — Contas a Pagar</h3>
+    <button onclick="closeM('mo-cp-duplicados')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div style="font-size:.78rem;color:var(--ink4);margin-bottom:12px;padding:8px 12px;background:#f8fafc;border-radius:8px;border:1px solid var(--border)">
+    Agrupa lançamentos em aberto (não pagos) que têm o MESMO fornecedor + vencimento + parcela — normalmente sobra de uma planilha importada mais de uma vez em ciclos diferentes. Confira a Despesa/Valor de cada linha antes de excluir: se forem realmente duas contas diferentes que coincidiram nesses 3 campos, desmarque antes de confirmar. Sempre passa pela Lixeira antes de excluir de vez.
+  </div>
+  <div id="cp-dup-status" style="font-size:.8rem;color:var(--ink3);margin-bottom:10px"></div>
+  <div id="cp-dup-body" style="overflow-y:auto;flex:1"></div>
+  <button id="cp-dup-confirmar-btn" onclick="_cpConfirmarDuplicados()" style="display:none;margin-top:12px;width:100%;background:#dc2626;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">Excluir selecionados</button>
 </div>
 </div>
 
@@ -11354,6 +11376,104 @@ async function _cpConfirmarReconciliacao(){
   }
   toast(`${n} lançamento(s) excluído(s) na reconciliação`,'tok');
   renderReconciliacaoContasPagar();
+}
+// ── Duplicados Internos (2026-08-04) ──────────────────────────────────────────────────────
+// Complementa a Reconciliação Total acima: aquela só pega o que SUMIU da planilha; esta pega o
+// que está REPETIDO dentro do próprio sistema (fornecedor+vencimento+parcela iguais, cada cópia
+// batendo individualmente com a mesma linha da planilha, então nenhuma sozinha "sumia"). Caso
+// real encontrado 2026-08-04: "GNOVE INSTALAÇÃO / INSS" e "GRANDA / CONSTRUTIVA" apareciam 2-3x
+// cada no sistema com os mesmos 3 campos, inflando o card "A Pagar" muito acima da planilha.
+let _cpGruposDuplicados=[];
+function _cpDetectarGruposDuplicados(){
+  const grupos={};
+  (contasPagar||[]).filter(c=>c.status!=='pago').forEach(c=>{
+    const chave=_cpxNorm(c.fornecedor)+'|'+(c.vencimento||'')+'|'+_cpxNorm(c.parcela||'');
+    (grupos[chave]=grupos[chave]||[]).push(c);
+  });
+  return Object.values(grupos).filter(g=>g.length>1).sort((a,b)=>b.length-a.length);
+}
+function abrirDuplicadosContasPagar(){
+  if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem excluir contas a pagar','terr');return;}
+  openM('mo-cp-duplicados');
+  renderDuplicadosContasPagar();
+}
+function renderDuplicadosContasPagar(){
+  const statusEl=document.getElementById('cp-dup-status');
+  const bodyEl=document.getElementById('cp-dup-body');
+  const btnEl=document.getElementById('cp-dup-confirmar-btn');
+  const grupos=_cpDetectarGruposDuplicados();
+  // Dentro de cada grupo, marca pra excluir todo mundo MENOS o lançamento criado por último
+  // (presume-se que a cópia mais recente é a mais confiável) — 100% editável pelo usuário antes
+  // de confirmar, então um palpite errado aqui não causa dano.
+  _cpGruposDuplicados=grupos.map(g=>{
+    const ordenado=[...g].sort((a,b)=>String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')));
+    return ordenado.map((c,i)=>({...c,_manter:i===0,_selecionadoExcluir:i>0}));
+  });
+  if(!_cpGruposDuplicados.length){
+    statusEl.innerHTML='';
+    bodyEl.innerHTML=`<div style="font-size:.85rem;color:#16a34a;padding:10px 12px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0">✅ Nenhum lançamento em aberto duplicado (mesmo fornecedor+vencimento+parcela) encontrado.</div>`;
+    btnEl.style.display='none';
+    return;
+  }
+  const totalItens=_cpGruposDuplicados.reduce((s,g)=>s+g.length,0);
+  const totalExcluir=_cpGruposDuplicados.reduce((s,g)=>s+g.filter(c=>c._selecionadoExcluir).length,0);
+  const somaExcluir=_cpGruposDuplicados.reduce((s,g)=>s+g.filter(c=>c._selecionadoExcluir).reduce((s2,c)=>s2+(c.valor||0),0),0);
+  statusEl.innerHTML=`⚠️ <strong>${_cpGruposDuplicados.length} grupo(s)</strong> duplicado(s), ${totalItens} lançamento(s) no total.`;
+  bodyEl.innerHTML=_cpGruposDuplicados.map((g,gi)=>`
+    <div style="margin-bottom:14px;border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <div style="background:#fef2f2;padding:6px 10px;font-size:.75rem;font-weight:700;color:#991b1b">${g[0].fornecedor||'—'} — vencimento ${fmtD(g[0].vencimento)} — parcela ${g[0].parcela||'—'} (${g.length} cópias)</div>
+      <table class="dash-table" style="margin:0">
+        <thead><tr><th></th><th>Empresa</th><th>Despesa</th><th>NF</th><th>Valor</th><th>Status</th><th>Criado em</th></tr></thead>
+        <tbody>${g.map((c,ci)=>`
+        <tr style="${c._manter?'background:#f0fdf4':''}">
+          <td><input type="checkbox" ${c._selecionadoExcluir?'checked':''} onchange="_cpGruposDuplicados[${gi}][${ci}]._selecionadoExcluir=this.checked;_cpAtualizaBtnDuplicados()"></td>
+          <td>${(EMPRESAS_CONTAS_PAGAR.find(e=>e.id===c.empresa)||{}).label||c.empresa||'—'}</td>
+          <td title="${(c.despesaDesc||'').replace(/"/g,'&quot;')}" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.despesaDesc||'—'}${c._manter?' <span style="color:#16a34a;font-weight:700">(mantido)</span>':''}</td>
+          <td>${c.nf||'—'}</td>
+          <td style="font-weight:700;white-space:nowrap">${fmtR(c.valor)}</td>
+          <td>${({pendente:'⏳ Pendente'})[c.status]||c.status}</td>
+          <td style="white-space:nowrap;font-size:.72rem">${c.criadoEm?new Date(c.criadoEm).toLocaleString('pt-BR'):'—'}</td>
+        </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`).join('');
+  btnEl.style.display='';
+  btnEl.textContent=`Excluir ${totalExcluir} lançamento(s) selecionado(s) (${fmtR(somaExcluir)})`;
+}
+function _cpAtualizaBtnDuplicados(){
+  const btnEl=document.getElementById('cp-dup-confirmar-btn');if(!btnEl)return;
+  const totalExcluir=_cpGruposDuplicados.reduce((s,g)=>s+g.filter(c=>c._selecionadoExcluir).length,0);
+  const somaExcluir=_cpGruposDuplicados.reduce((s,g)=>s+g.filter(c=>c._selecionadoExcluir).reduce((s2,c)=>s2+(c.valor||0),0),0);
+  btnEl.textContent=`Excluir ${totalExcluir} lançamento(s) selecionado(s) (${fmtR(somaExcluir)})`;
+  btnEl.disabled=!totalExcluir;
+  btnEl.style.opacity=totalExcluir?'1':'.5';
+}
+async function _cpConfirmarDuplicados(){
+  if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem excluir contas a pagar','terr');return;}
+  const selecionados=[];
+  _cpGruposDuplicados.forEach(g=>g.forEach(c=>{if(c._selecionadoExcluir)selecionados.push(c);}));
+  if(!selecionados.length){toast('Nenhum lançamento selecionado para excluir','terr');return;}
+  if(!confirm(`Excluir ${selecionados.length} lançamento(s) duplicado(s) (soma ${fmtR(selecionados.reduce((s,c)=>s+(c.valor||0),0))})? Essa ação não pode ser desfeita (mas fica na Lixeira).`))return;
+  const senha=await pedirSenhaAdmin('Confirmar exclusão de duplicados','Digite a senha de administrador para excluir estes lançamentos de Contas a Pagar:');
+  if(!senha){toast('Exclusão cancelada','tinf');return;}
+  if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
+  const btn=document.getElementById('cp-dup-confirmar-btn');
+  if(btn){btn.disabled=true;btn.textContent='Excluindo...';}
+  let n=0;
+  for(const c of selecionados){
+    try{
+      await _lixeiraAdicionar('contaPagar',c,{resumo:`Duplicado — ${c.fornecedor||'Lançamento'} — R$ ${(c.valor||0).toFixed?c.valor.toFixed(2):c.valor}`});
+      await deleteContaPagarFS(c.id);
+      n++;
+    }catch(e){console.error(e);}
+  }
+  toast(`${n} lançamento(s) duplicado(s) excluído(s)`,'tok');
+  renderDuplicadosContasPagar();
+  const elFin=document.getElementById('sec-cat-FINANCEIRO');
+  if(elFin&&elFin.style.display!=='none'){
+    if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();
+    else if(typeof renderContasPagar==='function')renderContasPagar();
+  }
 }
 function _cpAtualizaContadorImport(){
   const btnEl=document.getElementById('cp-import-confirmar-btn');if(!btnEl)return;
