@@ -9713,11 +9713,18 @@ function renderDashCards(){
   const vends=getVendedores().filter(v=>!isClabonde(v));
   const totalVendas=getVendasMes(y,m,null);
   const totalMeta=vends.reduce((s,v)=>s+getMetaMes(y,m,v),0);
-  let totalRecebido=0;
-  pedidos.filter(isComercialPedido).forEach(p=>{getParcelas(p).forEach(parc=>{
-    const qi=getComissaoQuinzena(p,parc.dataStr);
-    if(qi&&qi.y===y&&qi.m===m){const conf=getPagConf(parc.confKey);if(conf&&conf.status==='confirmado')totalRecebido+=parc.valor;}
-  });});
+  // BUG GRAVE corrigido 2026-08-04 (usuário confirmou ~R$1 milhão em Contas a Receber e
+  // esse card mostrou só R$31 mil): este cálculo era MANUAL e direto em cima de
+  // pedidos.filter(isComercialPedido), então (1) ignorava por completo qualquer venda que só
+  // existe na planilha sem pedido emitido no Firestore (XLSX_VENDAS "pré-julho", que é boa
+  // parte do histórico) e os saldos devedores lançados em recebimento parcial, e (2) usava
+  // parc.dataStr (a data ORIGINAL prevista) pra achar a quinzena em vez de conf.novaData (a
+  // data real/atual, depois de qualquer adiamento) — então parcela adiada contava na
+  // quinzena errada. A tabela "Recebimentos & Comissões" logo abaixo já usava a fonte certa
+  // (getComissaoItems), então os dois números divergiam. Agora os dois vêm exatamente da
+  // mesma função — nunca mais podem discordar entre si.
+  const {itemsI:_rcI,itemsII:_rcII}=getComissaoItems(y,m);
+  const totalRecebido=[..._rcI,..._rcII].filter(i=>i.status==='confirmado').reduce((s,i)=>s+i.valor,0);
   c.innerHTML=[
     {label:'Vendas do Mês',val:fmtR(totalVendas),sub:totalMeta>0?`Meta: ${fmtR(totalMeta)}`:'Meta não definida',color:'#2563eb'},
     {label:'Recebido Confirmado',val:fmtR(totalRecebido),sub:'Parcelas confirmadas no mês',color:'#16a34a'},
