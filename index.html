@@ -804,7 +804,7 @@ select.fc{cursor:pointer}
             <button onclick="auditarLiquidosMes()" style="margin-left:auto;background:#fefce8;border:1.5px solid #fde68a;color:#92400e;border-radius:8px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">🔍 Auditar Bruto/Líquido do Mês</button>
           </div>
           <div id="dash-audit-liq"></div>
-          <div id="dash-cards" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px"></div>
+          <div id="dash-cards" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px"></div>
           <div class="dash-card">
             <div class="dash-sec-title">🎯 Metas do Mês</div>
             <div style="overflow-x:auto">
@@ -9033,30 +9033,31 @@ function getComissaoQuinzena(p, dataStr){
   }
   return getQuinzenaInfo(dataStr);
 }
-// Quinzena usada pra achar em QUAL fechamento de comissão (dia 5 ou dia 15) um item entra
-// (2026-08-04, regra confirmada pelo usuário: "as comissões são pagas todo dia 05 e todo
-// dia 15 com base naquilo que foi RECEBIDO entre esses períodos"). Depois de CONFIRMADO em
-// Contas a Receber, a data que manda é a data REAL em que o dinheiro entrou
-// (conf.dataRecebimentoReal, pedida no modal de Confirmar Recebimento) — nunca mais a data
-// PREVISTA (dataAtiva/parc.dataStr), que só é um chute de quando o cliente ia pagar. Sem
-// isso, confirmar hoje uma leva de recebimentos atrasados jogava cada um pra quinzena da
-// data ORIGINALMENTE prevista (muitas vezes em mês já fechado há tempos), em vez de entrar
-// no fechamento de agora (dia 5 ou dia 15 mais próximo a partir de quando o dinheiro
-// realmente entrou) — exatamente o sintoma relatado ("confirmei quase R$1 milhão e não caiu
-// no fechamento de dia 05/08"). Pedido AINDA pendente (sem confirmação/sem data real) continua
-// usando a data prevista como estimativa — é só o que dá pra mostrar em Pagamentos Futuros.
+// Quinzena usada pra achar em QUAL fechamento de comissão (dia 5 ou dia 15) um item entra.
+// Regra reafirmada 2026-08-04 pelo usuário, com exemplo prático (uma leva grande de
+// recebimentos atrasados confirmada num dia só): "os valores que foram CONFIRMADOS
+// PAGAMENTO entre os dias 15/07 a 04/08 vão pra quinzena 1 de agosto (paga dia 05/08); se eu
+// der baixa CONFIRMANDO pagamentos entre 05/08 a 14/08, vai pra quinzena 2 (paga dia 15/08)".
+// Ou seja: o que importa é o dia em que o Financeiro CLICOU EM CONFIRMAR (conf.confirmedAt,
+// timestamp automático), não a data prevista de vencimento nem a "data real de recebimento"
+// digitada no modal (dataRecebimentoReal) — essa segunda ainda é ótima pra auditoria/
+// histórico (por isso continua sendo pedida e salva), mas NÃO decide mais a quinzena de
+// comissão. Primeira tentativa (usar dataRecebimentoReal) jogava a comissão pro mês do
+// vencimento ORIGINAL digitado — que muitas vezes já tinha fechado há tempos — em vez do
+// fechamento de HOJE, que é quando o Financeiro realmente processou o lote. Pedido AINDA
+// pendente (sem confirmação) continua usando a data prevista como estimativa — é só o que
+// dá pra mostrar em Pagamentos Futuros, já que ainda não existe confirmedAt nenhum.
 // Regra "day<=7 mesmo mês" de pedido importadoPlanilha (getComissaoQuinzena acima) NUNCA se
 // aplica aqui: aquela regra existe só porque a data da PLANILHA já É a própria marcação de
-// quinzena, sem ligação com calendário real — mas dataRecebimentoReal é sempre uma data de
-// calendário genuína (digitada num <input type=date>), então sempre usa a janela universal
-// (getQuinzenaInfo), mesmo pra pedido vindo da planilha.
+// quinzena, sem ligação com calendário real — confirmedAt é sempre um timestamp real do
+// sistema, então sempre usa a janela universal (getQuinzenaInfo), mesmo pra pedido vindo da
+// planilha.
 function _quinzenaParaComissao(p,dataAtiva,conf){
-  if(conf&&conf.status==='confirmado'&&conf.dataRecebimentoReal){
-    const iso=String(conf.dataRecebimentoReal);
-    const partes=iso.split('-');
-    if(partes.length===3){
-      const[y,m,d]=partes;
-      return getQuinzenaInfo(`${d}/${m}/${y}`);
+  if(conf&&conf.status==='confirmado'&&conf.confirmedAt){
+    const d=new Date(conf.confirmedAt);
+    if(!isNaN(d)){
+      const dd=String(d.getDate()).padStart(2,'0'),mm=String(d.getMonth()+1).padStart(2,'0'),yy=d.getFullYear();
+      return getQuinzenaInfo(`${dd}/${mm}/${yy}`);
     }
   }
   return getComissaoQuinzena(p,dataAtiva);
@@ -9783,10 +9784,18 @@ function renderDashCards(){
   // (getComissaoItems), então os dois números divergiam. Agora os dois vêm exatamente da
   // mesma função — nunca mais podem discordar entre si.
   const {itemsI:_rcI,itemsII:_rcII}=getComissaoItems(y,m);
-  const totalRecebido=[..._rcI,..._rcII].filter(i=>i.status==='confirmado').reduce((s,i)=>s+i.valor,0);
+  // Card único "Recebido Confirmado" virou DOIS cards, um por quinzena (2026-08-04, a pedido
+  // do usuário: "quero visualizar... o card QUINZENA 1 e QUINZENA 2... separando o que foi
+  // recebido dentro de cada quinzena"). Cada um soma só os itens daquela quinzena
+  // (itemsI=fecha dia 5, itemsII=fecha dia 15) que já estão confirmados — mesma fonte
+  // (getComissaoItems) que a tabela "Recebimentos & Comissões" logo abaixo usa pra desenhar
+  // as seções "1ª Quinzena"/"2ª Quinzena", então os três nunca podem discordar entre si.
+  const totalQ1=_rcI.filter(i=>i.status==='confirmado').reduce((s,i)=>s+i.valor,0);
+  const totalQ2=_rcII.filter(i=>i.status==='confirmado').reduce((s,i)=>s+i.valor,0);
   c.innerHTML=[
     {label:'Vendas do Mês',val:fmtR(totalVendas),sub:totalMeta>0?`Meta: ${fmtR(totalMeta)}`:'Meta não definida',color:'#2563eb'},
-    {label:'Recebido Confirmado',val:fmtR(totalRecebido),sub:'Parcelas confirmadas no mês',color:'#16a34a'},
+    {label:'Quinzena 1 · paga dia 5',val:fmtR(totalQ1),sub:'Líquido confirmado até dia 4',color:'#16a34a'},
+    {label:'Quinzena 2 · paga dia 15',val:fmtR(totalQ2),sub:'Líquido confirmado de dia 5 a 14',color:'#0d9488'},
     {label:'Meta da Empresa',val:fmtR(totalMeta),sub:totalMeta>0&&totalVendas>=totalMeta?'✅ Meta atingida':'Acompanhe os vendedores',color:'#e91e63'},
   ].map(card=>`<div style="background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e5e7eb">
     <div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:6px">${card.label}</div>
