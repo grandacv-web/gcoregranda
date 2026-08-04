@@ -12195,11 +12195,17 @@ function _plPedidosElegiveis(){
 // o snapshot gravado no pedido se ele existir, e só cai na config atual (_lpEtapasCfgAtual)
 // pra pedidos antigos que ainda não tinham esse campo (_migrarLpEtapasSnapshot congela esses
 // na config de hoje assim que o sistema carrega, pra nunca mudar de novo depois).
-const LP_PCT_PADRAO={medicao:15,projeto:15,compras:31,corteGalv:31,art:38,adesivo:38,producao:88,embalagem:100};
+const LP_PCT_PADRAO={medicao:15,projeto:15,compras:31,corteGalv:31,art:38,adesivo:38,producao:88};
 // Embalagem sempre com 2 dias ÚTEIS fixos antes da Saída do Frete (2026-08-04, a pedido do
 // usuário) — ver uso em _lpCalcEtapas/_lpSimular. producao:88 em LP_PCT_PADRAO acima vira só
 // um fallback (usado apenas se a etapa Embalagem for removida em Configurações).
 const LP_DIAS_EMBALAGEM=2;
+// Embalagem NÃO é mais editável em Configurações (2026-08-04, a pedido do usuário: "o prazo
+// final de embalagem tem que ser finalizar em 100% dos dias internos") — pct:100 fixo direto
+// na definição, igual "Saída do Frete" já fazia, em vez de vir de LP_PCT_PADRAO.embalagem (que
+// um admin podia mudar em Configurações → Etapas de Pedidos, quebrando a garantia). 100% dos
+// dias internos = a própria coletaIso (fim do "prazo interno", ver _lpCalcEtapas), por
+// definição — sempre a última etapa interna antes do frete sair.
 const LP_ETAPAS_PADRAO=[
   {key:'medicao',label:'Medição Técnica',cond:'medicao',editavel:true},
   {key:'projeto',label:'Projeto Executivo',editavel:true},
@@ -12208,7 +12214,7 @@ const LP_ETAPAS_PADRAO=[
   {key:'art',label:'Recebimento ART',cond:'art',editavel:true},
   {key:'adesivo',label:'Recebimento Adesivo',editavel:true},
   {key:'producao',label:'Produção',editavel:true},
-  {key:'embalagem',label:'Embalagem',editavel:true},
+  {key:'embalagem',label:'Embalagem',pct:100},
   {key:'saidaFrete',label:'Saída do Frete',pct:100,cond:'frete'},
   {key:'chegadaFrete',label:'Início da Instalação',special:'chegada',cond:'instalacao'},
   {key:'finalInstalacao',label:'Final da Instalação',special:'final',cond:'instalacao'}
@@ -12667,25 +12673,116 @@ const LP_ETAPAS_COM_BAIXA=['art',...Object.values(LP_SETORES).reduce((arr,s)=>ar
 // próximo dia com espaço, já que lá é só hipótese, sem compromisso real ainda).
 function _lpCapProducaoDia(){return cfg.lpCapProducaoDia||75000;}
 function _lpCapInstalacoesDia(){return cfg.lpCapInstalacoesDia||3;}
-// Mapa {isoDoDia:{soma,itens:[{p,liquido}]}} de quanto de líquido está previsto FINALIZAR em
-// Produção em cada dia, somando todos os pedidos elegíveis (mesma fonte da Lista de Pedidos).
-// Pedido que já deu baixa em Produção (p.lpBaixas.producao) não ocupa mais espaço — já foi
-// entregue, não compete por capacidade de verdade nenhuma.
+// ===================== DISTRIBUIÇÃO DIÁRIA DE PRODUÇÃO (2026-08-04) =====================
+// Antes, o líquido INTEIRO de um pedido caía de uma vez só no dia-limite de Produção (só
+// avisava "Requer Atenção" se estourasse ali) — a pedido do usuário, agora a produção é
+// distribuída em fatias de até R$75.000 (_lpCapProducaoDia) por dia ÚTIL, terminando
+// exatamente no prazo-limite de Produção (etapa "producao", já calculada por _lpCalcEtapas):
+//   1) Começa alocando no PRÓPRIO dia-limite e vai voltando dia útil a dia útil (sempre que um
+//      dia já está cheio de OUTRO pedido, pula pro anterior; se está com espaço parcial, usa só
+//      o que sobra e continua recuando com o restante) — isso já produz sozinho o exemplo dado
+//      pelo usuário: pedido de R$225 mil com prazo em 07/08, sem nada mais ocupando a agenda,
+//      vira 75 mil em 05/08, 75 mil em 06/08 e 75 mil em 07/08 (as 2 datas antes do prazo).
+//   2) Recuo NUNCA passa de 50% da janela de dias internos (emissão → prazo-limite de Produção,
+//      contados em dias ÚTEIS) — "sempre 50% mais até a data limite, nunca 50% menos". Bateu
+//      nesse piso e ainda sobra valor pra alocar: aloca mesmo assim no dia-piso, estourando a
+//      capacidade se precisar (nunca deixa produção "sem dia nenhum") e marca
+//      `estourouJanela:true` — vira o aviso "⚠️ Requer Atenção" na Lista de Pedidos real.
+// Isso vale IGUAL pros pedidos reais (Kanban/Calendário/Lista, ver _lpMapaProducaoPorDia) e pro
+// 🧮 Simulador (que roda a mesma função numa CÓPIA do mapa real, sem gravar nada de verdade).
+//
+// _lpAlocarProducao é a função "pura" (recebe valor+janela+mapa direto, sem depender de objeto
+// de pedido) — usada tanto por _lpAlocarProducaoPedido (pedido real) quanto pelo Simulador
+// (pedido hipotético, que não existe em `pedidos` ainda).
+function _lpAlocarProducao(liquido,inicioIso,deadlineIso,mapa,refItem){
+  const cap=_lpCapProducaoDia();
+  const resultado={chunks:[],estourouJanela:false,deadlineIso,floorIso:deadlineIso};
+  let restante=liquido||0;
+  if(restante<=0.005||!deadlineIso||!inicioIso)return resultado;
+  const totalDiasUteis=Math.max(1,_lpDiasUteisJanela(inicioIso,deadlineIso));
+  const metade=Math.max(1,Math.ceil(totalDiasUteis/2));
+  const floorIso=_lpSubtraiDiasUteis(deadlineIso,metade-1);
+  resultado.floorIso=floorIso;
+  let iso=deadlineIso,guard=0;
+  while(restante>0.005&&guard<400){
+    guard++;
+    const ehFloor=iso<=floorIso;
+    const ocupado=(mapa[iso]&&mapa[iso].soma)||0;
+    const livre=cap-ocupado;
+    let usar=0,estouroDoDia=false;
+    if(ehFloor){
+      usar=restante; // chegou no piso de 50% — aloca o que sobrar mesmo, não dá mais pra recuar
+      estouroDoDia=livre<restante-0.005;
+      if(estouroDoDia)resultado.estourouJanela=true;
+    }else if(livre>0.005){
+      usar=Math.min(livre,restante);
+    }
+    if(usar>0.005){
+      resultado.chunks.push({iso,valor:usar,estouro:estouroDoDia});
+      if(!mapa[iso])mapa[iso]={soma:0,itens:[]};
+      mapa[iso].soma+=usar;
+      if(refItem)mapa[iso].itens.push(Object.assign({},refItem,{liquido:usar}));
+      restante-=usar;
+    }
+    if(restante<=0.005||ehFloor)break;
+    iso=_lpSubtraiDiasUteis(iso,1);
+  }
+  // Guarda de segurança (não deveria acontecer, o ramo ehFloor acima já força alocar tudo) —
+  // nunca deixa valor "sumir" sem virar dia nenhum.
+  if(restante>0.005){
+    resultado.chunks.push({iso:deadlineIso,valor:restante,estouro:true});
+    if(!mapa[deadlineIso])mapa[deadlineIso]={soma:0,itens:[]};
+    mapa[deadlineIso].soma+=restante;
+    if(refItem)mapa[deadlineIso].itens.push(Object.assign({},refItem,{liquido:restante}));
+    resultado.estourouJanela=true;
+  }
+  resultado.chunks.sort((a,b)=>a.iso.localeCompare(b.iso)); // ordem cronológica pra exibição
+  return resultado;
+}
+// Resultado da alocação de CADA pedido real, por id — recalculado do zero a cada chamada de
+// _lpMapaProducaoPorDia() (ver função abaixo). Usado por _lpRequerAtencao (pra saber se este
+// pedido especificamente estourou a janela de 50%) e por _lpEventosFiltrados (pra desenhar um
+// card por dia no Kanban/Calendário em vez de um card só no dia-limite).
+let _lpProdAlocCache={};
+function _lpAlocarProducaoPedido(p,calc,mapa){
+  const etProd=calc.etapas.find(e=>e.key==='producao');
+  if(!etProd||!etProd.aplicavel)return null;
+  const liquido=(pedidoToVendaRow(p).lq)||0;
+  const r=_lpAlocarProducao(liquido,calc.emissaoIso,etProd.iso,mapa,{p});
+  _lpProdAlocCache[p.id]=r;
+  return r;
+}
+// Mapa {isoDoDia:{soma,itens:[{p,liquido}]}} de quanto de líquido está previsto ocupar a
+// Produção em cada dia, já distribuído dia a dia (ver _lpAlocarProducao acima) — não é mais "1
+// pedido = 1 dia", é "1 pedido = N fatias de até R$75.000 terminando no prazo-limite dele".
+// Processa os pedidos do prazo mais PRÓXIMO pro mais distante — quem tem menos fôlego reserva
+// espaço primeiro; quem tem mais prazo é quem sobra pra trás quando dois pedidos disputam o
+// mesmo dia. Pedido que já deu baixa em Produção (p.lpBaixas.producao) não ocupa mais espaço —
+// já foi entregue, não compete por capacidade de verdade nenhuma.
 function _lpMapaProducaoPorDia(){
   const mapa={};
-  _lpPedidosElegiveis().forEach(p=>{
-    if(p.lpBaixas&&p.lpBaixas.producao)return;
-    const calc=_lpCalcEtapas(p);
-    if(!calc.ok)return;
-    const etProd=calc.etapas.find(e=>e.key==='producao');
-    if(!etProd||!etProd.aplicavel)return;
-    const liquido=(pedidoToVendaRow(p).lq)||0;
-    if(!mapa[etProd.iso])mapa[etProd.iso]={soma:0,itens:[]};
-    mapa[etProd.iso].soma+=liquido;
-    mapa[etProd.iso].itens.push({p,liquido});
+  _lpProdAlocCache={};
+  const elegiveis=_lpPedidosElegiveis()
+    .filter(p=>!(p.lpBaixas&&p.lpBaixas.producao))
+    .map(p=>({p,calc:_lpCalcEtapas(p)}))
+    .filter(x=>x.calc.ok);
+  elegiveis.sort((a,b)=>{
+    const eA=a.calc.etapas.find(e=>e.key==='producao'),eB=b.calc.etapas.find(e=>e.key==='producao');
+    return String(eA&&eA.iso||'').localeCompare(String(eB&&eB.iso||''));
   });
+  elegiveis.forEach(({p,calc})=>_lpAlocarProducaoPedido(p,calc,mapa));
   return mapa;
 }
+// Quais dias ÚTEIS têm produção alocada ACIMA da capacidade máxima (só acontece quando um
+// pedido bateu no piso de 50% da janela e precisou estourar, ver _lpAlocarProducao) — devolve
+// [[iso,{soma,itens}],...] ordenado por data; usado no aviso "🏭 N dia(s) com Produção acima da
+// capacidade" na Lista de Pedidos (2026-08-04, a pedido do usuário: "quero visibilidade de
+// quantos dias tem a produção com mais de 75 mil"). `.length` do retorno = a contagem.
+function _lpDiasProducaoEstourados(mapaProducao){
+  const cap=_lpCapProducaoDia();
+  return Object.entries(mapaProducao||{}).filter(([,d])=>d.soma>cap+0.005).sort((a,b)=>a[0].localeCompare(b[0]));
+}
+// ===================== FIM DISTRIBUIÇÃO DIÁRIA DE PRODUÇÃO =====================
 // Mesma ideia, mas contando QUANTAS instalações (não valor) começam no mesmo dia
 // (chegadaIso = etapa "Início da Instalação"). Instalação não tem baixa própria na Lista de
 // Pedidos ainda (só Projetos/Compras/Produção têm, ver LP_SETORES), então conta todo pedido
@@ -12781,14 +12878,18 @@ function _lpProximoDiaLivreInstalacao(isoDesejado,mapa){
 // Diagnóstico "requer atenção" de UM pedido já lançado de verdade — usado na Lista de Pedidos
 // real. Retorna null se está tudo dentro da capacidade, ou um array de motivos (texto) se
 // algum dos dois limites estourou no dia calculado desse pedido.
+// mapaProducao é mantido no parâmetro só por compatibilidade de assinatura com quem já chama
+// esta função (sempre logo depois de _lpMapaProducaoPorDia()) — o diagnóstico de Produção em si
+// agora vem de _lpProdAlocCache (ver _lpAlocarProducaoPedido), que sabe exatamente se ESTE
+// pedido precisou estourar o piso de 50% da janela, em vez de só olhar a soma de um dia isolado
+// (2026-08-04, a pedido do usuário — produção agora é distribuída em fatias diárias).
 function _lpRequerAtencao(x,mapaProducao,mapaInstalacao){
   if(!x.ok)return null;
   const motivos=[];
-  const cap=_lpCapProducaoDia();
-  const etProd=x.calc.etapas.find(e=>e.key==='producao');
-  if(etProd&&etProd.aplicavel){
-    const dia=mapaProducao[etProd.iso];
-    if(dia&&dia.soma>cap+0.005)motivos.push(`Produção: ${fmtR(dia.soma)} previstos pra ${fmtD(etProd.iso)} (${dia.itens.length} pedido${dia.itens.length!==1?'s':''}), limite é ${fmtR(cap)}`);
+  const alocProd=_lpProdAlocCache[x.p.id];
+  if(alocProd&&alocProd.estourouJanela){
+    const distrib=alocProd.chunks.map(c=>`${fmtD(c.iso)}: ${fmtR(c.valor)}${c.estouro?' ⚠️':''}`).join(', ');
+    motivos.push(`Produção: não coube recuando até 50% dos dias internos (limite ${fmtR(_lpCapProducaoDia())}/dia útil, prazo ${fmtD(alocProd.deadlineIso)}) — precisou estourar a capacidade perto do prazo. Distribuição: ${distrib}`);
   }
   if(x.calc.temInst){
     const capI=_lpCapInstalacoesDia();
@@ -13643,13 +13744,28 @@ function _lpEventosFiltrados(){
   const filDataAte=document.getElementById('lp-fil-data-ate')?.value||'';
   const filtraPorDataDeEtapa=filDataCampo==='etapas'&&(filDataDe||filDataAte);
   const hojeIso=new Date().toISOString().slice(0,10);
+  // Garante que _lpProdAlocCache está atualizado antes de expandir os eventos de Produção logo
+  // abaixo — não depende de quem chamou esta função já ter rodado _lpMapaProducaoPorDia() antes
+  // (2026-08-04, ver bloco DISTRIBUIÇÃO DIÁRIA DE PRODUÇÃO).
+  _lpMapaProducaoPorDia();
   const infos=_lpListaFiltrada().filter(x=>x.ok);
   const eventos=[];
   infos.forEach(x=>{
-    x.calc.etapas.filter(e=>e.aplicavel
-      &&(!filEtapa||e.key===filEtapa)
-      &&(!filtraPorDataDeEtapa||_lpDataNoIntervalo(e.iso,filDataDe,filDataAte))
-    ).forEach(e=>{
+    x.calc.etapas.filter(e=>e.aplicavel&&(!filEtapa||e.key===filEtapa)).forEach(e=>{
+      if(e.key==='producao'){
+        // Produção agora vira 1 EVENTO POR DIA alocado (ver _lpAlocarProducaoPedido), não mais
+        // um evento só no dia-limite — status/atraso continuam vindo da baixa/prazo REAIS
+        // (únicos, por pedido inteiro); só a data e o valor exibidos mudam por fatia do dia.
+        const alocProd=_lpProdAlocCache[x.p.id];
+        const statusEtapa=_lpStatusEtapa(x.p,e,hojeIso);
+        const chunks=(alocProd&&alocProd.chunks.length)?alocProd.chunks:[{iso:e.iso,valor:null,estouro:false}];
+        chunks.forEach(c=>{
+          if(filtraPorDataDeEtapa&&!_lpDataNoIntervalo(c.iso,filDataDe,filDataAte))return;
+          eventos.push({p:x.p,etapa:Object.assign({},e,{iso:c.iso}),atrasadoPedido:x.atrasado,concluidoPedido:x.concluido,statusEtapa,valorChunk:c.valor,estouroChunk:!!c.estouro});
+        });
+        return;
+      }
+      if(filtraPorDataDeEtapa&&!_lpDataNoIntervalo(e.iso,filDataDe,filDataAte))return;
       eventos.push({p:x.p,etapa:e,atrasadoPedido:x.atrasado,concluidoPedido:x.concluido,statusEtapa:_lpStatusEtapa(x.p,e,hojeIso)});
     });
   });
@@ -13762,6 +13878,15 @@ function renderListaPedidos(){
   // recalcular tudo de novo no clique — sempre reflete o mesmo filtro que está na tela no
   // momento (busca/etapa/status/data), igual o número da badge.
   _lpPedidosAtencaoCache=infos.filter(x=>x._atencao);
+  // Aviso "🏭 N dia(s) com Produção acima da capacidade" (2026-08-04, a pedido do usuário: "quero
+  // essa visibilidade") — conta quantos dias ÚTEIS ficaram com mais líquido alocado do que a
+  // capacidade máxima (_lpCapProducaoDia, hoje R$75.000). Só acontece quando algum pedido bateu
+  // no piso de 50% de recuo e precisou estourar perto do prazo dele (ver _lpAlocarProducao) —
+  // diferente da badge "Requer Atenção" (que é por PEDIDO), este é o retrato por DIA da agenda
+  // inteira de Produção.
+  const _lpCapProd=_lpCapProducaoDia();
+  const _lpDiasEstouradosDetalhe=Object.entries(_lpMapaProd).filter(([,d])=>d.soma>_lpCapProd+0.005).sort((a,b)=>a[0].localeCompare(b[0]));
+  const capacidadeHtml=_lpDiasEstouradosDetalhe.length?`<div style="padding:10px 14px;background:#fef3c7;border:1px solid #fde68a;border-radius:10px;margin-bottom:14px;font-size:.78rem;color:#92400e;font-weight:600" title="${_lpDiasEstouradosDetalhe.map(([iso,d])=>fmtD(iso)+': '+fmtR(d.soma)).join(' | ').replace(/"/g,'&quot;')}">🏭 <strong>${_lpDiasEstouradosDetalhe.length} dia${_lpDiasEstouradosDetalhe.length!==1?'s':''} útil${_lpDiasEstouradosDetalhe.length!==1?'eis':''}</strong> com Produção alocada ACIMA da capacidade máxima de ${fmtR(_lpCapProd)}/dia — pedido(s) que bateram no limite de recuo (50% da janela interna) e precisaram estourar perto do prazo. Passe o mouse aqui pra ver as datas.</div>`:'';
   const geralHtml=`<div style="display:flex;align-items:center;gap:14px;padding:12px 16px;background:#f8fafc;border:1px solid var(--border);border-radius:12px;margin-bottom:14px;flex-wrap:wrap">
     <div style="font-size:.8rem;font-weight:800;color:var(--ink);white-space:nowrap">🎯 Assertividade Geral</div>
     ${assertGeral.pct===null?`<div style="font-size:.76rem;color:var(--ink4)">Sem baixas registradas ainda em Projetos/Compras/Produção.</div>`
@@ -13771,10 +13896,10 @@ function renderListaPedidos(){
     ${qtdAtencao>0?`<div onclick="_lpAbrirModalAtencao()" title="Clique pra ver quais pedidos" style="cursor:pointer;margin-left:auto;background:#fee2e2;color:#b91c1c;font-weight:800;font-size:.78rem;padding:6px 12px;border-radius:20px;white-space:nowrap">⚠️ ${qtdAtencao} pedido${qtdAtencao!==1?'s':''} requer${qtdAtencao!==1?'em':''} atenção — limite de Produção ou Instalação estourado</div>`:''}
   </div>`;
   if(!infos.length){
-    body.innerHTML=geralHtml+'<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum pedido encontrado.</div>';
+    body.innerHTML=geralHtml+capacidadeHtml+'<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum pedido encontrado.</div>';
     return;
   }
-  body.innerHTML=geralHtml+`<div style="overflow-x:auto"><table class="tbl-acoes-fixa" style="width:100%;border-collapse:collapse;font-size:.82rem">
+  body.innerHTML=geralHtml+capacidadeHtml+`<div style="overflow-x:auto"><table class="tbl-acoes-fixa" style="width:100%;border-collapse:collapse;font-size:.82rem">
     <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
       <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">JOB</th>
       <th style="padding:8px 10px">Vendedor</th><th style="padding:8px 10px">Emissão</th><th style="padding:8px 10px">Prazo Final</th>
@@ -13922,14 +14047,24 @@ function _lpSimular(){
   const etProd=etapas.find(e=>e.key==='producao');
   if(etProd){
     const cap=_lpCapProducaoDia();
-    const diaAtual=mapaProd[etProd.iso]||{soma:0,itens:[]};
-    const cabe=(diaAtual.soma+liquido)<=cap;
-    if(cabe){
-      prodHtml=`<div style="padding:10px 14px;background:#dcfce7;border-radius:8px;color:#15803d;font-weight:700">✅ Produção (${fmtD(etProd.iso)}): já tem ${fmtR(diaAtual.soma)} comprometido de ${fmtR(cap)} — cabe esse pedido de ${fmtR(liquido)} (sobra ${fmtR(Math.max(0,cap-diaAtual.soma-liquido))}).</div>`;
-    } else {
-      const sugestao=_lpProximoDiaLivreProducao(etProd.iso,liquido,mapaProd);
-      prodHtml=`<div style="padding:10px 14px;background:#fee2e2;border-radius:8px;color:#b91c1c;font-weight:700">❌ Produção (${fmtD(etProd.iso)}): já tem ${fmtR(diaAtual.soma)} comprometido de ${fmtR(cap)} — não cabe mais ${fmtR(liquido)} nesse dia. Próximo dia com espaço: <u>${fmtD(sugestao)}</u> (empurraria o prazo final em ${_lpDiferencaDias(etProd.iso,sugestao)} dia(s) útil(eis)).</div>`;
-    }
+    // Simula a MESMA distribuição diária usada nos pedidos reais (ver _lpAlocarProducao), numa
+    // CÓPIA leve do mapa real (só a soma por dia — nunca mexe no mapa de verdade nem grava nada,
+    // "no simulador é só consulta", 2026-08-04, a pedido do usuário). Roda a partir de HOJE até
+    // o prazo-limite de Produção deste pedido hipotético, com o mesmo piso de 50% de recuo.
+    const mapaProdSim={};
+    Object.keys(mapaProd).forEach(k=>{mapaProdSim[k]={soma:mapaProd[k].soma,itens:[]};});
+    const alocSim=_lpAlocarProducao(liquido,hojeIso,etProd.iso,mapaProdSim);
+    const linhasDia=alocSim.chunks.map(c=>`<tr style="border-bottom:1px solid var(--border-lt)">
+        <td style="padding:5px 8px">${fmtD(c.iso)}</td>
+        <td style="padding:5px 8px;text-align:right;font-weight:700;color:${c.estouro?'#b91c1c':'var(--ink)'}">${fmtR(c.valor)}${c.estouro?' ⚠️':''}</td>
+      </tr>`).join('');
+    prodHtml=`<div style="padding:10px 14px;background:${alocSim.estourouJanela?'#fee2e2':'#dcfce7'};border-radius:8px">
+      <div style="font-weight:700;color:${alocSim.estourouJanela?'#b91c1c':'#15803d'}">${alocSim.estourouJanela?'⚠️ Produção vai precisar estourar a capacidade':'✅ Produção cabe dentro da capacidade normal'} — limite ${fmtR(cap)}/dia útil, distribuído recuando a partir do prazo-limite (${fmtD(etProd.iso)}), nunca mais de 50% da janela interna pra trás (recuo máximo até ${fmtD(alocSim.floorIso)}).</div>
+      <table style="width:100%;border-collapse:collapse;font-size:.8rem;margin-top:8px">
+        <thead><tr style="text-align:left"><th style="padding:5px 8px">Dia</th><th style="padding:5px 8px;text-align:right">Líquido alocado</th></tr></thead>
+        <tbody>${linhasDia}</tbody>
+      </table>
+    </div>`;
   }
   if(temInst){
     const capI=_lpCapInstalacoesDia();
@@ -14024,16 +14159,22 @@ function renderListaPedidosKanban(){
       </div>
       <div style="padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px">
         ${itens.length?itens.map(it=>{
-          const{p,etapa,statusEtapa,atrasadoPedido,concluidoPedido}=it;
-          const corCard=statusEtapa==='atrasado'?'#fee2e2':'#fff';
-          const borda=statusEtapa==='atrasado'?'#dc2626':'var(--border-lt)';
+          const{p,etapa,statusEtapa,atrasadoPedido,concluidoPedido,valorChunk,estouroChunk}=it;
+          const corCard=estouroChunk?'#fef3c7':statusEtapa==='atrasado'?'#fee2e2':'#fff';
+          const borda=estouroChunk?'#f59e0b':statusEtapa==='atrasado'?'#dc2626':'var(--border-lt)';
           const statusTxt=statusEtapa==='ok'?'✅ Baixa dada':statusEtapa==='atrasado'?'🔴 Atrasado':'🔜 Programada';
           const statusCor=statusEtapa==='ok'?'var(--success)':statusEtapa==='atrasado'?'#dc2626':'#0284c7';
+          // valorChunk só existe na etapa Produção (2026-08-04) — mostra a FATIA de líquido
+          // alocada pra este dia específico (ver _lpAlocarProducaoPedido), não o valor total do
+          // pedido; estouroChunk avisa que esse dia passou da capacidade de R$75.000 porque bateu
+          // no piso de 50% de recuo e não tinha mais pra onde empurrar.
+          const chunkHtml=valorChunk!=null?`<div style="font-size:.68rem;font-weight:800;margin-top:2px;color:${estouroChunk?'#b45309':'var(--ink2)'}">💰 ${fmtR(valorChunk)} neste dia${estouroChunk?' ⚠️ acima da capacidade':''}</div>`:'';
           return `<div onclick="lpAbrirDetalhe('${p.id}')" style="background:${corCard};border:1px solid ${borda};border-radius:10px;padding:10px;cursor:pointer">
             <div style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'}</div>
             <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(p.cliente||'').replace(/"/g,'&quot;')}">${p.cliente||'—'}</div>
             ${p.job?`<div style="font-size:.66rem;color:var(--ink4);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(p.job).replace(/"/g,'&quot;')}">JOB: ${p.job}</div>`:''}
-            <div style="font-size:.68rem;color:var(--ink4)">Prazo desta etapa: <strong>${fmtD(etapa.iso)}</strong></div>
+            <div style="font-size:.68rem;color:var(--ink4)">${valorChunk!=null?'Data desta fatia':'Prazo desta etapa'}: <strong>${fmtD(etapa.iso)}</strong></div>
+            ${chunkHtml}
             <div style="font-size:.68rem;font-weight:700;margin-top:2px;color:${statusCor}">${statusTxt}</div>
             ${atrasadoPedido?'<div style="font-size:.66rem;color:#dc2626;font-weight:700;margin-top:2px">🔴 Pedido atrasado (entrega final)</div>':concluidoPedido?'<div style="font-size:.66rem;color:var(--success);font-weight:700;margin-top:2px">✅ Pedido concluído</div>':''}
           </div>`;
@@ -14093,9 +14234,9 @@ function renderListaPedidosCalendario(){
       <div style="font-size:.7rem;font-weight:700;color:${nomeFeriado?'#b45309':(ehHoje?'var(--brand-d)':'var(--ink4)')}">${d}</div>
       ${nomeFeriado?`<div style="font-size:.6rem;color:#b45309;font-weight:700;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎌 ${nomeFeriado}</div>`:''}
       <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
-        ${eventos.slice(0,3).map(ev=>`<div onclick="event.stopPropagation();lpAbrirDetalhe('${ev.p.id}')" title="${ev.etapa.label} — OS ${ev.p.os||''} — ${(ev.p.cliente||'').replace(/"/g,'&quot;')}${ev.p.job?' — JOB '+String(ev.p.job).replace(/"/g,'&quot;'):''}" style="cursor:pointer;font-size:.6rem;background:${_lpCorEtapa(ev.etapa.key)}22;color:${_lpCorEtapa(ev.etapa.key)};border-radius:4px;padding:1px 4px;margin-bottom:1px">
+        ${eventos.slice(0,3).map(ev=>`<div onclick="event.stopPropagation();lpAbrirDetalhe('${ev.p.id}')" title="${ev.etapa.label} — OS ${ev.p.os||''} — ${(ev.p.cliente||'').replace(/"/g,'&quot;')}${ev.p.job?' — JOB '+String(ev.p.job).replace(/"/g,'&quot;'):''}${ev.valorChunk!=null?' — '+fmtR(ev.valorChunk)+' neste dia'+(ev.estouroChunk?' (acima da capacidade)':''):''}" style="cursor:pointer;font-size:.6rem;background:${ev.estouroChunk?'#fef3c7':_lpCorEtapa(ev.etapa.key)+'22'};color:${ev.estouroChunk?'#b45309':_lpCorEtapa(ev.etapa.key)};border-radius:4px;padding:1px 4px;margin-bottom:1px">
           <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${ev.p.os||''} · ${ev.p.cliente||'—'}</div>
-          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.85">${ev.p.job?'JOB '+ev.p.job+' · ':''}${ev.etapa.label}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.85">${ev.p.job?'JOB '+ev.p.job+' · ':''}${ev.etapa.label}${ev.valorChunk!=null?' · '+fmtR(ev.valorChunk):''}</div>
         </div>`).join('')}
         ${eventos.length>3?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${eventos.length-3} outro(s) — ver dia</div>`:''}
       </div>
@@ -14126,6 +14267,7 @@ function lpAbrirDia(iso){
       <div style="flex:1;min-width:0">
         <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${ev.p.os||'—'} · ${ev.p.cliente||'—'}</div>
         <div style="font-size:.7rem;color:var(--ink4)">${ev.p.job||''}${ev.p.responsavel?' · '+ev.p.responsavel:''}</div>
+        ${ev.valorChunk!=null?`<div style="font-size:.7rem;font-weight:700;color:${ev.estouroChunk?'#b45309':'var(--ink3)'}">💰 ${fmtR(ev.valorChunk)} neste dia${ev.estouroChunk?' ⚠️ acima da capacidade':''}</div>`:''}
       </div>
       ${ev.atrasadoPedido?'<span style="font-size:.66rem;color:#dc2626;font-weight:700;flex-shrink:0">🔴 Atrasado</span>':ev.concluidoPedido?'<span style="font-size:.9rem;flex-shrink:0">✅</span>':''}
     </div>`;
