@@ -9215,19 +9215,29 @@ function getPagamentosExtras(){return cfg.pagamentosExtras||[];}
 // pagamento (pagDia/pagM/pagY, escolhida explicitamente no lançamento) bate com a quinzena
 // pedida — pra um bônus já pago/confirmado numa quinzena não voltar a aparecer "pra pagar"
 // no relatório/PDF de outra quinzena do mesmo mês de referência (bug relatado 2026-07-16).
+// BUG corrigido 2026-08-04 (usuário lançou bônus pro Julio em Configurações e ele não somava
+// no Resumo por Vendedor): quando `dia` é informado (uso normal em mkExtras/mkVendResume,
+// que mostram CADA quinzena separada), a condição antiga exigia o mês de REFERÊNCIA (p.y/p.m,
+// escolhido só como "isso é relativo a qual mês") bater com o mês da tela ATÉ ALÉM de exigir
+// a quinzena de pagamento (pagY/pagM/pagDia) bater — ou seja, um bônus referente a Julho mas
+// programado pra pagar em Agosto nunca aparecia em lugar nenhum, nem em Julho (pagM não
+// batia) nem em Agosto (p.m referência não batia). Agora, quando `dia` é passado, filtra só
+// pela quinzena de pagamento de verdade (pagY/pagM/pagDia) — é isso que decide em qual tela
+// o valor deve aparecer, não o mês de referência (que é só um rótulo informativo).
 function getPagamentosExtrasMes(y,m,dia){
-  return getPagamentosExtras().filter(p=>p.y===y&&p.m===m&&(dia==null||(p.pagDia===dia&&p.pagM===m&&p.pagY===y)));
+  if(dia!=null)return getPagamentosExtras().filter(p=>p.pagY===y&&p.pagM===m&&p.pagDia===dia);
+  return getPagamentosExtras().filter(p=>p.y===y&&p.m===m);
 }
 
-function getPagamentosExtrasVendedor(y,m,vendedor){
-  return getPagamentosExtrasMes(y,m).filter(p=>vendedorMatch(p.vendedor,vendedor));
+function getPagamentosExtrasVendedor(y,m,vendedor,dia){
+  return getPagamentosExtrasMes(y,m,dia).filter(p=>vendedorMatch(p.vendedor,vendedor));
 }
 
 // Extras do próprio Clabonde: usa isClabonde() em vez de vendedorMatch() porque
 // "GUILHERME CLABONDE" (valor salvo) não bate no fallback de 1ª-palavra de vendedorMatch
 // contra "CLABONDE".
-function getPagamentosExtrasClabonde(y,m){
-  return getPagamentosExtrasMes(y,m).filter(p=>isClabonde((p.vendedor||'').toUpperCase()));
+function getPagamentosExtrasClabonde(y,m,dia){
+  return getPagamentosExtrasMes(y,m,dia).filter(p=>isClabonde((p.vendedor||'').toUpperCase()));
 }
 
 async function addPagamentoExtra(){
@@ -20193,7 +20203,12 @@ function renderDashComissoes(){
       <div style="margin-top:6px">${mkTable(items,emptyMsg)}</div>
     </details>`;
   }
-  function mkVendResume(items,incluirExtras){
+  // `dia` (5 ou 15, 2026-08-04): antes era um booleano `incluirExtras` só usado na chamada da
+  // 1ª Quinzena — a 2ª Quinzena nunca somava NENHUM extra na coluna de comissão, mesmo pra
+  // bônus agendados pra pagar dia 15 (bug relatado pelo usuário: lançou bônus pro Julio e não
+  // apareceu na soma). Agora sempre soma, escopado pela quinzena de pagamento certa.
+  function mkVendResume(items,dia){
+    const incluirExtras=!!dia;
     if(!items.length)return'';
     const vends=[...new Set(items.map(i=>(i.nomeVend||'').trim()).filter(Boolean))].filter(v=>!v.toUpperCase().includes('KELLEN')).sort();
     const rows=vends.map(v=>{
@@ -20201,7 +20216,7 @@ function renderDashComissoes(){
       const val=its.reduce((s,i)=>s+i.valor,0);
       const com=its.reduce((s,i)=>s+(i.valor*i.pct/100),0);
       const pend=its.filter(i=>i.status!=='confirmado').reduce((s,i)=>s+(i.valor*i.pct/100),0);
-      const extras=incluirExtras?getPagamentosExtrasVendedor(y,m,v):[];
+      const extras=incluirExtras?getPagamentosExtrasVendedor(y,m,v,dia):[];
       const extraPend=extras.filter(p=>p.status!=='confirmado').reduce((s,p)=>s+p.valor,0);
       const extraPago=extras.filter(p=>p.status==='confirmado').reduce((s,p)=>s+p.valor,0);
       const extraTip=extras.length?extras.map(p=>p.motivo+' ('+fmtR(p.valor)+')').join(' · '):'';
@@ -20217,7 +20232,7 @@ function renderDashComissoes(){
     const valClab=items.reduce((s,i)=>s+i.valor,0);
     const comClab=items.reduce((s,i)=>s+(i.valor*i.pctClab/100),0);
     const pendClab=items.filter(i=>i.status!=='confirmado').reduce((s,i)=>s+(i.valor*i.pctClab/100),0);
-    const extrasClab=incluirExtras?getPagamentosExtrasClabonde(y,m):[];
+    const extrasClab=incluirExtras?getPagamentosExtrasClabonde(y,m,dia):[];
     const extraPendClab=extrasClab.filter(p=>p.status!=='confirmado').reduce((s,p)=>s+p.valor,0);
     const extraPagoClab=extrasClab.filter(p=>p.status==='confirmado').reduce((s,p)=>s+p.valor,0);
     const extraTipClab=extrasClab.length?extrasClab.map(p=>p.motivo+' ('+fmtR(p.valor)+')').join(' · '):'';
@@ -20305,13 +20320,13 @@ function renderDashComissoes(){
        <div style="font-size:.85rem;font-weight:700;color:#fff;letter-spacing:.3px">1ª Quinzena · pagar dia 5</div>
      </div>
      ${mkExtras(5)}
-     ${mkCards(itemsIView)}${mkVendResume(itemsIView,true)}
+     ${mkCards(itemsIView)}${mkVendResume(itemsIView,5)}
      ${mkPendentes(pendI,'Nenhum lançamento pendente nesta quinzena.')}${mkConsolidado(consI)}
      <div style="background:#4338ca;padding:10px 16px;border-radius:8px;margin:24px 0 16px">
        <div style="font-size:.85rem;font-weight:700;color:#fff;letter-spacing:.3px">2ª Quinzena · pagar dia 15</div>
      </div>
      ${mkExtras(15)}
-     ${mkCards(itemsIIView)}${mkVendResume(itemsIIView)}
+     ${mkCards(itemsIIView)}${mkVendResume(itemsIIView,15)}
      ${mkPendentes(pendII,'Nenhum lançamento pendente nesta quinzena.')}${mkConsolidado(consII)}`;
 }
 
