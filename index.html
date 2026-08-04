@@ -9608,6 +9608,13 @@ function _invalidateDashCache(){_vrmCache=null;_comItemsCache=null;}
 // aparecendo 2x em Recebimentos & Comissões (pedido no Firestore + a mesma linha da
 // planilha reaparecendo como "sem pedido correspondente" por não bater a string exata).
 function _osTokens(p){return String(p||'').split(/[\/,]/).map(s=>s.trim()).filter(Boolean);}
+// Ver comentário completo dentro de getComissaoItemsAll() — lista de OS cuja comissão o
+// usuário confirmou (várias vezes, com print) já ter sido paga em Julho quinzena 2, mesmo o
+// sistema calculando uma quinzena de Agosto pra elas. Global (não só dentro de uma função)
+// pra ficar num único lugar e valer em QUALQUER consumidor de getComissaoItemsAll (tela, PDF,
+// Pagamentos Futuros, Todos os Confirmados) — nunca mais separado feito antes, quando só
+// existia dentro de renderDashComissoes() e continuava vazando pro PDF.
+const _EXCLUIR_COMISSAO_0804=new Set(['109','120','169','171','180','184','188','218']);
 function getVendaRowsMerged(){
   if(_vrmCache)return _vrmCache;
   const importadosFS=pedidos.filter(p=>p.importadoPlanilha);
@@ -10123,8 +10130,19 @@ function getComissaoItemsAll(){
     const item={confKey:sd.confKey,label:`💰 Saldo · ${sd.origemLabel||'Parcela'}`,dataStr:sd.dataStr,valor:valorAjustado,valorBruto:valorBrutoAjustado,liqEstimado:false,status:conf?conf.status:'pendente',historicoAutoConfirmado:false,confirmedAt:conf?conf.confirmedAt:null,motivoAtraso:conf?conf.motivoAtraso||'':'',motivoAtrasoEm:conf?conf.motivoAtrasoEm||'':'',pct,pctClab,dataAtiva,nomeVend:sd.nomeVend||'—',cliente:sd.cliente||'—',categoria:sd.categoria||'',mesPedido:sd.mesPedido||'—',emY:sd.emY,emM:sd.emM,pedidoOs:sd.pedidoOs||'—',job:sd.job||'',cidade:'',_pid:sd.pedidoId||'',pedidoPdfUrl:'',ocUrl:'',qy:qi.y,qm:qi.m,qhalf:qi.half};
     all.push(item);
   });
-  _comItemsCache=all;
-  return all;
+  // Exclusão pontual (2026-08-04) — OS 109,120,169,171,180,184,188,218: usuário confirmou
+  // várias vezes, com print, que a comissão desses pedidos específicos JÁ FOI PAGA em Julho
+  // quinzena 2, mesmo o cálculo automático de quinzena (baseado na data ativa da parcela,
+  // que foi adiada/reeditada em algum momento) jogando pra Agosto. Filtrado AQUI na fonte
+  // (getComissaoItemsAll), não só na tela — bug corrigido 2026-08-04 no mesmo dia: a exclusão
+  // só existia dentro de renderDashComissoes(), então sumia da tela mas continuava saindo no
+  // PDF de comissão (gerarPDFComissao) e em qualquer outro lugar que leia
+  // getComissaoItems/getComissaoItemsAll direto. Agora nunca mais aparece em lugar nenhum.
+  // Pode apagar esta lista mais tarde se o número de OS acabar sendo reaproveitado por outra
+  // venda (não costuma acontecer, ver _osJaEmUso()).
+  const _all=all.filter(i=>!_osTokens(i.pedidoOs).some(tok=>_EXCLUIR_COMISSAO_0804.has(tok)));
+  _comItemsCache=_all;
+  return _all;
 }
 
 function getComissaoItems(y,m){
@@ -20296,21 +20314,13 @@ function renderDashComissoes(){
   const itemsIIView=itemsII.filter(i=>i.status==='confirmado'||!i.motivoAtraso);
   // Quinzena JÁ FECHADA (dia 5/15 já passou) some INTEIRA desta tela — de Pendentes de
   // Revisão E de Consolidados, tanto faz o status. Só sobra aqui a quinzena ainda ABERTA.
-  //
-  // Exclusão pontual adicional (2026-08-04) — OS 109,120,169,171,180,184,188,218: o usuário
-  // confirmou 3x, com print, que a comissão desses pedidos específicos JÁ FOI PAGA em Julho
-  // quinzena 2, mesmo a data ativa de algumas parcelas (adiada/reeditada pra 16/07 etc.) tendo
-  // empurrado o cálculo automático pra quinzena de Agosto (_quinzenaJaFechou não pega, porque
-  // pro sistema essa quinzena ainda não fechou). Em vez de tentar adivinhar mais uma regra de
-  // data que cubra esse caso, exclusão direta e definitiva por OS — mais seguro que continuar
-  // arriscando outra regra automática errada. Pode apagar esta lista mais tarde se o número de
-  // OS acabar sendo reaproveitado por outra venda (não costuma acontecer, ver _osJaEmUso()).
-  const _EXCLUIR_COMISSAO_0804=new Set(['109','120','169','171','180','184','188','218']);
-  const _naoExcluidoManual=i=>!_osTokens(i.pedidoOs).some(tok=>_EXCLUIR_COMISSAO_0804.has(tok));
-  const consI=itemsIView.filter(i=>i.status==='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf)&&_naoExcluidoManual(i));
-  const pendI=itemsIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf)&&_naoExcluidoManual(i));
-  const consII=itemsIIView.filter(i=>i.status==='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf)&&_naoExcluidoManual(i));
-  const pendII=itemsIIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf)&&_naoExcluidoManual(i));
+  // (A exclusão pontual das OS 109/120/169/171/180/184/188/218 agora é feita na FONTE, dentro
+  // de getComissaoItemsAll() — ver comentário lá — então já chega filtrada aqui em itemsI/II,
+  // sem precisar repetir o filtro nesta tela.)
+  const consI=itemsIView.filter(i=>i.status==='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
+  const pendI=itemsIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
+  const consII=itemsIIView.filter(i=>i.status==='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
+  const pendII=itemsIIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
 
   el.innerHTML=
     filterBar+
