@@ -9555,6 +9555,16 @@ async function reativarVendaCancelada(os){
 // mostrar dado desatualizado, só evita recalcular a mesma coisa repetidas vezes.
 let _vrmCache=null,_comItemsCache=null;
 function _invalidateDashCache(){_vrmCache=null;_comItemsCache=null;}
+// Algumas linhas da planilha (e às vezes o próprio pedido) têm OS composto (ex.:
+// "18711 / 18712", 2 números fechados como uma venda só) — comparar a string inteira
+// nunca bate se só um dos números aparecer do outro lado, duplicando a venda. Quebra o
+// campo OS em tokens (separador "/" ou ",") pra comparar número a número. Hoisted pra
+// função global 2026-08-04 — antes só existia dentro de getVendaRowsMerged (corrigido
+// 2026-08-03 pro caso "BOB'S SALVADOR BA" duplicado), e getComissaoItemsAll tinha a MESMA
+// comparação ingênua de string inteira, sem essa tokenização — causou os pedidos 235/236
+// aparecendo 2x em Recebimentos & Comissões (pedido no Firestore + a mesma linha da
+// planilha reaparecendo como "sem pedido correspondente" por não bater a string exata).
+function _osTokens(p){return String(p||'').split(/[\/,]/).map(s=>s.trim()).filter(Boolean);}
 function getVendaRowsMerged(){
   if(_vrmCache)return _vrmCache;
   const importadosFS=pedidos.filter(p=>p.importadoPlanilha);
@@ -9567,12 +9577,8 @@ function getVendaRowsMerged(){
   // editar o pedido de maio e preencher o número/PDF).
   const importadosFSOs=new Set();
   importadosFS.forEach(p=>{importadosFSOs.add(String(p.os));if(p.origPlanilhaOs)importadosFSOs.add(String(p.origPlanilhaOs));});
-  // Algumas linhas da planilha têm OS composto (ex.: "18711 / 18712", 2 números fechados como
-  // uma venda só) — comparar a string inteira contra importadosFSOs nunca batia se só um dos
-  // dois números virasse pedido no Firestore, duplicando a venda (ex.: BOB'S SALVADOR BA
-  // aparecendo 2x com o mesmo valor, relatado pelo usuário 2026-08-03). Agora quebra o campo
-  // OS em tokens (separador "/" ou ",") e basta UM token bater pra excluir a linha da planilha.
-  const _osTokens=p=>String(p||'').split(/[\/,]/).map(s=>s.trim()).filter(Boolean);
+  // OS composto (ex.: "18711 / 18712") tratado via _osTokens() global — basta UM token
+  // bater pra excluir a linha da planilha (ver comentário na definição de _osTokens acima).
   const xlsxSemFS=(typeof XLSX_VENDAS!=='undefined'?XLSX_VENDAS:[]).filter(r=>!_osTokens(r.p).some(tok=>importadosFSOs.has(tok)));
   _vrmCache=[
     ...xlsxSemFS,
@@ -9955,9 +9961,18 @@ function _empurraQuinzenaMesFechado(qi,emY,emM){
 function getComissaoItemsAll(){
   if(_comItemsCache)return _comItemsCache;
   const all=[];
+  // BUG corrigido 2026-08-04 (pedidos 235/236 aparecendo 2x em Recebimentos & Comissões):
+  // osFirestore só guardava a string EXATA de p.os. Pedido com OS composto (ex.: "235 / 236",
+  // 2 números fechados como uma venda só) nunca batia contra a linha da planilha (XLSX_VENDAS)
+  // pro token individual "235" ou "236", então a mesma venda entrava DUAS vezes: uma via
+  // pedido real (getParcelas abaixo) e outra via "sem pedido correspondente" (bloco XLSX mais
+  // abaixo). Mesma classe de bug já corrigida em getVendaRowsMerged 2026-08-03 — agora usa o
+  // mesmo _osTokens() global, e também registra origPlanilhaOs (OS provisório da planilha
+  // antes de editar o pedido), senão a linha antiga da planilha reaparece igual.
   const osFirestore=new Set();
   pedidos.filter(isComercialPedido).forEach(p=>{
-    if(p.os!=null)osFirestore.add(String(p.os));
+    if(p.os!=null)_osTokens(p.os).forEach(tok=>osFirestore.add(tok));
+    if(p.origPlanilhaOs)_osTokens(p.origPlanilhaOs).forEach(tok=>osFirestore.add(tok));
     // Venda cancelada (cfg.vendasCanceladas, marcada por Nº de OS) não entra aqui —
     // sem isso, cancelar só tirava a venda da Lista de Vendas/Gráficos (que usam
     // getVendaRowsMerged, já filtrado), mas ela continuava sendo contada em Pagamentos
@@ -9969,8 +9984,10 @@ function getComissaoItemsAll(){
       const dataAtiva=conf&&conf.novaData?conf.novaData:parc.dataStr;
       let qi=_quinzenaParaComissao(p,dataAtiva,conf);
       if(!qi)return;
-      // Usa XLSX_VENDAS como fonte autoritativa do mês de venda (evita mês errado salvo no Firestore)
-      const xlsxRef=(XLSX_VENDAS||[]).find(x=>String(x.p)===String(p.os));
+      // Usa XLSX_VENDAS como fonte autoritativa do mês de venda (evita mês errado salvo no
+      // Firestore) — busca por TOKEN (não string inteira) pra achar a linha certa mesmo
+      // quando um dos dois lados tem OS composto ("235 / 236").
+      const xlsxRef=(XLSX_VENDAS||[]).find(x=>_osTokens(x.p).some(tok=>_osTokens(p.os).includes(tok)));
       // Mês da venda pra cálculo de comissão (bateu-meta): mesma prioridade já usada em
       // pedidoToVendaRow() pra Lista de Vendas/Metas — override manual (campo "Mês da Venda"
       // em Editar Valores) sempre vence, senão a planilha reconciliada, senão a emissão.
@@ -10010,9 +10027,10 @@ function getComissaoItemsAll(){
       all.push(item);
     });
   });
-  // Entradas do XLSX_VENDAS sem pedido correspondente no Firestore
+  // Entradas do XLSX_VENDAS sem pedido correspondente no Firestore — por TOKEN (não string
+  // inteira), mesma correção do bug 235/236 explicada acima.
   const synP={importadoPlanilha:true};
-  (XLSX_VENDAS||[]).filter(x=>!osFirestore.has(String(x.p))).forEach(x=>{
+  (XLSX_VENDAS||[]).filter(x=>!_osTokens(x.p).some(tok=>osFirestore.has(tok))).forEach(x=>{
     if(isVendaCancelada(x.p))return;
     (x.parcelas||[]).forEach((parc,idx)=>{
       const confKey=`xlsxv::${x.p}::${idx}`;
@@ -20012,9 +20030,19 @@ function renderDashComissoes(){
   // de digitado explícito na parcela — assim dá pra ver de cara quais pedidos ainda
   // precisam do Líquido preenchido em Editar Valores, sem abrir um por um.
   function mkLiqCell(i){
-    if(i.divergePlanilha)return`<span style="font-weight:700">${fmtR(i.valor)}</span><br><span style="font-size:.6rem;color:#dc2626;font-weight:700" title="O número de parcelas cadastradas neste pedido não bate com o número de parcelas da planilha mestre pra esse OS (provavelmente falta parcela cadastrada, ex.: Entrada já paga que não foi redigitada em Editar Valores). O valor mostrado é EXATAMENTE o que está digitado, sem nenhum ajuste — confira contra a planilha antes de confirmar esta comissão.">🚨 confira c/ planilha</span>`;
-    if(!i.liqEstimado)return`<span style="font-weight:700">${fmtR(i.valor)}</span>`;
-    return`<span style="font-weight:700">${fmtR(i.valor)}</span><br><span style="font-size:.6rem;color:#b45309;font-weight:700" title="Sem Líquido digitado nesta parcela — valor estimado pela proporção do pedido (Valor Líquido do Pedido / Valor Bruto). Preencha o Líquido em Editar Valores pra usar o valor exato.">⚠️ estimado</span>`;
+    // Regra 2026-08-04 (pedido do usuário após ver os pedidos 235/236 aparecendo 2x na
+    // lista): toda célula de Valor Líquido mostra embaixo QUAL parcela é aquela (Entrada,
+    // Parcela 1, Parcela 2, 💰 Saldo...). Antes essa informação só existia na coluna
+    // "Parcela" separada (fácil de não bater o olho, principalmente na tabela de
+    // Consolidados, que nem tinha essa coluna). Com o rótulo colado no valor, duas linhas
+    // do mesmo pedido com parcelas diferentes ficam óbvias como legítimas — e se for a
+    // MESMA parcela com o mesmo valor repetida, isso sim é sinal real de duplicação (ver
+    // [[project_dedup_os_composto_getvendarowsmerged]], mesma classe de bug corrigida aqui
+    // em getComissaoItemsAll via _osTokens).
+    const labelTag=i.label?`<br><span style="font-size:.62rem;color:#64748b;font-weight:600">${i.label}</span>`:'';
+    if(i.divergePlanilha)return`<span style="font-weight:700">${fmtR(i.valor)}</span><br><span style="font-size:.6rem;color:#dc2626;font-weight:700" title="O número de parcelas cadastradas neste pedido não bate com o número de parcelas da planilha mestre pra esse OS (provavelmente falta parcela cadastrada, ex.: Entrada já paga que não foi redigitada em Editar Valores). O valor mostrado é EXATAMENTE o que está digitado, sem nenhum ajuste — confira contra a planilha antes de confirmar esta comissão.">🚨 confira c/ planilha</span>${labelTag}`;
+    if(!i.liqEstimado)return`<span style="font-weight:700">${fmtR(i.valor)}</span>${labelTag}`;
+    return`<span style="font-weight:700">${fmtR(i.valor)}</span><br><span style="font-size:.6rem;color:#b45309;font-weight:700" title="Sem Líquido digitado nesta parcela — valor estimado pela proporção do pedido (Valor Líquido do Pedido / Valor Bruto). Preencha o Líquido em Editar Valores pra usar o valor exato.">⚠️ estimado</span>${labelTag}`;
   }
   // Mesma lógica pro Bruto: pedido vindo da planilha que ainda não foi editado em "Editar
   // Valores" desde a v2 só tem o Líquido real (da planilha) — o Bruto exibido aqui é uma
@@ -20101,13 +20129,16 @@ function renderDashComissoes(){
   function mkCards(items){
     const prev=items.filter(i=>i.status!=='confirmado').reduce((s,i)=>s+i.valor,0);
     const conf=items.filter(i=>i.status==='confirmado').reduce((s,i)=>s+i.valor,0);
-    const cp=items.filter(i=>i.status!=='confirmado').reduce((s,i)=>s+(i.valor*i.pct/100),0);
+    // "Comissão a pagar" (comissão de itens ainda não confirmados) foi tirada daqui a pedido
+    // do usuário (2026-08-04): esse número é só projeção/futuro e só deve aparecer em
+    // "🔮 Pagamentos Futuros", pra não misturar comissão já garantida (cliente pagou) com
+    // comissão que ainda depende do cliente pagar, nesta mesma tela. Sobra só a comissão
+    // real desta quinzena — a dos itens confirmados —, chamada simplesmente de "Comissão".
     const cc=items.filter(i=>i.status==='confirmado').reduce((s,i)=>s+(i.valor*i.pct/100),0);
-    return`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px">
+    return`<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px">
       <div style="background:#dbeafe;border-radius:8px;padding:10px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#1e40af">Receb. cliente</div><div style="font-size:.95rem;font-weight:800;color:#1e40af">${fmtR(prev)}</div><div style="font-size:.6rem;color:#93c5fd;margin-top:2px">a receber dos clientes</div></div>
       <div style="background:#dcfce7;border-radius:8px;padding:10px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#16a34a">Receb. confirmado</div><div style="font-size:.95rem;font-weight:800;color:#16a34a">${fmtR(conf)}</div><div style="font-size:.6rem;color:#86efac;margin-top:2px">pagos pelos clientes</div></div>
-      <div style="background:#fce7f3;border-radius:8px;padding:10px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#be185d">Comissão a pagar</div><div style="font-size:.95rem;font-weight:800;color:#be185d">${fmtR(cp)}</div><div style="font-size:.6rem;color:#f9a8d4;margin-top:2px">a pagar ao vendedor</div></div>
-      <div style="background:#f3e8ff;border-radius:8px;padding:10px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#7c3aed">Comissão liberada</div><div style="font-size:.95rem;font-weight:800;color:#7c3aed">${fmtR(cc)}</div><div style="font-size:.6rem;color:#c4b5fd;margin-top:2px" title="Cliente já pagou (confirmado em Financeiro), então esta comissão está pronta pra entrar no pagamento do dia 5 ou 15 — isso NÃO significa que o valor já foi transferido/pago ao vendedor.">recebido do cliente · ainda não paga ao vendedor</div></div>
+      <div style="background:#f3e8ff;border-radius:8px;padding:10px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#7c3aed">Comissão</div><div style="font-size:.95rem;font-weight:800;color:#7c3aed">${fmtR(cc)}</div><div style="font-size:.6rem;color:#c4b5fd;margin-top:2px">referente ao já recebido do cliente nesta quinzena</div></div>
     </div>`;
   }
 
@@ -20126,7 +20157,6 @@ function renderDashComissoes(){
       return`<tr>
         <td style="font-weight:600">${v}</td>
         <td style="font-weight:700">${fmtR(val)}</td>
-        <td style="font-weight:700;color:#be185d">${fmtR(pend+extraPend)}</td>
         <td style="font-weight:700;color:#7c3aed">${fmtR(com-pend+extraPago)}</td>
         ${incluirExtras?`<td style="font-weight:700;color:#b45309"${extraTip?` title="${extraTip.replace(/"/g,'')}"`:''}>${extras.length?fmtR(extraPend+extraPago):'—'}</td>`:''}
       </tr>`;
@@ -20143,14 +20173,16 @@ function renderDashComissoes(){
     const rowClab=`<tr style="background:#fef3c7">
         <td style="font-weight:700">GUILHERME CLABONDE (Gerente)</td>
         <td style="font-weight:700">${fmtR(valClab)}</td>
-        <td style="font-weight:700;color:#be185d">${fmtR(pendClab+extraPendClab)}</td>
         <td style="font-weight:700;color:#7c3aed">${fmtR(comClab-pendClab+extraPagoClab)}</td>
         ${incluirExtras?`<td style="font-weight:700;color:#b45309"${extraTipClab?` title="${extraTipClab.replace(/"/g,'')}"`:''}>${extrasClab.length?fmtR(extraPendClab+extraPagoClab):'—'}</td>`:''}
       </tr>`;
+    // Coluna "Comissão a pagar" (projeção sobre vendas ainda não confirmadas) tirada daqui
+    // 2026-08-04 a pedido do usuário — esse número só deve aparecer em "🔮 Pagamentos
+    // Futuros". Aqui sobra só "Comissão", que é sempre a parte já confirmada/garantida.
     return`<details style="margin-bottom:12px">
       <summary style="cursor:pointer;font-size:.72rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">📊 Resumo por vendedor</summary>
       <div style="overflow-x:auto;margin-top:8px"><table class="dash-table">
-        <thead><tr><th>Vendedor</th><th>Total clientes</th><th>Comissão a pagar</th><th title="Cliente já pagou — pronta pra entrar no pagamento do dia 5/15, mas ainda NÃO foi transferida ao vendedor">Comissão liberada</th>${incluirExtras?'<th>🎁 Extras</th>':''}</tr></thead>
+        <thead><tr><th>Vendedor</th><th>Total clientes</th><th>Comissão</th>${incluirExtras?'<th>🎁 Extras</th>':''}</tr></thead>
         <tbody>${rows}${rowClab}</tbody>
       </table></div>
       ${incluirExtras?'<p style="font-size:.68rem;color:#94a3b8;margin-top:4px">Coluna "Extras" já soma nos totais de comissão ao lado. Passe o mouse sobre o valor pra ver o motivo.</p>':''}
