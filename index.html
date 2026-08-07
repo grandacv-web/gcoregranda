@@ -4734,51 +4734,70 @@ function geralTab(tab,btn){
     renderAll();
   }
 }
+// Pendências do Conselho ainda não resolvidas de um pedido (rascunho ou já emitido) — helper
+// reaproveitado em renderConselhoPedidos()/renderDashVendas()/submit() (ver [[project_conselho_de_pedidos]]).
+function _pedPendAbertas(p){return((p&&p.conselhoPendencias)||[]).filter(x=>!x.resolvida);}
 // ===================== CONSELHO DE PEDIDOS (2026-08-07) =====================
-// Lista só os pedidos que ainda NÃO foram emitidos de verdade (conselhoStatus==='rascunho' e
+// Lista os rascunhos que ainda NÃO foram emitidos de verdade (conselhoStatus==='rascunho' e
 // sem origemComercial) — assim que um rascunho é promovido a emissão de verdade (ver submit(),
-// que seta origemComercial:true e conselhoStatus:'emitido'), ele some daqui e passa a aparecer
-// em todo o resto do sistema normalmente (Lista de Vendas, Financeiro etc.), igual sempre foi.
+// que seta origemComercial:true e conselhoStatus:'emitido'), ele sai da lista de "aguardando
+// conselho"... A PARTIR de 2026-08-08 (a pedido do usuário: "mesmo tendo pendencias ele pode
+// emitir... quero elas visiveis pra gente poder sanar elas mesmo depois de emitido"), um
+// pedido JÁ EMITIDO continua aparecendo aqui embaixo enquanto tiver qualquer Pendência do
+// Conselho não resolvida — some de vez só quando não sobrar nenhuma pendência aberta.
 // Visível só pra quem criou o rascunho + admin (a pedido do usuário) — o resto do time
-// comercial não vê rascunho alheio aqui, só o próprio.
+// comercial não vê rascunho/pendência alheia aqui, só a própria.
 function renderConselhoPedidos(){
   const wrap=document.getElementById('conselho-pedidos-list');
   if(!wrap)return;
   const{isAdm,email}=_getUserCat();
   const meuEmail=(email||usuarioLogado?.email||'').toLowerCase();
-  const rascunhos=pedidos.filter(p=>p.conselhoStatus==='rascunho'&&!p.origemComercial&&(isAdm||(p.conselhoCriadoPorEmail||'').toLowerCase()===meuEmail));
-  rascunhos.sort((a,b)=>(a.conselhoData||'9999').localeCompare(b.conselhoData||'9999'));
-  if(!rascunhos.length){
-    wrap.innerHTML='<div style="text-align:center;padding:32px 16px;color:var(--ink4);font-size:.85rem">Nenhum rascunho aguardando conselho — clique em "Fazer Novo Conselho" pra começar um.</div>';
+  const meus=p=>isAdm||(p.conselhoCriadoPorEmail||'').toLowerCase()===meuEmail;
+  const rascunhos=pedidos.filter(p=>p.conselhoStatus==='rascunho'&&!p.origemComercial&&meus(p));
+  const emitidosComPend=pedidos.filter(p=>p.origemComercial&&meus(p)&&_pedPendAbertas(p).length>0);
+  const todos=[...rascunhos,...emitidosComPend];
+  todos.sort((a,b)=>(a.conselhoData||'9999').localeCompare(b.conselhoData||'9999'));
+  if(!todos.length){
+    wrap.innerHTML='<div style="text-align:center;padding:32px 16px;color:var(--ink4);font-size:.85rem">Nenhum rascunho aguardando conselho nem pendência aberta — clique em "Fazer Novo Conselho" pra começar um.</div>';
     return;
   }
   const hojeIso=new Date().toISOString().slice(0,10);
-  const rows=rascunhos.map(p=>{
+  const rows=todos.map(p=>{
+    const jaEmitido=!!p.origemComercial;
+    const pendList=_pedPendAbertas(p);
+    const pendAbertas=pendList.length;
     // "Pronto pra emitir" aqui é só um resumo visual pra lista — a checagem que REALMENTE
     // bloqueia a emissão é a validação completa dentro de submit() (todas as abas, não só
     // estes campos-chave); isso evita ter 2 listas de obrigatoriedade divergindo com o tempo.
+    // Pedido JÁ emitido não passa mais por essas checagens de pré-requisito (já foi emitido —
+    // só falta resolver as pendências que ficaram em aberto).
     const faltam=[];
-    if(!p.conselhoData)faltam.push('Data do Conselho');
-    if(!p.conselhoEscopo)faltam.push('Reunião de Escopo (não respondida)');
-    else if(p.conselhoEscopo!=='Sim')faltam.push('Reunião de Escopo (ainda não feita)');
-    if(!p.conselhoAssinatura)faltam.push('Necessita Assinatura?');
-    if(!p.cliente)faltam.push('Cliente');
-    if(!p.os)faltam.push('Nº da OS');
-    if(!p.vtotalPreenchido&&!(p.valores&&p.valores['Valor Bruto']))faltam.push('Valores');
-    const pendAbertas=(p.conselhoPendencias||[]).filter(x=>!x.resolvida).length;
+    if(!jaEmitido){
+      if(!p.conselhoClienteProvisorio&&!p.cliente)faltam.push('Nome do Cliente');
+      if(!p.conselhoData)faltam.push('Data do Conselho');
+      if(!p.conselhoEscopo)faltam.push('Reunião de Escopo (não respondida)');
+      else if(p.conselhoEscopo!=='Sim')faltam.push('Reunião de Escopo (ainda não feita)');
+      if(!p.conselhoAssinatura)faltam.push('Necessita Assinatura?');
+      if(!p.cliente)faltam.push('Cliente');
+      if(!p.os)faltam.push('Nº da OS');
+      if(!p.vtotalPreenchido&&!(p.valores&&p.valores['Valor Bruto']))faltam.push('Valores');
+    }
     if(pendAbertas)faltam.push(`${pendAbertas} pendência${pendAbertas>1?'s':''} não resolvida${pendAbertas>1?'s':''}`);
     const pronto=!faltam.length;
-    const atrasado=p.conselhoData&&p.conselhoData<hojeIso;
+    const atrasado=!jaEmitido&&p.conselhoData&&p.conselhoData<hojeIso;
+    let statusHtml;
+    if(jaEmitido)statusHtml=`<span style="color:#7c3aed;font-weight:700;cursor:help;white-space:nowrap" title="OS ${p.os||'—'} já emitida — falta resolver: ${pendList.map(x=>x.texto).join(', ')}">🟣 Emitido — ${pendAbertas} pendência${pendAbertas>1?'s':''}</span>`;
+    else statusHtml=pronto?'<span style="color:#16a34a;font-weight:700;white-space:nowrap">🟢 Pronto pra emitir</span>':`<span style="color:#d97706;font-weight:700;cursor:help;white-space:nowrap" title="Falta: ${faltam.join(', ')}">🟡 Rascunho</span>`;
     return`<tr>
       <td style="white-space:nowrap;font-weight:700;${atrasado?'color:#dc2626':''}">${fmtD(p.conselhoData)||'—'}${atrasado?' ⚠️':''}</td>
-      <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:120px">${p.cliente||'—'}</td>
+      <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:120px">${p.cliente?p.cliente:(p.conselhoClienteProvisorio?`<span title="Nome provisório — ainda sem Razão Social preenchida">${p.conselhoClienteProvisorio} <span style="font-size:.62rem;color:var(--ink4);font-weight:600">(provisório)</span></span>`:'—')}${jaEmitido?` <span style="font-size:.62rem;color:var(--ink4);font-weight:600">(OS ${p.os||'—'})</span>`:''}</td>
       <td style="font-size:.78rem">${p.job||'—'}</td>
       <td style="font-size:.72rem;color:var(--ink4)">${p.conselhoCriadoPor||'—'}</td>
-      <td>${pronto?'<span style="color:#16a34a;font-weight:700;white-space:nowrap">🟢 Pronto pra emitir</span>':`<span style="color:#d97706;font-weight:700;cursor:help;white-space:nowrap" title="Falta: ${faltam.join(', ')}">🟡 Rascunho</span>`}</td>
+      <td>${statusHtml}</td>
       <td style="white-space:nowrap">
-        <button onclick="openEmissao('${p.id}')" style="background:#fff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;margin-right:4px">✏️ ${pronto?'Abrir':'Completar'}</button>
+        <button onclick="openEmissao('${p.id}')" style="background:#fff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;margin-right:4px">✏️ ${jaEmitido?'Ver/Editar':(pronto?'Abrir':'Completar')}</button>
         <button onclick="abrirPendenciasConselho('${p.id}')" title="Pendências" style="background:#fff;color:#7c3aed;border:1.5px solid #ddd6fe;border-radius:6px;padding:5px 8px;font-size:.72rem;font-weight:700;cursor:pointer;margin-right:4px">📋 Pendências${pendAbertas?` (${pendAbertas})`:''}</button>
-        <button onclick="excluirRascunhoConselho('${p.id}')" title="Excluir rascunho" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:6px;padding:5px 8px;font-size:.72rem;font-weight:700;cursor:pointer">🗑️</button>
+        ${jaEmitido?'':`<button onclick="excluirRascunhoConselho('${p.id}')" title="Excluir rascunho" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:6px;padding:5px 8px;font-size:.72rem;font-weight:700;cursor:pointer">🗑️</button>`}
       </td>
     </tr>`;
   }).join('');
@@ -4794,6 +4813,11 @@ function renderConselhoPedidos(){
 async function excluirRascunhoConselho(pedidoId){
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Rascunho não encontrado','terr');return;}
+  // Trava de segurança (2026-08-08): desde que pedido já emitido com pendência aberta passou a
+  // aparecer nesta mesma lista, o botão de excluir some pra ele na tela — mas confere de novo
+  // aqui também, caso chegue uma chamada direta. Pedido já emitido nunca se apaga por aqui (usa
+  // o fluxo normal de exclusão de venda, com senha de admin — ver delP()).
+  if(p.origemComercial){toast('Este pedido já foi emitido — use a exclusão normal da Lista de Vendas, não esta.','terr');return;}
   if(!confirm(`Excluir este rascunho de Conselho (${p.cliente||'sem cliente ainda'})? Esta ação não pode ser desfeita.`))return;
   try{
     await _lixeiraAdicionar('pedido',p,{resumo:`Rascunho de Conselho — ${p.cliente||'—'}`});
@@ -5836,10 +5860,10 @@ function openEmissao(eid2){
       // Conselho de Pedidos (2026-08-07) — reconstrói a partir do que já foi salvo (rascunho
       // reaberto pra completar, ou pedido já emitido sendo editado).
       conselhoData:p.conselhoData||'',conselhoEscopo:p.conselhoEscopo||'',conselhoEscopoObs:p.conselhoEscopoObs||'',
-      conselhoAssin:p.conselhoAssinatura||'',conselhoWpp:p.conselhoLinkWpp||''};
+      conselhoAssin:p.conselhoAssinatura||'',conselhoWpp:p.conselhoLinkWpp||'',conselhoClienteProv:p.conselhoClienteProvisorio||''};
   } else {
     ed={tipo:'',resp:usuarioLogado?.nomeExibicao||'',cli:'',emails:[],email_comprador:'',email_engenheiro:'',email_financeiro:'',job:'',prazo:'',os:'',obs:'',
-      conselhoData:'',conselhoEscopo:'',conselhoEscopoObs:'',conselhoAssin:'',conselhoWpp:'',
+      conselhoData:'',conselhoEscopo:'',conselhoEscopoObs:'',conselhoAssin:'',conselhoWpp:'',conselhoClienteProv:'',
       vtotal:'',i_tipo:'',vinst:'',vmob:'',vrem:'',remocao:'',f_tipo:'',fmod:'',vfrete:'',vmed:'',vart:'',vlaudo:'',
       elevacoes:'',elevs:[],velev:'',elevBloqVia:'',remocoes:[],medicao:'',
       tem_oc:'',arq_oc:'',tem_ent:'Não tem entrada',vent:'',dent:'',fent:'',
@@ -5865,7 +5889,7 @@ function closeEM(){
   closeM('mo-em');
 }
 function _rascunhoTemConteudo(){
-  return!!(ed.cli||ed.job||ed.os||ed.conselhoData||ed.conselhoEscopo||ed.conselhoAssin||ed.vtotal);
+  return!!(ed.cli||ed.job||ed.os||ed.conselhoData||ed.conselhoEscopo||ed.conselhoAssin||ed.conselhoClienteProv||ed.vtotal);
 }
 
 // Um pedido "é rascunho de Conselho" enquanto ainda não passou pela emissão de verdade —
@@ -5901,6 +5925,11 @@ function validarAba(id){
   // não aqui (ver comentário lá): dá pra continuar preenchendo o resto do pedido pro
   // rascunho mesmo respondendo "Não" por enquanto.
   if(id==='conselho'){
+    // Nome do Cliente provisório (2026-08-08, a pedido do usuário) — só serve pra identificar
+    // o rascunho na lista de Conselho enquanto a Razão Social (ed.cli, aba Dados) e o JOB ainda
+    // não foram preenchidos; some da lista sozinho assim que p.cliente existir de verdade (ver
+    // renderConselhoPedidos()). Por isso é obrigatório aqui: sem ele a lista fica cheia de "—".
+    if(!ed.conselhoClienteProv||!ed.conselhoClienteProv.trim())erros.push('Nome do Cliente (provisório) não informado');
     if(!ed.conselhoData)erros.push('Data em que fará o Conselho não informada');
     if(!ed.conselhoEscopo)erros.push('Informe se foi feita a reunião de escopo com o cliente');
     if(!ed.conselhoAssin)erros.push('Informe se o pedido necessita de assinatura (contrato)');
@@ -6101,7 +6130,7 @@ function saveSt(){
   const gsel=cls=>document.querySelector('.'+cls+'.sel')?.dataset?.val||'';
   const gon=cls=>document.querySelector('.'+cls+'.on')?.dataset?.val||'';
   if(id==='conselho'){
-    ed.conselhoData=gv('em-cons-data');ed.conselhoEscopoObs=gv('em-cons-obs');ed.conselhoWpp=gv('em-cons-wpp').trim();
+    ed.conselhoClienteProv=gv('em-cons-cliente-prov').trim();ed.conselhoData=gv('em-cons-data');ed.conselhoEscopoObs=gv('em-cons-obs');ed.conselhoWpp=gv('em-cons-wpp').trim();
   }else if(id==='dados'){
     ed.resp=gv('em-rsp');ed.cli=gv('em-cli');ed.job=gv('em-job');ed.prazo=gv('em-prazo');ed.obs=gv('em-obs');
     ed.email_comprador=gv('em-email-comprador').trim();ed.email_engenheiro=gv('em-email-engenheiro').trim();ed.email_financeiro=gv('em-email-financeiro').trim();
@@ -6445,6 +6474,10 @@ function renderStep(id){
       <div class="fsec-t"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> CONSELHO DE PEDIDOS</div>
       <div style="border:1.5px solid #eef0f5;border-radius:12px;padding:16px;margin-bottom:14px">
         <div style="font-size:.76rem;color:var(--ink3);margin-bottom:14px">Este pedido só pode ser emitido de verdade (indo pra Lista de Vendas e disparando o e-mail) depois de passar pelo Conselho. Preencha o que já tiver aqui — o resto dá pra completar depois, reabrindo este mesmo rascunho.</div>
+        <div class="fg"><label>Nome do Cliente <span class="r">*</span></label>
+          <input class="fc" id="em-cons-cliente-prov" value="${(ed.conselhoClienteProv||'').replace(/"/g,'&quot;')}" placeholder="Ex: Padaria do João, Posto Estrela...">
+          <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Só pra identificar esse pedido na lista de Conselho enquanto a Razão Social e o JOB ainda não foram preenchidos (aba Dados) — assim que forem, a lista passa a mostrar eles no lugar deste nome.</div>
+        </div>
         <div class="fg"><label>Data em que fará o Conselho <span class="r">*</span></label>
           <input class="fc" type="date" id="em-cons-data" value="${ed.conselhoData||''}">
         </div>
@@ -7897,6 +7930,9 @@ function _buildPedidoBaseDoEd(){
     // na 1ª vez (preserva o do registro existente se já tinha).
     conselhoData:ed.conselhoData||'',conselhoEscopo:ed.conselhoEscopo||'',conselhoEscopoObs:ed.conselhoEscopoObs||'',
     conselhoAssinatura:ed.conselhoAssin||'',conselhoLinkWpp:ed.conselhoWpp||'',
+    // Nome do Cliente provisório (2026-08-08) — só usado pra exibição na lista de Conselho
+    // enquanto p.cliente (Razão Social, aba Dados) ainda não existe (ver renderConselhoPedidos()).
+    conselhoClienteProvisorio:ed.conselhoClienteProv||'',
     conselhoCriadoPor:(_pedidoExistente&&_pedidoExistente.conselhoCriadoPor)||usuarioLogado?.nomeExibicao||usuarioLogado?.email||'',
     conselhoCriadoPorEmail:(_pedidoExistente&&_pedidoExistente.conselhoCriadoPorEmail)||usuarioLogado?.email||'',
     conselhoCriadoEm:(_pedidoExistente&&_pedidoExistente.conselhoCriadoEm)||new Date().toISOString(),
@@ -7957,18 +7993,16 @@ async function submit(){
   // reforça que "Não" na reunião de escopo especificamente barra a EMISSÃO (mas não impede
   // salvar como rascunho — ver salvarRascunhoConselho(), que nunca passa por aqui).
   const idxConselho=idx('conselho');
+  if(!ed.conselhoClienteProv||!ed.conselhoClienteProv.trim())erros.push({msg:'Nome do Cliente (provisório) não informado',aba:idxConselho,label:'Conselho'});
   if(!ed.conselhoData)erros.push({msg:'Data em que fará o Conselho não informada',aba:idxConselho,label:'Conselho'});
   if(!ed.conselhoEscopo)erros.push({msg:'Informe se foi feita a reunião de escopo com o cliente',aba:idxConselho,label:'Conselho'});
   else if(ed.conselhoEscopo!=='Sim')erros.push({msg:'A reunião de escopo com o cliente precisa ter sido feita (resposta "Sim") antes de emitir este pedido',aba:idxConselho,label:'Conselho'});
   if(!ed.conselhoAssin)erros.push({msg:'Informe se o pedido necessita de assinatura (contrato)',aba:idxConselho,label:'Conselho'});
-  // Pendências do Conselho (2026-08-08, a pedido do usuário) — enquanto existir QUALQUER
-  // pendência registrada e ainda não marcada como resolvida (ver abrirPendenciasConselho() /
-  // _consPendToggle()), a emissão de verdade fica bloqueada, igual à reunião de escopo.
-  {
-    const _pedExistPend=editing?pedidos.find(x=>x.id===editing):null;
-    const _pendAbertas=((_pedExistPend&&_pedExistPend.conselhoPendencias)||[]).filter(x=>!x.resolvida);
-    if(_pendAbertas.length)erros.push({msg:`Existem ${_pendAbertas.length} pendência${_pendAbertas.length>1?'s':''} do Conselho ainda não resolvida${_pendAbertas.length>1?'s':''} — marque todas como resolvidas (botão "📋 Pendências" na lista de Conselho de Pedidos) antes de emitir`,aba:idxConselho,label:'Conselho'});
-  }
+  // Pendências do Conselho (2026-08-08) — ANTES bloqueava a emissão enquanto tivesse pendência
+  // aberta; removido a pedido do usuário ("mesmo tendo pendencias ele pode emitir") — agora dá
+  // pra emitir com pendência aberta, e ela continua visível/cobrando depois de emitido (ver
+  // renderConselhoPedidos() e renderDashVendas(), que passam a mostrar pedidos JÁ emitidos
+  // enquanto tiverem conselhoPendencias não resolvidas) até alguém marcar como resolvida.
   // Aba Dados gerais
   if(!ed.cli)erros.push({msg:'Cliente não informado',aba:idxDados,label:'Dados Gerais'});
   if(!ed.tipo)erros.push({msg:'Tipo do pedido não selecionado',aba:idxDados,label:'Dados Gerais'});
@@ -23051,6 +23085,7 @@ function renderDashVendas(){
         ${r.job?`<div style="font-size:.64rem;color:#64748b;white-space:nowrap" title="JOB">🏷️ ${r.job}</div>`:''}
         ${r.ocUrl?`<a href="${r.ocUrl}" target="_blank" style="font-size:.64rem;color:#1d4ed8;font-weight:600;text-decoration:underline;white-space:nowrap">📎 ${r.numOC||'Ver OC'}</a>`:(r.numOC?`<div style="font-size:.64rem;color:#94a3b8;white-space:nowrap">OC ${r.numOC}</div>`:'')}
         ${r.pedidoPdfUrl?`<a href="${r.pedidoPdfUrl}" target="_blank" style="font-size:.64rem;color:#e91e63;font-weight:600;text-decoration:underline;white-space:nowrap;display:block">📄 Ver Pedido</a>`:''}
+        ${pedFin&&_pedPendAbertas(pedFin).length?`<a href="javascript:void(0)" onclick="abrirPendenciasConselho('${pedFin.id}')" style="font-size:.64rem;color:#7c3aed;font-weight:700;text-decoration:underline;white-space:nowrap;display:block" title="${_pedPendAbertas(pedFin).map(x=>x.texto).join(' · ')}">⚠️ ${_pedPendAbertas(pedFin).length} pendência${_pedPendAbertas(pedFin).length>1?'s':''} do Conselho</a>`:''}
       </td>
       <td class="dt-cliente">
         <a href="javascript:void(0)" onclick="${verDet}" class="dt-cliente-link" title="${clSafe} — clique para ver detalhes">${r.cl}</a>
