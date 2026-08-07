@@ -3720,13 +3720,21 @@ function _ehTarefaGcore(t){
   return (t.tipo||'').trim().toLowerCase()==='lançar no gcore';
 }
 async function _migrarLancarGcoreSemResponsavel(){
+  // Flag PERSISTIDA (2026-08-07, otimização de performance — "o sistema tem dado uma travada
+  // ao apertar F5") — sem isso, esta migração reescaneava TODO o array de pedidos em memória
+  // de novo a cada F5, pra sempre, mesmo já não tendo mais nenhum afetado há semanas (era
+  // regra defensiva só pra corrigir dado histórico de antes do fix na origem). Mesmo padrão de
+  // _migrarAtrasadosListaPedidosHoje: roda de verdade só 1x pra sempre; se precisar rodar de
+  // novo (ex.: bug voltar a acontecer), é só zerar esse campo em cfg.
+  if(cfg.migGcoreSemRespFeita)return;
   const afetados=pedidos.filter(p=>(p.tarefasComerciais||[]).some(t=>t.status==='pendente'&&!t.responsavel&&_ehTarefaGcore(t)));
-  if(!afetados.length)return;
   for(const p of afetados){
     p.tarefasComerciais.forEach(t=>{if(t.status==='pendente'&&!t.responsavel&&_ehTarefaGcore(t))t.responsavel='GUILHERME CLABONDE';});
     await savePedidoFS(p);
   }
-  _refreshTarefasBadge();
+  cfg.migGcoreSemRespFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  if(afetados.length)_refreshTarefasBadge();
 }
 // Corrige na origem o bug achado 2026-07-29 ("aparece atrasado sem nem ter chegado a
 // entrega"): pedidos criados a partir da planilha (editarVendaLista/
@@ -3736,12 +3744,16 @@ async function _migrarLancarGcoreSemResponsavel(){
 // usar p.prazo (ex.: pré-preencher o campo de Alterar Prazo) também funcionar certo.
 function _prazoPareceBR(v){return/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(v||'');}
 async function _migrarPrazoBrParaIso(){
+  // Flag PERSISTIDA (2026-08-07, mesma otimização de performance de _migrarLancarGcoreSemResponsavel
+  // acima — ver comentário lá) — sem isso, reescaneava todo p.prazo de novo a cada F5.
+  if(cfg.migPrazoBrIsoFeita)return;
   const afetados=pedidos.filter(p=>_prazoPareceBR(p.prazo));
-  if(!afetados.length)return;
   for(const p of afetados){
     p.prazo=_brToIso(p.prazo);
     await savePedidoFS(p);
   }
+  cfg.migPrazoBrIsoFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
 }
 // Congela em cada pedido elegível pra Lista de Pedidos (ver _lpPedidosElegiveis, definida
 // mais abaixo) a config de Etapas de Pedidos vigente HOJE (percentuais/etapas removidas/
@@ -3752,13 +3764,18 @@ async function _migrarPrazoBrParaIso(){
 // do usuário: "a regra é que ao mudar a porcentagem... ele não muda prazos que já foram
 // lançados, ele muda os futuros apenas").
 async function _migrarLpEtapasSnapshot(){
+  // Flag PERSISTIDA (2026-08-07, mesma otimização de performance — ver
+  // _migrarLancarGcoreSemResponsavel acima) — sem isso, recalculava _lpPedidosElegiveis() (que
+  // já é um cálculo por pedido) de novo a cada F5.
+  if(cfg.migLpEtapasSnapshotFeita)return;
   const afetados=_lpPedidosElegiveis().filter(p=>!p.lpEtapasCfg);
-  if(!afetados.length)return;
   const cfgHoje=_lpEtapasCfgAtual();
   for(const p of afetados){
     p.lpEtapasCfg=cfgHoje;
     await savePedidoFS(p);
   }
+  cfg.migLpEtapasSnapshotFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
 }
 // Backfill do Prazo Estimado de Frete faltante (2026-07-30, depois reforçado em 2026-07-31 —
 // "corrija isso aqui de uma vez por todas... se o pedido tem frete na emissao ele foi
@@ -3769,8 +3786,10 @@ async function _migrarLpEtapasSnapshot(){
 // esta migração sempre consegue corrigir todo pedido afetado, sem depender de o endereço
 // bater um regex exato.
 async function _migrarPrazoFreteFaltante(){
+  // Flag PERSISTIDA (2026-08-07, mesma otimização de performance — ver
+  // _migrarLancarGcoreSemResponsavel acima).
+  if(cfg.migPrazoFreteFeita)return;
   const afetados=pedidos.filter(p=>_lpTemFrete(p)&&!(p.frete&&p.frete['Prazo Estimado de Entrega']));
-  if(!afetados.length)return;
   let corrigidos=0;
   for(const p of afetados){
     p.frete=p.frete||{};
@@ -3778,6 +3797,8 @@ async function _migrarPrazoFreteFaltante(){
     await savePedidoFS(p);
     corrigidos++;
   }
+  cfg.migPrazoFreteFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   if(corrigidos)toast(`${corrigidos} pedido(s) com Prazo Estimado de Frete faltante foram corrigidos automaticamente`,'tok');
 }
 // Backfill do ano corrompido em p.prazo (2026-07-31, a pedido do usuário — caso real do OS
@@ -3787,6 +3808,10 @@ async function _migrarPrazoFreteFaltante(){
 // nunca reescreve uma data que já é válida, só a que está claramente corrompida, mantendo
 // mês/dia originais e forçando ano=2026.
 async function _migrarAnoPrazoImplausivel(){
+  // Flag PERSISTIDA (2026-08-07, mesma otimização de performance — ver
+  // _migrarLancarGcoreSemResponsavel acima) — sem isso, percorria pedidos inteiro de novo a
+  // cada F5 só pra achar 0 casos (já corrigidos há semanas).
+  if(cfg.migAnoPrazoFeita)return;
   let corrigidos=0;
   for(const p of pedidos){
     if(!p.prazo)continue;
@@ -3798,6 +3823,8 @@ async function _migrarAnoPrazoImplausivel(){
     await savePedidoFS(p);
     corrigidos++;
   }
+  cfg.migAnoPrazoFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   if(corrigidos)toast(`${corrigidos} pedido(s) com ano de Prazo de Finalização corrompido foram corrigidos para 2026`,'tok');
 }
 // Limpeza pontual (2026-07-31, a pedido do usuário) — pedidos com Prazo Final de Finalização
@@ -3808,6 +3835,12 @@ async function _migrarAnoPrazoImplausivel(){
 // (idempotente: já concluído, statusPedido vira 'concluido' e o pedido é pulado nas próximas
 // vezes), então fica no mesmo padrão de migração 1x-por-sessão das outras acima.
 async function _migrarProjetosPrazoAte10Ago(){
+  // Flag PERSISTIDA (2026-08-07, otimização de performance) — diferente da migração de baixo
+  // (_migrarAtrasadosProjetosComprasHoje, que É pra continuar rodando toda sessão por design —
+  // ver comentário dela), esta aqui é "ação de UMA VEZ SÓ" (ver comentário acima) que ficou
+  // presa no padrão de sessão por engano — sem isso, recalculava _lpPedidosElegiveis()+_projInfo
+  // de TODO pedido de novo a cada F5, à toa, já que o corte é uma data fixa que já passou.
+  if(cfg.migProjPrazo10AgoFeita)return;
   const LIMITE='2026-08-10';
   const hojeIso=new Date().toISOString().slice(0,10);
   const infos=_lpPedidosElegiveis().map(p=>_projInfo(p,hojeIso)).filter(x=>x.ok);
@@ -3827,6 +3860,8 @@ async function _migrarProjetosPrazoAte10Ago(){
     marcados++;
     osMarcados.push(p.os||p.id);
   }
+  cfg.migProjPrazo10AgoFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   if(marcados)toast(`${marcados} pedido(s) com Prazo Final de Finalização até 10/08 concluídos em Projetos (OS ${osMarcados.slice(0,8).join(', ')}${osMarcados.length>8?'...':''})`,'tok');
 }
 // Limpeza pontual (2026-08-03, a pedido do usuário: "remover tudo que tiver atrasado no
