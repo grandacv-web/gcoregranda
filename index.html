@@ -3937,6 +3937,8 @@ let _anoPrazoMigracaoFeita=false;
 let _projPrazo10AgoMigracaoFeita=false;
 let _atrasadosProjComprasMigracaoFeita=false;
 let _atrasadosLpMigracaoFeita=false;
+let _centrosCustoExtraMigracaoFeita=false;
+let _centrosCustoExtra2MigracaoFeita=false;
 function setupRealtimeSync(){
   if(!window._fbWatchPedidos)return;
   window._fbWatchPedidos(function(snapshot){
@@ -3999,6 +4001,21 @@ function setupRealtimeSync(){
     if(!_atrasadosLpMigracaoFeita&&_getUserCat().isAdm){
       _atrasadosLpMigracaoFeita=true;
       _migrarAtrasadosListaPedidosHoje().catch(e=>{_atrasadosLpMigracaoFeita=false;console.error('Erro ao concluir itens atrasados na Lista de Pedidos',e);});
+    }
+    // Seed pontual (2026-08-07, a pedido do usuário) — cadastra os Centros de Custo extras da
+    // estrutura de DRE que ele mandou por anexo, além dos que a planilha de Contas a Pagar já
+    // cadastra sozinha (ver _migrarSeedCentrosCustoExtra). Mesmo padrão de flag PERSISTIDO
+    // (cfg.migCentrosCustoExtraFeita) da limpeza de atrasados acima — roda de verdade só 1x pra
+    // sempre, só admin.
+    if(!_centrosCustoExtraMigracaoFeita&&_getUserCat().isAdm){
+      _centrosCustoExtraMigracaoFeita=true;
+      _migrarSeedCentrosCustoExtra().catch(e=>{_centrosCustoExtraMigracaoFeita=false;console.error('Erro ao cadastrar Centros de Custo extras',e);});
+    }
+    // 2º lote de Centro de Custo extra (2026-08-07, ver _migrarSeedCentrosCustoExtra2) — mesmo
+    // padrão acima, flag PERSISTIDO próprio, só admin.
+    if(!_centrosCustoExtra2MigracaoFeita&&_getUserCat().isAdm){
+      _centrosCustoExtra2MigracaoFeita=true;
+      _migrarSeedCentrosCustoExtra2().catch(e=>{_centrosCustoExtra2MigracaoFeita=false;console.error('Erro ao cadastrar 2º lote de Centros de Custo extras',e);});
     }
     // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache)
     // montado ANTES dessa atualização de pedidos — editar OS/valores/vendedor num pedido
@@ -10401,6 +10418,59 @@ function removeCentroCusto(i){
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderCentrosCusto();
   toast('Centro de custo removido','tok');
+}
+// Lista de Centro de Custo extra (2026-08-07, a pedido do usuário) — anexou a estrutura de DRE
+// da empresa (Receita de Vendas / Custo Administrativo/Comercial/Produção/Projetos / Salários /
+// Comissões / Pró Labore / CMV / Operação / Impostos / Imobilizado / Juros / Distribuição
+// Sócios / Empréstimos) e pediu pra cadastrar cada um como opção extra de Centro de Custo, além
+// dos que a planilha de Contas a Pagar já importa sozinha — "pro usuário poder colocar outros
+// custos se ele quiser direcionar diferente". Ficam disponíveis tanto em Contas a Pagar quanto
+// em Contas a Receber (mesma lista, ver getCentrosCusto()). EBITDA e Lucro Líquido do anexo
+// ficaram DE FORA por serem subtotal calculado do DRE (nada se lança diretamente neles) — se o
+// usuário quiser mesmo assim, dá pra cadastrar manualmente em Configurações → Centro de Custo.
+const CENTROS_CUSTO_SEED_EXTRA=[
+  'Receita de Vendas','Custo Administrativo','Custo Comercial','Custo Produção','Custo Projetos',
+  'Salários','Comissões','Pró Labore','CMV','Operação','Impostos','Imobilizado','Juros',
+  'Distribuição Sócios','Empréstimos'
+];
+async function _migrarSeedCentrosCustoExtra(){
+  if(cfg.migCentrosCustoExtraFeita)return;
+  if(!cfg.centrosCusto||!cfg.centrosCusto.length)cfg.centrosCusto=getCentrosCusto().filter(c=>c!==CENTRO_CUSTO_NAO_RECONHECIDO);
+  const norm=s=>_normSemAcento(s).trim();
+  let adicionados=0;
+  CENTROS_CUSTO_SEED_EXTRA.forEach(nome=>{
+    if(!cfg.centrosCusto.some(c=>norm(c)===norm(nome))){cfg.centrosCusto.push(nome);adicionados++;}
+  });
+  cfg.migCentrosCustoExtraFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  if(typeof renderCentrosCusto==='function')renderCentrosCusto();
+  if(adicionados)toast(`${adicionados} Centro(s) de Custo novo(s) cadastrado(s)`,'tok');
+}
+// 2º lote de Centro de Custo extra (2026-08-07, mesmo dia, novo anexo) — desta vez itens de
+// Balanço Patrimonial/indicadores gerais (Patrimônio Líquido, Passivo Circulante, Passivo
+// Total, Ativo Circulante, Disponibilidades, Lucro Operacional, Lucro Líquido, Receita
+// Líquida). Migração separada da de cima (própria flag persistida cfg.migCentrosCustoExtra2Feita)
+// porque a primeira já rodou e ficou marcada como feita pra sempre — não roda de novo sozinha.
+// "Lucro Líquido" tinha ficado de fora do 1º lote por ser subtotal; entra aqui porque o usuário
+// pediu explicitamente desta vez.
+const CENTROS_CUSTO_SEED_EXTRA_2=[
+  'Patrimônio Líquido','Passivo Circulante','Passivo Total','Ativo Circulante',
+  'Disponibilidades','Lucro Operacional','Lucro Líquido','Receita Líquida'
+];
+async function _migrarSeedCentrosCustoExtra2(){
+  if(cfg.migCentrosCustoExtra2Feita)return;
+  if(!cfg.centrosCusto||!cfg.centrosCusto.length)cfg.centrosCusto=getCentrosCusto().filter(c=>c!==CENTRO_CUSTO_NAO_RECONHECIDO);
+  const norm=s=>_normSemAcento(s).trim();
+  let adicionados=0;
+  CENTROS_CUSTO_SEED_EXTRA_2.forEach(nome=>{
+    if(!cfg.centrosCusto.some(c=>norm(c)===norm(nome))){cfg.centrosCusto.push(nome);adicionados++;}
+  });
+  cfg.migCentrosCustoExtra2Feita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  if(typeof renderCentrosCusto==='function')renderCentrosCusto();
+  if(adicionados)toast(`${adicionados} Centro(s) de Custo novo(s) cadastrado(s)`,'tok');
 }
 const GRUPO_DRE_LABEL={CMV:'Custo de Produção (CMV)',OPERACIONAL:'Despesas Operacionais',FINANCEIRA:'Despesas Financeiras',IMPOSTOS:'Impostos',IMOBILIZADO:'Imobilizado (Bem Financiado)',NAO_CLASSIFICADO:'Não Classificado'};
 function _normSemAcento(s){
