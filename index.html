@@ -2397,7 +2397,7 @@ select.fc{cursor:pointer}
   <div class="fsec" style="margin-top:14px">
     <div class="fsec-t">🧾 Gastos Extras (não entram no save)</div>
     <div style="border:1.5px solid #eef0f5;border-radius:12px;padding:16px">
-      <div style="font-size:.72rem;color:var(--ink4);margin-bottom:10px">Ex.: taxa local, diária extra, estacionamento — não muda o Valor Líquido nem o Save, só soma no Total Gasto.</div>
+      <div style="font-size:.72rem;color:var(--ink4);margin-bottom:10px">Ex.: taxa local, diária extra, estacionamento — motivo e setor são obrigatórios; não muda o Valor Líquido nem o Save, só soma no Total Gasto. Cada gasto salvo vira um registro automático no Diário de Obra desta obra (e aparece no Histórico de Pedidos).</div>
       <div id="fgl-extras-list"></div>
       <button type="button" onclick="fglAddExtra()" style="background:var(--surface-2,#f3f4f6);border:1px solid var(--border);color:var(--ink);border-radius:8px;padding:8px 12px;font-size:.78rem;font-weight:600;cursor:pointer">+ Adicionar gasto</button>
       <div style="margin-top:10px;font-size:.8rem;color:var(--ink3)">Total de gastos extras: <strong id="fgl-extras-total">R$ 0,00</strong></div>
@@ -15867,19 +15867,28 @@ function fillFgSelect(id,tipo,valorAtual){
   el.innerHTML='<option value="">Selecione...</option>'+_fgFornecedores(tipo).map(f=>`<option value="${f.nome}" ${f.nome===valorAtual?'selected':''}>${f.nome}</option>`).join('');
 }
 let _fglPedidoId='';
-let _fglExtras=[]; // [{valor:number,motivo}]
+let _fglExtras=[]; // [{valor:number,motivo,setor,id}]
+// Setores disponíveis pro gasto extra (2026-08-07, a pedido do usuário) — motivo e setor
+// viraram obrigatórios pra dar rastreabilidade: todo gasto extra salvo com valor vira um
+// registro automático no Diário de Obra (ver salvarFgLancamento), que por sua vez já reaparece
+// sozinho no Histórico de Pedidos (_histPedidoEventos itera p.diarios).
+const FGL_SETORES_GASTO_EXTRA=['PLANEJAMENTO','COMERCIAL','PRODUÇÃO','PROJETOS','QUALIDADE'];
 function _fglRenderExtras(){
   const wrap=document.getElementById('fgl-extras-list');
   if(!wrap)return;
   wrap.innerHTML=_fglExtras.map((e,i)=>`
-    <div style="display:grid;grid-template-columns:140px 1fr auto;gap:8px;align-items:center;margin-bottom:6px">
+    <div style="display:grid;grid-template-columns:120px 1fr 150px auto;gap:8px;align-items:center;margin-bottom:6px">
       <input class="fc" placeholder="R$ 0,00" value="${e.valor?Number(e.valor).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):''}" oninput="fmtMoney(this);_fglExtras[${i}].valor=moneyToNum(this.value);_fglAtualizarSaves()">
-      <input class="fc no-upper" placeholder="Motivo (ex.: taxa local, diária extra, estacionamento...)" value="${(e.motivo||'').replace(/"/g,'&quot;')}" oninput="_fglExtras[${i}].motivo=this.value">
+      <input class="fc no-upper" placeholder="Motivo do gasto (obrigatório)" value="${(e.motivo||'').replace(/"/g,'&quot;')}" oninput="_fglExtras[${i}].motivo=this.value">
+      <select class="fc" onchange="_fglExtras[${i}].setor=this.value">
+        <option value="">Setor...</option>
+        ${FGL_SETORES_GASTO_EXTRA.map(s=>`<option value="${s}" ${e.setor===s?'selected':''}>${s}</option>`).join('')}
+      </select>
       <button type="button" onclick="_fglExtras.splice(${i},1);_fglRenderExtras();_fglAtualizarSaves()" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:1rem" title="Remover">🗑️</button>
     </div>`).join('');
 }
 function fglAddExtra(){
-  _fglExtras.push({valor:0,motivo:''});
+  _fglExtras.push({valor:0,motivo:'',setor:'',id:'ge_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)});
   _fglRenderExtras();
 }
 // Recalcula os 3 Saves + Total Gasto ao vivo, toda vez que um Valor Fechado ou um gasto
@@ -15920,7 +15929,7 @@ function abrirFgLancar(pedidoId){
   setInp('fgl-fechado-inst',c.fechadoInst);
   setInp('fgl-fechado-frete',c.fechadoFrete);
   setInp('fgl-fechado-munque',c.fechadoMunque);
-  _fglExtras=Array.isArray(fg.gastosExtras)?fg.gastosExtras.map(e=>({valor:moneyToNum(e.valor),motivo:e.motivo||''})):[];
+  _fglExtras=Array.isArray(fg.gastosExtras)?fg.gastosExtras.map(e=>({valor:moneyToNum(e.valor),motivo:e.motivo||'',setor:e.setor||'',id:e.id||('ge_'+Date.now()+'_'+Math.random().toString(36).slice(2,7))})):[];
   _fglRenderExtras();
   _fglAtualizarSaves();
   openM('mo-fg-lancar');
@@ -15934,7 +15943,17 @@ async function salvarFgLancamento(){
   const fechadoInst=moneyToNum(document.getElementById('fgl-fechado-inst')?.value||0);
   const fechadoFrete=moneyToNum(document.getElementById('fgl-fechado-frete')?.value||0);
   const fechadoMunque=moneyToNum(document.getElementById('fgl-fechado-munque')?.value||0);
-  const gastosExtras=_fglExtras.filter(e=>moneyToNum(e.valor)>0||e.motivo).map(e=>({valor:fmtR(moneyToNum(e.valor)),motivo:(e.motivo||'').trim()}));
+  // Gasto extra "em uso" (algum campo preenchido) precisa ter os 3 campos completos — motivo e
+  // setor viraram obrigatórios (2026-08-07, a pedido do usuário) pra dar rastreabilidade: cada
+  // gasto extra vira um registro no Diário de Obra (data/hora + valor), ver abaixo.
+  const extrasEmUso=_fglExtras.filter(e=>moneyToNum(e.valor)>0||(e.motivo||'').trim()||e.setor);
+  for(const e of extrasEmUso){
+    if(!(moneyToNum(e.valor)>0)||!(e.motivo||'').trim()||!e.setor){
+      toast('Preencha valor, motivo e setor de todo gasto extra antes de salvar','terr');
+      return;
+    }
+  }
+  const gastosExtras=extrasEmUso.map(e=>({id:e.id,valor:fmtR(moneyToNum(e.valor)),motivo:(e.motivo||'').trim(),setor:e.setor}));
   p.fornGestao={
     instalador,transportadora,munque,
     fechadoInst:fmtR(fechadoInst),fechadoFrete:fmtR(fechadoFrete),fechadoMunque:fmtR(fechadoMunque),
@@ -15953,6 +15972,30 @@ async function salvarFgLancamento(){
   if(instalador)p.planTarefas.instalador={concluido:true,data:hojeTarefa,por:quemPreencheu};
   if(transportadora)p.planTarefas.frete={concluido:true,data:hojeTarefa,por:quemPreencheu};
   if(munque)p.planTarefas.elevacao={concluido:true,data:hojeTarefa,por:quemPreencheu};
+  // Cada gasto extra novo (com motivo+setor) vira um registro no Diário de Obra — data/hora do
+  // lançamento e valor — pra ficar rastreado; como p.diarios já reaparece sozinho no Histórico
+  // de Pedidos (_histPedidoEventos), não precisa duplicar lógica lá, só tratar o "origem:
+  // gastoExtra" pra um título/ícone melhor (ver _histPedidoEventos). Só registra 1x por gasto
+  // (marcado por gastoExtraId), mesmo que o lançamento seja salvo de novo depois com o mesmo
+  // gasto ainda na lista.
+  p.diarios=p.diarios||[];
+  const idsJaRegistrados=new Set(p.diarios.filter(d=>d.origem==='gastoExtra').map(d=>d.gastoExtraId));
+  const agora=new Date();
+  gastosExtras.forEach(e=>{
+    if(idsJaRegistrados.has(e.id))return;
+    p.diarios.push({
+      data:agora.toISOString().slice(0,10),
+      andamento:`Gasto extra registrado — Setor: ${e.setor} — Motivo: ${e.motivo} — Valor: ${e.valor}`,
+      fotos:[],
+      registradoPor:quemPreencheu,
+      registradoEm:agora.toISOString(),
+      origem:'gastoExtra',
+      gastoExtraId:e.id,
+      gastoExtraSetor:e.setor,
+      gastoExtraMotivo:e.motivo,
+      gastoExtraValor:e.valor
+    });
+  });
   await savePedidoFS(p);
   toast('Lançamento de fornecedores salvo','tok');
   closeM('mo-fg-lancar');
@@ -17953,6 +17996,14 @@ function _histPedidoEventos(p){
   // 5. Diários de Obra (2026-07-29) — um evento por registro do dia a dia, ordenado pela
   // Data escolhida no registro (que pode ser retroativa), não pela hora em que foi digitado.
   (p.diarios||[]).forEach(d=>{
+    // Gasto extra da Gestão de Fornecedores (2026-08-07) é gravado como um registro de Diário
+    // de Obra (ver salvarFgLancamento), mas ganha título/ícone/cor próprios aqui pra não se
+    // confundir com um registro manual de andamento — usa registradoEm (data+hora do
+    // lançamento) em vez de d.data pra refletir exatamente quando o gasto foi salvo.
+    if(d.origem==='gastoExtra'){
+      add('🧾','Gasto extra registrado',d.registradoEm||d.data,`Setor: ${d.gastoExtraSetor||'—'} · Motivo: ${d.gastoExtraMotivo||'—'} · Valor: ${d.gastoExtraValor||'—'} — registrado por ${d.registradoPor||'—'} (também no Diário de Obra)`,'#b45309');
+      return;
+    }
     const nFotos=(d.fotos||[]).length;
     const detalheDiario=`${d.andamento||'—'}${nFotos?' · '+nFotos+' foto(s)/vídeo(s)':''} — registrado por ${d.registradoPor||'—'}`;
     add('📔','Diário de obra registrado',d.data,detalheDiario,'#0891b2');
