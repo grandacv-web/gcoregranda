@@ -2381,6 +2381,24 @@ select.fc{cursor:pointer}
 </div>
 </div>
 
+<!-- MENUS POR USUÁRIO (2026-08-08) — Configurações→Usuários→🧩 Menus. Cada usuário cadastrado
+     pode ter os menus do sidebar customizados individualmente, independente da categoria de
+     cadastro (a categoria continua existindo só pra regra interna que precisa dela, ver
+     _menusPadraoPorCategoria/_temMenu no bloco de permissões). -->
+<div class="mov" id="mo-menus-usuario" onclick="cio(event,'mo-menus-usuario')">
+<div class="mvmod" style="width:420px;max-width:96vw">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <h3 style="margin-bottom:0">🧩 Menus do Usuário</h3>
+    <button onclick="closeM('mo-menus-usuario')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div id="mu-info" style="font-size:.78rem;color:var(--ink3);margin-bottom:12px;padding:8px 10px;background:#f8fafc;border-radius:8px;border:1px solid var(--border)"></div>
+  <input type="hidden" id="mu-email">
+  <div id="mu-lista" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-height:50vh;overflow-y:auto"></div>
+  <button onclick="salvarMenusUsuario()" style="width:100%;background:#0891b2;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer;margin-bottom:8px">💾 Salvar Menus</button>
+  <button onclick="restaurarMenusPadrao()" type="button" style="width:100%;background:none;border:1.5px solid var(--border);border-radius:10px;padding:8px;font-size:.75rem;font-weight:600;cursor:pointer;color:var(--ink3)">↺ Restaurar padrão da categoria</button>
+</div>
+</div>
+
 <!-- LANÇAR FORNECEDORES POR PEDIDO MODAL (Planejamento → Fornecedores, 2026-07-29) —
      Budget é sempre automático (70% do valor já cobrado do cliente naquele item, vindo da
      Emissão) e só-leitura; só o Valor Fechado (o que foi realmente negociado) é digitado. -->
@@ -3172,8 +3190,16 @@ window._fbRemoveUsuario=(email)=>{
   const b=writeBatch(db);
   b.update(ref,new FieldPath('usuarioNomes',email),deleteField());
   b.update(ref,new FieldPath('usuarioCats',email),deleteField());
+  // usuarioMenus (2026-08-08) — deleteField num campo que nunca existiu não dá erro, então é
+  // seguro incluir sempre, mesmo pra usuário que nunca teve os menus customizados.
+  b.update(ref,new FieldPath('usuarioMenus',email),deleteField());
   return b.commit();
 };
+// Exclusão atômica genérica de UM campo aninhado do cfg (2026-08-08) — usada pra "Restaurar
+// padrão da categoria" em Configurações→Usuários→🧩 Menus (tira a customização de
+// cfg.usuarioMenus[email] sem tocar em mais nada do documento). Mesmo motivo/padrão de
+// _fbUpdateUsuario/_fbUpdatePagConf acima.
+window._fbDeleteCfgField=(parts)=>updateDoc(doc(db,'sistema','config'),new FieldPath(...parts),deleteField());
 // Funções administrativas (Cloud Functions) — definir senha / apagar usuário direto no Firebase Auth, sem e-mail.
 window._fbAdminSetPassword=(email,newPassword)=>httpsCallable(functions,'adminSetPassword')({email,newPassword});
 window._fbAdminDeleteUser=(email)=>httpsCallable(functions,'adminDeleteUser')({email});
@@ -4532,7 +4558,10 @@ function buildSidebarCats(){
   // _podeVerVisaoComercial(). Categorias de setor (Compras/Produção/Projetos/PCP/Qualidade)
   // deixam de ver esse botão (2026-08-03), além de RH/Planejamento puros que já não viam.
   if(elSbGeral)elSbGeral.style.display=(_rhOnlySidebar||_planOnlySidebar||!_podeVerVisaoComercial())?'none':'';
-  const cats=_rhOnlySidebar?['RH']:_planOnlySidebar?['LISTA_PEDIDOS','PLANEJAMENTO']:['FERRAMENTAS','HISTORICO',...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['LISTA_PEDIDOS','PLANEJAMENTO']:[]),...(_isSetorUser('PROJETOS')?['PROJETOS']:[]),...(_isSetorUser('COMPRAS')?['COMPRAS']:[]),...(_isSetorUser('PRODUÇÃO')?['PRODUÇÃO']:[]),...(_isRhUser()?['RH']:[])];
+  // Ferramentas/Histórico agora também passam por _temMenu (2026-08-08) — continuam aparecendo
+  // por padrão pra todo mundo (ver _menusPadraoPorCategoria), mas o admin pode tirar de um
+  // usuário específico em Configurações→Usuários→🧩 Menus.
+  const cats=_rhOnlySidebar?['RH']:_planOnlySidebar?['LISTA_PEDIDOS','PLANEJAMENTO']:[...(_temAcessoFerramentas()?['FERRAMENTAS']:[]),...(_temAcessoHistorico()?['HISTORICO']:[]),...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['LISTA_PEDIDOS','PLANEJAMENTO']:[]),...(_isSetorUser('PROJETOS')?['PROJETOS']:[]),...(_isSetorUser('COMPRAS')?['COMPRAS']:[]),...(_isSetorUser('PRODUÇÃO')?['PRODUÇÃO']:[]),...(_isRhUser()?['RH']:[])];
   const catIcons={'FERRAMENTAS':'🧰','RH':'👥','FINANCEIRO':'💰','COMPRAS':'🛒','PCP':'📋','PRODUÇÃO':'🏭','QUALIDADE':'✅','PLANEJAMENTO':'🏗️','PROJETOS':'📐','HISTORICO':'🔍','COMISSAO_PLANEJAMENTO':'📈','LISTA_PEDIDOS':'📦'};
   const catLabelsSidebar={'FERRAMENTAS':'FERRAMENTAS','HISTORICO':'HISTÓRICO DE PEDIDOS','COMISSAO_PLANEJAMENTO':'COMISSÃO PLANEJAMENTO','LISTA_PEDIDOS':'LISTA DE PEDIDOS'};
   container.innerHTML=cats.map(cat=>`
@@ -4549,6 +4578,57 @@ function _getUserCat(){
   const email=(usuarioLogado?.email||'').toLowerCase();
   return {cat:usuarioLogado?.categoria||(cfg.usuarioCats&&cfg.usuarioCats[email])||'',email,isAdm:(usuarioLogado?.categoria==='ADMINISTRADOR'||_ADMINS.includes(email))};
 }
+// Menus por usuário (2026-08-08, a pedido do usuário: "quero poder editar quais menus cada
+// usuario pode ver"). Cada usuário cadastrado pode ter uma lista PRÓPRIA de menus em
+// cfg.usuarioMenus[email] (array de chaves, ver MENUS_TOGGLE_DEFS), editável em Configurações→
+// Usuários→🧩 Menus, totalmente independente da categoria de cadastro (COMERCIAL/PLANEJAMENTO/
+// etc.) — a categoria continua existindo só pra regra interna que precisa dela (ex: tipo
+// Vendedor/Prospecção e comissão do Comercial). Sem customização (cfg.usuarioMenus[email]
+// indefinido), o usuário mantém EXATAMENTE o que a categoria já dava antes dessa tela existir
+// (ver _menusPadraoPorCategoria, que replica a lógica antiga de buildSidebarCats/setSection) —
+// ninguém perde acesso por causa dessa feature. Admin sempre vê tudo, não importa o que estiver
+// marcado (_menusEfetivosLogado devolve null pra admin = sem restrição, ver _temMenu).
+const MENUS_TOGGLE_DEFS=[
+  {key:'GERAL',label:'Visão Comercial (Vendas/Gráficos/Metas)'},
+  {key:'FERRAMENTAS',label:'Ferramentas'},
+  {key:'HISTORICO',label:'Histórico de Pedidos'},
+  {key:'FINANCEIRO',label:'Financeiro'},
+  {key:'LISTA_PEDIDOS',label:'Lista de Pedidos'},
+  {key:'PLANEJAMENTO',label:'Planejamento'},
+  {key:'PROJETOS',label:'Projetos'},
+  {key:'COMPRAS',label:'Compras'},
+  {key:'PRODUÇÃO',label:'Produção'},
+  {key:'RH',label:'RH'}
+];
+function _menusPadraoPorCategoria(cat){
+  if(cat==='RH')return['RH'];
+  if(cat==='PLANEJAMENTO')return['LISTA_PEDIDOS','PLANEJAMENTO'];
+  const m=['FERRAMENTAS','HISTORICO'];
+  if(cat==='COMERCIAL'||cat==='FINANCEIRO')m.push('GERAL');
+  if(cat==='FINANCEIRO')m.push('FINANCEIRO');
+  if(cat==='PROJETOS')m.push('PROJETOS');
+  if(cat==='COMPRAS')m.push('COMPRAS');
+  if(cat==='PRODUÇÃO')m.push('PRODUÇÃO');
+  return m;
+}
+// Menus efetivos de um e-mail qualquer (pra tela de edição do admin) — lista customizada se
+// existir, senão o padrão da categoria dele.
+function _menusEfetivosPara(email,cat){
+  const custom=cfg.usuarioMenus&&cfg.usuarioMenus[(email||'').toLowerCase()];
+  return Array.isArray(custom)?custom:_menusPadraoPorCategoria(cat);
+}
+// Menus efetivos do usuário LOGADO — null pra admin (sem restrição nenhuma).
+function _menusEfetivosLogado(){
+  const{cat,isAdm,email}=_getUserCat();
+  if(isAdm)return null;
+  return _menusEfetivosPara(email,cat);
+}
+function _temMenu(key){
+  const m=_menusEfetivosLogado();
+  return m===null||m.includes(key);
+}
+function _temAcessoFerramentas(){return _temMenu('FERRAMENTAS');}
+function _temAcessoHistorico(){return _temMenu('HISTORICO');}
 function setSection(sec){
   // Trava de acesso à "Visão Comercial" (Vendas do Mês/Lista de Emissão/Gráficos/Metas) —
   // só Comercial, Financeiro ou admin. Bug relatado pela Isabela (Planejamento) conseguindo
@@ -4587,6 +4667,18 @@ function setSection(sec){
   // RH (2026-07-29) — só admin ou categoria RH (cadastro de usuário já tinha essa opção em
   // CATEGORIAS_USUARIOS, só faltava o gate de tela e o menu de verdade).
   if(sec==='cat:RH'&&!_isRhUser()){
+    toast('ACESSO NÃO PERMITIDO','terr');
+    return;
+  }
+  // Ferramentas/Histórico (2026-08-08) — antes eram fixos pra qualquer logado, sem gate
+  // nenhum aqui (só o botão do sidebar existia). Agora que dá pra tirar isso de um usuário
+  // específico em Configurações→Usuários→🧩 Menus, precisam de trava de verdade também, senão
+  // dava pra forçar acesso pelo console mesmo sem o botão aparecer.
+  if(sec==='cat:FERRAMENTAS'&&!_temAcessoFerramentas()){
+    toast('ACESSO NÃO PERMITIDO','terr');
+    return;
+  }
+  if(sec==='cat:HISTORICO'&&!_temAcessoHistorico()){
     toast('ACESSO NÃO PERMITIDO','terr');
     return;
   }
@@ -8465,7 +8557,8 @@ async function renderUserList(){
       lista.innerHTML=entries.map(([email,nome])=>
         `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #b2ebf2;gap:4px">
           <span style="flex:1;min-width:0"><strong>${nome}</strong><br><span style="color:#0891b2;font-size:.70rem">${email}</span></span>
-          <div style="display:flex;gap:4px;flex-shrink:0">
+          <div style="display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+            <button onclick="abrirMenusUsuario('${email}')" style="background:#f5f3ff;border:1px solid #c4b5fd;border-radius:6px;cursor:pointer;color:#6d28d9;font-size:.7rem;padding:3px 7px;font-weight:600" title="Escolher quais menus esse usuário pode ver">🧩 Menus</button>
             <button onclick="recriarUsuario('${email}')" style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;cursor:pointer;color:#16a34a;font-size:.7rem;padding:3px 7px;font-weight:600" title="Criar/Redefinir senha manualmente">🔑 Nova Senha</button>
             <button onclick="resetarSenhaEmail('${email}')" style="background:#eff6ff;border:1px solid #93c5fd;border-radius:6px;cursor:pointer;color:#1d4ed8;font-size:.7rem;padding:3px 7px;font-weight:600" title="Enviar email de redefinição">📧 Email Reset</button>
             <button onclick="removerNomeUsuario('${email}')" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.8rem;padding:2px 6px" title="Remover">✕</button>
@@ -8478,10 +8571,79 @@ async function renderUserList(){
   }
 }
 
+// 🧩 Menus por usuário (2026-08-08) — abre a checklist com os menus efetivos daquele e-mail
+// pré-marcados (customizados se já existir cfg.usuarioMenus[email], senão o padrão da
+// categoria de cadastro dele, ver _menusEfetivosPara). ADMINISTRADOR sempre vê tudo na prática
+// (bypass em _temMenu), então avisamos aqui em vez de deixar o admin achar que restringiu algo.
+function abrirMenusUsuario(email){
+  const nome=(cfg.usuarioNomes&&cfg.usuarioNomes[email])||email;
+  const cat=(cfg.usuarioCats&&cfg.usuarioCats[email])||'';
+  const efetivo=_menusEfetivosPara(email,cat);
+  const custom=!!(cfg.usuarioMenus&&cfg.usuarioMenus[email]);
+  const elEmail=document.getElementById('mu-email');
+  if(elEmail)elEmail.value=email;
+  const info=document.getElementById('mu-info');
+  if(info){
+    info.innerHTML=`<strong>${nome}</strong><br>${email}<br>Categoria de cadastro: ${cat||'—'} · ${custom?'menus customizados':'usando padrão da categoria'}`
+      +(cat==='ADMINISTRADOR'?'<br><span style="color:#b45309">⚠️ Administrador sempre vê todos os menus, essa lista não tem efeito nele.</span>':'');
+  }
+  const listaEl=document.getElementById('mu-lista');
+  if(listaEl){
+    listaEl.innerHTML=MENUS_TOGGLE_DEFS.map(m=>`
+      <label style="display:flex;align-items:center;gap:8px;font-size:.82rem;cursor:pointer">
+        <input type="checkbox" class="mu-chk" value="${m.key}" ${efetivo.includes(m.key)?'checked':''}>
+        ${m.label}
+      </label>`).join('');
+  }
+  openM('mo-menus-usuario');
+}
+async function salvarMenusUsuario(){
+  const email=document.getElementById('mu-email')?.value;
+  if(!email)return;
+  const selecionados=[...document.querySelectorAll('.mu-chk:checked')].map(c=>c.value);
+  if(!cfg.usuarioMenus)cfg.usuarioMenus={};
+  cfg.usuarioMenus[email]=selecionados;
+  try{
+    if(window._fbUpdateUsuario){
+      await window._fbUpdateUsuario([[['usuarioMenus',email],selecionados]]);
+    } else if(window._fbSaveCfg){
+      await window._fbSaveCfg(cfg);
+    }
+  }catch(e){
+    console.error('Erro ao salvar menus do usuário via updateDoc, tentando fallback completo',e);
+    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  toast('Menus salvos para '+email,'tok');
+  closeM('mo-menus-usuario');
+  if(typeof buildSidebarCats==='function')buildSidebarCats();
+}
+async function restaurarMenusPadrao(){
+  const email=document.getElementById('mu-email')?.value;
+  if(!email)return;
+  if(!confirm('Remover a customização e voltar pro padrão da categoria de cadastro desse usuário?'))return;
+  if(cfg.usuarioMenus)delete cfg.usuarioMenus[email];
+  try{
+    if(window._fbDeleteCfgField){
+      await window._fbDeleteCfgField(['usuarioMenus',email]);
+    } else if(window._fbSaveCfg){
+      await window._fbSaveCfg(cfg);
+    }
+  }catch(e){
+    console.error('Erro ao restaurar menus padrão via updateDoc, tentando fallback completo',e);
+    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  toast('Menus voltaram ao padrão da categoria','tok');
+  closeM('mo-menus-usuario');
+  if(typeof buildSidebarCats==='function')buildSidebarCats();
+}
+
 async function removerNomeUsuario(email){
   if(!confirm('Remover '+email+' definitivamente (inclusive o login no Firebase)?'))return;
   if(cfg.usuarioNomes)delete cfg.usuarioNomes[email];
   if(cfg.usuarioCats)delete cfg.usuarioCats[email];
+  if(cfg.usuarioMenus)delete cfg.usuarioMenus[email];
   // Remoção atômica (FieldPath deleteField) em vez de setDoc(cfg inteiro) — mesmo motivo do
   // addUser(), ver comentário em _fbUpdateUsuario/_fbRemoveUsuario no bloco do Firebase.
   try{
@@ -12875,15 +13037,15 @@ async function gerarPDFDRE(){
 }
 
 function _isFinanceiroUser(){
-  const {cat,isAdm}=_getUserCat();
-  return isAdm||cat==='FINANCEIRO';
+  // 2026-08-08: passou a checar a lista de menus efetivos (_temMenu), que já cai no padrão da
+  // categoria FINANCEIRO se o usuário nunca teve os menus customizados — ver _menusEfetivosLogado.
+  return _temMenu('FINANCEIRO');
 }
 // Mesmo padrão de _isFinanceiroUser() — categoria PLANEJAMENTO já existe em
 // CATEGORIAS_USUARIOS (cadastro de usuário), só faltava o gate de tela (2026-07-22, novo
 // menu Planejamento → Finalização de Obra).
 function _isPlanejamentoUser(){
-  const {cat,isAdm}=_getUserCat();
-  return isAdm||cat==='PLANEJAMENTO';
+  return _temMenu('PLANEJAMENTO');
 }
 // Perfil PLANEJAMENTO "puro" (não-admin) — a pedido do usuário (2026-08-03, mesmo padrão do
 // RH puro, ver _isRhOnly()): quem tem categoria PLANEJAMENTO e NÃO é admin só deve enxergar o
@@ -12892,8 +13054,14 @@ function _isPlanejamentoUser(){
 // Vendas do Mês — setSection('geral') não tinha trava nenhuma antes disso. Admin continua
 // vendo tudo normalmente mesmo logando com e-mail cadastrado como PLANEJAMENTO.
 function _isPlanejamentoOnly(){
-  const{cat,isAdm}=_getUserCat();
-  return cat==='PLANEJAMENTO'&&!isAdm;
+  // 2026-08-08: generalizado pra qualquer usuário cuja lista efetiva de menus seja só
+  // Planejamento (+Lista de Pedidos) — sem Visão Comercial nem Ferramentas. Antes checava só a
+  // categoria PLANEJAMENTO; agora funciona também pra quem foi customizado manualmente pra ficar
+  // restrito a esse único menu.
+  const{isAdm}=_getUserCat();
+  if(isAdm)return false;
+  const m=_menusEfetivosLogado();
+  return !!m&&m.includes('PLANEJAMENTO')&&!m.includes('GERAL')&&!m.includes('FERRAMENTAS');
 }
 // "Visão Comercial" (Vendas do Mês/Lista de Emissão/Gráficos/Metas) só é pra Comercial,
 // Financeiro (extensão já decidida em 2026-07-03 — "só Financeiro fica no menu além de Visão
@@ -12901,8 +13069,7 @@ function _isPlanejamentoOnly(){
 // Qualidade) nunca tiveram motivo pra ver valor de venda por vendedor, e por engano
 // conseguiam abrir "geral" direto — não existia trava nenhuma nessa seção (2026-08-03).
 function _podeVerVisaoComercial(){
-  const{cat,isAdm}=_getUserCat();
-  return isAdm||cat==='COMERCIAL'||cat==='FINANCEIRO';
+  return _temMenu('GERAL');
 }
 
 // ===================== PLANEJAMENTO — FINALIZAÇÃO DE OBRA (2026-07-22) =====================
@@ -13783,8 +13950,7 @@ function _lpRequerAtencao(x,mapaProducao,mapaInstalacao){
 }
 // ===================== FIM CAPACIDADE DIÁRIA =====================
 function _isSetorUser(setorKey){
-  const{cat,isAdm}=_getUserCat();
-  return isAdm||cat===setorKey;
+  return _temMenu(setorKey);
 }
 function _lpStatusEtapa(p,etapa,hojeIso){
   const baixa=p.lpBaixas&&p.lpBaixas[etapa.key];
@@ -16754,15 +16920,18 @@ function renderComissaoPlanejamento(){
 // dia a dia. Validado em Python/BeautifulSoup contra o arquivo real de exemplo (ADRIANO
 // MIGLIORINI, RH/horario colaborador.xls) antes de portar pra JS.
 function _isRhUser(){
-  const{cat,isAdm}=_getUserCat();
-  return isAdm||cat==='RH';
+  return _temMenu('RH');
 }
 // Perfil RH "puro" (não-admin) — a pedido do usuário (2026-07-30): quem tem categoria RH e
 // NÃO é admin só deve enxergar o Menu RH, nada mais (nem Visão Comercial, nem Ferramentas,
 // nem Histórico). Admin continua vendo tudo normalmente mesmo logando com esse e-mail.
 function _isRhOnly(){
-  const{cat,isAdm}=_getUserCat();
-  return cat==='RH'&&!isAdm;
+  // 2026-08-08: mesma generalização de _isPlanejamentoOnly() — trava quem tem só RH na lista
+  // efetiva de menus, sem Visão Comercial nem Ferramentas, e não só quem tem categoria RH.
+  const{isAdm}=_getUserCat();
+  if(isAdm)return false;
+  const m=_menusEfetivosLogado();
+  return !!m&&m.includes('RH')&&!m.includes('GERAL')&&!m.includes('FERRAMENTAS');
 }
 function _rhNorm(s){
   return String(s==null?'':s).replace(/ /g,' ').replace(/\s+/g,' ').trim();
