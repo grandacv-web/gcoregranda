@@ -4827,6 +4827,12 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
       const sl=document.getElementById('lp-sec-lista'),sk=document.getElementById('lp-sec-kanban'),sc=document.getElementById('lp-sec-calendario');
       if(sl)sl.style.display='';if(sk)sk.style.display='none';if(sc)sc.style.display='none';
       if(typeof lpSetTab==='function')_lpTabAtiva='lista';
+      // Sempre reabre com o filtro de Status em "Em andamento" (2026-08-08, a pedido do
+      // usuário) — troca de aba Lista/Kanban/Calendário dentro do menu (lpSetTab) NÃO mexe
+      // nisso, só reabrir o menu pelo menu lateral. O usuário pode trocar o filtro à vontade
+      // depois, fica só valendo até a próxima vez que sair e voltar pro menu.
+      const filStatusEl=document.getElementById('lp-fil-status');
+      if(filStatusEl)filStatusEl.value='andamento';
       if(typeof renderListaPedidos==='function')renderListaPedidos();
     }catch(e){console.error('Erro ao abrir Lista de Pedidos',e);}},120);
     // PROJETOS ganhou visão própria em Lista/Kanban/Calendário (2026-07-31, mesmo padrão da
@@ -15219,6 +15225,17 @@ function _lpListaFiltrada(){
 // filtram o pedido inteiro lá em _lpListaFiltrada, então aqui só repassam todas as etapas dele.
 function _lpEventosFiltrados(){
   const filEtapa=document.getElementById('lp-fil-etapa')?.value||'';
+  // Corrigido 2026-08-08, a pedido do usuário: o filtro de Status (Atrasados/Em andamento/
+  // Concluídos) filtrava só o PEDIDO como um todo (via _lpListaFiltrada, ex.: "andamento" =
+  // pedido ainda não finalizado no Planejamento) e depois soltava TODAS as etapas aplicáveis
+  // daquele pedido no Kanban/Calendário — inclusive as que já tinham baixa dada. Resultado:
+  // filtrar "Em andamento" mostrava cards com "✅ Baixa dada" (pedido como um todo ainda em
+  // andamento, mas aquela etapa específica já concluída). Agora o filtro também é aplicado por
+  // EVENTO (cada card = 1 etapa), usando o status real daquela etapa (_lpStatusEtapa), não o
+  // status do pedido inteiro. A aba "Lista" (renderListaPedidos, 1 linha = 1 pedido inteiro)
+  // continua usando só _lpListaFiltrada() sem essa filtragem extra — lá "Em andamento" do
+  // pedido como um todo continua fazendo sentido.
+  const filStatus=document.getElementById('lp-fil-status')?.value||'';
   const filDataCampo=document.getElementById('lp-fil-data-campo')?.value||'';
   const filDataDe=document.getElementById('lp-fil-data-de')?.value||'';
   const filDataAte=document.getElementById('lp-fil-data-ate')?.value||'';
@@ -15249,7 +15266,14 @@ function _lpEventosFiltrados(){
       eventos.push({p:x.p,etapa:e,atrasadoPedido:x.atrasado,concluidoPedido:x.concluido,statusEtapa:_lpStatusEtapa(x.p,e,hojeIso)});
     });
   });
-  return eventos;
+  // Filtro de status por EVENTO (ver comentário no topo da função) — "incompletos" não se
+  // aplica aqui (pedido com dado faltando nem chega a gerar evento, calc.ok já é false lá em
+  // _lpListaFiltrada), então passa tudo o que já veio.
+  if(filStatus==='atrasados')return eventos.filter(ev=>ev.statusEtapa==='atrasado');
+  if(filStatus==='andamento')return eventos.filter(ev=>ev.statusEtapa==='pendente');
+  if(filStatus==='concluidos')return eventos.filter(ev=>ev.statusEtapa==='ok');
+  if(filStatus==='incompletos')return eventos;
+  return eventos.filter(ev=>ev.statusEtapa!=='ok'); // padrão: "Todos (em andamento + atrasados)"
 }
 let _lpTabAtiva='lista';
 // Cache do que gerou a badge "⚠️ N pedidos requerem atenção" no último render de
