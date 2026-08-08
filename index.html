@@ -3019,7 +3019,7 @@ select.fc{cursor:pointer}
 <script type="module">
 import{initializeApp,deleteApp}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
 import{getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged,createUserWithEmailAndPassword,sendPasswordResetEmail,EmailAuthProvider,reauthenticateWithCredential}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
-import{getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,onSnapshot,getDocs,FieldPath,writeBatch}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
+import{getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,deleteField,onSnapshot,getDocs,FieldPath,writeBatch}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-functions.js';
 
 const firebaseConfig={
@@ -3148,6 +3148,32 @@ window._fbWatchCfg=(cb)=>onSnapshot(doc(db,'sistema','config'),snap=>{if(snap.ex
 // ITAQUA GARDEN SHOP, ambos com data de parcela no confKey). new FieldPath(...) trata cada
 // parte como valor literal, sem parsear caractere nenhum dentro dela.
 window._fbUpdatePagConf=(confKey,data)=>updateDoc(doc(db,'sistema','config'),new FieldPath('pagConf',confKey),data);
+// Escrita ATÔMICA de usuário (nome/categoria/comissão) — mesmo padrão e mesmo motivo do
+// _fbUpdatePagConf acima (2026-08-08). Causa raiz encontrada: addUser()/removerNomeUsuario()
+// gravavam via _fbSaveCfg(cfg), que é setDoc SEM merge do documento 'config' INTEIRO com o que
+// estivesse em memória (`cfg`) naquele instante. Se dois cadastros/remoções de usuário
+// acontecessem perto um do outro (duas abas, ou um save de qualquer outra tela do sistema
+// disparando logo depois), o snapshot intermediário recebido pelo listener podia sobrescrever
+// localmente cfg.usuarioNomes/cfg.usuarioCats por uma versão sem o usuário recém-criado — e o
+// próximo _fbSaveCfg(cfg) qualquer regravava essa perda como se o usuário nunca tivesse sido
+// cadastrado. Sintoma relatado: Roberson/Isabela/Lucas continuavam logando normal (a conta no
+// Firebase Auth nunca foi tocada) mas sumiam da lista de Usuários e perdiam a categoria — e sem
+// categoria, o sidebar esconde os menus de setor (Planejamento/Projetos/etc., ver
+// buildSidebarCats/_isPlanejamentoOnly). writeBatch com FieldPath grava só os campos passados,
+// nunca depende do resto do cfg em memória, então essa perda não pode mais acontecer aqui.
+window._fbUpdateUsuario=(fields)=>{
+  const ref=doc(db,'sistema','config');
+  const b=writeBatch(db);
+  fields.forEach(([parts,val])=>b.update(ref,new FieldPath(...parts),val));
+  return b.commit();
+};
+window._fbRemoveUsuario=(email)=>{
+  const ref=doc(db,'sistema','config');
+  const b=writeBatch(db);
+  b.update(ref,new FieldPath('usuarioNomes',email),deleteField());
+  b.update(ref,new FieldPath('usuarioCats',email),deleteField());
+  return b.commit();
+};
 // Funções administrativas (Cloud Functions) — definir senha / apagar usuário direto no Firebase Auth, sem e-mail.
 window._fbAdminSetPassword=(email,newPassword)=>httpsCallable(functions,'adminSetPassword')({email,newPassword});
 window._fbAdminDeleteUser=(email)=>httpsCallable(functions,'adminDeleteUser')({email});
@@ -4027,6 +4053,7 @@ let _atrasadosProjComprasMigracaoFeita=false;
 let _atrasadosLpMigracaoFeita=false;
 let _centrosCustoExtraMigracaoFeita=false;
 let _centrosCustoExtra2RemocaoMigracaoFeita=false;
+let _restaurarUsuariosMigracaoFeita=false;
 function setupRealtimeSync(){
   if(!window._fbWatchPedidos)return;
   window._fbWatchPedidos(function(snapshot){
@@ -4105,6 +4132,13 @@ function setupRealtimeSync(){
     if(!_centrosCustoExtra2RemocaoMigracaoFeita&&_getUserCat().isAdm){
       _centrosCustoExtra2RemocaoMigracaoFeita=true;
       _migrarRemoverCentrosCustoExtra2().catch(e=>{_centrosCustoExtra2RemocaoMigracaoFeita=false;console.error('Erro ao remover 2º lote de Centros de Custo extras',e);});
+    }
+    // Restauração pontual (2026-08-08, a pedido do usuário) — recoloca Roberson/Isabela/Lucas
+    // na lista de Usuários e devolve a categoria de cada um, ver _migrarRestaurarUsuariosSumidos20260808.
+    // Mesmo padrão de flag PERSISTIDO, só admin, idempotente.
+    if(!_restaurarUsuariosMigracaoFeita&&_getUserCat().isAdm){
+      _restaurarUsuariosMigracaoFeita=true;
+      _migrarRestaurarUsuariosSumidos20260808().catch(e=>{_restaurarUsuariosMigracaoFeita=false;console.error('Erro na migração de restauração de usuários',e);});
     }
     // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache)
     // montado ANTES dessa atualização de pedidos — editar OS/valores/vendedor num pedido
@@ -8359,23 +8393,40 @@ async function addUser(){
     cfg.usuarioNomes[em]=nome;
     if(!cfg.usuarioCats)cfg.usuarioCats={};
     cfg.usuarioCats[em]=cat;
+    // Campos a gravar de forma atômica (FieldPath) — ver comentário em _fbUpdateUsuario logo
+    // acima da definição, no bloco do Firebase. Nunca mais um setDoc(cfg inteiro) aqui.
+    const _campos=[[['usuarioNomes',em],nome],[['usuarioCats',em],cat]];
     if(cat==='COMERCIAL'){
       if(!cfg.comercialTipo)cfg.comercialTipo={};
       cfg.comercialTipo[nome]=tipoCom;
+      _campos.push([['comercialTipo',nome],tipoCom]);
       if(tipoCom==='VENDEDOR'){
         const pb=parseFloat(document.getElementById('nu-pct-bate')?.value);
         const pn=parseFloat(document.getElementById('nu-pct-naobate')?.value);
         if(!isNaN(pb)||!isNaN(pn)){
           if(!cfg.pctComissaoPessoal)cfg.pctComissaoPessoal={};
-          cfg.pctComissaoPessoal[nome]={bate:isNaN(pb)?null:pb,naoBate:isNaN(pn)?null:pn};
+          const _pc={bate:isNaN(pb)?null:pb,naoBate:isNaN(pn)?null:pn};
+          cfg.pctComissaoPessoal[nome]=_pc;
+          _campos.push([['pctComissaoPessoal',nome],_pc]);
         }
       } else if(tipoCom==='PROSPECCAO'){
         const po=parseFloat(document.getElementById('nu-pct-orc')?.value);
         if(!cfg.pctComissaoProspeccao)cfg.pctComissaoProspeccao={};
-        cfg.pctComissaoProspeccao[nome]=isNaN(po)?0:po;
+        const _po=isNaN(po)?0:po;
+        cfg.pctComissaoProspeccao[nome]=_po;
+        _campos.push([['pctComissaoProspeccao',nome],_po]);
       }
     }
-    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+    try{
+      if(window._fbUpdateUsuario){
+        await window._fbUpdateUsuario(_campos);
+      } else if(window._fbSaveCfg){
+        await window._fbSaveCfg(cfg);
+      }
+    }catch(e){
+      console.error('Erro ao gravar usuário via updateDoc/batch, tentando fallback completo',e);
+      if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+    }
     localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
     if(jaExistia&&senhaForcada){
       toast('✅ Conta já existia — senha atualizada na hora! '+nome+' ('+em+') já pode entrar com a senha nova.','tok');
@@ -8431,7 +8482,18 @@ async function removerNomeUsuario(email){
   if(!confirm('Remover '+email+' definitivamente (inclusive o login no Firebase)?'))return;
   if(cfg.usuarioNomes)delete cfg.usuarioNomes[email];
   if(cfg.usuarioCats)delete cfg.usuarioCats[email];
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  // Remoção atômica (FieldPath deleteField) em vez de setDoc(cfg inteiro) — mesmo motivo do
+  // addUser(), ver comentário em _fbUpdateUsuario/_fbRemoveUsuario no bloco do Firebase.
+  try{
+    if(window._fbRemoveUsuario){
+      await window._fbRemoveUsuario(email);
+    } else if(window._fbSaveCfg){
+      await window._fbSaveCfg(cfg);
+    }
+  }catch(e){
+    console.error('Erro ao remover usuário via updateDoc/batch, tentando fallback completo',e);
+    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderUserList();
   try{
@@ -10946,6 +11008,51 @@ async function _migrarRemoverCentrosCustoExtra2(){
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   if(typeof renderCentrosCusto==='function')renderCentrosCusto();
   if(removidos)toast(`${removidos} Centro(s) de Custo removido(s)`,'tok');
+}
+// Restauração pontual (2026-08-08, a pedido do usuário) — Roberson, Isabela e Lucas
+// continuavam logando normal mas tinham sumido da lista de Usuários e perdido a categoria, por
+// causa da race condition corrigida em addUser()/removerNomeUsuario() (ver _fbUpdateUsuario no
+// bloco do Firebase, e o comentário lá em cima com a causa raiz completa). A conta de cada um
+// no Firebase Auth nunca foi tocada — só a entrada em cfg.usuarioNomes/usuarioCats sumiu — por
+// isso essa migração só recria essas duas entradas, sem mexer em senha nem recriar login
+// nenhum. Idempotente e com flag PERSISTIDO (cfg.migRestaurarUsuarios20260808Feita): só recria
+// a entrada se ela já não existir (não sobrescreve categoria se alguém já tiver corrigido na
+// mão antes desta migração rodar), e só roda de verdade uma vez pra sempre.
+const _RESTAURAR_USUARIOS_20260808=[
+  {email:'planejamento1@granda.ind.br',nome:'ROBERSON CASTILHO',cat:'PLANEJAMENTO'},
+  {email:'logistica2@granda.ind.br',nome:'ISABELA PRADO',cat:'PLANEJAMENTO'},
+  {email:'projetos1@granda.ind.br',nome:'LUCAS PRADO',cat:'PROJETOS'}
+];
+async function _migrarRestaurarUsuariosSumidos20260808(){
+  if(cfg.migRestaurarUsuarios20260808Feita)return;
+  if(!cfg.usuarioNomes)cfg.usuarioNomes={};
+  if(!cfg.usuarioCats)cfg.usuarioCats={};
+  const _campos=[];
+  let restaurados=0;
+  _RESTAURAR_USUARIOS_20260808.forEach(u=>{
+    if(!cfg.usuarioNomes[u.email]||!cfg.usuarioCats[u.email]){
+      cfg.usuarioNomes[u.email]=u.nome;
+      cfg.usuarioCats[u.email]=u.cat;
+      _campos.push([['usuarioNomes',u.email],u.nome]);
+      _campos.push([['usuarioCats',u.email],u.cat]);
+      restaurados++;
+    }
+  });
+  cfg.migRestaurarUsuarios20260808Feita=true;
+  _campos.push([['migRestaurarUsuarios20260808Feita'],true]);
+  try{
+    if(window._fbUpdateUsuario){
+      await window._fbUpdateUsuario(_campos);
+    } else if(window._fbSaveCfg){
+      await window._fbSaveCfg(cfg);
+    }
+  }catch(e){
+    console.error('Erro na migração de restauração de usuários',e);
+    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  if(typeof renderUserList==='function')renderUserList();
+  if(restaurados)toast(`${restaurados} usuário(s) restaurado(s) na lista`,'tok');
 }
 const GRUPO_DRE_LABEL={CMV:'Custo de Produção (CMV)',OPERACIONAL:'Despesas Operacionais',FINANCEIRA:'Despesas Financeiras',IMPOSTOS:'Impostos',IMOBILIZADO:'Imobilizado (Bem Financiado)',NAO_CLASSIFICADO:'Não Classificado'};
 function _normSemAcento(s){
