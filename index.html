@@ -1534,19 +1534,55 @@ select.fc{cursor:pointer}
       </div>
     </div>
     <div id="sec-cat-PRODUCAO" style="display:none">
+      <div class="dash-tabs" style="margin-bottom:14px" id="prod-main-tabs">
+        <button class="dash-tab active prod-main-tab" onclick="prodSetTab('lista',this)">📋 Lista</button>
+        <button class="dash-tab prod-main-tab" onclick="prodSetTab('kanban',this)">🗂️ Kanban</button>
+        <button class="dash-tab prod-main-tab" onclick="prodSetTab('calendario',this)">📅 Calendário</button>
+      </div>
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
-        🏭 Tarefas do setor de Produção — Produção, Recebimento de Corte Galvanizado e Recebimento de Adesivo (2026-08-04, saíram de Compras). Dê baixa em cada uma assim que estiver pronta.
+        🏭 Cada pedido passa por um checklist de 3 subtarefas — Recebimento de Corte Galvanizado, Recebimento de Adesivos e Produzir — antes de ser considerado pronto. Clique em "Iniciar Produção" pra abrir; cada baixa continua indo pro Histórico do pedido, igual sempre foi. A Produção é distribuída em fatias de até <strong id="prod-cap-valor">—</strong> por dia útil, recuando a partir do prazo — o Calendário mostra quais dias já estão ocupados e quais estão livres pra novas vendas.
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
-        <input id="st-producao-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="renderSetorTarefas('PRODUÇÃO')" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
-        <select id="st-producao-fil" onchange="renderSetorTarefas('PRODUÇÃO')" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
-          <option value="">Pendentes + Atrasadas</option>
-          <option value="pendentes">🔵 Pendentes</option>
-          <option value="atrasadas">🔴 Atrasadas</option>
-          <option value="concluidas">✅ Concluídas</option>
+        <input id="prod-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="prodRenderAtivo()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
+        <select id="prod-fil-status" onchange="prodRenderAtivo()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+          <option value="">Todos (exceto concluídos)</option>
+          <option value="nao_iniciado">⚪ Não iniciados</option>
+          <option value="andamento">🔵 Em andamento</option>
+          <option value="atrasado">🔴 Atrasados</option>
+          <option value="concluido">✅ Concluídos</option>
         </select>
       </div>
-      <div id="st-producao-body"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+        <select id="prod-fil-data-campo" onchange="prodRenderAtivo()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+          <option value="">📅 Filtrar por data: nenhum</option>
+          <option value="emissao">Data de Emissão/Venda</option>
+          <option value="etapas">Prazo de Produção</option>
+          <option value="final">Data de Finalização (Prazo Final)</option>
+        </select>
+        <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">De
+          <input type="date" id="prod-fil-data-de" onchange="prodRenderAtivo()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
+        </label>
+        <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">Até
+          <input type="date" id="prod-fil-data-ate" onchange="prodRenderAtivo()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
+        </label>
+        <button onclick="document.getElementById('prod-fil-data-campo').value='';document.getElementById('prod-fil-data-de').value='';document.getElementById('prod-fil-data-ate').value='';prodRenderAtivo();" class="dash-btn-conf" style="background:#94a3b8" type="button">✕ Limpar datas</button>
+      </div>
+      <div id="prod-sec-lista">
+        <div id="prod-body"></div>
+      </div>
+      <div id="prod-sec-kanban" style="display:none">
+        <div id="prod-kanban-body" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px"></div>
+      </div>
+      <div id="prod-sec-calendario" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+          <div class="dash-mes-nav" style="margin:0">
+            <button onclick="prodCalMov(-1)" type="button">◀</button>
+            <div class="dash-mes-label" id="prod-cal-lbl" style="min-width:150px"></div>
+            <button onclick="prodCalMov(1)" type="button">▶</button>
+          </div>
+        </div>
+        <div id="prod-cal-body"></div>
+      </div>
     </div>
     <!-- HISTÓRICO DE PEDIDOS (consulta, aberto pra qualquer usuário logado) -->
     <div id="sec-cat-HISTORICO" style="display:none">
@@ -4814,7 +4850,14 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
       _comprasTabAtiva='lista';
       renderComprasLista();
     }catch(e){console.error('Erro ao abrir Compras',e);}},120);
-    if(isProducaoSetor)setTimeout(()=>{try{renderSetorTarefas('PRODUÇÃO');}catch(e){console.error('Erro ao abrir Produção',e);}},120);
+    if(isProducaoSetor)setTimeout(()=>{try{
+      document.querySelectorAll('.prod-main-tab').forEach(b=>b.classList.remove('active'));
+      document.getElementById('prod-main-tabs')?.querySelector('.prod-main-tab')?.classList.add('active');
+      const sl=document.getElementById('prod-sec-lista'),sk=document.getElementById('prod-sec-kanban'),sc=document.getElementById('prod-sec-calendario');
+      if(sl)sl.style.display='';if(sk)sk.style.display='none';if(sc)sc.style.display='none';
+      _prodTabAtiva='lista';
+      prodRenderAtivo();
+    }catch(e){console.error('Erro ao abrir Produção',e);}},120);
   }
   document.querySelectorAll('.sb-btn').forEach(b=>b.classList.remove('active'));
   if(isGeral){
@@ -13959,9 +14002,22 @@ function _lpRequerAtencao(x,mapaProducao,mapaInstalacao){
 function _isSetorUser(setorKey){
   return _temMenu(setorKey);
 }
+// Corrigido 2026-08-08, a pedido do usuário: antes, uma baixa dada DEPOIS do prazo da etapa
+// virava 'atrasado' aqui — mas os menus de setor (Projetos/Compras/Produção, ver _projInfo/
+// _prodInfo/_comprasInfo) sempre tratam "baixa dada" como concluído, sem olhar se foi tarde.
+// Isso fazia a Lista de Pedidos mostrar "26 atrasados" numa etapa em que o menu do setor
+// correspondente mostrava zero (o usuário pegou isso comparando Projeto Executivo x menu
+// Projetos) — o motivo raiz descoberto foi que pedidos emitidos logo no início de julho/2026
+// tiveram a baixa real dada só depois, quando o checklist daquele setor foi ao ar (Projetos
+// só existe desde 31/07/2026), então qualquer baixa de pedido antigo carimbava depois do
+// prazo calculado mesmo sendo trabalho genuíno. Agora as duas telas usam a MESMA regra: baixa
+// dada = 'ok' sempre (não importa a data); só falta baixa com prazo já vencido é que é
+// 'atrasado'. Pedido emitido de julho/2026 em diante que está genuinamente pendente e vencido
+// continua aparecendo atrasado normalmente — só o que muda é deixar de penalizar quem já
+// concluiu.
 function _lpStatusEtapa(p,etapa,hojeIso){
   const baixa=p.lpBaixas&&p.lpBaixas[etapa.key];
-  if(baixa)return baixa.data<=etapa.iso?'ok':'atrasado';
+  if(baixa)return 'ok';
   return etapa.iso<hojeIso?'atrasado':'pendente';
 }
 // Assertividade de UM pedido (a partir de um calc já calculado, pra não recalcular à toa).
@@ -14734,6 +14790,374 @@ function comprasAbrirDia(iso){
       <button onclick="document.getElementById('compras-dia-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
     </div>
     ${avisoFeriado}
+    ${corpo}
+  </div>`;
+  document.body.appendChild(modal);
+}
+// ===================== CHECKLIST DE PRODUÇÃO (menu PRODUÇÃO, 2026-08-08) =====================
+// Mesmo espírito do checklist de PROJETOS (checklist único por pedido, "Iniciar Produção" abre,
+// ao concluir a última fica pronto), MAS as 3 subtarefas (Recebimento de Corte Galvanizado,
+// Recebimento de Adesivos, Produzir) continuam gravando CADA UMA no campo que já existia antes
+// desta tela (p.lpBaixas.corteGalv/.adesivo/.producao), usando as MESMAS lpDarBaixa/
+// lpDesfazerBaixa que a lista simples antiga já chamava — decisão tomada com o usuário
+// (2026-08-08) pra não arriscar quebrar nada que já lê esses 3 campos direto (Lista de Pedidos,
+// Simulador, Histórico de Pedidos etc.). Por isso NÃO existe p.prodChecklist nem
+// _prodChecarConclusao — "pedido pronto" é só as 3 baixas existirem ao mesmo tempo, calculado
+// na hora (ver _prodInfo), nunca um status guardado à parte que possa desalinhar do real.
+// Diferença do checklist de Projetos: lá um prazo só é repartido em 8 pedaços de hora; aqui
+// cada subtarefa JÁ tem seu próprio prazo de verdade (a etapa correspondente calculada por
+// _lpCalcEtapas), então cada uma mostra sua própria janela de horas úteis, sem reparto nenhum.
+const PROD_CHECKLIST_ITENS=[
+  {key:'corteGalv',label:'RECEBIMENTO DE CORTE GALVANIZADO'},
+  {key:'adesivo',label:'RECEBIMENTO DE ADESIVOS'},
+  {key:'producao',label:'PRODUZIR'}
+];
+// Info consolidada de UM pedido pro menu PRODUÇÃO. "Início sugerido"/"estourou" vêm de
+// _lpProdAlocCache (populado por _lpMapaProducaoPorDia(), ver bloco CAPACIDADE DIÁRIA lá em
+// cima) — por isso _prodListaFiltrada() sempre roda _lpMapaProducaoPorDia() antes de montar as
+// infos, garantindo que o cache está fresco pra esta renderização.
+function _prodInfo(p,hojeIso){
+  const calc=_lpCalcEtapas(p);
+  if(!calc.ok)return{p,ok:false,calc};
+  const subs=PROD_CHECKLIST_ITENS.map(it=>{
+    const etapa=calc.etapas.find(e=>e.key===it.key);
+    return (etapa&&etapa.aplicavel)?{key:it.key,label:it.label,etapa,feito:!!(p.lpBaixas&&p.lpBaixas[it.key])}:null;
+  }).filter(Boolean);
+  if(!subs.length)return{p,ok:false,semEtapa:true};
+  const feitos=subs.filter(s=>s.feito).length;
+  const temPendenteAtrasada=subs.some(s=>!s.feito&&s.etapa.iso<hojeIso);
+  const statusPedido=feitos===subs.length?'concluido':temPendenteAtrasada?'atrasado':feitos>0?'andamento':'nao_iniciado';
+  // Etapa "âncora" pra ordenar/mostrar prazo principal na Lista/Kanban — sempre 'producao'
+  // quando aplicável (é ela que manda no resto do fluxo e na capacidade), senão a 1ª disponível.
+  const etapaAncora=(subs.find(s=>s.key==='producao')||subs[0]).etapa;
+  const aloc=_lpProdAlocCache[p.id];
+  const inicioSugeridoIso=(aloc&&aloc.chunks&&aloc.chunks.length)?aloc.chunks.reduce((min,c)=>(!min||c.iso<min)?c.iso:min,null):null;
+  return{p,ok:true,calc,subs,feitos,totalItens:subs.length,statusPedido,etapa:etapaAncora,inicioSugeridoIso,estourou:!!(aloc&&aloc.estourouJanela)};
+}
+// Lista filtrada do menu PRODUÇÃO — mesmo padrão de busca/status/intervalo de datas de
+// Projetos/Compras (ver _projListaFiltrada). ignorarPadraoOcultarConcluido=true é usado por
+// Kanban/Calendário, que já separam visualmente por status (mesmo motivo de _projListaFiltrada).
+function _prodListaFiltrada(ignorarPadraoOcultarConcluido){
+  const hojeIso=new Date().toISOString().slice(0,10);
+  _lpMapaProducaoPorDia();
+  const busca=(document.getElementById('prod-fil-busca')?.value||'').toUpperCase().trim();
+  const filStatus=document.getElementById('prod-fil-status')?.value||'';
+  const filDataCampo=document.getElementById('prod-fil-data-campo')?.value||'';
+  const filDataDe=document.getElementById('prod-fil-data-de')?.value||'';
+  const filDataAte=document.getElementById('prod-fil-data-ate')?.value||'';
+  const temFiltroData=!!(filDataCampo&&(filDataDe||filDataAte));
+  let infos=_lpPedidosElegiveis().map(p=>_prodInfo(p,hojeIso)).filter(x=>x.ok);
+  if(busca)infos=infos.filter(({p})=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
+  if(temFiltroData){
+    if(filDataCampo==='emissao')infos=infos.filter(x=>_lpDataNoIntervalo(x.calc.emissaoIso,filDataDe,filDataAte));
+    else if(filDataCampo==='final')infos=infos.filter(x=>_lpDataNoIntervalo(x.calc.prazoIso,filDataDe,filDataAte));
+    else if(filDataCampo==='etapas')infos=infos.filter(x=>_lpDataNoIntervalo(x.etapa.iso,filDataDe,filDataAte));
+  }
+  if(filStatus)infos=infos.filter(x=>x.statusPedido===filStatus);
+  else if(!ignorarPadraoOcultarConcluido)infos=infos.filter(x=>x.statusPedido!=='concluido');
+  const ordem={atrasado:0,andamento:1,nao_iniciado:2,concluido:3};
+  infos.sort((a,b)=>ordem[a.statusPedido]-ordem[b.statusPedido]||String(a.etapa.iso||'9999').localeCompare(b.etapa.iso||'9999'));
+  return infos;
+}
+// Eventos (pedido+subtarefa) achatados por dia — usado só pelo Calendário/modal do dia. A
+// subtarefa 'producao' pode virar VÁRIOS eventos (1 por dia alocado, ver _lpAlocarProducao);
+// corteGalv/adesivo são sempre 1 evento no dia do prazo delas, iguais às outras etapas de setor.
+function _prodEventosFiltrados(){
+  _lpMapaProducaoPorDia();
+  const infos=_prodListaFiltrada(true);
+  const eventos=[];
+  infos.forEach(info=>{
+    info.subs.forEach(s=>{
+      if(s.key==='producao'){
+        const aloc=_lpProdAlocCache[info.p.id];
+        const chunks=(aloc&&aloc.chunks&&aloc.chunks.length)?aloc.chunks:[{iso:s.etapa.iso,valor:null,estouro:false}];
+        chunks.forEach(c=>eventos.push({p:info.p,sub:s,iso:c.iso,valorChunk:c.valor,estouroChunk:!!c.estouro,statusPedido:info.statusPedido}));
+      } else {
+        eventos.push({p:info.p,sub:s,iso:s.etapa.iso,valorChunk:null,estouroChunk:false,statusPedido:info.statusPedido});
+      }
+    });
+  });
+  return eventos;
+}
+function prodIniciarOuAbrirChecklist(pedidoId){prodAbrirChecklist(pedidoId);}
+// Modal do checklist — reaberto (re-renderizado do zero) a cada marcação, igual Projetos/
+// Compras. Cada subtarefa mostra seu PRÓPRIO prazo (fim de expediente 17:30, mesma convenção
+// de Projetos/Compras) e horas úteis restantes/de atraso. A subtarefa 'producao' ganha um
+// banner extra com a distribuição diária (de onde vem o "início sugerido") — ver
+// _lpAlocarProducaoPedido/_lpProdAlocCache.
+function prodAbrirChecklist(pedidoId){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const hojeIso=new Date().toISOString().slice(0,10);
+  _lpMapaProducaoPorDia();
+  const info=_prodInfo(p,hojeIso);
+  if(!info.ok){toast('Não foi possível calcular o prazo deste pedido','terr');return;}
+  const agora=new Date();
+  const old=document.getElementById('prod-check-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='prod-check-modal';
+  modal.dataset.pedidoId=pedidoId;
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)prodFecharChecklist();};
+  document.removeEventListener('keydown',_prodEscHandler);
+  document.addEventListener('keydown',_prodEscHandler);
+  const aloc=_lpProdAlocCache[p.id];
+  const bannerCapacidade=(aloc&&aloc.chunks&&aloc.chunks.length)
+    ?(aloc.estourouJanela
+      ?`<div style="font-size:.74rem;color:#b45309;margin-bottom:12px;padding:8px 10px;background:#fef3c7;border-radius:8px">⚠️ <strong>Requer atenção</strong> — não coube nem recuando até o limite de folga (${fmtR(_lpCapProducaoDia())}/dia útil). Distribuição: ${aloc.chunks.map(c=>`${fmtD(c.iso)}: ${fmtR(c.valor)}${c.estouro?' ⚠️':''}`).join(', ')}</div>`
+      :`<div style="font-size:.74rem;color:var(--ink3);margin-bottom:12px;padding:8px 10px;background:#f0f9ff;border-radius:8px">🏭 Produção distribuída em até ${fmtR(_lpCapProducaoDia())}/dia útil: ${aloc.chunks.slice().reverse().map(c=>`${fmtD(c.iso)}: ${fmtR(c.valor)}`).join(', ')} — deve <strong>começar em ${fmtD(info.inicioSugeridoIso)}</strong> pra terminar no prazo (${fmtD(aloc.deadlineIso)}).</div>`)
+    :'';
+  const linhas=info.subs.map((s,idx)=>{
+    const prazoFimDia=new Date(s.etapa.iso+'T17:30:00');
+    const atrasada=!s.feito&&agora>prazoFimDia;
+    let badgeTxt,badgeCor;
+    if(s.feito){badgeTxt='✅ Concluído';badgeCor='#16a34a';}
+    else if(atrasada){badgeTxt=`🔴 ${_horasUteisEntre(prazoFimDia,agora).toFixed(2)}h de atraso`;badgeCor='#dc2626';}
+    else{badgeTxt=`⏳ ${_horasUteisEntre(agora,prazoFimDia).toFixed(2)}h úteis restantes`;badgeCor='#0284c7';}
+    const baixa=p.lpBaixas&&p.lpBaixas[s.key];
+    const quando=(s.feito&&baixa&&baixa.dataHora)?new Date(baixa.dataHora):null;
+    const quandoTxt=quando?` · concluído em ${quando.toLocaleDateString('pt-BR')} ${String(quando.getHours()).padStart(2,'0')}:${String(quando.getMinutes()).padStart(2,'0')}`:'';
+    return `<div style="border:1px solid ${atrasada?'#fca5a5':'var(--border-lt)'};background:${atrasada?'#fef2f2':'#fff'};border-radius:10px;padding:12px;margin-bottom:8px">
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+        <input type="checkbox" ${s.feito?'checked':''} onchange="prodMarcarSubtarefa('${pedidoId}','${s.key}',this.checked)" style="width:18px;height:18px;margin-top:1px;flex-shrink:0;accent-color:#16a34a">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+            <div style="font-size:.84rem;font-weight:700;color:var(--ink)">${idx+1}. ${s.label}</div>
+            <span style="background:${badgeCor}1a;color:${badgeCor};font-weight:800;font-size:.72rem;padding:2px 9px;border-radius:20px;white-space:nowrap;flex-shrink:0">${badgeTxt}</span>
+          </div>
+          <div style="font-size:.68rem;color:var(--ink4);margin-top:2px">Prazo desta subtarefa: ${fmtD(s.etapa.iso)}${quandoTxt}</div>
+        </div>
+      </label>
+    </div>`;
+  }).join('');
+  const concluidoTotal=info.feitos===info.totalItens;
+  const{isAdm}=_getUserCat();
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:560px;width:92%;max-height:88vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px">
+      <div>
+        <div style="font-size:1rem;font-weight:800;color:#1a1f36">🏭 Checklist de Produção — OS ${p.os||'—'}</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${p.cliente||'—'}${p.job?' · '+p.job:''}</div>
+      </div>
+      <button onclick="prodFecharChecklist()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar (Esc)">✕</button>
+    </div>
+    ${concluidoTotal?`<div style="padding:10px 12px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.8rem;font-weight:700;margin-bottom:12px">✅ Pedido pronto — as ${info.totalItens} subtarefas foram concluídas.</div>`:''}
+    <div style="font-size:.74rem;color:var(--ink4);margin-bottom:6px">${info.feitos}/${info.totalItens} concluídas</div>
+    <div style="background:#e2e8f0;border-radius:20px;height:8px;overflow:hidden;margin-bottom:14px"><div style="background:${concluidoTotal?'#16a34a':'#00bac7'};height:100%;width:${(info.feitos/info.totalItens*100)}%"></div></div>
+    ${bannerCapacidade}
+    <div>${linhas}</div>
+    ${isAdm&&!concluidoTotal?info.subs.map(s=>!s.feito?`<button onclick="prodMarcarSubtarefa('${pedidoId}','${s.key}',true)" class="dash-btn-conf" style="background:#94a3b8;width:100%;margin-top:6px;margin-bottom:0" type="button">🔒 Admin: marcar "${s.label}" concluída manualmente</button>`:'').join(''):''}
+  </div>`;
+  document.body.appendChild(modal);
+}
+// Marca/desmarca UMA subtarefa — chama as MESMAS lpDarBaixa/lpDesfazerBaixa que a lista simples
+// antiga já usava (ver comentário no topo deste bloco), então qualquer coisa que já lia
+// p.lpBaixas.corteGalv/.adesivo/.producao continua funcionando sem nenhuma mudança.
+async function prodMarcarSubtarefa(pedidoId,itemKey,feito){
+  if(feito)await lpDarBaixa(pedidoId,itemKey,'PRODUÇÃO');
+  else await lpDesfazerBaixa(pedidoId,itemKey,'PRODUÇÃO');
+  prodAbrirChecklist(pedidoId);
+  if(typeof prodRenderAtivo==='function')prodRenderAtivo();
+}
+function prodFecharChecklist(){
+  const modal=document.getElementById('prod-check-modal');
+  if(modal)modal.remove();
+  document.removeEventListener('keydown',_prodEscHandler);
+}
+function _prodEscHandler(e){
+  if(e.key!=='Escape')return;
+  prodFecharChecklist();
+}
+// ===================== MENU PRODUÇÃO — LISTA/KANBAN/CALENDÁRIO (2026-08-08) =====================
+// Mesmo estilo do menu PROJETOS (1 cartão = 1 pedido, não 1 por subtarefa, porque as 3 vivem no
+// mesmo checklist). O Calendário é diferente dos outros 2 menus: além dos pedidos, cada dia
+// mostra quanto da capacidade de Produção (_lpCapProducaoDia, R$/dia útil) já está ocupado —
+// a visão pedida pelo usuário de "o que está encavalado" e "quais dias temos livres pra
+// colocar vendas". Sem exportação (Excel/PDF) por enquanto, mesmo padrão inicial do menu
+// COMPRAS quando ganhou Lista/Kanban/Calendário (2026-08-03) — dá pra adicionar depois se
+// precisar.
+let _prodTabAtiva='lista';
+function prodSetTab(tab,btn){
+  document.querySelectorAll('.prod-main-tab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  const sl=document.getElementById('prod-sec-lista'),sk=document.getElementById('prod-sec-kanban'),sc=document.getElementById('prod-sec-calendario');
+  if(sl)sl.style.display=tab==='lista'?'':'none';
+  if(sk)sk.style.display=tab==='kanban'?'':'none';
+  if(sc)sc.style.display=tab==='calendario'?'':'none';
+  _prodTabAtiva=tab;
+  prodRenderAtivo();
+}
+function prodRenderAtivo(){
+  const capEl=document.getElementById('prod-cap-valor');
+  if(capEl)capEl.textContent=fmtR(_lpCapProducaoDia());
+  if(_prodTabAtiva==='kanban')renderProdKanban();
+  else if(_prodTabAtiva==='calendario')renderProdCalendario();
+  else renderProdLista();
+}
+function renderProdLista(){
+  const body=document.getElementById('prod-body');
+  if(!body)return;
+  if(!_isSetorUser('PRODUÇÃO')){
+    body.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700;font-size:.85rem">🔒 ACESSO NÃO PERMITIDO — apenas Produção ou Administrador podem ver esta lista.</div>';
+    return;
+  }
+  const infos=_prodListaFiltrada();
+  if(!infos.length){body.innerHTML='<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum pedido encontrado.</div>';return;}
+  body.innerHTML=`<div style="overflow-x:auto"><table class="tbl-acoes-fixa" style="width:100%;border-collapse:collapse;font-size:.82rem">
+    <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
+      <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">JOB</th>
+      <th style="padding:8px 10px">Prazo Produção</th><th style="padding:8px 10px">Início sugerido</th><th style="padding:8px 10px">Checklist</th><th style="padding:8px 10px">Status</th><th style="padding:8px 10px"></th>
+    </tr></thead><tbody>
+    ${infos.map(x=>{
+      const{p,etapa,feitos,totalItens,statusPedido,inicioSugeridoIso,estourou}=x;
+      const corLinha=statusPedido==='atrasado'?'color:#dc2626':'';
+      const pct=Math.round(feitos/totalItens*100);
+      const acaoLbl=statusPedido==='concluido'?'👁️ Ver Checklist':feitos>0?'🔄 Continuar':'🚀 Iniciar Produção';
+      const inicioTxt=inicioSugeridoIso?(fmtD(inicioSugeridoIso)+(estourou?' ⚠️':'')):'—';
+      return `<tr onclick="prodIniciarOuAbrirChecklist('${p.id}')" style="border-bottom:1px solid var(--border-lt);cursor:pointer;${corLinha}">
+        <td style="padding:8px 10px;font-weight:700;${corLinha}">${p.os||'—'}</td>
+        <td style="padding:8px 10px;${corLinha}" title="${(p.cliente||'').replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.cliente||'—'}</div></td>
+        <td style="padding:8px 10px;${corLinha}">${p.job||'—'}</td>
+        <td style="padding:8px 10px;${corLinha}">${fmtD(etapa.iso)}</td>
+        <td style="padding:8px 10px;${estourou?'color:#b45309;font-weight:700':''}">${inicioTxt}</td>
+        <td style="padding:8px 10px"><div style="background:#e2e8f0;border-radius:20px;height:7px;width:90px;overflow:hidden"><div style="background:${statusPedido==='atrasado'?'#dc2626':'#00bac7'};height:100%;width:${pct}%"></div></div><div style="font-size:.68rem;color:var(--ink4);margin-top:2px">${feitos}/${totalItens}</div></td>
+        <td style="padding:8px 10px;font-weight:700;color:${_projStatusCor(statusPedido)}">${_projStatusLabel(statusPedido)}</td>
+        <td style="padding:8px 10px;text-align:right"><button onclick="event.stopPropagation();prodIniciarOuAbrirChecklist('${p.id}')" class="dash-btn-conf" style="background:#0891b2;white-space:nowrap">${acaoLbl}</button></td>
+      </tr>`;
+    }).join('')}
+    </tbody></table></div>`;
+}
+function renderProdKanban(){
+  const wrap=document.getElementById('prod-kanban-body');
+  if(!wrap)return;
+  if(!_isSetorUser('PRODUÇÃO')){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const infos=_prodListaFiltrada(true);
+  const colunas=[{key:'nao_iniciado',label:'⚪ Não Iniciado'},{key:'andamento',label:'🔵 Em Andamento'},{key:'atrasado',label:'🔴 Atrasado'},{key:'concluido',label:'✅ Concluído'}];
+  wrap.innerHTML=colunas.map(col=>{
+    const itens=infos.filter(x=>x.statusPedido===col.key).sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso));
+    const cor=_projStatusCor(col.key);
+    return `<div style="flex:0 0 240px;background:#f8fafc;border-radius:12px;border:1px solid var(--border-lt);display:flex;flex-direction:column;max-height:70vh">
+      <div style="padding:10px 12px;border-bottom:2px solid ${cor};font-size:.75rem;font-weight:800;color:${cor};display:flex;justify-content:space-between;align-items:center">
+        <span>${col.label}</span><span style="background:${cor};color:#fff;border-radius:20px;padding:1px 8px;font-size:.68rem">${itens.length}</span>
+      </div>
+      <div style="padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px">
+        ${itens.length?itens.map(x=>{
+          const{p,etapa,feitos,totalItens,inicioSugeridoIso,estourou}=x;
+          return `<div onclick="prodIniciarOuAbrirChecklist('${p.id}')" style="background:#fff;border:1px solid ${col.key==='atrasado'?'#dc2626':'var(--border-lt)'};border-radius:10px;padding:10px;cursor:pointer">
+            <div style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'}</div>
+            <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(p.cliente||'').replace(/"/g,'&quot;')}">${p.cliente||'—'}</div>
+            ${p.job?`<div style="font-size:.66rem;color:var(--ink4);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(p.job).replace(/"/g,'&quot;')}">JOB: ${p.job}</div>`:''}
+            <div style="font-size:.68rem;color:var(--ink4)">Prazo: <strong>${fmtD(etapa.iso)}</strong></div>
+            ${inicioSugeridoIso?`<div style="font-size:.68rem;color:${estourou?'#b45309':'var(--ink4)'}">Início sugerido: <strong>${fmtD(inicioSugeridoIso)}</strong>${estourou?' ⚠️':''}</div>`:''}
+            <div style="font-size:.68rem;font-weight:700;margin-top:2px;color:${cor}">${feitos}/${totalItens} subtarefas</div>
+          </div>`;
+        }).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.72rem">—</div>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+let _prodCalMes={y:new Date().getFullYear(),m:new Date().getMonth()+1};
+function prodCalMov(dir){
+  _prodCalMes.m+=dir;
+  if(_prodCalMes.m>12){_prodCalMes.m=1;_prodCalMes.y++;}
+  if(_prodCalMes.m<1){_prodCalMes.m=12;_prodCalMes.y--;}
+  renderProdCalendario();
+}
+// Cor do preenchimento do dia pela capacidade de Produção (R$/dia útil) — livre (nada
+// alocado) / ocupado (dentro do limite) / lotado (bateu o limite certinho) / estourado (passou,
+// só acontece quando um pedido bateu no piso de 50% e precisou estourar, ver
+// _lpAlocarProducao). Só um indicativo visual, não bloqueia nada — a decisão de aceitar mais
+// venda continua humana (2026-08-08, a pedido do usuário: "ver os dias que temos livres pra
+// colocar vendas").
+function _prodCorCapacidade(soma,cap){
+  if(soma<=0.005)return{cor:'#16a34a',label:'Livre'};
+  if(soma>cap+0.005)return{cor:'#dc2626',label:'Estourado'};
+  if(soma>=cap-0.005)return{cor:'#d97706',label:'Lotado'};
+  return{cor:'#0284c7',label:'Ocupado'};
+}
+function renderProdCalendario(){
+  const lbl=document.getElementById('prod-cal-lbl');
+  const{y,m}=_prodCalMes;
+  if(lbl)lbl.textContent=MESES_PT[m]+' '+y;
+  const body=document.getElementById('prod-cal-body');
+  if(!body)return;
+  if(!_isSetorUser('PRODUÇÃO')){body.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const mapaCap=_lpMapaProducaoPorDia();
+  const cap=_lpCapProducaoDia();
+  const eventos=_prodEventosFiltrados();
+  const porDia={};
+  eventos.forEach(ev=>{
+    const partes=ev.iso.split('-');
+    if(parseInt(partes[0],10)===y&&parseInt(partes[1],10)===m){
+      if(!porDia[ev.iso])porDia[ev.iso]=[];
+      porDia[ev.iso].push(ev);
+    }
+  });
+  const primeiroDia=new Date(y,m-1,1);
+  const diasNoMes=new Date(y,m,0).getDate();
+  const offset=primeiroDia.getDay();
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const nomesFeriados=getFeriadosComNome(y);
+  const cabecalho=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'].map(d=>`<div style="text-align:center;font-size:.68rem;font-weight:700;color:var(--ink4);padding:6px 0">${d}</div>`).join('');
+  let celulas=[];
+  for(let i=0;i<offset;i++)celulas.push('<div></div>');
+  for(let d=1;d<=diasNoMes;d++){
+    const iso=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const itens=porDia[iso]||[];
+    const ehHoje=iso===hojeIso;
+    const nomeFeriado=nomesFeriados[iso];
+    const soma=(mapaCap[iso]&&mapaCap[iso].soma)||0;
+    const capInfo=_prodCorCapacidade(soma,cap);
+    const capBar=soma>0?`<div style="margin-top:2px" title="${capInfo.label}: ${fmtR(soma)} de ${fmtR(cap)}"><div style="background:#e2e8f0;border-radius:20px;height:5px;overflow:hidden"><div style="background:${capInfo.cor};height:100%;width:${Math.min(100,soma/cap*100)}%"></div></div><div style="font-size:.58rem;color:${capInfo.cor};font-weight:700">${fmtR(soma)}</div></div>`:'';
+    celulas.push(`<div onclick="prodAbrirDia('${iso}')" title="${nomeFeriado?('Feriado: '+nomeFeriado).replace(/"/g,'&quot;'):''}" style="min-height:96px;min-width:0;overflow:hidden;border:1px solid ${nomeFeriado?'#f59e0b':'var(--border-lt)'};border-radius:8px;padding:5px;cursor:pointer;transition:box-shadow .15s;${nomeFeriado?'background:#fef3c7':(ehHoje?'background:var(--brand-xlt);border-color:var(--brand)':'background:#fff')}" onmouseover="this.style.boxShadow='0 2px 10px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow='none'">
+      <div style="font-size:.7rem;font-weight:700;color:${nomeFeriado?'#b45309':(ehHoje?'var(--brand-d)':'var(--ink4)')}">${d}</div>
+      ${nomeFeriado?`<div style="font-size:.6rem;color:#b45309;font-weight:700;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎌 ${nomeFeriado}</div>`:''}
+      ${capBar}
+      <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
+        ${itens.slice(0,2).map(ev=>`<div onclick="event.stopPropagation();prodIniciarOuAbrirChecklist('${ev.p.id}')" title="OS ${ev.p.os||''} — ${(ev.p.cliente||'').replace(/"/g,'&quot;')} — ${ev.sub.label}" style="cursor:pointer;font-size:.6rem;background:${_projStatusCor(ev.statusPedido)}22;color:${_projStatusCor(ev.statusPedido)};border-radius:4px;padding:1px 4px">
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${ev.p.os||''} · ${ev.p.cliente||'—'}</div>
+        </div>`).join('')}
+        ${itens.length>2?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${itens.length-2} outro(s) — ver dia</div>`:''}
+      </div>
+    </div>`);
+  }
+  body.innerHTML=`<div style="font-size:.68rem;color:var(--ink4);display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+    <span>🟢 Livre</span><span style="color:#0284c7">🔵 Ocupado</span><span style="color:#d97706">🟠 Lotado</span><span style="color:#dc2626">🔴 Estourado</span>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">${cabecalho}${celulas.join('')}</div>`;
+}
+function prodAbrirDia(iso){
+  const eventos=_prodEventosFiltrados().filter(ev=>ev.iso===iso);
+  eventos.sort((a,b)=>String(a.p.os||'').localeCompare(String(b.p.os||''),'pt-BR',{numeric:true}));
+  const mapaCap=_lpMapaProducaoPorDia();
+  const cap=_lpCapProducaoDia();
+  const soma=(mapaCap[iso]&&mapaCap[iso].soma)||0;
+  const capInfo=_prodCorCapacidade(soma,cap);
+  const old=document.getElementById('prod-dia-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='prod-dia-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  const dataFmt=new Date(iso+'T00:00:00').toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+  const nomeFeriado=getFeriadosComNome(parseInt(iso.slice(0,4),10))[iso];
+  const avisoFeriado=nomeFeriado?`<div style="padding:10px 12px;background:#fef3c7;color:#92400e;border-radius:8px;font-size:.78rem;font-weight:700;margin-bottom:12px">🎌 Feriado: ${nomeFeriado}</div>`:'';
+  const capTxt=`<div style="padding:10px 12px;background:${capInfo.cor}1a;color:${capInfo.cor};border-radius:8px;font-size:.8rem;font-weight:700;margin-bottom:12px">🏭 ${capInfo.label} — ${fmtR(soma)} de ${fmtR(cap)} alocados em Produção neste dia</div>`;
+  const corpo=eventos.length?eventos.map(ev=>{
+    const cor=_projStatusCor(ev.statusPedido);
+    return `<div onclick="document.getElementById('prod-dia-modal').remove();prodIniciarOuAbrirChecklist('${ev.p.id}')" style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+      <span style="background:${cor}22;color:${cor};padding:3px 8px;border-radius:20px;font-size:.68rem;font-weight:700;white-space:nowrap;flex-shrink:0">${_projStatusLabel(ev.statusPedido)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${ev.p.os||'—'} · ${ev.p.cliente||'—'}</div>
+        <div style="font-size:.7rem;color:var(--ink4)">${ev.sub.label}${ev.valorChunk?' · '+fmtR(ev.valorChunk):''}${ev.estouroChunk?' ⚠️':''}</div>
+      </div>
+    </div>`;
+  }).join(''):'<div style="text-align:center;padding:30px;color:var(--ink4);font-size:.85rem">Nenhuma produção programada pra este dia.</div>';
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:540px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:10px">
+      <div style="font-size:1rem;font-weight:800;color:#1a1f36;text-transform:capitalize">📅 ${dataFmt}</div>
+      <button onclick="document.getElementById('prod-dia-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
+    </div>
+    ${avisoFeriado}
+    ${capTxt}
     ${corpo}
   </div>`;
   document.body.appendChild(modal);
