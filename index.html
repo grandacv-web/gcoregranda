@@ -3243,6 +3243,17 @@ window._fbRemoveUsuario=(email)=>{
 // cfg.usuarioMenus[email] sem tocar em mais nada do documento). Mesmo motivo/padrão de
 // _fbUpdateUsuario/_fbUpdatePagConf acima.
 window._fbDeleteCfgField=(parts)=>updateDoc(doc(db,'sistema','config'),new FieldPath(...parts),deleteField());
+// Escrita atômica genérica de UM campo aninhado do cfg (2026-08-08) — mesmo padrão/motivo de
+// _fbUpdatePagConf/_fbUpdateUsuario acima. Criada porque gcSaveExtra() (Gráficos → Pipeline &
+// Oportunidades Perdidas, campos Orçamentos em aberto/Taxa de conversão/Negócios perdidos)
+// salvava via _fbSaveCfg(cfg) — setDoc SEM merge do documento inteiro — a cada TECLA digitada
+// (oninput). Isso é pior ainda que os outros casos: qualquer outro save do sistema disparado
+// nesse meio tempo (por qualquer usuário, em qualquer tela) sobrescrevia localmente o `cfg` com
+// um snapshot sem o que acabou de ser digitado, e a digitação seguinte regravava esse cfg
+// desatualizado no servidor — o dado "sumia" ao trocar de página porque nunca chegou a ser
+// salvo de verdade no Firestore, só parecia salvo na tela. updateDoc com FieldPath grava só
+// cfg.dashExtra[chave], nunca depende do resto do cfg em memória.
+window._fbUpdateCfgField=(parts,value)=>updateDoc(doc(db,'sistema','config'),new FieldPath(...parts),value);
 // Funções administrativas (Cloud Functions) — definir senha / apagar usuário direto no Firebase Auth, sem e-mail.
 window._fbAdminSetPassword=(email,newPassword)=>httpsCallable(functions,'adminSetPassword')({email,newPassword});
 window._fbAdminDeleteUser=(email)=>httpsCallable(functions,'adminDeleteUser')({email});
@@ -23918,7 +23929,11 @@ function setProspecOrc(nome,y,m,valor){
   const cur=cfg.dashExtra[k]||{orc:0,cv:0,pd:0};
   cur.orc=valor;
   cfg.dashExtra[k]=cur;
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  // Corrigido 2026-08-08 — mesmo campo (cfg.dashExtra) e mesmo motivo de gcSaveExtra(), ver
+  // comentário de window._fbUpdateCfgField: setDoc sem merge aqui sobrescrevia o documento
+  // inteiro e podia perder digitação de outra tela/aba. Grava só este campo, atômico.
+  if(window._fbUpdateCfgField)window._fbUpdateCfgField(['dashExtra',k],cur);
+  else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderDashMetas();
 }
@@ -23953,8 +23968,14 @@ function gcSaveExtra(){
   // Motivos de perda — só a QUANTIDADE é digitada; o R$ de cada um é sempre recalculado
   // na leitura (gcGetExtra/gcMotivosPerda), nunca persistido aqui.
   GC_MOTIVOS_PERDA.forEach(mo=>{extra[mo.k]=Math.max(0,Math.round(parseFloat((document.getElementById('gc-inp-'+mo.k)||{}).value)||0));});
-  cfg.dashExtra[gcExtraKey(gcVendIdx,gcMes.y,gcMes.m)]=extra;
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  const _gcExtraChave=gcExtraKey(gcVendIdx,gcMes.y,gcMes.m);
+  cfg.dashExtra[_gcExtraChave]=extra;
+  // Corrigido 2026-08-08 — ver comentário de window._fbUpdateCfgField: antes usava
+  // _fbSaveCfg(cfg) (setDoc sem merge do documento inteiro) a cada tecla digitada, o que fazia
+  // o dado "sumir" ao trocar de página quando outro save do sistema acontecia no meio da
+  // digitação. Agora grava só cfg.dashExtra[chave], atômico, sem depender do resto do cfg.
+  if(window._fbUpdateCfgField)window._fbUpdateCfgField(['dashExtra',_gcExtraChave],extra);
+  else if(window._fbSaveCfg)window._fbSaveCfg(cfg); // fallback só se o helper não existir
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   gcRenderVendPaineis();
 }
