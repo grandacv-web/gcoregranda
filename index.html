@@ -1420,9 +1420,10 @@ select.fc{cursor:pointer}
         <button class="dash-tab active proj-main-tab" onclick="projSetTab('lista',this)">📋 Lista</button>
         <button class="dash-tab proj-main-tab" onclick="projSetTab('kanban',this)">🗂️ Kanban</button>
         <button class="dash-tab proj-main-tab" onclick="projSetTab('calendario',this)">📅 Calendário</button>
+        <button class="dash-tab proj-main-tab" onclick="projSetTab('indicadores',this)">📊 Indicadores</button>
       </div>
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
-        📐 Cada pedido passa por um checklist de 8 etapas antes de o Projeto Executivo ser considerado pronto — clique em "Iniciar Projeto" pra abrir. Ao marcar a última etapa, a baixa é dada automaticamente (data e hora exatas ficam no Histórico do pedido). Prazo e pedidos vêm da Lista de Pedidos.
+        📐 Cada pedido passa por um checklist de 8 etapas antes de o Projeto Executivo ser considerado pronto — clique em "Iniciar Projeto" pra abrir. Ao marcar a última etapa, o sistema pede o CMV (%) do projeto e só então dá a baixa (data e hora exatas ficam no Histórico do pedido). Prazo e pedidos vêm da Lista de Pedidos.
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
         <input id="proj-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="projRenderAtivo()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
@@ -1476,6 +1477,35 @@ select.fc{cursor:pointer}
           </div>
         </div>
         <div id="proj-cal-body"></div>
+      </div>
+      <!-- INDICADORES (2026-08-10, a pedido do usuário) — mesmo espírito da aba de Gráficos do
+           Comercial, só que pros projetos: Finalizados em Dia/com Atraso (clicáveis, mostram a
+           lista de pedidos de cada um) + CMV médio do período + Top 5 CMV mais altos. Igual ao
+           Calendário, abre sempre no mês corrente com navegação ◀▶; o campo De/Até é opcional
+           pra quem quiser outro intervalo (limpa a navegação por mês quando preenchido). -->
+      <div id="proj-sec-indicadores" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+          <div class="dash-mes-nav" style="margin:0">
+            <button onclick="projIndMesMov(-1)" type="button">◀</button>
+            <div class="dash-mes-label" id="proj-ind-mes-lbl" style="min-width:150px"></div>
+            <button onclick="projIndMesMov(1)" type="button">▶</button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">Ou período De
+              <input type="date" id="proj-ind-data-de" onchange="renderProjIndicadores()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
+            </label>
+            <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">Até
+              <input type="date" id="proj-ind-data-ate" onchange="renderProjIndicadores()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
+            </label>
+            <button onclick="document.getElementById('proj-ind-data-de').value='';document.getElementById('proj-ind-data-ate').value='';renderProjIndicadores();" class="dash-btn-conf" style="background:#94a3b8" type="button">✕ Usar mês</button>
+          </div>
+        </div>
+        <div class="gc-krow" id="proj-ind-kpis" style="grid-template-columns:repeat(3,1fr)"></div>
+        <div class="gc-chart-card">
+          <div class="gc-chart-title">Top 5 CMV mais altos do período</div>
+          <div class="gc-chart-sub">Projetos finalizados com o maior CMV (%) registrado no período selecionado</div>
+          <div id="proj-ind-top5" style="margin-top:10px"></div>
+        </div>
       </div>
     </div>
     <div id="sec-cat-COMPRAS" style="display:none">
@@ -14176,16 +14206,26 @@ const PROJ_CHECKLIST_ITENS=[
 // baixa automaticamente, com data+hora exatas e a marca viaChecklist:true. Só desfaz a baixa
 // automaticamente se algum item for desmarcado DEPOIS — e só quando a baixa atual tiver essa
 // mesma marca (nunca mexe numa baixa manual dada por um admin sem passar pelo checklist).
-function _projChecarConclusao(p){
+// Corrigido 2026-08-10, a pedido do usuário: o fluxo interativo (marcar o 8º item na tela) não
+// pode mais finalizar sozinho — antes precisa pedir o CMV (%) do projeto, ver
+// projPedirCmvEFinalizar()/projConfirmarCmv(). opts.skipAutoBaixa:true trava só a parte de DAR
+// a baixa (usada pelo caminho interativo); o desfazer continua igual sempre. As migrações em
+// lote (_migrarProjetosPrazoAte10Ago/_migrarAtrasadosProjetosComprasHoje) e o atalho "Admin:
+// marcar concluído manualmente" continuam chamando sem esse parâmetro — são ações
+// administrativas/em lote sem humano pra preencher CMV um por um, então continuam concluindo
+// sem CMV (decisão do usuário: "atalho admin continua livre").
+function _projChecarConclusao(p,opts){
+  const skipAutoBaixa=opts&&opts.skipAutoBaixa;
   const todosFeitos=PROJ_CHECKLIST_ITENS.every(it=>p.projChecklist.itens[it.key]&&p.projChecklist.itens[it.key].feito);
   const baixaAtual=p.lpBaixas&&p.lpBaixas.projeto;
-  if(todosFeitos&&!baixaAtual){
+  if(todosFeitos&&!baixaAtual&&!skipAutoBaixa){
     const agora=new Date();
     p.lpBaixas=p.lpBaixas||{};
     p.lpBaixas.projeto={data:agora.toISOString().slice(0,10),dataHora:agora.toISOString(),por:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),viaChecklist:true};
   } else if(!todosFeitos&&baixaAtual&&baixaAtual.viaChecklist){
     delete p.lpBaixas.projeto;
   }
+  return todosFeitos;
 }
 // Status do PEDIDO no menu PROJETOS — mais granular que o status de etapa genérico
 // (_lpStatusEtapa), porque aqui interessa saber se o checklist já foi ao menos iniciado.
@@ -14374,9 +14414,62 @@ async function projMarcarItem(pedidoId,itemKey,feito){
   p.projChecklist.itens[itemKey]=p.projChecklist.itens[itemKey]||{feito:false,quando:null,obs:''};
   p.projChecklist.itens[itemKey].feito=feito;
   p.projChecklist.itens[itemKey].quando=feito?new Date().toISOString():null;
-  _projChecarConclusao(p);
+  // CMV obrigatório pra finalizar (2026-08-10, a pedido do usuário) — ver comentário de
+  // _projChecarConclusao. skipAutoBaixa:true trava só o "dar baixa sozinho"; o "desfazer" (item
+  // desmarcado depois de já concluído) continua acontecendo normal dentro da função.
+  const todosFeitos=_projChecarConclusao(p,{skipAutoBaixa:true});
   await savePedidoFS(p);
+  const jaTemBaixa=!!(p.lpBaixas&&p.lpBaixas.projeto);
+  if(todosFeitos&&!jaTemBaixa)projPedirCmvEFinalizar(pedidoId);
+  else projAbrirChecklist(pedidoId);
+  if(typeof projRenderAtivo==='function')projRenderAtivo();
+}
+// Modal que pede o CMV (%) do projeto assim que o 8º item do checklist é marcado — só finaliza
+// de verdade (dá a baixa) depois que o usuário informa um valor (2026-08-10, a pedido do
+// usuário: "ele só consegue dar um projeto como concluído dizendo qual foi o CMV"). Fecha o
+// checklist de trás (ainda em 8/8, mas sem baixa — fica como "Em andamento" até confirmar aqui
+// ou o usuário reabrir e cancelar, ver projCancelarCmv).
+function projPedirCmvEFinalizar(pedidoId){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const old=document.getElementById('proj-check-modal');if(old)old.remove();
+  const oldCmv=document.getElementById('proj-cmv-modal');if(oldCmv)oldCmv.remove();
+  const modal=document.createElement('div');
+  modal.id='proj-cmv-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)projCancelarCmv(pedidoId);};
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:420px;width:92%;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:10px">
+      <div style="font-size:1rem;font-weight:800;color:#1a1f36">✅ Finalizar Projeto — OS ${p.os||'—'}</div>
+      <button onclick="projCancelarCmv('${pedidoId}')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Voltar ao checklist">✕</button>
+    </div>
+    <div style="font-size:.8rem;color:var(--ink3);margin-bottom:16px">Todas as 8 etapas foram concluídas. Pra finalizar o projeto, informe o CMV deste projeto.</div>
+    <label style="font-size:.7rem;font-weight:700;color:var(--ink3);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">CMV do Projeto (%) <span class="r">*</span></label>
+    <input id="proj-cmv-input" type="number" min="0" step="0.01" placeholder="Ex.: 32.5" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.9rem;font-family:inherit;box-sizing:border-box">
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button onclick="projCancelarCmv('${pedidoId}')" class="dash-btn-conf" style="background:#94a3b8;flex:1" type="button">Voltar ao checklist</button>
+      <button onclick="projConfirmarCmv('${pedidoId}')" class="dash-btn-conf" style="background:#16a34a;flex:1" type="button">✅ Finalizar Projeto</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  setTimeout(()=>document.getElementById('proj-cmv-input')?.focus(),50);
+}
+function projCancelarCmv(pedidoId){
+  const m=document.getElementById('proj-cmv-modal');if(m)m.remove();
   projAbrirChecklist(pedidoId);
+}
+async function projConfirmarCmv(pedidoId){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const inp=document.getElementById('proj-cmv-input');
+  const val=parseFloat((inp&&inp.value||'').replace(',','.'));
+  if(isNaN(val)||val<0){toast('Informe um CMV válido (%) pra finalizar o projeto','terr');if(inp)inp.focus();return;}
+  const agora=new Date();
+  p.lpBaixas=p.lpBaixas||{};
+  p.lpBaixas.projeto={data:agora.toISOString().slice(0,10),dataHora:agora.toISOString(),por:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),viaChecklist:true,cmv:val};
+  await savePedidoFS(p);
+  const m=document.getElementById('proj-cmv-modal');if(m)m.remove();
+  toast(`Projeto finalizado ✅ CMV: ${val}%`,'tok');
   if(typeof projRenderAtivo==='function')projRenderAtivo();
 }
 async function projSalvarObs(pedidoId,itemKey,texto){
@@ -16197,16 +16290,18 @@ let _projTabAtiva='lista';
 function projSetTab(tab,btn){
   document.querySelectorAll('.proj-main-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  const sl=document.getElementById('proj-sec-lista'),sk=document.getElementById('proj-sec-kanban'),sc=document.getElementById('proj-sec-calendario');
+  const sl=document.getElementById('proj-sec-lista'),sk=document.getElementById('proj-sec-kanban'),sc=document.getElementById('proj-sec-calendario'),si=document.getElementById('proj-sec-indicadores');
   if(sl)sl.style.display=tab==='lista'?'':'none';
   if(sk)sk.style.display=tab==='kanban'?'':'none';
   if(sc)sc.style.display=tab==='calendario'?'':'none';
+  if(si)si.style.display=tab==='indicadores'?'':'none';
   _projTabAtiva=tab;
   projRenderAtivo();
 }
 function projRenderAtivo(){
   if(_projTabAtiva==='kanban')renderProjKanban();
   else if(_projTabAtiva==='calendario')renderProjCalendario();
+  else if(_projTabAtiva==='indicadores')renderProjIndicadores();
   else renderProjLista();
 }
 function _projStatusLabel(st){return{nao_iniciado:'⚪ Não iniciado',andamento:'🔵 Em andamento',atrasado:'🔴 Atrasado',concluido:'✅ Concluído'}[st]||st;}
@@ -16601,6 +16696,124 @@ async function projExportarCalendarioPDF(){
   doc.save(`menu_projetos_calendario_${y}_${String(m).padStart(2,'0')}.pdf`);
   toast('PDF gerado!','tok');
 }
+
+// ===================== MENU PROJETOS — INDICADORES (2026-08-10) =====================
+// Aba nova a pedido do usuário, mesmo espírito da aba de Gráficos do Comercial: Finalizados em
+// Dia/com Atraso (clicáveis, mostram a lista de pedidos de cada lista) + CMV médio do período +
+// Top 5 CMV mais altos. "Em dia"/"atraso" aqui é o real (baixa.data comparado com o prazo da
+// etapa 'projeto'), diferente do status simplificado que _lpStatusEtapa usa na Lista de
+// Pedidos/Kanban (ver correção de 2026-08-08) — ali a intenção foi não penalizar visualmente um
+// projeto já concluído; aqui em Indicadores é exatamente o oposto, queremos saber de propósito
+// se ele foi entregue dentro do prazo ou não, então usamos a comparação de data direto.
+let _projIndMes={y:new Date().getFullYear(),m:new Date().getMonth()+1};
+let _projIndCache=[]; // último cálculo de renderProjIndicadores(), reusado pelos modais de lista
+function projIndMesMov(dir){
+  _projIndMes.m+=dir;
+  if(_projIndMes.m>12){_projIndMes.m=1;_projIndMes.y++;}
+  if(_projIndMes.m<1){_projIndMes.m=12;_projIndMes.y--;}
+  // Navegar por mês só faz sentido se não tiver um período customizado ativo — limpa o De/Até
+  // pra não ficar uma combinação confusa dos dois filtros ao mesmo tempo.
+  const de=document.getElementById('proj-ind-data-de');if(de)de.value='';
+  const ate=document.getElementById('proj-ind-data-ate');if(ate)ate.value='';
+  renderProjIndicadores();
+}
+// Período efetivo: usa o De/Até customizado se preenchido, senão o mês navegado (◀▶).
+function _projIndPeriodo(){
+  const de=document.getElementById('proj-ind-data-de')?.value||'';
+  const ate=document.getElementById('proj-ind-data-ate')?.value||'';
+  if(de||ate)return{de,ate};
+  const{y,m}=_projIndMes;
+  const ultimoDia=new Date(y,m,0).getDate();
+  return{de:`${y}-${String(m).padStart(2,'0')}-01`,ate:`${y}-${String(m).padStart(2,'0')}-${String(ultimoDia).padStart(2,'0')}`};
+}
+// Só entra projeto REALMENTE concluído (p.lpBaixas.projeto existe) com a data da baixa dentro
+// do período — não usa _lpPedidosElegiveis().filter(status==='concluido') direto porque aqui
+// precisamos do objeto `baixa` completo (data real + cmv), não só o status resumido.
+function _projIndInfos(){
+  const periodo=_projIndPeriodo();
+  return _lpPedidosElegiveis().map(p=>{
+    const baixa=p.lpBaixas&&p.lpBaixas.projeto;
+    if(!baixa||!baixa.data)return null;
+    if(!_lpDataNoIntervalo(baixa.data,periodo.de,periodo.ate))return null;
+    const calc=_lpCalcEtapas(p);
+    if(!calc.ok)return null;
+    const etapa=calc.etapas.find(e=>e.key==='projeto'&&e.aplicavel);
+    if(!etapa)return null;
+    const emDia=baixa.data<=etapa.iso;
+    const cmv=(typeof baixa.cmv==='number'&&!isNaN(baixa.cmv))?baixa.cmv:null;
+    return{p,baixa,etapa,emDia,cmv};
+  }).filter(Boolean);
+}
+function renderProjIndicadores(){
+  const lbl=document.getElementById('proj-ind-mes-lbl');
+  const{y,m}=_projIndMes;
+  if(lbl)lbl.textContent=MESES_PT[m]+' '+y;
+  const kpisEl=document.getElementById('proj-ind-kpis');
+  const top5El=document.getElementById('proj-ind-top5');
+  if(!kpisEl)return;
+  if(!_isSetorUser('PROJETOS')){
+    kpisEl.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700;font-size:.85rem;grid-column:1/-1">🔒 ACESSO NÃO PERMITIDO — apenas Projetos ou Administrador podem ver os indicadores.</div>';
+    if(top5El)top5El.innerHTML='';
+    return;
+  }
+  const infos=_projIndInfos();
+  _projIndCache=infos;
+  const emDia=infos.filter(x=>x.emDia);
+  const atraso=infos.filter(x=>!x.emDia);
+  const comCmv=infos.filter(x=>x.cmv!=null);
+  const mediaCmv=comCmv.length?comCmv.reduce((s,x)=>s+x.cmv,0)/comCmv.length:null;
+  kpisEl.innerHTML=[
+    {cls:'vd',l:'✅ Finalizados em Dia',v:String(emDia.length),s:'Clique pra ver quais',click:"projIndAbrirLista('emdia')"},
+    {cls:'ro',l:'🔴 Finalizados com Atraso',v:String(atraso.length),s:'Clique pra ver quais',click:"projIndAbrirLista('atraso')"},
+    {cls:'dk',l:'📊 CMV Médio do Período',v:mediaCmv!=null?mediaCmv.toFixed(2).replace('.',',')+'%':'—',s:comCmv.length?comCmv.length+' de '+infos.length+' projeto(s) com CMV registrado':'Nenhum projeto com CMV neste período'}
+  ].map(k=>`<div class="gc-kp ${k.cls}"${k.click?` onclick="${k.click}" style="cursor:pointer"`:''}><div class="gc-kl">${k.l}</div><div class="gc-kv">${k.v}</div><div class="gc-ks">${k.s}</div></div>`).join('');
+
+  const top5=comCmv.slice().sort((a,b)=>b.cmv-a.cmv).slice(0,5);
+  if(top5El)top5El.innerHTML=top5.length?`<div style="overflow-x:auto"><table class="dash-table" style="width:100%"><thead><tr>
+      <th style="padding:8px 10px">#</th><th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">JOB</th><th style="padding:8px 10px">Finalizado em</th><th style="padding:8px 10px">CMV</th>
+    </tr></thead><tbody>
+    ${top5.map((x,i)=>`<tr onclick="lpAbrirDetalhe('${x.p.id}')" style="cursor:pointer;border-bottom:1px solid var(--border-lt)">
+      <td style="padding:8px 10px;font-weight:700">${i+1}º</td>
+      <td style="padding:8px 10px;font-weight:700">${x.p.os||'—'}</td>
+      <td style="padding:8px 10px">${x.p.cliente||'—'}</td>
+      <td style="padding:8px 10px">${x.p.job||'—'}</td>
+      <td style="padding:8px 10px">${fmtD(x.baixa.data)}</td>
+      <td style="padding:8px 10px;font-weight:800;color:${x.cmv>=50?'#dc2626':x.cmv>=30?'#d97706':'#16a34a'}">${x.cmv.toFixed(2).replace('.',',')}%</td>
+    </tr>`).join('')}
+    </tbody></table></div>`:'<div style="text-align:center;padding:20px;color:var(--ink4);font-size:.82rem">Nenhum projeto com CMV registrado neste período.</div>';
+}
+// Modal de lista (clique num dos 2 cards de cima) — mostra quais pedidos entram em cada lista,
+// reusando o cálculo já feito em _projIndCache (renderProjIndicadores roda sempre antes de
+// qualquer clique possível, então o cache nunca fica desatualizado em relação ao período atual).
+function projIndAbrirLista(tipo){
+  const itens=(tipo==='emdia'?_projIndCache.filter(x=>x.emDia):_projIndCache.filter(x=>!x.emDia));
+  itens.sort((a,b)=>String(a.p.os||'').localeCompare(String(b.p.os||''),'pt-BR',{numeric:true}));
+  const old=document.getElementById('proj-ind-lista-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='proj-ind-lista-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  const titulo=tipo==='emdia'?'✅ Finalizados em Dia':'🔴 Finalizados com Atraso';
+  const corpo=itens.length?itens.map(x=>{
+    const diasDif=Math.round((new Date(x.baixa.data+'T00:00:00')-new Date(x.etapa.iso+'T00:00:00'))/86400000);
+    const difTxt=tipo==='atraso'?`${diasDif} dia(s) corrido(s) após o prazo (${fmtD(x.etapa.iso)})`:`Finalizado em ${fmtD(x.baixa.data)} · prazo era ${fmtD(x.etapa.iso)}`;
+    return `<div onclick="document.getElementById('proj-ind-lista-modal').remove();lpAbrirDetalhe('${x.p.id}')" style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${x.p.cliente||'—'}</div>
+        <div style="font-size:.7rem;color:var(--ink4)">${x.p.job?x.p.job+' · ':''}${difTxt}${x.cmv!=null?' · CMV '+x.cmv.toFixed(2).replace('.',',')+'%':''}</div>
+      </div>
+    </div>`;
+  }).join(''):'<div style="text-align:center;padding:30px;color:var(--ink4);font-size:.85rem">Nenhum projeto nesta lista pra este período.</div>';
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:540px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:10px">
+      <div style="font-size:1rem;font-weight:800;color:#1a1f36">${titulo} (${itens.length})</div>
+      <button onclick="document.getElementById('proj-ind-lista-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
+    </div>
+    ${corpo}
+  </div>`;
+  document.body.appendChild(modal);
+}
+// ===================== FIM MENU PROJETOS — INDICADORES =====================
 
 // ===================== GESTÃO DE FORNECEDORES (Planejamento, 2026-07-29) =====================
 // Nova aba dentro de Planejamento, a pedido do usuário — inspirada num sistema separado que
