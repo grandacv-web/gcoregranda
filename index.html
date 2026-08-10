@@ -4092,6 +4092,54 @@ async function _migrarAtrasadosProjetosComprasHoje(){
   }
   if(marcados)toast(`${marcados} item(ns) atrasado(s) concluído(s) em Projetos/Compras (${osMarcados.slice(0,8).join(', ')}${osMarcados.length>8?'...':''})`,'tok');
 }
+// Reabertura pontual (2026-08-10, a pedido do usuário) — a exigência de informar o CMV (%) ao
+// finalizar o checklist do Projeto é NOVA (ver _projChecarConclusao/projPedirCmvEFinalizar,
+// mesma data). Projetos que já tinham sido concluídos ANTES dessa mudança (inclusive via as duas
+// limpezas em lote acima, _migrarProjetosPrazoAte10Ago/_migrarAtrasadosProjetosComprasHoje) não
+// têm esse CMV registrado, o que deixa os indicadores novos (aba Indicadores → CMV Médio/Top 5)
+// incompletos. O usuário pediu pra reabrir especificamente os projetos com Prazo Final de
+// Finalização a partir de 27/07/2026 — verificado ao vivo no site publicado antes de escrever
+// esta função: 26 pedidos batem esse critério (OS 242,236,234,235,255,253,176,178,271,269,268,
+// 272,275,267,273,261,283,266,287,290,292,291,270,289,300,294).
+//
+// O Projeto Executivo desses volta pra lista "a fazer" (baixa desfeita, exatamente como
+// lpDesfazerBaixa faria, com rastro automático no Histórico via p.lpBaixasDesfeitas — ver bloco 9
+// de _histPedidoEventos, nenhum código novo precisou entrar lá) e o checklist é resetado pra 0/8
+// (mantendo qualquer observação já escrita em cada item), forçando uma nova passada real que
+// termine pedindo o CMV — sem isso, reabrir mostraria as 8 etapas já marcadas e o banner "já foi
+// dado como concluído automaticamente" de projAbrirChecklist, sem nenhum clique novo pra acionar
+// projMarcarItem→projPedirCmvEFinalizar.
+//
+// Ação de UMA VEZ SÓ (flag persistida cfg.migReabrirProjetos27JulFeita) — mesmo padrão das outras
+// limpezas pontuais acima, nunca roda de novo sozinha em sessões futuras.
+async function _migrarReabrirProjetosPrazoDe27Jul(){
+  if(cfg.migReabrirProjetos27JulFeita)return;
+  const LIMITE='2026-07-27';
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const infos=_lpPedidosElegiveis().map(p=>_projInfo(p,hojeIso)).filter(x=>x.ok);
+  let reabertos=0;
+  const osReabertos=[];
+  for(const{p,calc}of infos){
+    const baixaAtual=p.lpBaixas&&p.lpBaixas.projeto;
+    if(!baixaAtual)continue;
+    if(!calc.prazoIso||calc.prazoIso<LIMITE)continue;
+    p.lpBaixasDesfeitas=p.lpBaixasDesfeitas||[];
+    p.lpBaixasDesfeitas.push({etapaKey:'projeto',baixaOriginal:baixaAtual,desfeitaEm:new Date().toISOString(),desfeitaPor:'Migração automática — nova exigência de CMV'});
+    delete p.lpBaixas.projeto;
+    if(p.projChecklist&&p.projChecklist.itens){
+      PROJ_CHECKLIST_ITENS.forEach(it=>{
+        const dado=p.projChecklist.itens[it.key];
+        if(dado){dado.feito=false;dado.quando=null;}
+      });
+    }
+    await savePedidoFS(p);
+    reabertos++;
+    osReabertos.push(p.os||p.id);
+  }
+  cfg.migReabrirProjetos27JulFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  if(reabertos)toast(`${reabertos} projeto(s) com Prazo Final a partir de 27/07 reabertos em Projetos, pra dar baixa de novo com CMV (OS ${osReabertos.slice(0,8).join(', ')}${osReabertos.length>8?'...':''})`,'tok');
+}
 // Limpeza pontual (2026-08-04, a pedido do usuário: "os projetos que mandei vc tirar da lista
 // de projetos porque estavam entregues já vc não baixou da lista de pedidos... pode remover
 // tudo que tiver atrasado da lista de pedidos"). A limpeza de 2026-08-03
@@ -4161,6 +4209,7 @@ let _anoPrazoMigracaoFeita=false;
 let _projPrazo10AgoMigracaoFeita=false;
 let _atrasadosProjComprasMigracaoFeita=false;
 let _atrasadosLpMigracaoFeita=false;
+let _reabrirProjetos27JulMigracaoFeita=false;
 let _centrosCustoExtraMigracaoFeita=false;
 let _centrosCustoExtra2RemocaoMigracaoFeita=false;
 let _restaurarUsuariosMigracaoFeita=false;
@@ -4217,6 +4266,13 @@ function setupRealtimeSync(){
     if(!_atrasadosProjComprasMigracaoFeita&&_getUserCat().isAdm){
       _atrasadosProjComprasMigracaoFeita=true;
       _migrarAtrasadosProjetosComprasHoje().catch(e=>{_atrasadosProjComprasMigracaoFeita=false;console.error('Erro ao concluir itens atrasados em Projetos/Compras',e);});
+    }
+    // Limpeza pontual (2026-08-10, a pedido do usuário) — reabre em Projetos os pedidos com
+    // Prazo Final de Finalização a partir de 27/07 que já tinham baixa (ver
+    // _migrarReabrirProjetosPrazoDe27Jul) — só 1x pra sempre (flag persistida), só admin.
+    if(!_reabrirProjetos27JulMigracaoFeita&&_getUserCat().isAdm){
+      _reabrirProjetos27JulMigracaoFeita=true;
+      _migrarReabrirProjetosPrazoDe27Jul().catch(e=>{_reabrirProjetos27JulMigracaoFeita=false;console.error('Erro ao reabrir projetos com Prazo Final a partir de 27/07',e);});
     }
     // Limpeza pontual (2026-08-04, a pedido do usuário) — mesma ideia acima, mas dando baixa de
     // verdade em p.lpBaixas (controle próprio da Lista de Pedidos/Kanban, que a limpeza de
@@ -17804,7 +17860,16 @@ function _rhParseDiasTable(root,horario,hojeIso){
     const ehAtestado=_RH_STATUS_ATESTADO.some(k=>statusLower.includes(k));
     const previstoOriginalDiaMin=previstoDiaMin;
     if(_RH_STATUS_NAO_UTIL.some(k=>statusLower.includes(k)))previstoDiaMin=0;
-    if(ehAtestado)previstoDiaMin=0;
+    if(ehAtestado){
+      previstoDiaMin=0;
+      // NOVO (2026-08-10, a pedido do usuário): considera que o colaborador trabalhou as horas
+      // do dia normalmente mesmo com atestado — antes trabalhadoMin ficava com o que foi batido
+      // de verdade no ponto (geralmente 0, já que não compareceu), o que fazia o total de
+      // "Horas Trabalhadas" do período parecer menor só por causa do atestado. Não muda
+      // falta/atraso/perdido/diasUteis (que já ficam neutros aqui porque previstoDiaMin virou 0
+      // acima) — só garante que a soma de horas trabalhadas não desconta esse dia.
+      trabalhadoMin=previstoOriginalDiaMin;
+    }
     // Guarda os horários batidos crus (Ent1/Sai1/Ent2/Sai2 = manhã+tarde, o par mais comum;
     // Ent3/Sai3/Ent4/Sai4 só aparecem em exceções, ex.: texto livre "FALTA DE ENERGIA HOF" no
     // dia de Atestado) — pedido do usuário (2026-07-29): "quero ver o horário que ele chegou
@@ -18071,7 +18136,11 @@ function _rhStats(diasArr){
     // Atestado/Declaração (2026-07-30) — contado À PARTE, nunca entra em previstoMin/perdidoMin/
     // faltasDias/diasUteis (o parser já zera d.previstoMin nesses dias, ver _rhParseDiasTable),
     // então não precisa de "if" pra pular o resto do loop — só soma aqui e segue normal.
-    if(d.atestado){diasAtestado++;minutosAtestado+=Math.max(0,(d.previstoOriginalMin||0)-(d.trabalhadoMin||0));}
+    // (2026-08-10) minutosAtestado agora soma o total de horas COBERTAS pelo atestado (não mais
+    // "não trabalhadas") — desde que trabalhadoMin passou a ser preenchido igual ao previsto
+    // nesses dias (ver _rhParseDiasTable), a diferença previstoOriginal-trabalhado sempre daria
+    // 0, o que deixaria essa métrica sem sentido.
+    if(d.atestado){diasAtestado++;minutosAtestado+=(d.previstoOriginalMin||0);}
     const prev=d.previstoMin||0,trab=d.trabalhadoMin||0;
     previstoMin+=prev;
     trabalhadoMin+=trab;
@@ -18370,7 +18439,9 @@ function _rhAbrirDrillDown(tipo){
         valorOrdem=d.atrasoMin||0;
       }else if(tipo==='atestados'){
         inclui=!!d.atestado;
-        detalhe='Cobriu '+_rhFmtHoras(d.previstoOriginalMin||0);
+        const chaveOv=f.id+'|'+d.data;
+        const override=(cfg.rhAtestadoOverrides||{})[chaveOv];
+        detalhe='Cobriu '+_rhFmtHoras(d.previstoOriginalMin||0)+(override?` · <span style="color:#0891b2;font-weight:700">Motivo real: ${String(override.motivo).replace(/</g,'&lt;')}</span>`:'');
         valorOrdem=d.previstoOriginalMin||0;
       }else{ // 'perdidas' (Horas Perdidas) e 'cumprimento' (mesma base de cálculo)
         const prev=d.previstoMin||0,trab=d.trabalhadoMin||0;
@@ -18378,7 +18449,7 @@ function _rhAbrirDrillDown(tipo){
         detalhe=(trab===0&&!d.incompleto)?'Falta — '+_rhFmtHoras(prev)+' perdidas':_rhFmtHoras(prev-trab)+' perdidas';
         valorOrdem=prev-trab;
       }
-      if(inclui)linhas.push({nome:f.nome,depto:f.departamento||'—',data:d.data,diaSemana:d.diaSemana,detalhe,valorOrdem});
+      if(inclui)linhas.push({id:f.id,nome:f.nome,depto:f.departamento||'—',data:d.data,diaSemana:d.diaSemana,detalhe,valorOrdem,statusPlanilha:d.status||''});
     });
   });
   linhas.sort((a,b)=>b.valorOrdem-a.valorOrdem||a.data.localeCompare(b.data));
@@ -18386,29 +18457,82 @@ function _rhAbrirDrillDown(tipo){
   const old=document.getElementById('rh-drill-modal');if(old)old.remove();
   const modal=document.createElement('div');
   modal.id='rh-drill-modal';
+  modal.dataset.tipo=tipo;
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
   modal.onclick=e=>{if(e.target===modal)modal.remove();};
   const semanaAbrev=['dom','seg','ter','qua','qui','sex','sáb'];
+  // Coluna extra "Motivo" só na lista de Atestados (2026-08-10, a pedido do usuário: "clica no
+  // atestado, clica na pessoa e muda o status") — deixa registrado no sistema qual foi o motivo
+  // REAL quando não foi bem um atestado, sem precisar (nem poder) editar a planilha original,
+  // que sempre vai continuar mostrando "Atestado". Texto livre, nada pré-cadastrado.
+  const mostrarColMotivo=tipo==='atestados';
   const linhasHtml=linhas.length?`<table style="width:100%;border-collapse:collapse;font-size:.82rem">
     <thead><tr style="text-align:left;border-bottom:2px solid #e2e8f0">
-      <th style="padding:8px">Colaborador</th><th style="padding:8px">Departamento</th><th style="padding:8px">Data</th><th style="padding:8px">Detalhe</th>
+      <th style="padding:8px">Colaborador</th><th style="padding:8px">Departamento</th><th style="padding:8px">Data</th><th style="padding:8px">Detalhe</th>${mostrarColMotivo?'<th style="padding:8px"></th>':''}
     </tr></thead>
     <tbody>${linhas.map(l=>`<tr style="border-bottom:1px solid #f1f5f9">
-      <td style="padding:8px;font-weight:700;color:#101B3D">${String(l.nome).replace(/</g,'&lt;')}</td>
+      <td style="padding:8px;font-weight:700;color:#101B3D" title="${mostrarColMotivo?('Na planilha: '+String(l.statusPlanilha).replace(/"/g,'&quot;')):''}">${String(l.nome).replace(/</g,'&lt;')}</td>
       <td style="padding:8px;color:#64748b">${String(l.depto).replace(/</g,'&lt;')}</td>
       <td style="padding:8px;white-space:nowrap">${fmtD(l.data)} <span style="color:#94a3b8;font-size:.72rem">(${semanaAbrev[l.diaSemana]})</span></td>
       <td style="padding:8px">${l.detalhe}</td>
+      ${mostrarColMotivo?`<td style="padding:8px;text-align:right;white-space:nowrap"><button onclick="_rhEditarMotivoAtestado('${l.id}','${l.data}','${String(l.nome).replace(/'/g,"\\'")}')" class="dash-btn-conf" style="background:#0891b2;font-size:.68rem;padding:5px 9px" type="button">✏️ Alterar motivo</button></td>`:''}
     </tr>`).join('')}</tbody>
   </table>`:'<div style="text-align:center;padding:30px;color:#94a3b8;font-size:.85rem">Nada encontrado no período/filtro atual.</div>';
+  const avisoMotivo=mostrarColMotivo?`<div style="font-size:.72rem;color:#0369a1;background:#f0f9ff;border-radius:8px;padding:8px 10px;margin-bottom:12px">ℹ️ "Alterar motivo" só corrige o que fica registrado aqui no sistema — a planilha do ponto (Hponto) enviada continua mostrando Atestado/Declaração, ela nunca é editada.</div>`:'';
   modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:24px;max-width:760px;width:100%;max-height:85vh;overflow:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <h3 style="margin:0;font-size:1rem;font-weight:800;color:#101B3D">${titulos[tipo]||'Detalhe'}</h3>
       <button onclick="document.getElementById('rh-drill-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
     </div>
     <div style="font-size:.74rem;color:#64748b;margin-bottom:14px">${linhas.length} registro(s) no recorte atual (mesmo filtro de mês/período/departamento/busca da tela)</div>
+    ${avisoMotivo}
     ${linhasHtml}
   </div>`;
   document.body.appendChild(modal);
+}
+// Modal de edição do motivo (2026-08-10) — texto livre, sem lista pré-cadastrada, a pedido do
+// usuário: "ela escreve como ela quiser na hora, não precisa ser pré-cadastrado". Salvo em
+// cfg.rhAtestadoOverrides['<funcionarioId>|<data>'] via escrita atômica (mesmo padrão de
+// window._fbUpdateCfgField, ver comentário dela) — nunca toca no documento rhPonto original
+// (a planilha importada), só numa camada de anotação por cima.
+function _rhEditarMotivoAtestado(funcId,data,nome){
+  if(!_isRhUser()){toast('Apenas RH/Administrador podem alterar isso','terr');return;}
+  const chave=funcId+'|'+data;
+  const atual=((cfg.rhAtestadoOverrides||{})[chave]||{}).motivo||'';
+  const old=document.getElementById('rh-motivo-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='rh-motivo-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 24px;max-width:440px;width:92%">
+    <div style="font-size:1rem;font-weight:800;color:#101B3D;margin-bottom:4px">Alterar motivo — ${String(nome).replace(/</g,'&lt;')}</div>
+    <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">${fmtD(data)} · Na planilha sai como Atestado/Declaração — isso aqui só corrige o motivo registrado no sistema, sem mexer no arquivo original.</div>
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Motivo real</label>
+    <textarea id="rh-motivo-input" placeholder="Escreva o motivo real..." style="width:100%;min-height:70px;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;resize:vertical">${String(atual).replace(/</g,'&lt;')}</textarea>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      ${atual?`<button onclick="_rhSalvarMotivoAtestado('${funcId}','${data}',true)" class="dash-btn-conf" style="background:#94a3b8" type="button" title="Volta a mostrar só Atestado/Declaração">Remover</button>`:''}
+      <button onclick="document.getElementById('rh-motivo-modal').remove()" class="dash-btn-conf" style="background:#94a3b8;flex:1" type="button">Cancelar</button>
+      <button onclick="_rhSalvarMotivoAtestado('${funcId}','${data}',false)" class="dash-btn-conf" style="background:#16a34a;flex:1" type="button">Salvar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  setTimeout(()=>document.getElementById('rh-motivo-input')?.focus(),50);
+}
+async function _rhSalvarMotivoAtestado(funcId,data,remover){
+  const inp=document.getElementById('rh-motivo-input');
+  const motivo=remover?'':(inp?inp.value.trim():'');
+  const chave=funcId+'|'+data;
+  cfg.rhAtestadoOverrides=cfg.rhAtestadoOverrides||{};
+  if(motivo){
+    cfg.rhAtestadoOverrides[chave]={motivo,por:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),em:new Date().toISOString()};
+    if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['rhAtestadoOverrides',chave],cfg.rhAtestadoOverrides[chave]);
+  } else {
+    delete cfg.rhAtestadoOverrides[chave];
+    if(window._fbDeleteCfgField)await window._fbDeleteCfgField(['rhAtestadoOverrides',chave]);
+  }
+  const m=document.getElementById('rh-motivo-modal');if(m)m.remove();
+  toast(motivo?'Motivo atualizado ✅':'Alteração removida','tok');
+  _rhAbrirDrillDown('atestados');
 }
 function renderRhPontualidade(){
   if(!_isRhUser())return;
@@ -18557,7 +18681,7 @@ function renderRhPontualidade(){
       ${_rhCell('perdidas','tendencia','Horas Perdidas',_rhValorTxt(_rhFmtHoras(statsGeral.perdidoMin),corPerdida),`<div style="font-size:.68rem;color:#94a3b8;margin-top:4px">${statsGeral.pctPerdida.toFixed(1)}% do previsto</div>`)}
       ${_rhCell('faltas','alerta','Faltas (dias)',_rhValorTxt(String(statsGeral.faltasDias),corFaltas))}
       ${_rhCell('atrasos','alarme','Atraso de Chegada',_rhValorTxt(_rhFmtHoras(statsGeral.atrasoMin),corAtraso))}
-      ${_rhCell('atestados','nota','Dias de Atestado',_rhValorTxt(String(statsGeral.diasAtestado),corAtestado),`<div style="font-size:.68rem;color:#94a3b8;margin-top:4px">${_rhFmtHoras(statsGeral.minutosAtestado)} não trabalhadas</div>`)}
+      ${_rhCell('atestados','nota','Dias de Atestado',_rhValorTxt(String(statsGeral.diasAtestado),corAtestado),`<div style="font-size:.68rem;color:#94a3b8;margin-top:4px">${_rhFmtHoras(statsGeral.minutosAtestado)} cobertas (contam como trabalhadas)</div>`)}
     </div>`;
   }
   const comDados=porFunc.filter(x=>x.stats.diasUteis>0);
@@ -18794,7 +18918,12 @@ function _rhRenderHistoricoModal(){
         <button onclick="_rhHistMesMov(1)" type="button">▶</button>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px">
+    <!-- Corrigido 2026-08-10, a pedido do usuário ("assiduidade e cumprimento... os dados tao
+         saindo tortos embaixo") — eram 6 cards num grid "auto-fit" que cabia só 5 por linha
+         nessa largura de modal (820px), então o 6º (Horas Cumpridas) sobrava sozinho numa 2ª
+         linha, colado à esquerda com um buraco vazio do lado. Grid fixo de 3 colunas x 2 linhas
+         preenche as 6 células certinho, sem sobra. -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
       <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:12px"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">Previstas</div><div style="font-size:1rem;font-weight:800;margin-top:4px">${_rhFmtHoras(stats.previstoMin)}</div></div>
       <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:12px"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">Perdidas</div><div style="font-size:1rem;font-weight:800;margin-top:4px">${_rhFmtHoras(stats.perdidoMin)}</div></div>
       <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:12px"><div style="font-size:.66rem;font-weight:700;text-transform:uppercase;color:var(--ink4)">Faltas</div><div style="font-size:1rem;font-weight:800;margin-top:4px;color:${stats.faltasDias>0?'#dc2626':'inherit'}">${stats.faltasDias}</div></div>
