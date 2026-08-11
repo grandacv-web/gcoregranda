@@ -893,6 +893,7 @@ select.fc{cursor:pointer}
       <div id="ferramenta-tarefas">
         <div class="dash-tabs" style="margin-bottom:10px" id="tf-subtabs">
           <button class="dash-tab active" id="tf-tab-pend" onclick="tarefasTab('pendentes',this)">⏳ Pendentes</button>
+          <button class="dash-tab" id="tf-tab-aprov" onclick="tarefasTab('aprovacao',this)">🔍 Aguardando Aprovação<span id="tf-tab-aprov-count"></span></button>
           <button class="dash-tab" id="tf-tab-conc" onclick="tarefasTab('concluidas',this)">✅ Concluídas</button>
           <button class="dash-tab" id="tf-tab-rel" onclick="tarefasTab('relatorio',this)">📊 Relatório</button>
         </div>
@@ -2326,6 +2327,31 @@ select.fc{cursor:pointer}
 </div>
 </div>
 
+<!-- DEVOLVER TAREFA MODAL (2026-08-11) — admin devolve uma tarefa que estava "Aguardando
+     Aprovação" porque na prática não foi concluída (ou foi feita errado), com prazo novo
+     obrigatório. Ver abrirDevolverTarefa()/_confirmarDevolucaoTarefa()/devolverTarefaComercial(). -->
+<div class="mov" id="mo-tarefa-devolver" onclick="cio(event,'mo-tarefa-devolver')">
+<div class="mvmod" style="width:480px;max-width:96vw">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <h3 style="margin-bottom:0">↩️ Devolver Tarefa</h3>
+    <button onclick="closeM('mo-tarefa-devolver')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div id="tf-devolver-info" style="font-size:.8rem;color:var(--ink3);margin-bottom:14px"></div>
+  <input type="hidden" id="tf-devolver-pedido-id">
+  <input type="hidden" id="tf-devolver-tarefa-id">
+  <div class="fg">
+    <label>Novo prazo <span class="r">*</span></label>
+    <input type="date" id="tf-devolver-novo-prazo" class="fc">
+  </div>
+  <div class="fg">
+    <label>Motivo da devolução <span class="r">*</span></label>
+    <textarea id="tf-devolver-motivo" class="fc" rows="3" placeholder="Explique o que falta ou o que não foi feito..." style="text-transform:none"></textarea>
+  </div>
+  <div style="font-size:.72rem;color:#94a3b8;margin-bottom:12px">A tarefa volta pra "Pendentes" com o novo prazo, pro responsável concluir de novo.</div>
+  <button onclick="_confirmarDevolucaoTarefa()" style="width:100%;background:#c2410c;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">Devolver tarefa</button>
+</div>
+</div>
+
 <!-- PENDÊNCIAS DO CONSELHO (2026-08-08) — o que falta resolver antes de emitir um rascunho de
      verdade; cada item vira uma tarefa automática (2 dias de prazo) e bloqueia a emissão até
      ser marcado como resolvido (ver abrirPendenciasConselho() e o bloqueio em submit()). -->
@@ -3366,7 +3392,7 @@ const TAREFA_TIPOS_SUGERIDOS=['Lançar no GCore'];
 // vencido (ver _tarefaAtrasada()) — é a penalidade do pedido negado. historicoAdiamentos
 // guarda todo pedido já decidido (aprovado ou reprovado), pra auditoria.
 function novaTarefaComercial(tipo,responsavel,prazoTarefa,criadoPor,descricao){
-  return{id:uid(),tipo,descricao:descricao||'',status:'pendente',criadaEm:new Date().toISOString(),concluidaEm:null,responsavel:responsavel||'',prazoTarefa:prazoTarefa||'',criadoPor:criadoPor||'',adiamentoPendente:null,historicoAdiamentos:[],atrasoForcado:false};
+  return{id:uid(),tipo,descricao:descricao||'',status:'pendente',criadaEm:new Date().toISOString(),concluidaEm:null,concluidoPor:'',responsavel:responsavel||'',prazoTarefa:prazoTarefa||'',criadoPor:criadoPor||'',adiamentoPendente:null,historicoAdiamentos:[],atrasoForcado:false,aprovadoPor:'',aprovadoEm:null,historicoDevolucoes:[]};
 }
 // Regras configuráveis em Configurações > Tarefas Automáticas (cfg.regrasTarefasComerciais).
 // Cada regra: {id, tipo:'' (vazio=qualquer, ou uma chave de TC como "Venda"/"Amostra"),
@@ -3420,13 +3446,31 @@ function getTarefasComerciaisPendentes(){
   const out=[];
   pedidos.forEach(p=>{
     (p.tarefasComerciais||[]).forEach(t=>{
-      if(t.status!=='concluida')out.push({...t,pedidoId:p.id,os:p.os,cliente:p.cliente,vendedor:p.responsavel||'—',tipoPedido:p.tipoPedido||'',job:p.job||'',prazo:p.prazo||''});
+      if((t.status||'pendente')==='pendente')out.push({...t,pedidoId:p.id,os:p.os,cliente:p.cliente,vendedor:p.responsavel||'—',tipoPedido:p.tipoPedido||'',job:p.job||'',prazo:p.prazo||''});
     });
   });
   (cfg.tarefasGerais||[]).forEach(t=>{
-    if(t.status!=='concluida')out.push({...t,avulsaGeral:true});
+    if((t.status||'pendente')==='pendente')out.push({...t,avulsaGeral:true});
   });
   out.sort((a,b)=>(a.criadaEm||'').localeCompare(b.criadaEm||''));
+  return out;
+}
+// Tarefa que alguém marcou como feita mas ainda não foi conferida por um admin (2026-08-11,
+// a pedido do usuário: "eu quero que o que os outros usuarios concluirem fique numa lista
+// pra eu aprovar... antes dela ir para concluidos"). Fica de fora tanto de Pendentes quanto
+// de Concluídas até a decisão do admin (ver aprovarTarefaComercial()/devolverTarefaComercial()
+// em marcarTarefaComercial()/_aplicarConclusaoTarefa()).
+function getTarefasComerciaisAguardandoAprovacao(){
+  const out=[];
+  pedidos.forEach(p=>{
+    (p.tarefasComerciais||[]).forEach(t=>{
+      if(t.status==='aguardando_aprovacao')out.push({...t,pedidoId:p.id,os:p.os,cliente:p.cliente,vendedor:p.responsavel||'—',tipoPedido:p.tipoPedido||'',job:p.job||'',prazo:p.prazo||''});
+    });
+  });
+  (cfg.tarefasGerais||[]).forEach(t=>{
+    if(t.status==='aguardando_aprovacao')out.push({...t,avulsaGeral:true});
+  });
+  out.sort((a,b)=>(a.concluidaEm||'').localeCompare(b.concluidaEm||''));
   return out;
 }
 function getTarefasComerciaisConcluidas(){
@@ -3451,27 +3495,66 @@ function _podeMexerNaTarefa(responsavel){
   const meuNome=usuarioLogado?.nomeExibicao||'';
   return !!meuNome&&responsavel===meuNome;
 }
+// Concluir uma tarefa (ou reabrir uma já concluída) — mutação central compartilhada por
+// tarefa de pedido e tarefa avulsa geral (ver marcarTarefaComercial()/marcarTarefaGeral()
+// logo abaixo, mesmo padrão de _aplicarSolicitacaoAdiamento()). Regra nova (2026-08-11, a
+// pedido do usuário): quando quem conclui NÃO é administrador, a tarefa não vai direto pra
+// "concluida" — fica "aguardando_aprovacao" até um admin conferir de verdade (ver
+// aprovarTarefaComercial()/devolverTarefaComercial()). Admin concluindo (a própria tarefa ou
+// qualquer outra, já que ele pode mexer em todas) segue direto pra "concluida", sem essa
+// etapa — não faz sentido pedir aprovação de si mesmo. concluidaEm é sempre gravado no
+// momento em que a pessoa marca como feita, não quando o admin decide depois — é essa data
+// que conta pro prazo/relatório de aproveitamento (ver _tarefaAtrasada()), pra uma aprovação
+// demorada não penalizar quem entregou em dia.
+function _aplicarConclusaoTarefa(t,concluida){
+  if(!_podeMexerNaTarefa(t.responsavel)){toast('Só o responsável ou um administrador pode concluir esta tarefa','terr');return false;}
+  const {isAdm}=_getUserCat();
+  if(concluida){
+    const agora=new Date().toISOString();
+    const meuNome=usuarioLogado?.nomeExibicao||'';
+    t.concluidaEm=agora;
+    t.concluidoPor=meuNome;
+    if(isAdm){
+      t.status='concluida';
+      t.aprovadoPor=meuNome;
+      t.aprovadoEm=agora;
+    } else {
+      t.status='aguardando_aprovacao';
+      t.aprovadoPor='';
+      t.aprovadoEm=null;
+    }
+  } else {
+    // Reabrir — só existe pra tarefa já concluída de verdade (aprovada), botão da aba
+    // Concluídas. Zera tudo, volta pro estado inicial.
+    t.status='pendente';
+    t.concluidaEm=null;
+    t.concluidoPor='';
+    t.aprovadoPor='';
+    t.aprovadoEm=null;
+  }
+  return true;
+}
 async function marcarTarefaComercial(pedidoId,tarefaId,concluida){
   if(!pedidoId)return marcarTarefaGeral(tarefaId,concluida);
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p||!p.tarefasComerciais)return;
   const t=p.tarefasComerciais.find(x=>x.id===tarefaId);
   if(!t)return;
-  if(!_podeMexerNaTarefa(t.responsavel)){toast('Só o responsável ou um administrador pode concluir esta tarefa','terr');return;}
-  t.status=concluida?'concluida':'pendente';
-  t.concluidaEm=concluida?new Date().toISOString():null;
+  if(!_aplicarConclusaoTarefa(t,concluida))return;
   // Pendência do Conselho (2026-08-09, a pedido do usuário: "ao clicar como concluida em
   // qualquer uma das listas... conclui em tudo") — se esta tarefa nasceu de uma pendência
   // (t.origemConselho, ver _consPendAdicionar()), concluir/reabrir por AQUI também resolve/
   // reabre a pendência vinculada (por tarefaId), sincronizando com o modal de Pendências e a
   // lista de Conselho de Pedidos — mesma ação nos 2 sentidos (ver _consPendToggle(), que já
-  // fazia o caminho inverso: resolver a pendência conclui a tarefa).
-  if(t.origemConselho&&p.conselhoPendencias){
+  // fazia o caminho inverso: resolver a pendência conclui a tarefa). Enviar pra aprovação
+  // ainda NÃO resolve a pendência — só quando o admin aprovar de verdade (ver
+  // aprovarTarefaComercial()) — por isso só mexe aqui se o status final for concluida/pendente.
+  if(t.origemConselho&&p.conselhoPendencias&&t.status!=='aguardando_aprovacao'){
     const pend=p.conselhoPendencias.find(x=>x.tarefaId===t.id);
     if(pend){
-      pend.resolvida=concluida;
-      pend.resolvidaEm=concluida?new Date().toISOString():null;
-      pend.resolvidaPor=concluida?(usuarioLogado?.nomeExibicao||''):'';
+      pend.resolvida=t.status==='concluida';
+      pend.resolvidaEm=t.status==='concluida'?new Date().toISOString():null;
+      pend.resolvidaPor=t.status==='concluida'?(usuarioLogado?.nomeExibicao||''):'';
     }
   }
   await savePedidoFS(p);
@@ -3482,6 +3565,7 @@ async function marcarTarefaComercial(pedidoId,tarefaId,concluida){
   // Se o modal de Pendências estiver aberto nesse MESMO pedido, re-renderiza pra refletir o
   // checkbox marcado/desmarcado sem precisar fechar e reabrir.
   if(typeof _consPendPedidoId!=='undefined'&&_consPendPedidoId===pedidoId&&typeof _renderPendenciasConselho==='function')_renderPendenciasConselho();
+  if(t.status==='aguardando_aprovacao')toast('Tarefa enviada para aprovação do administrador!','tok');
 }
 // ── ADIAR TAREFA (2026-07-22) ──────────────────────────────────────────────
 // Responsável pela tarefa ou admin pedem novo prazo com justificativa obrigatória (mesma
@@ -3491,7 +3575,7 @@ async function marcarTarefaComercial(pedidoId,tarefaId,concluida){
 // marcarTarefaGeral logo acima.
 function _aplicarSolicitacaoAdiamento(t,novoPrazo,justificativa){
   if(!_podeMexerNaTarefa(t.responsavel)){toast('Só o responsável ou um administrador pode adiar esta tarefa','terr');return false;}
-  if(t.status==='concluida'){toast('Essa tarefa já foi concluída — reabra antes de adiar.','terr');return false;}
+  if(t.status!=='pendente'){toast(t.status==='aguardando_aprovacao'?'Essa tarefa está aguardando aprovação — não dá pra adiar agora.':'Essa tarefa já foi concluída — reabra antes de adiar.','terr');return false;}
   if(!novoPrazo){toast('Informe o novo prazo','terr');return false;}
   if(!justificativa||!justificativa.trim()){toast('Justificativa do adiamento é obrigatória','terr');return false;}
   const {isAdm}=_getUserCat();
@@ -3586,13 +3670,22 @@ async function decidirAdiamentoTarefaGeral(tarefaId,aprovado){
 // total de todo mundo, cada outro usuário vê só a contagem das SUAS tarefas. (Movido do
 // antigo botão gtab-tarefas, dentro de Geral, pra o item fixo do sidebar em 2026-07-16.)
 function _refreshTarefasBadge(){
+  const {isAdm}=_getUserCat();
+  const meuNome=usuarioLogado?.nomeExibicao||'';
+  const pend=getTarefasComerciaisPendentes();
+  const aguardando=getTarefasComerciaisAguardandoAprovacao();
   const badge=document.getElementById('ferr-sidebar-badge');
   if(badge){
-    const {isAdm}=_getUserCat();
-    const pend=getTarefasComerciaisPendentes();
-    const meuNome=usuarioLogado?.nomeExibicao||'';
-    const n=isAdm?pend.length:pend.filter(t=>t.responsavel===meuNome).length;
+    // Admin conta também as "aguardando aprovação" de todo mundo no badge do sidebar — é
+    // trabalho pendente dele igual uma tarefa pendente normal (ver aba nova em
+    // renderTarefasComerciais()).
+    const n=isAdm?(pend.length+aguardando.length):pend.filter(t=>t.responsavel===meuNome).length;
     badge.textContent=n?` (${n})`:'';
+  }
+  const tabAprov=document.getElementById('tf-tab-aprov-count');
+  if(tabAprov){
+    const n=isAdm?aguardando.length:aguardando.filter(t=>t.responsavel===meuNome).length;
+    tabAprov.textContent=n?` (${n})`:'';
   }
   _renderPainelUsuario();
 }
@@ -3813,20 +3906,114 @@ function _tarefaAtrasada(t){
   if(!t.prazoTarefa)return false;
   const prazo=new Date(t.prazoTarefa+'T23:59:59');
   if(isNaN(prazo))return false;
-  const ref=t.status==='concluida'?(t.concluidaEm?new Date(t.concluidaEm):null):new Date();
+  // "aguardando_aprovacao" já tem concluidaEm travado (o momento em que a pessoa marcou como
+  // feita) — usa essa data pro prazo, não o "agora", pra uma aprovação demorada do admin não
+  // virar atraso de quem entregou em dia (ver _aplicarConclusaoTarefa()).
+  const finalizada=t.status==='concluida'||t.status==='aguardando_aprovacao';
+  const ref=finalizada?(t.concluidaEm?new Date(t.concluidaEm):null):new Date();
   if(!ref||isNaN(ref))return false;
   return ref>prazo;
 }
 async function marcarTarefaGeral(tarefaId,concluida){
   const t=(cfg.tarefasGerais||[]).find(x=>x.id===tarefaId);
   if(!t)return;
-  if(!_podeMexerNaTarefa(t.responsavel)){toast('Só o responsável ou um administrador pode concluir esta tarefa','terr');return;}
-  t.status=concluida?'concluida':'pendente';
-  t.concluidaEm=concluida?new Date().toISOString():null;
+  if(!_aplicarConclusaoTarefa(t,concluida))return;
   if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderTarefasComerciais();
   _refreshTarefasBadge();
+  if(t.status==='aguardando_aprovacao')toast('Tarefa enviada para aprovação do administrador!','tok');
+}
+// ── APROVAR / DEVOLVER TAREFA (aba "Aguardando Aprovação", 2026-08-11) ─────────────────────
+// Decisão do admin sobre uma tarefa que alguém marcou como feita: aprovar confirma de vez
+// (vira "concluida", concluidaEm continua sendo o momento original em que a pessoa marcou,
+// não muda); devolver volta a tarefa pra "pendente" com um prazo novo, porque na prática não
+// foi concluída (ou foi feita errado) — mesmo padrão de _aplicarSolicitacaoAdiamento()/
+// _aplicarDecisaoAdiamento(), reaproveitado tanto pra tarefa de pedido quanto avulsa geral.
+function _podeAprovarTarefa(){return _getUserCat().isAdm;}
+function _aplicarAprovacaoTarefa(t,aprovado,novoPrazo,motivo){
+  if(!_podeAprovarTarefa()){toast('Só um administrador pode aprovar ou devolver uma tarefa','terr');return false;}
+  if(t.status!=='aguardando_aprovacao'){toast('Essa tarefa não está aguardando aprovação','terr');return false;}
+  const meuNome=usuarioLogado?.nomeExibicao||'';
+  const agora=new Date().toISOString();
+  if(aprovado){
+    t.status='concluida';
+    t.aprovadoPor=meuNome;
+    t.aprovadoEm=agora;
+  } else {
+    if(!novoPrazo){toast('Informe o novo prazo','terr');return false;}
+    if(!motivo||!motivo.trim()){toast('Explique o motivo da devolução','terr');return false;}
+    if(!t.historicoDevolucoes)t.historicoDevolucoes=[];
+    t.historicoDevolucoes.push({prazoAntigo:t.prazoTarefa||'',prazoNovo:novoPrazo,motivo:motivo.trim(),tentativaConcluidaEm:t.concluidaEm,devolvidoPor:meuNome,dataDevolucao:agora});
+    t.status='pendente';
+    t.prazoTarefa=novoPrazo;
+    t.concluidaEm=null;
+    t.concluidoPor='';
+    t.aprovadoPor='';
+    t.aprovadoEm=null;
+  }
+  return true;
+}
+async function aprovarTarefaComercial(pedidoId,tarefaId){
+  if(!pedidoId)return aprovarTarefaGeral(tarefaId);
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p||!p.tarefasComerciais)return;
+  const t=p.tarefasComerciais.find(x=>x.id===tarefaId);
+  if(!t)return;
+  if(!_aplicarAprovacaoTarefa(t,true))return;
+  // Mesma sincronização de Conselho de marcarTarefaComercial() — só agora, na aprovação
+  // de verdade, é que a pendência vinculada pode ser dada como resolvida.
+  if(t.origemConselho&&p.conselhoPendencias){
+    const pend=p.conselhoPendencias.find(x=>x.tarefaId===t.id);
+    if(pend){pend.resolvida=true;pend.resolvidaEm=new Date().toISOString();pend.resolvidaPor=usuarioLogado?.nomeExibicao||'';}
+  }
+  await savePedidoFS(p);
+  renderTarefasComerciais();
+  renderAll();
+  _refreshTarefasBadge();
+  if(typeof renderConselhoPedidos==='function')renderConselhoPedidos();
+  if(typeof _consPendPedidoId!=='undefined'&&_consPendPedidoId===pedidoId&&typeof _renderPendenciasConselho==='function')_renderPendenciasConselho();
+  toast('Tarefa aprovada e concluída!','tok');
+}
+async function aprovarTarefaGeral(tarefaId){
+  const t=(cfg.tarefasGerais||[]).find(x=>x.id===tarefaId);
+  if(!t)return;
+  if(!_aplicarAprovacaoTarefa(t,true))return;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  renderTarefasComerciais();
+  _refreshTarefasBadge();
+  toast('Tarefa aprovada e concluída!','tok');
+}
+async function devolverTarefaComercial(pedidoId,tarefaId,novoPrazo,motivo){
+  if(!pedidoId)return devolverTarefaGeral(tarefaId,novoPrazo,motivo);
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p||!p.tarefasComerciais)return;
+  const t=p.tarefasComerciais.find(x=>x.id===tarefaId);
+  if(!t)return;
+  if(!_aplicarAprovacaoTarefa(t,false,novoPrazo,motivo))return;
+  if(t.origemConselho&&p.conselhoPendencias){
+    const pend=p.conselhoPendencias.find(x=>x.tarefaId===t.id);
+    if(pend){pend.resolvida=false;pend.resolvidaEm=null;pend.resolvidaPor='';}
+  }
+  await savePedidoFS(p);
+  renderTarefasComerciais();
+  closeM('mo-tarefa-devolver');closeM('mo-tarefa-detalhe');
+  _refreshTarefasBadge();
+  if(typeof renderConselhoPedidos==='function')renderConselhoPedidos();
+  if(typeof _consPendPedidoId!=='undefined'&&_consPendPedidoId===pedidoId&&typeof _renderPendenciasConselho==='function')_renderPendenciasConselho();
+  toast('Tarefa devolvida com novo prazo — voltou pra Pendentes.','twar');
+}
+async function devolverTarefaGeral(tarefaId,novoPrazo,motivo){
+  const t=(cfg.tarefasGerais||[]).find(x=>x.id===tarefaId);
+  if(!t)return;
+  if(!_aplicarAprovacaoTarefa(t,false,novoPrazo,motivo))return;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  renderTarefasComerciais();
+  closeM('mo-tarefa-devolver');closeM('mo-tarefa-detalhe');
+  _refreshTarefasBadge();
+  toast('Tarefa devolvida com novo prazo — voltou pra Pendentes.','twar');
 }
 
 async function setUpload(zoneId,nameId,input,edKey){
@@ -5207,6 +5394,10 @@ async function _consPendToggle(pendId,resolvida){
   pend.resolvidaPor=resolvida?(usuarioLogado?.nomeExibicao||''):'';
   if(pend.tarefaId&&p.tarefasComerciais){
     const t=p.tarefasComerciais.find(x=>x.id===pend.tarefaId);
+    // Resolvido aqui (checkbox de Pendências do Conselho) vai direto pra "concluida", sem
+    // passar pela etapa de aprovação de _aplicarConclusaoTarefa() (2026-08-11) — é uma
+    // marcação de quem já está com o pedido aberto no Conselho, não o fluxo de "Concluir"
+    // de Ferramentas → Tarefas que este ticket pediu pra travar em aprovação.
     if(t){t.status=resolvida?'concluida':'pendente';t.concluidaEm=resolvida?new Date().toISOString():null;}
   }
   try{
@@ -22769,8 +22960,10 @@ function renderTarefasComerciais(){
   const body=document.getElementById('tarefas-body');if(!body)return;
   const {isAdm}=_getUserCat();
   const meuNome=usuarioLogado?.nomeExibicao||'';
-  const pendente=_tarefasTabAtual==='pendentes';
-  let lista=pendente?getTarefasComerciaisPendentes():getTarefasComerciaisConcluidas();
+  const aba=_tarefasTabAtual; // 'pendentes' | 'aprovacao' | 'concluidas'
+  const pendente=aba==='pendentes';
+  const aguardando=aba==='aprovacao';
+  let lista=pendente?getTarefasComerciaisPendentes():aguardando?getTarefasComerciaisAguardandoAprovacao():getTarefasComerciaisConcluidas();
   let filResp='',filCat='';
   if(isAdm){
     // Admin pode filtrar por qualquer responsável (ou ver todo mundo), e também por
@@ -22782,11 +22975,13 @@ function renderTarefasComerciais(){
     if(filCat)lista=lista.filter(t=>_nomeParaCategorias(t.responsavel).includes(filCat));
   } else {
     // Todo mundo mais vê só as próprias tarefas atribuídas — é a "caixinha pendente pra
-    // mim" que fica assim até eu mesmo marcar como concluída.
+    // mim" que fica assim até eu mesmo marcar como concluída (e, na aba Aguardando
+    // Aprovação, só pra acompanhar o status, sem botão de aprovar/devolver).
     lista=lista.filter(t=>t.responsavel===meuNome);
   }
   if(!lista.length){
-    body.innerHTML=`<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">${(filResp||filCat)?'Nenhuma tarefa para esse filtro.':(pendente?'Nenhuma tarefa pendente. 🎉':'Nenhuma tarefa concluída ainda.')}</div>`;
+    const vazio=(filResp||filCat)?'Nenhuma tarefa para esse filtro.':(pendente?'Nenhuma tarefa pendente. 🎉':aguardando?'Nenhuma tarefa aguardando aprovação.':'Nenhuma tarefa concluída ainda.');
+    body.innerHTML=`<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">${vazio}</div>`;
     return;
   }
   // Guarda a lista renderizada (já com os dados de venda mesclados) pra abrirDetalheTarefa()
@@ -22801,9 +22996,32 @@ function renderTarefasComerciais(){
       if(atrasada)prazoBadge=`<span style="background:#fee2e2;color:#dc2626;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">⚠️ Prazo ${fmtD(t.prazoTarefa)}${pendente?' (vencido)':' — concluída com atraso'}</span>`;
       else prazoBadge=`<span style="background:${pendente?'#fef9c3':'#dcfce7'};color:${pendente?'#92400e':'#16a34a'};border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">${pendente?'📅 Prazo '+fmtD(t.prazoTarefa):'✅ No prazo'}</span>`;
     }
+    const aguardandoBadge=aguardando?`<span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">🔍 Aguardando aprovação</span>`:'';
     // Resumo da descrição na lista (até 2 linhas) — visualmente separado do título, em
     // cinza mais claro; o texto completo só aparece ao clicar no card (abrirDetalheTarefa).
     const descResumo=t.descricao?`<div style="font-size:.74rem;color:#64748b;margin-top:3px;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${t.descricao}</div>`:'';
+    const rodapeTexto=pendente?'Criada em '+_fmtDataHora(t.criadaEm)
+      :aguardando?'Enviada para aprovação em '+_fmtDataHora(t.concluidaEm)+(t.concluidoPor?' por '+t.concluidoPor:'')
+      :'Concluída em '+_fmtDataHora(t.concluidaEm)+(t.aprovadoPor&&t.aprovadoPor!==t.concluidoPor?' · Aprovada por '+t.aprovadoPor:'');
+    let acoesHtml='';
+    if(pendente){
+      acoesHtml=`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 14px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">✅ Concluir</button>`
+        +(!t.adiamentoPendente&&_podeMexerNaTarefa(t.responsavel)
+          ?`<button onclick="abrirAdiarTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">⏳ Adiar</button>`
+          :'')
+        +(t.adiamentoPendente&&isAdm
+          ?`<button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">✅ Aprovar</button><button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',false)" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">❌ Reprovar</button>`
+          :'');
+    } else if(aguardando){
+      acoesHtml=isAdm
+        ?`<button onclick="aprovarTarefaComercial('${t.pedidoId||''}','${t.id}')" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 14px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">✅ Aprovar</button><button onclick="abrirDevolverTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">↩️ Devolver</button>`
+        :`<span style="font-size:.7rem;color:#94a3b8;white-space:nowrap">Aguardando aprovação do administrador</span>`;
+    } else {
+      acoesHtml=`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',false)" style="background:#f1f5f9;color:#475569;border:none;border-radius:7px;padding:7px 14px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">↩️ Reabrir</button>`;
+    }
+    acoesHtml+=_podeExcluirTarefa(t.criadoPor)
+      ?`<button onclick="excluirTarefaComercial('${t.pedidoId||''}','${t.id}')" title="Excluir tarefa — só quem lançou ou um administrador vê este botão" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:7px;padding:7px 10px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">🗑️</button>`
+      :'';
     return`
     <div onclick="abrirDetalheTarefa('${t.id}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid ${atrasada&&pendente?'#fecaca':'var(--border-lt)'};border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <div style="min-width:0">
@@ -22811,26 +23029,16 @@ function renderTarefasComerciais(){
           <span>${t.tipo}</span>
           ${t.origemConselho?`<span style="background:#ede9fe;color:#7c3aed;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">🗳️ Conselho</span>`:''}
           ${t.responsavel?`<span style="background:#dbeafe;color:#1d4ed8;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">👤 ${t.responsavel}</span>`:`<span style="background:#f1f5f9;color:#94a3b8;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:600;white-space:nowrap">Sem responsável</span>`}
+          ${aguardandoBadge}
           ${prazoBadge}
           ${_tarefaAdiamentoBadges(t,pendente)}
         </div>
         ${descResumo}
         <div style="font-size:.72rem;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px">${t.avulsaGeral?'📌 Tarefa avulsa (sem venda vinculada)':'OS '+(t.os||'—')+' · '+(t.cliente||'—')+(t.job?' · JOB: '+t.job:'')+' · '+t.vendedor+(t.prazo?' · Prazo do pedido: '+fmtD(t.prazo):'')}</div>
-        <div style="font-size:.66rem;color:#94a3b8;margin-top:2px">${pendente?'Criada em '+_fmtDataHora(t.criadaEm):'Concluída em '+_fmtDataHora(t.concluidaEm)}${t.criadoPor?' · Lançada por '+t.criadoPor:''}</div>
+        <div style="font-size:.66rem;color:#94a3b8;margin-top:2px">${rodapeTexto}${t.criadoPor?' · Lançada por '+t.criadoPor:''}</div>
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;max-width:220px" onclick="event.stopPropagation()">
-        ${pendente
-          ?`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 14px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">✅ Concluir</button>`
-          :`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',false)" style="background:#f1f5f9;color:#475569;border:none;border-radius:7px;padding:7px 14px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">↩️ Reabrir</button>`}
-        ${pendente&&!t.adiamentoPendente&&_podeMexerNaTarefa(t.responsavel)
-          ?`<button onclick="abrirAdiarTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">⏳ Adiar</button>`
-          :''}
-        ${pendente&&t.adiamentoPendente&&isAdm
-          ?`<button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">✅ Aprovar</button><button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',false)" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">❌ Reprovar</button>`
-          :''}
-        ${_podeExcluirTarefa(t.criadoPor)
-          ?`<button onclick="excluirTarefaComercial('${t.pedidoId||''}','${t.id}')" title="Excluir tarefa — só quem lançou ou um administrador vê este botão" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:7px;padding:7px 10px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">🗑️</button>`
-          :''}
+        ${acoesHtml}
       </div>
     </div>`;
   }).join('');
@@ -22841,7 +23049,8 @@ function abrirDetalheTarefa(tarefaId){
   const t=_tarefasListaAtual.find(x=>x.id===tarefaId);
   if(!t){toast('Tarefa não encontrada (a lista pode ter mudado) — atualize e tente de novo','terr');return;}
   const {isAdm}=_getUserCat();
-  const pendente=t.status!=='concluida';
+  const pendente=(t.status||'pendente')==='pendente';
+  const aguardando=t.status==='aguardando_aprovacao';
   const atrasada=_tarefaAtrasada(t);
   let prazoBadge='';
   if(t.prazoTarefa){
@@ -22862,11 +23071,34 @@ function abrirDetalheTarefa(tarefaId){
   } else if(t.atrasoForcado){
     adiamentoBloco=`<div style="background:#fef2f2;border-left:3px solid #dc2626;border-radius:6px;padding:10px 14px;font-size:.78rem;color:#7f1d1d;margin-bottom:16px">🚫 Um pedido de adiamento desta tarefa foi reprovado — conta como atraso no relatório, independente da data do prazo.</div>`;
   }
+  const statusPill=pendente?{cor1:'#dbeafe',cor2:'#1d4ed8',txt:'⏳ Pendente'}:aguardando?{cor1:'#e0f2fe',cor2:'#0369a1',txt:'🔍 Aguardando aprovação'}:{cor1:'#dcfce7',cor2:'#16a34a',txt:'✅ Concluída'};
+  const rodapeTexto=pendente?'Criada em '+_fmtDataHora(t.criadaEm)
+    :aguardando?'Enviada para aprovação em '+_fmtDataHora(t.concluidaEm)+(t.concluidoPor?' por '+t.concluidoPor:'')
+    :'Concluída em '+_fmtDataHora(t.concluidaEm)+(t.aprovadoPor&&t.aprovadoPor!==t.concluidoPor?' · Aprovada por '+t.aprovadoPor:'');
+  let botoesHtml='';
+  if(pendente){
+    botoesHtml=`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',true);closeM('mo-tarefa-detalhe')" style="flex:1;background:#16a34a;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">✅ Concluir</button>`
+      +(!t.adiamentoPendente&&_podeMexerNaTarefa(t.responsavel)
+        ?`<button onclick="abrirAdiarTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">⏳ Adiar</button>`
+        :'')
+      +(t.adiamentoPendente&&isAdm
+        ?`<button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">✅ Aprovar adiamento</button><button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',false)" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">❌ Reprovar</button>`
+        :'');
+  } else if(aguardando){
+    botoesHtml=isAdm
+      ?`<button onclick="aprovarTarefaComercial('${t.pedidoId||''}','${t.id}');closeM('mo-tarefa-detalhe')" style="flex:1;background:#16a34a;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">✅ Aprovar</button><button onclick="abrirDevolverTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">↩️ Devolver</button>`
+      :`<div style="flex:1;font-size:.82rem;color:#94a3b8;padding:11px;text-align:center">Aguardando aprovação do administrador</div>`;
+  } else {
+    botoesHtml=`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',false);closeM('mo-tarefa-detalhe')" style="flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">↩️ Reabrir</button>`;
+  }
+  botoesHtml+=_podeExcluirTarefa(t.criadoPor)
+    ?`<button onclick="closeM('mo-tarefa-detalhe');excluirTarefaComercial('${t.pedidoId||''}','${t.id}')" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">🗑️ Excluir</button>`
+    :'';
   const body=document.getElementById('td-body');if(!body)return;
   body.innerHTML=`
     <div style="font-size:1.1rem;font-weight:800;color:#1a1f36;line-height:1.35;margin-bottom:10px">${t.tipo}</div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px">
-      <span style="background:${pendente?'#dbeafe':'#dcfce7'};color:${pendente?'#1d4ed8':'#16a34a'};border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">${pendente?'⏳ Pendente':'✅ Concluída'}</span>
+      <span style="background:${statusPill.cor1};color:${statusPill.cor2};border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">${statusPill.txt}</span>
       ${t.origemConselho?`<span style="background:#ede9fe;color:#7c3aed;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">🗳️ Conselho</span>`:''}
       ${t.responsavel?`<span style="background:#dbeafe;color:#1d4ed8;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">👤 ${t.responsavel}</span>`:`<span style="background:#f1f5f9;color:#94a3b8;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:600;white-space:nowrap">Sem responsável</span>`}
       ${prazoBadge}
@@ -22877,21 +23109,10 @@ function abrirDetalheTarefa(tarefaId){
     ${adiamentoBloco}
     <div style="border-top:1px solid var(--border-lt);padding-top:12px;font-size:.8rem;color:#475569;display:flex;flex-direction:column;gap:6px">
       <div>${t.avulsaGeral?'📌 Tarefa avulsa (sem venda vinculada)':'<strong>Pedido:</strong> OS '+(t.os||'—')+' · '+(t.cliente||'—')+(t.job?' · JOB: '+t.job:'')+' · '+t.vendedor+(t.prazo?' · Prazo do pedido: '+fmtD(t.prazo):'')}</div>
-      <div style="font-size:.76rem;color:#94a3b8">${pendente?'Criada em '+_fmtDataHora(t.criadaEm):'Concluída em '+_fmtDataHora(t.concluidaEm)}${t.criadoPor?' · Lançada por '+t.criadoPor:''}</div>
+      <div style="font-size:.76rem;color:#94a3b8">${rodapeTexto}${t.criadoPor?' · Lançada por '+t.criadoPor:''}</div>
     </div>
     <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
-      ${pendente
-        ?`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',true);closeM('mo-tarefa-detalhe')" style="flex:1;background:#16a34a;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">✅ Concluir</button>`
-        :`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',false);closeM('mo-tarefa-detalhe')" style="flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">↩️ Reabrir</button>`}
-      ${pendente&&!t.adiamentoPendente&&_podeMexerNaTarefa(t.responsavel)
-        ?`<button onclick="abrirAdiarTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">⏳ Adiar</button>`
-        :''}
-      ${pendente&&t.adiamentoPendente&&isAdm
-        ?`<button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">✅ Aprovar adiamento</button><button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',false)" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">❌ Reprovar</button>`
-        :''}
-      ${_podeExcluirTarefa(t.criadoPor)
-        ?`<button onclick="closeM('mo-tarefa-detalhe');excluirTarefaComercial('${t.pedidoId||''}','${t.id}')" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">🗑️ Excluir</button>`
-        :''}
+      ${botoesHtml}
     </div>
   `;
   openM('mo-tarefa-detalhe');
@@ -22923,6 +23144,31 @@ function _confirmarAdiamentoTarefa(){
   if(!novoPrazo){toast('Informe o novo prazo','terr');return;}
   if(!justificativa.trim()){toast('Justificativa do adiamento é obrigatória','terr');return;}
   solicitarAdiamentoTarefa(pedidoId,tarefaId,novoPrazo,justificativa);
+}
+// Abre o modal de devolução pra uma tarefa "aguardando_aprovacao" específica (achada em
+// _tarefasListaAtual, igual abrirAdiarTarefa()) — só admin usa, pra tarefa que na prática
+// não foi concluída (ou foi feita errado) voltar pra Pendentes com um prazo novo.
+function abrirDevolverTarefa(pedidoId,tarefaId){
+  const t=_tarefasListaAtual.find(x=>x.id===tarefaId);
+  if(!t){toast('Tarefa não encontrada (a lista pode ter mudado) — atualize e tente de novo','terr');return;}
+  if(!_podeAprovarTarefa()){toast('Só um administrador pode devolver uma tarefa','terr');return;}
+  const elP=document.getElementById('tf-devolver-pedido-id');if(elP)elP.value=pedidoId||'';
+  const elT=document.getElementById('tf-devolver-tarefa-id');if(elT)elT.value=tarefaId;
+  const elN=document.getElementById('tf-devolver-novo-prazo');if(elN)elN.value=t.prazoTarefa||'';
+  const elM=document.getElementById('tf-devolver-motivo');if(elM)elM.value='';
+  const elInfo=document.getElementById('tf-devolver-info');
+  if(elInfo)elInfo.innerHTML=`<strong>${t.tipo}</strong><br>Responsável: ${t.responsavel||'—'}<br>Enviada para aprovação em ${_fmtDataHora(t.concluidaEm)}${t.concluidoPor?' por '+t.concluidoPor:''}`;
+  openM('mo-tarefa-devolver');
+}
+function _confirmarDevolucaoTarefa(){
+  const pedidoId=document.getElementById('tf-devolver-pedido-id')?.value||'';
+  const tarefaId=document.getElementById('tf-devolver-tarefa-id')?.value||'';
+  const novoPrazo=document.getElementById('tf-devolver-novo-prazo')?.value||'';
+  const motivo=document.getElementById('tf-devolver-motivo')?.value||'';
+  if(!tarefaId)return;
+  if(!novoPrazo){toast('Informe o novo prazo','terr');return;}
+  if(!motivo.trim()){toast('Explique o motivo da devolução','terr');return;}
+  devolverTarefaComercial(pedidoId,tarefaId,novoPrazo,motivo);
 }
 // Busca de pedido tipo autocomplete (2026-07-16) — substituiu o <select> antigo, que tinha
 // centenas de opções ("OS 275 · FILIAL BK DRIVE T-63"...) e era praticamente impossível de
@@ -23012,7 +23258,7 @@ function _tfRelDadosMes(){
   const {isAdm}=_getUserCat();
   const meuNome=usuarioLogado?.nomeExibicao||'';
   const {y,m}=_tfRelMes;
-  let todas=[...getTarefasComerciaisPendentes(),...getTarefasComerciaisConcluidas()];
+  let todas=[...getTarefasComerciaisPendentes(),...getTarefasComerciaisAguardandoAprovacao(),...getTarefasComerciaisConcluidas()];
   // Tarefa avulsa (lançada pelo formulário "+ Nova tarefa", ver adicionarTarefaComercialAvulsa/
   // adicionarTarefaGeralAvulsa) só entra no Relatório se quem lançou for administrador — tarefa
   // que o próprio usuário criou pra si mesmo ou pra um colega se organizar é só isso, organização
@@ -23127,7 +23373,7 @@ async function exportarTarefasPDF(){
   const df=document.getElementById('tf-pdf-data-fim')?.value||'';
   const filResp=isAdm?((document.getElementById('tf-fil-responsavel')||{}).value||''):'';
 
-  let lista=[...getTarefasComerciaisPendentes(),...getTarefasComerciaisConcluidas()];
+  let lista=[...getTarefasComerciaisPendentes(),...getTarefasComerciaisAguardandoAprovacao(),...getTarefasComerciaisConcluidas()];
   if(!isAdm)lista=lista.filter(t=>t.responsavel===meuNome);
   else if(filResp)lista=lista.filter(t=>t.responsavel===filResp);
 
@@ -23220,7 +23466,7 @@ async function exportarTarefasPDF(){
   doc.setTextColor(0,0,0);
   doc.setFont('helvetica','normal');
 
-  const statusLbl=t=>t.status==='concluida'?(_tarefaAtrasada(t)?'Concluída c/ atraso':'Concluída'):(_tarefaAtrasada(t)?'Atrasada':'Pendente');
+  const statusLbl=t=>t.status==='concluida'?(_tarefaAtrasada(t)?'Concluída c/ atraso':'Concluída'):t.status==='aguardando_aprovacao'?(_tarefaAtrasada(t)?'Aguard. aprovação (atraso)':'Aguardando aprovação'):(_tarefaAtrasada(t)?'Atrasada':'Pendente');
   const head=['Tarefa','Vinculada a','Responsável','Lançada em','Prazo','Concluída em','Status'];
   const body=lista.map(t=>[
     t.tipo||'—',
