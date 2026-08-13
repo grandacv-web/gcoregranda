@@ -925,6 +925,11 @@ select.fc{cursor:pointer}
           <select id="tf-fil-categoria" onchange="renderTarefasComerciais()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)">
             <option value="">Todas</option>
           </select>
+          <label style="font-size:.72rem;font-weight:600;color:var(--ink3);white-space:nowrap;margin-left:6px">⏰ Filtrar por atraso</label>
+          <select id="tf-fil-atraso" onchange="renderTarefasComerciais()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)">
+            <option value="">Todas</option>
+            <option value="atrasadas">Só atrasadas</option>
+          </select>
         </div>
         <!-- Exportação em PDF — independe da aba Pendentes/Concluídas em tela: monta a lista
              na hora combinando pendentes+concluídas e aplicando os filtros abaixo (ver
@@ -4709,14 +4714,18 @@ function renderList(){
     </td></tr>`;
     return;
   }
-  const {isAdm:_isAdmLista}=_getUserCat();
+  // Reenviar Email agora abre pra qualquer usuário, não só admin (2026-08-13) — cada
+  // vendedor só vê os próprios pedidos aqui (ver pedidosKanban()), então liberar o botão
+  // pra todos que aparecem nesta tabela não dá acesso a pedido de outro vendedor; a trava
+  // real fica dentro de reenviarEmailPedido() (isAdm OU vendedorMatch), então mesmo se
+  // alguém chamar por fora (console) continua barrado no pedido de terceiro.
   document.getElementById('ltb').innerHTML=sorted.map(p=>`<tr>
     <td><b>OS ${p.os||'—'}</b></td><td>${p.cliente}</td><td>${p.job||'—'}</td>
     <td><span class="kc-tipo ${TC[p.tipo]||'tv'}" style="padding:3px 8px;border-radius:8px;font-size:.65rem">${p.tipo}</span></td>
     <td>${p.emissaoEm?fmtD(p.emissaoEm):'—'}</td>
     <td>${p.prazo?fmtD(p.prazo):'—'}</td><td>${p.responsavel||'—'}</td>
     <td>${_emailBadgeLista(p)}</td>
-    <td style="white-space:nowrap"><button style="padding:5px 12px;border:1.5px solid #e8eaf0;border-radius:7px;background:#fff;cursor:pointer;font-size:.75rem;font-weight:600;margin-right:4px" onclick="viewP('${p.id}')">Ver</button>${_isAdmLista?`<button style="padding:5px 12px;border:1.5px solid #dbeafe;border-radius:7px;background:#dbeafe;color:#1a2b5e;cursor:pointer;font-size:.75rem;font-weight:600" onclick="reenviarEmailPedido('${p.id}')">🔁 Reenviar Email</button>`:''}</td>
+    <td style="white-space:nowrap"><button style="padding:5px 12px;border:1.5px solid #e8eaf0;border-radius:7px;background:#fff;cursor:pointer;font-size:.75rem;font-weight:600;margin-right:4px" onclick="viewP('${p.id}')">Ver</button><button style="padding:5px 12px;border:1.5px solid #dbeafe;border-radius:7px;background:#dbeafe;color:#1a2b5e;cursor:pointer;font-size:.75rem;font-weight:600" onclick="reenviarEmailPedido('${p.id}')">🔁 Reenviar Email</button></td>
   </tr>`).join('');
 }
 function exportarExcelEmissao(){
@@ -7936,11 +7945,16 @@ async function _enviarEmailEmissao(p,destEmailsOverride){
 
 // Botão "🔁 Reenviar E-mail" — manda de novo, exatamente como foi cadastrado, lendo
 // direto do pedido salvo (não depende do formulário de emissão, que já não existe mais
-// depois que a tela foi fechada).
+// depois que a tela foi fechada). Antes era só admin; agora qualquer vendedor também pode
+// reenviar, mas só do PRÓPRIO pedido (mesma trava usada em Lista de Emissão/Lista de
+// Vendas pra decidir o que cada um enxerga — ver vendedorMatch()); admin continua podendo
+// reenviar de qualquer pedido (2026-08-13).
 async function reenviarEmailPedido(pedidoId){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem reenviar e-mail','terr');return;}
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
+  const {isAdm}=_getUserCat();
+  const meuNome=usuarioLogado?.nomeExibicao||'';
+  if(!isAdm&&!vendedorMatch(p.responsavel,meuNome)){toast('Você só pode reenviar e-mail dos seus próprios pedidos','terr');return;}
   toast('Reenviando e-mail...','tinf');
   const r=await _enviarEmailEmissao(p);
   if(r.ok){toast(`E-mail reenviado para ${r.destinatarios.length} destinatário(s)!`,'tok');}
@@ -10916,6 +10930,67 @@ function setPagConf(confKey,data){
   if(typeof _invalidateDashCache==='function')_invalidateDashCache();
 }
 
+// Comissão já paga por fora (2026-08-13) — marca/desmarca uma parcela JÁ CONFIRMADA em Contas
+// a Receber cuja comissão o vendedor já recebeu por outro canal (ex.: adiantada manualmente
+// antes de o Financeiro confirmar o recebimento aqui no sistema). Motivo: _quinzenaParaComissao
+// joga a comissão pra quinzena baseada na DATA DA CONFIRMAÇÃO (não na data real em que o
+// cliente pagou) — então confirmar hoje um recebimento antigo faz a comissão dele "cair" pra
+// pagar de novo na próxima quinzena, mesmo já paga. Caso real: OS 56/30/28/29 (Burger King),
+// confirmados em 13/08/2026, caindo automaticamente na quinzena de 15/08 mesmo o usuário tendo
+// confirmado que já pagou essa comissão por fora.
+// Marca só ANOTA o item (getComissaoItemsAll), NUNCA remove: Contas a Receber e "Todos os
+// Confirmados" continuam mostrando o recebimento normalmente (já que o cliente pagou, fica
+// registrado pra auditoria). Só getComissaoItems(y,m) — a fonte de "Consolidados desta
+// quinzena" em Metas & Comissões e do PDF de comissão — filtra estes itens pra fora, pra não
+// contar de novo uma comissão já paga ao vendedor.
+async function setComissaoPagaFora(confKey,marcar){
+  if(!_isFinanceiroUser()){toast('Apenas Financeiro pode marcar comissão como paga por fora','terr');return;}
+  if(!cfg.comissaoPagaFora)cfg.comissaoPagaFora={};
+  if(marcar){
+    const data={em:new Date().toISOString(),por:usuarioLogado?.nomeExibicao||''};
+    cfg.comissaoPagaFora[confKey]=data;
+    try{
+      if(window._fbUpdateCfgField){
+        window._fbUpdateCfgField(['comissaoPagaFora',confKey],data).catch(e=>{
+          console.error('Erro ao gravar comissaoPagaFora via updateDoc, tentando fallback completo',e);
+          if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+        });
+      } else if(window._fbSaveCfg){
+        window._fbSaveCfg(cfg);
+      }
+    }catch(e){
+      console.error('Erro síncrono ao gravar comissaoPagaFora, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }
+  } else {
+    delete cfg.comissaoPagaFora[confKey];
+    try{
+      if(window._fbDeleteCfgField){
+        window._fbDeleteCfgField(['comissaoPagaFora',confKey]).catch(e=>{
+          console.error('Erro ao remover comissaoPagaFora via updateDoc, tentando fallback completo',e);
+          if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+        });
+      } else if(window._fbSaveCfg){
+        window._fbSaveCfg(cfg);
+      }
+    }catch(e){
+      console.error('Erro síncrono ao remover comissaoPagaFora, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }
+  }
+  try{
+    localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  }catch(e){
+    console.error('Erro ao gravar cache local (gcore_cfg)',e);
+  }
+  if(typeof _invalidateDashCache==='function')_invalidateDashCache();
+  toast(marcar?'Marcado: essa comissão não vai mais aparecer pra pagar na quinzena — continua "Recebido" normalmente.':'Desmarcado — volta a aparecer normalmente na quinzena de comissão.','tsuc');
+  if(typeof renderFinanceiro==='function'&&document.getElementById('fc-body'))try{renderFinanceiro();}catch(e){}
+  if(typeof renderContasUnificado==='function'&&document.getElementById('fc-body'))try{renderContasUnificado();}catch(e){}
+  if(typeof renderDashComissoes==='function'&&document.getElementById('dash-comissoes'))try{renderDashComissoes();}catch(e){}
+  if(typeof renderTodosConfirmados==='function'&&document.getElementById('confall-body'))try{renderTodosConfirmados();}catch(e){}
+}
+
 function _dashShowPinModal(){
   document.getElementById('dash-pin-modal')?.remove();
   const modal=document.createElement('div');
@@ -11312,14 +11387,23 @@ function getComissaoItemsAll(){
   // Pode apagar esta lista mais tarde se o número de OS acabar sendo reaproveitado por outra
   // venda (não costuma acontecer, ver _osJaEmUso()).
   const _all=all.filter(i=>!_osTokens(i.pedidoOs).some(tok=>_EXCLUIR_COMISSAO_0804.has(tok)));
+  // Comissão já paga por fora (2026-08-13) — anota cada item com a marca de cfg.comissaoPagaFora
+  // (se existir pro confKey dele), SEM remover nada da lista: Contas a Receber e "Todos os
+  // Confirmados" continuam mostrando o recebimento normalmente. Só getComissaoItems(y,m) usa
+  // este campo pra filtrar. Ver setComissaoPagaFora().
+  _all.forEach(i=>{i.comissaoPagaFora=(cfg.comissaoPagaFora&&cfg.comissaoPagaFora[i.confKey])||null;});
   _comItemsCache=_all;
   return _all;
 }
 
 function getComissaoItems(y,m){
   const all=getComissaoItemsAll();
-  const itemsI=all.filter(i=>i.qy===y&&i.qm===m&&i.qhalf==='I');
-  const itemsII=all.filter(i=>i.qy===y&&i.qm===m&&i.qhalf==='II');
+  // Exclui itens marcados como "comissão já paga por fora" (setComissaoPagaFora) — eles
+  // continuam com status confirmado em Contas a Receber/Todos os Confirmados, só não entram
+  // mais na quinzena "a pagar" de Metas & Comissões nem no PDF de comissão (gerarPDFComissao
+  // usa esta mesma função), evitando pagar a mesma comissão duas vezes.
+  const itemsI=all.filter(i=>i.qy===y&&i.qm===m&&i.qhalf==='I'&&!i.comissaoPagaFora);
+  const itemsII=all.filter(i=>i.qy===y&&i.qm===m&&i.qhalf==='II'&&!i.comissaoPagaFora);
   return {itemsI,itemsII};
 }
 
@@ -21108,8 +21192,15 @@ function renderFinanceiro(){
     const ck=i.confKey.replace(/'/g,"\\'");
     const da=(i.dataAtiva||'').replace(/'/g,"\\'");
     const cl=(i.cliente||'').replace(/'/g,"\\'");
+    // "Comissão paga por fora" (2026-08-13) — só aparece em item já Recebido, pra marcar/
+    // desmarcar que a comissão dessa parcela já foi paga ao vendedor por outro canal, tirando-a
+    // da quinzena "a pagar" de Metas & Comissões sem mexer no status de recebimento (continua
+    // Recebido normalmente). Ver setComissaoPagaFora().
+    const pagaForaTag=i.comissaoPagaFora
+      ?`<span style="font-size:.66rem;color:#7c3aed;font-weight:700;margin-left:6px" title="Marcado por ${i.comissaoPagaFora.por||'—'} em ${i.comissaoPagaFora.em?new Date(i.comissaoPagaFora.em).toLocaleDateString('pt-BR'):'—'} — não entra na quinzena de pagamento de comissão">💸 Comissão paga por fora${isFinAdm?` <button onclick="setComissaoPagaFora('${ck}',false)" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:1px 5px;font-size:.6rem;color:#64748b;cursor:pointer" title="Desmarcar">✕</button>`:''}</span>`
+      :(isFinAdm?`<button onclick="setComissaoPagaFora('${ck}',true)" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.66rem;color:#7c3aed;cursor:pointer;margin-left:6px" title="Marque se a comissão desta parcela já foi paga ao vendedor por fora — assim ela some da quinzena de pagamento, sem afetar o recebimento (continua Recebido)">💸 Já paga por fora</button>`:'');
     const acoes=i.statusCalc==='confirmado'
-      ?(isFinAdm?`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span> <button onclick="if(confirm('Reabrir este recebimento? Ele volta a aparecer como pendente e a comissão correspondente deixa de estar liberada.'))reabrirPag('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.68rem;color:#64748b;cursor:pointer;margin-left:6px" title="Reabrir">↩ Reabrir</button>`:'<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span>')
+      ?(isFinAdm?`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span> <button onclick="if(confirm('Reabrir este recebimento? Ele volta a aparecer como pendente e a comissão correspondente deixa de estar liberada.'))reabrirPag('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.68rem;color:#64748b;cursor:pointer;margin-left:6px" title="Reabrir">↩ Reabrir</button>${pagaForaTag}`:`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span>${pagaForaTag}`)
       :(isFinAdm?`<button class="dash-btn-conf" onclick="abrirConfirmarRecebimento('${ck}','${da}','${cl}',${i.valorBruto})">✅ Confirmar</button><button class="dash-btn-adiar" style="background:#fee2e2;color:#dc2626" onclick="abrirMotivoNaoRecebido('${ck}','${da}','${cl}',${i.valorBruto})">❌ Não recebido</button>`:'<span style="font-size:.72rem;color:#94a3b8">Aguardando Financeiro</span>');
     return`<tr data-ck="${ck}" style="${i.statusCalc==='confirmado'?'background:#f0fdf4;':i.statusCalc==='atrasado'?'background:#fef2f2;':''}">
       <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${i.mesPedido||'—'}</td>
@@ -21362,8 +21453,14 @@ function renderContasUnificado(){
     const cl=(i.cliente||'').replace(/'/g,"\\'");
     const pid=(i._pid||'').replace(/'/g,"\\'");
     const statusLbl=i.statusCalc==='confirmado'?'<span class="dash-badge ok">✅ Recebido</span>':i.statusCalc==='atrasado'?'<span class="dash-badge no">⚠️ Atrasado</span>':'<span class="dash-badge pend">⏳ Pendente</span>';
+    // "Comissão paga por fora" (2026-08-13) — mesmo mecanismo/motivo do renderFinanceiro()
+    // acima (ver comentário lá e em setComissaoPagaFora()). Duplicado aqui porque esta tela
+    // (Contas Unificado) tem seu próprio template de linha, independente do de Financeiro.
+    const pagaForaTag=i.comissaoPagaFora
+      ?`<span style="font-size:.66rem;color:#7c3aed;font-weight:700;margin-left:6px" title="Marcado por ${i.comissaoPagaFora.por||'—'} em ${i.comissaoPagaFora.em?new Date(i.comissaoPagaFora.em).toLocaleDateString('pt-BR'):'—'} — não entra na quinzena de pagamento de comissão">💸 Comissão paga por fora${isFinAdm?` <button onclick="setComissaoPagaFora('${ck}',false)" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:1px 5px;font-size:.6rem;color:#64748b;cursor:pointer" title="Desmarcar">✕</button>`:''}</span>`
+      :(isFinAdm?`<button onclick="setComissaoPagaFora('${ck}',true)" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.66rem;color:#7c3aed;cursor:pointer;margin-left:6px" title="Marque se a comissão desta parcela já foi paga ao vendedor por fora — assim ela some da quinzena de pagamento, sem afetar o recebimento (continua Recebido)">💸 Já paga por fora</button>`:'');
     const acoes=i.statusCalc==='confirmado'
-      ?(isFinAdm?`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span> <button onclick="if(confirm('Reabrir este recebimento? Ele volta a aparecer como pendente e a comissão correspondente deixa de estar liberada.'))reabrirPag('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.68rem;color:#64748b;cursor:pointer;margin-left:6px" title="Reabrir">↩ Reabrir</button>`:'<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span>')
+      ?(isFinAdm?`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span> <button onclick="if(confirm('Reabrir este recebimento? Ele volta a aparecer como pendente e a comissão correspondente deixa de estar liberada.'))reabrirPag('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.68rem;color:#64748b;cursor:pointer;margin-left:6px" title="Reabrir">↩ Reabrir</button>${pagaForaTag}`:`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span>${pagaForaTag}`)
       :(isFinAdm?`<button class="dash-btn-conf" onclick="abrirConfirmarRecebimento('${ck}','${da}','${cl}',${i.valorBruto})">✅ Confirmar</button><button class="dash-btn-adiar" style="background:#fee2e2;color:#dc2626" onclick="abrirMotivoNaoRecebido('${ck}','${da}','${cl}',${i.valorBruto})">❌ Não recebido</button>`:'<span style="font-size:.72rem;color:#94a3b8">Aguardando Financeiro</span>');
     // i.pedido é o MESMO objeto de `pedidos` (referência, não cópia — ver getParcelas/
     // getComissaoItemsAll) — então i.pedido.prazo sempre reflete o valor atual, mesmo que
@@ -22864,12 +22961,21 @@ function renderTodosConfirmados(){
       const vCom=its.reduce((s,i)=>s+(i.valor*i.pct/100),0);
       return`<span style="display:inline-block;margin:2px 8px 2px 0;font-size:.72rem;color:#374151">${v}: <strong>${fmtR(vCom)}</strong> comissão (líq. ${fmtR(vLq)})</span>`;
     }).join('');
+    // Nota "comissão paga por fora" (2026-08-13) — este quadro é o histórico/auditoria de
+    // TODOS os recebimentos confirmados (não filtra por comissaoPagaFora, ver renderTodosConfirmados
+    // acima), então os totais aqui podem ser MAIORES que os de "Consolidados desta quinzena" em
+    // Metas & Comissões quando algum item já foi marcado como paga por fora (setComissaoPagaFora)
+    // — este aviso deixa isso explícito, pra não parecer inconsistência entre as duas telas.
+    const pagosFora=g.items.filter(i=>i.comissaoPagaFora);
+    const pagosForaComTotal=pagosFora.reduce((s,i)=>s+(i.valor*i.pct/100),0);
+    const pagaForaNota=pagosFora.length?`<div style="font-size:.68rem;color:#7c3aed;font-weight:600;margin-top:6px">💸 ${pagosFora.length} parcela${pagosFora.length>1?'s':''} (${fmtR(pagosForaComTotal)} comissão) já marcada${pagosFora.length>1?'s':''} como "paga por fora" — não entra${pagosFora.length>1?'m':''} no total de "Consolidados desta quinzena"/PDF de comissão.</div>`:'';
     return`<div style="border:1.5px solid ${passada?'#fca5a5':'#e5e7eb'};background:${passada?'#fef2f2':'#fff'};border-radius:10px;padding:12px 14px;margin-bottom:10px">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
         <div style="font-weight:800;color:#111827">💰 Comissão de ${label}${passada?' <span style="font-size:.68rem;color:#dc2626;font-weight:700">· mês já fechado</span>':''}</div>
         <div style="font-size:.8rem;font-weight:700;color:#16a34a">${g.items.length} parcela${g.items.length>1?'s':''} · ${fmtR(valLq)} líq. · <span style="color:#7c3aed">${fmtR(com)}</span> comissão</div>
       </div>
       <div>${porVend}</div>
+      ${pagaForaNota}
     </div>`;
   }).join('');
   body.innerHTML=`<div style="font-size:.8rem;font-weight:700;color:#111827;margin-bottom:12px;padding:10px 14px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0">
@@ -22964,15 +23070,18 @@ function renderTarefasComerciais(){
   const pendente=aba==='pendentes';
   const aguardando=aba==='aprovacao';
   let lista=pendente?getTarefasComerciaisPendentes():aguardando?getTarefasComerciaisAguardandoAprovacao():getTarefasComerciaisConcluidas();
-  let filResp='',filCat='';
+  let filResp='',filCat='',filAtraso='';
   if(isAdm){
-    // Admin pode filtrar por qualquer responsável (ou ver todo mundo), e também por
-    // categoria de usuário (Comercial, Planejamento, Financeiro, Adm etc.) — ver
-    // _nomeParaCategorias().
+    // Admin pode filtrar por qualquer responsável (ou ver todo mundo), também por
+    // categoria de usuário (Comercial, Planejamento, Financeiro, Adm etc. — ver
+    // _nomeParaCategorias()) e por atraso (reaproveita _tarefaAtrasada(), a mesma lógica
+    // do badge de prazo mostrado em cada card).
     filResp=(document.getElementById('tf-fil-responsavel')||{}).value||'';
     if(filResp)lista=lista.filter(t=>t.responsavel===filResp);
     filCat=(document.getElementById('tf-fil-categoria')||{}).value||'';
     if(filCat)lista=lista.filter(t=>_nomeParaCategorias(t.responsavel).includes(filCat));
+    filAtraso=(document.getElementById('tf-fil-atraso')||{}).value||'';
+    if(filAtraso==='atrasadas')lista=lista.filter(t=>_tarefaAtrasada(t));
   } else {
     // Todo mundo mais vê só as próprias tarefas atribuídas — é a "caixinha pendente pra
     // mim" que fica assim até eu mesmo marcar como concluída (e, na aba Aguardando
@@ -22980,7 +23089,7 @@ function renderTarefasComerciais(){
     lista=lista.filter(t=>t.responsavel===meuNome);
   }
   if(!lista.length){
-    const vazio=(filResp||filCat)?'Nenhuma tarefa para esse filtro.':(pendente?'Nenhuma tarefa pendente. 🎉':aguardando?'Nenhuma tarefa aguardando aprovação.':'Nenhuma tarefa concluída ainda.');
+    const vazio=(filResp||filCat||filAtraso)?'Nenhuma tarefa para esse filtro.':(pendente?'Nenhuma tarefa pendente. 🎉':aguardando?'Nenhuma tarefa aguardando aprovação.':'Nenhuma tarefa concluída ainda.');
     body.innerHTML=`<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">${vazio}</div>`;
     return;
   }
