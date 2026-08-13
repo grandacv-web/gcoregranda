@@ -2591,6 +2591,23 @@ select.fc{cursor:pointer}
 </div>
 </div>
 
+<!-- RETIRAR COMISSÃO DA LISTA MODAL (2026-08-13) -->
+<div class="mov" id="mo-retirar-comissao" onclick="cio(event,'mo-retirar-comissao')">
+<div class="mvmod" style="width:480px;max-width:96vw">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <h3 style="margin-bottom:0">🗑️ Retirar comissão da lista</h3>
+    <button onclick="closeM('mo-retirar-comissao')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div id="rtc-info" style="font-size:.8rem;color:var(--ink3);margin-bottom:14px"></div>
+  <p style="font-size:.72rem;color:var(--ink4);margin:-4px 0 14px">Isso tira esta venda da lista de comissão a pagar (Metas & Comissões e PDF de comissão). O recebimento do cliente em Contas a Receber NÃO é afetado.</p>
+  <div class="fg">
+    <label>Motivo <span class="r">*</span> <span style="font-weight:400;color:var(--ink4)">— obrigatório</span></label>
+    <textarea id="rtc-motivo" class="fc" rows="3" placeholder="Por que essa comissão não vai ser paga?" style="text-transform:none"></textarea>
+  </div>
+  <button onclick="salvarRetirarComissao()" style="margin-top:10px;width:100%;background:#dc2626;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">Retirar da lista</button>
+</div>
+</div>
+
 <!-- CONFIRMAR RECEBIMENTO MODAL -->
 <div class="mov" id="mo-confirmar-receb" onclick="cio(event,'mo-confirmar-receb')">
 <div class="mvmod" style="width:480px;max-width:96vw">
@@ -10991,6 +11008,86 @@ async function setComissaoPagaFora(confKey,marcar){
   if(typeof renderTodosConfirmados==='function'&&document.getElementById('confall-body'))try{renderTodosConfirmados();}catch(e){}
 }
 
+// Retirar comissão da lista (2026-08-13, a pedido do usuário) — botão só-admin em Metas &
+// Comissões pra quando a comissão de uma venda específica NÃO vai ser paga por algum motivo
+// (ex.: venda cancelada por fora, negociação com o vendedor, erro de cadastro etc — motivo
+// livre, sempre obrigatório e registrado). Diferente de "Comissão paga por fora"
+// (setComissaoPagaFora, em Contas a Receber): aquele é só pra recebimento JÁ confirmado cuja
+// comissão já foi paga por outro canal; este serve pra QUALQUER item (confirmado ou não) que
+// simplesmente não vai gerar pagamento de comissão nenhum. Os dois usam o mesmo padrão de
+// anotar sem remover — cfg.comissaoRemovida[confKey] — e getComissaoItems(y,m)/
+// getComissaoItemsFuturos filtram os dois campos pra fora da lista "a pagar", sem nunca
+// afetar o status do recebimento em Contas a Receber.
+let _rtcConfKey=null;
+function abrirRetirarComissao(confKey,cliente,valor,pedidoOs){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem retirar comissão da lista','terr');return;}
+  _rtcConfKey=confKey;
+  const info=document.getElementById('rtc-info');
+  if(info)info.innerHTML=`<strong>${cliente||'—'}</strong>${pedidoOs?' · OS '+pedidoOs:''} · ${fmtR(valor||0)} comissão`;
+  const mv=document.getElementById('rtc-motivo');if(mv)mv.value='';
+  openM('mo-retirar-comissao');
+}
+async function salvarRetirarComissao(){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem retirar comissão da lista','terr');return;}
+  const motivo=(document.getElementById('rtc-motivo')?.value||'').trim();
+  if(!motivo){toast('Informe o motivo — é obrigatório','terr');return;}
+  if(!_rtcConfKey)return;
+  await _setComissaoRemovida(_rtcConfKey,true,motivo);
+  closeM('mo-retirar-comissao');
+  _rtcConfKey=null;
+}
+async function desfazerRetirarComissao(confKey){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem desfazer isso','terr');return;}
+  if(!confirm('Colocar esta comissão de volta na lista a pagar?'))return;
+  await _setComissaoRemovida(confKey,false,'');
+}
+async function _setComissaoRemovida(confKey,marcar,motivo){
+  if(!cfg.comissaoRemovida)cfg.comissaoRemovida={};
+  if(marcar){
+    const data={em:new Date().toISOString(),por:usuarioLogado?.nomeExibicao||'',motivo};
+    cfg.comissaoRemovida[confKey]=data;
+    try{
+      if(window._fbUpdateCfgField){
+        await window._fbUpdateCfgField(['comissaoRemovida',confKey],data).catch(e=>{
+          console.error('Erro ao gravar comissaoRemovida via updateDoc, tentando fallback completo',e);
+          if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+        });
+      } else if(window._fbSaveCfg){
+        window._fbSaveCfg(cfg);
+      }
+    }catch(e){
+      console.error('Erro síncrono ao gravar comissaoRemovida, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }
+  } else {
+    delete cfg.comissaoRemovida[confKey];
+    try{
+      if(window._fbDeleteCfgField){
+        await window._fbDeleteCfgField(['comissaoRemovida',confKey]).catch(e=>{
+          console.error('Erro ao remover comissaoRemovida via updateDoc, tentando fallback completo',e);
+          if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+        });
+      } else if(window._fbSaveCfg){
+        window._fbSaveCfg(cfg);
+      }
+    }catch(e){
+      console.error('Erro síncrono ao remover comissaoRemovida, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }
+  }
+  try{
+    localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  }catch(e){
+    console.error('Erro ao gravar cache local (gcore_cfg)',e);
+  }
+  if(typeof _invalidateDashCache==='function')_invalidateDashCache();
+  toast(marcar?'Comissão retirada da lista de pagamento.':'Comissão de volta na lista a pagar.','tsuc');
+  if(typeof renderDashComissoes==='function'&&document.getElementById('dash-comissoes'))try{renderDashComissoes();}catch(e){}
+  if(typeof renderFinanceiro==='function'&&document.getElementById('fc-body'))try{renderFinanceiro();}catch(e){}
+  if(typeof renderContasUnificado==='function'&&document.getElementById('fc-body'))try{renderContasUnificado();}catch(e){}
+  if(typeof renderTodosConfirmados==='function'&&document.getElementById('confall-body'))try{renderTodosConfirmados();}catch(e){}
+}
+
 function _dashShowPinModal(){
   document.getElementById('dash-pin-modal')?.remove();
   const modal=document.createElement('div');
@@ -11391,26 +11488,36 @@ function getComissaoItemsAll(){
   // (se existir pro confKey dele), SEM remover nada da lista: Contas a Receber e "Todos os
   // Confirmados" continuam mostrando o recebimento normalmente. Só getComissaoItems(y,m) usa
   // este campo pra filtrar. Ver setComissaoPagaFora().
-  _all.forEach(i=>{i.comissaoPagaFora=(cfg.comissaoPagaFora&&cfg.comissaoPagaFora[i.confKey])||null;});
+  // Comissão retirada da lista (2026-08-13) — mesmo padrão de anotar-sem-remover, mas pro botão
+  // "🗑️ Retirar da lista" em Metas & Comissões (admin, motivo obrigatório): serve pra QUALQUER
+  // item (pendente ou confirmado) cuja comissão simplesmente não vai ser paga. Ver
+  // _setComissaoRemovida()/abrirRetirarComissao().
+  _all.forEach(i=>{
+    i.comissaoPagaFora=(cfg.comissaoPagaFora&&cfg.comissaoPagaFora[i.confKey])||null;
+    i.comissaoRemovida=(cfg.comissaoRemovida&&cfg.comissaoRemovida[i.confKey])||null;
+  });
   _comItemsCache=_all;
   return _all;
 }
 
 function getComissaoItems(y,m){
   const all=getComissaoItemsAll();
-  // Exclui itens marcados como "comissão já paga por fora" (setComissaoPagaFora) — eles
-  // continuam com status confirmado em Contas a Receber/Todos os Confirmados, só não entram
-  // mais na quinzena "a pagar" de Metas & Comissões nem no PDF de comissão (gerarPDFComissao
-  // usa esta mesma função), evitando pagar a mesma comissão duas vezes.
-  const itemsI=all.filter(i=>i.qy===y&&i.qm===m&&i.qhalf==='I'&&!i.comissaoPagaFora);
-  const itemsII=all.filter(i=>i.qy===y&&i.qm===m&&i.qhalf==='II'&&!i.comissaoPagaFora);
+  // Exclui itens marcados como "comissão já paga por fora" (setComissaoPagaFora) ou "retirada
+  // da lista" (abrirRetirarComissao) — eles continuam com o status normal em Contas a Receber/
+  // Todos os Confirmados, só não entram mais na quinzena "a pagar" de Metas & Comissões nem no
+  // PDF de comissão (gerarPDFComissao usa esta mesma função), evitando pagar a mesma comissão
+  // duas vezes ou pagar uma que foi explicitamente retirada.
+  const itemsI=all.filter(i=>i.qy===y&&i.qm===m&&i.qhalf==='I'&&!i.comissaoPagaFora&&!i.comissaoRemovida);
+  const itemsII=all.filter(i=>i.qy===y&&i.qm===m&&i.qhalf==='II'&&!i.comissaoPagaFora&&!i.comissaoRemovida);
   return {itemsI,itemsII};
 }
 
 // Tudo que ainda não foi confirmado, em QUALQUER mês (passado ou futuro) — usado
 // na janela "🔮 Pagamentos Futuros". Cada item já traz pct (vendedor) e pctClab (gerente).
+// Também exclui comissão retirada da lista (2026-08-13) — se não vai ser paga nunca, não faz
+// sentido continuar aparecendo como pagamento futuro previsto.
 function getComissaoItemsFuturos(vendedorFiltro){
-  const pend=getComissaoItemsAll().filter(i=>i.status!=='confirmado');
+  const pend=getComissaoItemsAll().filter(i=>i.status!=='confirmado'&&!i.comissaoRemovida);
   if(!vendedorFiltro)return pend;
   if(vendedorFiltro==='__CLABONDE__')return pend; // Clabonde ganha sobre o total, não por vendedor
   return pend.filter(i=>vendedorMatch(i.nomeVend,vendedorFiltro));
@@ -22618,7 +22725,12 @@ function renderDashComissoes(){
         // o fluxo dele é só Financeiro confirmar em Contas a Receber, cair em Consolidado, e
         // então pagar a comissão — sem nenhum passo manual extra aqui). Voltou ao
         // comportamento original: só leitura, ação de verdade é sempre em Financeiro.
-        const ac=i.status==='confirmado'?`<span style="font-size:.72rem;color:#16a34a">Pago ✓</span>`:i.status==='adiado'?`<span style="font-size:.72rem;color:#b45309" title="Adiado — veja o motivo em Financeiro → Contas a Receber">⏭ Adiado</span>`:`<span style="font-size:.68rem;color:#94a3b8" title="Confirmar ou marcar como não recebido agora é só em Financeiro → Contas a Receber">Ver em Financeiro</span>`;
+        // "🗑️ Retirar da lista" (2026-08-13) — só aparece em item que ainda não foi retirado
+        // (item já retirado nem chega até aqui, ver getComissaoItems que já filtra pra fora —
+        // ele some desta tabela e passa a viver só em mkRemovidas()). Admin-only (a tela
+        // inteira de Metas & Comissões já é admin-only, ver topo de renderDashComissoes).
+        const rtcBtn=`<button onclick="abrirRetirarComissao('${ck}','${(i.cliente||'').replace(/'/g,"\\'")}',${com},'${pedidoDisplay(i.pedidoOs)||''}')" style="background:none;border:1px solid #fecaca;border-radius:6px;padding:3px 8px;font-size:.62rem;color:#dc2626;cursor:pointer;margin-left:6px" title="Essa comissão não vai ser paga por algum motivo — retira da lista a pagar, exige motivo">🗑️ Retirar</button>`;
+        const ac=(i.status==='confirmado'?`<span style="font-size:.72rem;color:#16a34a">Pago ✓</span>`:i.status==='adiado'?`<span style="font-size:.72rem;color:#b45309" title="Adiado — veja o motivo em Financeiro → Contas a Receber">⏭ Adiado</span>`:`<span style="font-size:.68rem;color:#94a3b8" title="Confirmar ou marcar como não recebido agora é só em Financeiro → Contas a Receber">Ver em Financeiro</span>`)+rtcBtn;
         return`<tr style="${i.status==='confirmado'?'background:#f0fdf4;':''}">
           <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${i.mesPedido||'—'}</td>
           <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${pedidoDisplay(i.pedidoOs)||'—'}</td>
@@ -22656,7 +22768,7 @@ function renderDashComissoes(){
         <td style="font-weight:700;color:#7c3aed">${fmtR(com)}</td>
         <td style="font-size:.7rem;color:#16a34a;white-space:nowrap">${dataConf}</td>
         <td>${mkDetalhesCell(i)}</td>
-        <td><span style="font-size:.68rem;color:#94a3b8" title="Reabrir agora é só em Financeiro → Contas a Receber">Ver em Financeiro</span></td>
+        <td><span style="font-size:.68rem;color:#94a3b8" title="Reabrir agora é só em Financeiro → Contas a Receber">Ver em Financeiro</span><button onclick="abrirRetirarComissao('${ck}','${(i.cliente||'').replace(/'/g,"\\'")}',${com},'${pedidoDisplay(i.pedidoOs)||''}')" style="background:none;border:1px solid #fecaca;border-radius:6px;padding:3px 8px;font-size:.62rem;color:#dc2626;cursor:pointer;margin-left:6px" title="Essa comissão não vai ser paga por algum motivo — retira da lista a pagar, exige motivo">🗑️ Retirar</button></td>
       </tr>`;
     }).join('');
     // Abre sozinho quando tem busca ativa (2026-08-04) — antes ficava sempre fechado por
@@ -22777,6 +22889,37 @@ function renderDashComissoes(){
     </div>`;
   }
 
+  // Comissões retiradas da lista (2026-08-13) — como getComissaoItems(y,m) já filtra pra fora
+  // qualquer item com comissaoRemovida (pra não aparecer em Consolidados/Pendentes/PDF), esse
+  // item precisa de UM lugar nesta tela pra continuar visível/auditável e pra dar pra
+  // desfazer — senão o admin retira por engano e não acha mais onde reverter. Lê direto de
+  // getComissaoItemsAll() (não filtrado), escopado pela mesma quinzena (dia 5 ou 15).
+  function mkRemovidas(dia){
+    const half=dia===5?'I':'II';
+    let items=getComissaoItemsAll().filter(i=>i.qy===y&&i.qm===m&&i.qhalf===half&&i.comissaoRemovida);
+    if(filV)items=items.filter(i=>vendedorMatch(i.nomeVend,filV));
+    if(!items.length)return'';
+    const rows=items.map(i=>{
+      const ck=i.confKey.replace(/'/g,"\\'");
+      const com=i.valor*i.pct/100;
+      return`<tr>
+        <td style="font-weight:600">${i.nomeVend}</td>
+        <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${pedidoDisplay(i.pedidoOs)||'—'} · ${i.cliente||'—'}</td>
+        <td style="font-size:.78rem">${(i.comissaoRemovida.motivo||'—')}<br><span style="font-size:.62rem;color:#94a3b8">${i.comissaoRemovida.por||'—'} em ${i.comissaoRemovida.em?new Date(i.comissaoRemovida.em).toLocaleDateString('pt-BR'):'—'}</span></td>
+        <td style="font-weight:700;color:#7c3aed">${fmtR(com)}</td>
+        <td><button class="dash-btn-conf" onclick="desfazerRetirarComissao('${ck}')">↩ Colocar de volta</button></td>
+      </tr>`;
+    }).join('');
+    const quinzTxt=dia===5?'1ª Quinzena (dia 5)':'2ª Quinzena (dia 15)';
+    return`<div style="border:1.5px solid #fecaca;background:#fef2f2;border-radius:12px;padding:14px 16px;margin-bottom:18px">
+      <div style="font-size:.8rem;font-weight:700;color:#991b1b;margin-bottom:8px">🗑️ Comissões Retiradas da Lista — ${quinzTxt} de ${MESES_PT[m]} ${y} (${items.length}) — não entram no total a pagar nem no PDF</div>
+      <div style="overflow-x:auto"><table class="dash-table">
+        <thead><tr><th>Vendedor</th><th>Pedido/Cliente</th><th>Motivo</th><th>Comissão</th><th>Ação</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
+  }
+
   // Ordem fixa por mês de venda (Jan, Fev, Mar...) do mais antigo ao mais novo — nunca
   // alternar meses dentro da mesma lista de pendentes/consolidados.
   itemsI.sort(_cmpMesVenda);
@@ -22806,12 +22949,14 @@ function renderDashComissoes(){
        <div style="font-size:.85rem;font-weight:700;color:#fff;letter-spacing:.3px">1ª Quinzena · pagar dia 5</div>
      </div>
      ${mkExtras(5)}
+     ${mkRemovidas(5)}
      ${mkCards(itemsIView)}${mkVendResume(itemsIView,5)}
      ${mkPendentes(pendI,'Nenhum lançamento pendente nesta quinzena.')}${mkConsolidado(consI)}
      <div style="background:#4338ca;padding:10px 16px;border-radius:8px;margin:24px 0 16px">
        <div style="font-size:.85rem;font-weight:700;color:#fff;letter-spacing:.3px">2ª Quinzena · pagar dia 15</div>
      </div>
      ${mkExtras(15)}
+     ${mkRemovidas(15)}
      ${mkCards(itemsIIView)}${mkVendResume(itemsIIView,15)}
      ${mkPendentes(pendII,'Nenhum lançamento pendente nesta quinzena.')}${mkConsolidado(consII)}`;
 }
@@ -22969,6 +23114,12 @@ function renderTodosConfirmados(){
     const pagosFora=g.items.filter(i=>i.comissaoPagaFora);
     const pagosForaComTotal=pagosFora.reduce((s,i)=>s+(i.valor*i.pct/100),0);
     const pagaForaNota=pagosFora.length?`<div style="font-size:.68rem;color:#7c3aed;font-weight:600;margin-top:6px">💸 ${pagosFora.length} parcela${pagosFora.length>1?'s':''} (${fmtR(pagosForaComTotal)} comissão) já marcada${pagosFora.length>1?'s':''} como "paga por fora" — não entra${pagosFora.length>1?'m':''} no total de "Consolidados desta quinzena"/PDF de comissão.</div>`:'';
+    // Mesma lógica pra "🗑️ Retirar da lista" (2026-08-13, ver abrirRetirarComissao/mkRemovidas
+    // em renderDashComissoes) — item retirado também some do total de Consolidados/PDF mas
+    // continua aqui na auditoria geral de confirmados.
+    const removidos=g.items.filter(i=>i.comissaoRemovida);
+    const removidosComTotal=removidos.reduce((s,i)=>s+(i.valor*i.pct/100),0);
+    const removidosNota=removidos.length?`<div style="font-size:.68rem;color:#dc2626;font-weight:600;margin-top:6px">🗑️ ${removidos.length} parcela${removidos.length>1?'s':''} (${fmtR(removidosComTotal)} comissão) retirada${removidos.length>1?'s':''} da lista de pagamento — não entra${removidos.length>1?'m':''} no total de "Consolidados desta quinzena"/PDF de comissão.</div>`:'';
     return`<div style="border:1.5px solid ${passada?'#fca5a5':'#e5e7eb'};background:${passada?'#fef2f2':'#fff'};border-radius:10px;padding:12px 14px;margin-bottom:10px">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:6px">
         <div style="font-weight:800;color:#111827">💰 Comissão de ${label}${passada?' <span style="font-size:.68rem;color:#dc2626;font-weight:700">· mês já fechado</span>':''}</div>
@@ -22976,6 +23127,7 @@ function renderTodosConfirmados(){
       </div>
       <div>${porVend}</div>
       ${pagaForaNota}
+      ${removidosNota}
     </div>`;
   }).join('');
   body.innerHTML=`<div style="font-size:.8rem;font-weight:700;color:#111827;margin-bottom:12px;padding:10px 14px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0">
