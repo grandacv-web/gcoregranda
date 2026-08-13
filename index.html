@@ -9539,6 +9539,11 @@ let dashQuinzena='I';
 let dashComissaoVendFil='';
 let dashComissaoBusca='';
 let dashMetasUnlocked=false;
+// 🔎 Comissão Paga por Período (2026-08-13, a pedido do usuário) — busca INDEPENDENTE do mês
+// ativo (dashMesAtual/dashMov) dentro de Recebimentos & Comissões: filtra comissão já PAGA
+// (confirmada) por qualquer intervalo de datas + cliente/OS/JOB/cidade/vendedor, sem precisar
+// navegar mês a mês pelas setas ◀ ▶. Ver mkComPeriodo() dentro de renderDashComissoes().
+let comPeriodoBusca='';
 
 function dashLockMetas(){
   dashMetasUnlocked=false;
@@ -11164,6 +11169,21 @@ function dashComissaoBuscaInput(v){
   // usuário perderia o foco do input a cada letra digitada.
   const inp=document.getElementById('dash-com-fil-busca');
   if(inp){inp.focus();const pos=v.length;inp.setSelectionRange(pos,pos);}
+}
+
+// Mesmo padrão de dashComissaoBuscaInput acima, mas pro campo de busca INDEPENDENTE de
+// "🔎 Comissão Paga por Período" (não mexe em dashComissaoBusca nem no mês ativo).
+function comPeriodoBuscaInput(v){
+  comPeriodoBusca=v;
+  renderDashComissoes();
+  const inp=document.getElementById('com-per-busca');
+  if(inp){inp.focus();const pos=v.length;inp.setSelectionRange(pos,pos);}
+}
+function comPeriodoLimpar(){
+  comPeriodoBusca='';
+  const de=document.getElementById('com-per-de');if(de)de.value='';
+  const ate=document.getElementById('com-per-ate');if(ate)ate.value='';
+  renderDashComissoes();
 }
 
 function renderDashCards(){
@@ -22655,12 +22675,79 @@ function renderDashComissoes(){
     <button onclick="abrirTodosConfirmados()" class="dash-btn-conf" style="background:#16a34a">✅ Todos os Confirmados</button>
   </div>`;
 
+  // 🔎 Comissão Paga por Período (2026-08-13, a pedido do usuário: "quero filtro mesmo, por
+  // período de data, e um campo que eu digite o nome do cliente ou número da OS ou qualquer
+  // coisa vinculada ao pedido e ele puxe a comissão paga referente ali ao período ou mês que
+  // coloquei"). Totalmente INDEPENDENTE do mês ativo (dashMesAtual/dashMov) acima — usa
+  // getComissaoItemsAll() (todos os meses) filtrado só por status confirmado, sem tocar em
+  // nenhuma variável/tabela existente desta tela (Pendentes/Consolidados continuam 100%
+  // escopados ao mês selecionado pelas setas ◀ ▶, sem nenhuma mudança de comportamento).
+  const cpDe=document.getElementById('com-per-de')?.value||'';
+  const cpAte=document.getElementById('com-per-ate')?.value||'';
+  const cpBuscaNorm=norm(comPeriodoBusca||'');
+  let cpItems=getComissaoItemsAll().filter(i=>i.status==='confirmado');
+  if(cpDe||cpAte){
+    cpItems=cpItems.filter(i=>{
+      const dia=i.qhalf==='I'?5:15;
+      const iso=`${i.qy}-${String(i.qm).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+      return _lpDataNoIntervalo(iso,cpDe,cpAte);
+    });
+  }
+  if(cpBuscaNorm){
+    cpItems=cpItems.filter(i=>[i.pedidoOs,i.cliente,i.job,i.cidade,i.nomeVend].some(v=>v&&norm(String(v)).includes(cpBuscaNorm)));
+  }
+  const cpAtivo=!!(cpDe||cpAte||comPeriodoBusca);
+  const cpTotalLq=cpItems.reduce((s,i)=>s+i.valor,0);
+  const cpTotalCom=cpItems.reduce((s,i)=>s+(i.valor*i.pct/100),0);
+  const cpRows=cpItems.slice().sort((a,b)=>{
+    const da=a.confirmedAt||'',db=b.confirmedAt||'';
+    return db.localeCompare(da); // mais recente primeiro
+  }).map(i=>{
+    const com=i.valor*i.pct/100;
+    const dia=i.qhalf==='I'?5:15;
+    const dataConf=i.confirmedAt?new Date(i.confirmedAt).toLocaleDateString('pt-BR'):'—';
+    return`<tr>
+      <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${i.mesPedido||'—'}</td>
+      <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${pedidoDisplay(i.pedidoOs)||'—'}</td>
+      <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:130px">${i.cliente||'—'}</td>
+      <td>${i.nomeVend||'—'}</td>
+      <td style="font-weight:700;color:#1e40af">${fmtR(i.valorBruto)}</td>
+      <td style="font-weight:700">${fmtR(i.valor)}</td>
+      <td style="font-size:.7rem;white-space:nowrap">pagto dia ${String(dia).padStart(2,'0')}/${String(i.qm).padStart(2,'0')}/${i.qy}</td>
+      <td style="font-weight:700;color:#7c3aed">${fmtR(com)}</td>
+      <td style="font-size:.7rem;color:#16a34a;white-space:nowrap">${dataConf}</td>
+    </tr>`;
+  }).join('');
+  const periodoBox=`<div style="border:1.5px solid #c7d2fe;background:#eef2ff;border-radius:12px;padding:14px 16px;margin-bottom:20px">
+    <div style="font-size:.8rem;font-weight:700;color:#3730a3;margin-bottom:10px">🔎 Comissão Paga por Período</div>
+    <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:${cpAtivo?'12px':'0'}">
+      <div style="flex:1;min-width:220px">
+        <label style="display:block;font-size:.66rem;font-weight:700;color:#4338ca;text-transform:uppercase;margin-bottom:4px">Cliente, OS, JOB, cidade ou vendedor</label>
+        <div style="position:relative">
+          <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:.8rem;color:#818cf8;pointer-events:none">🔍</span>
+          <input id="com-per-busca" value="${(comPeriodoBusca||'').replace(/"/g,'&quot;')}" oninput="comPeriodoBuscaInput(this.value)" placeholder="Ex: MAX, 12345, São Paulo..."
+            style="width:100%;border:1.5px solid #c7d2fe;border-radius:8px;padding:7px 10px 7px 32px;font-size:.8rem;background:#fff;color:#1e1b4b;box-sizing:border-box">
+        </div>
+      </div>
+      <div>
+        <label style="display:block;font-size:.66rem;font-weight:700;color:#4338ca;text-transform:uppercase;margin-bottom:4px">Pago de</label>
+        <input type="date" id="com-per-de" value="${cpDe}" onchange="renderDashComissoes()" style="padding:6px 9px;border-radius:8px;border:1.5px solid #c7d2fe;font-size:.78rem;font-family:inherit">
+      </div>
+      <div>
+        <label style="display:block;font-size:.66rem;font-weight:700;color:#4338ca;text-transform:uppercase;margin-bottom:4px">até</label>
+        <input type="date" id="com-per-ate" value="${cpAte}" onchange="renderDashComissoes()" style="padding:6px 9px;border-radius:8px;border:1.5px solid #c7d2fe;font-size:.78rem;font-family:inherit">
+      </div>
+      ${cpAtivo?`<button onclick="comPeriodoLimpar()" style="background:none;border:1px solid #c7d2fe;border-radius:8px;padding:6px 12px;font-size:.75rem;color:#4338ca;cursor:pointer;white-space:nowrap">✕ Limpar</button>`:''}
+    </div>
+    ${cpAtivo?(cpItems.length?`<div style="font-size:.74rem;font-weight:700;color:#3730a3;margin-bottom:8px">${cpItems.length} recebimento${cpItems.length>1?'s':''} confirmado${cpItems.length>1?'s':''} · líquido ${fmtR(cpTotalLq)} · comissão ${fmtR(cpTotalCom)}</div><div style="overflow-x:auto"><table class="dash-table"><thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor Bruto</th><th>Valor Líquido</th><th>Pagto comissão</th><th>Comissão</th><th>Confirmado em</th></tr></thead><tbody>${cpRows}</tbody></table></div>`:`<div style="padding:8px 0;color:#6366f1;font-size:.78rem">Nenhuma comissão paga encontrada para esse filtro.</div>`):`<div style="font-size:.72rem;color:#6366f1">Digite algo pra buscar ou escolha um período — mostra só comissão já PAGA (confirmada), de qualquer mês, sem precisar navegar pelas setas ◀ ▶ acima.</div>`}
+  </div>`;
+
   if(!allItemsI.length&&!allItemsII.length){
-    el.innerHTML=filterBar+`<div style="padding:32px;text-align:center;color:#94a3b8;font-size:.85rem">Nenhum recebimento previsto para ${MESES_PT[m]} ${y}.</div>`;
+    el.innerHTML=filterBar+periodoBox+`<div style="padding:32px;text-align:center;color:#94a3b8;font-size:.85rem">Nenhum recebimento previsto para ${MESES_PT[m]} ${y}.</div>`;
     return;
   }
   if(busca&&!itemsI.length&&!itemsII.length){
-    el.innerHTML=filterBar+`<div style="padding:32px;text-align:center;color:#94a3b8;font-size:.85rem">Nenhum resultado para "${dashComissaoBusca}".</div>`;
+    el.innerHTML=filterBar+periodoBox+`<div style="padding:32px;text-align:center;color:#94a3b8;font-size:.85rem">Nenhum resultado para "${dashComissaoBusca}".</div>`;
     return;
   }
 
@@ -22943,6 +23030,7 @@ function renderDashComissoes(){
 
   el.innerHTML=
     filterBar+
+    periodoBox+
     // Barra de título de quinzena virou fundo escuro sólido, de ponta a ponta (2026-08-04, a
     // pedido do usuário: só a borda esquerda fina não separava bem as duas seções visualmente).
     `<div style="background:#111827;padding:10px 16px;border-radius:8px;margin-bottom:16px;margin-top:4px">
