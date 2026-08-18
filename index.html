@@ -1028,6 +1028,17 @@ select.fc{cursor:pointer}
             <select id="fc-fil-categoria" onchange="fcAplicarFiltros()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
               <option value="">Todas as categorias (Pagar)</option>
             </select>
+            <!-- Tipo de data do filtro De/Até (2026-08-18, a pedido do usuário: "quero ver o
+                 que entrou de receita entre os dias 05/08 a 18/08 e não consigo, só tem filtro
+                 de dia que entrou a venda") — até aqui "Data de/até" comparava sempre contra
+                 i.dataAtiva (vencimento/data prevista da parcela), nunca contra a data em que o
+                 Financeiro realmente confirmou o recebimento (conf.dataRecebimentoReal). Padrão
+                 continua "Vencimento" (comportamento de sempre, ninguém é afetado sem mexer);
+                 "Recebimento" troca a data usada pelo filtro pra _dataRecebimentoRealIso(i). -->
+            <select id="fc-fil-tipo-data" onchange="fcAplicarFiltros()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+              <option value="venc">📅 Data de Vencimento</option>
+              <option value="receb">✅ Data de Recebimento</option>
+            </select>
             <span style="font-size:.75rem;color:#94a3b8;font-weight:600">Data de</span>
             <input id="fc-fil-data-ini" type="date" style="width:150px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit" onchange="fcAplicarFiltros()">
             <span style="font-size:.75rem;color:#94a3b8;font-weight:600">até</span>
@@ -1055,6 +1066,7 @@ select.fc{cursor:pointer}
             <select id="fin-fil-mes-venda"><option value=""></option></select>
             <select id="fin-fil-vend"><option value=""></option></select>
             <select id="fin-fil-status"><option value=""></option><option value="aberto"></option><option value="pendente"></option><option value="atrasado"></option><option value="confirmado"></option></select>
+            <select id="fin-fil-tipo-data"><option value="venc"></option><option value="receb"></option></select>
             <input id="fin-fil-data-ini" type="date">
             <input id="fin-fil-data-fim" type="date">
             <div id="fin-body"></div>
@@ -5811,12 +5823,25 @@ async function cancelarVenda(os){
   if(!isAdm){toast('Apenas administradores podem cancelar vendas','terr');return;}
   const row=getVendaRowsMerged().find(r=>String(r.p)===String(os));
   if(!confirm(`Cancelar a venda do pedido OS ${os} (${row?.cl||''})? Ela será removida da Lista de Vendas.`))return;
+  // Motivo obrigatório (2026-08-18, a pedido do usuário) — antes uma venda cancelada não
+  // guardava NENHUM rastro de quem cancelou nem por quê, então investigar depois (ex.: "por
+  // que a OS 242 sumiu da Lista de Vendas?") sempre esbarrava num beco sem saída sem essa
+  // informação. Motivo em branco/cancelado no prompt aborta o cancelamento inteiro, mesmo
+  // padrão de campo obrigatório já usado em Adiar Tarefa/Motivo de Não Recebimento.
+  const motivo=(prompt(`Motivo do cancelamento da venda OS ${os} (${row?.cl||''}):`)||'').trim();
+  if(!motivo){toast('Cancelamento cancelado — motivo é obrigatório','tinf');return;}
   const senha=await pedirSenhaAdmin('Confirmar cancelamento','Digite sua senha de administrador para confirmar o cancelamento:');
   if(!senha){toast('Cancelamento cancelado','tinf');return;}
   if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
   try{
     if(!cfg.vendasCanceladas)cfg.vendasCanceladas=[];
     if(!cfg.vendasCanceladas.map(String).includes(String(os)))cfg.vendasCanceladas.push(String(os));
+    // vendasCanceladasInfo = estrutura PARALELA (por OS, igual vendasCanceladas), só com o
+    // motivo/quem/quando — separada de vendasCanceladas em si pra não arriscar quebrar nenhum
+    // dos vários lugares que já leem cfg.vendasCanceladas como lista simples de strings
+    // (isVendaCancelada, _reativarVendaSeCancelada, getVendaRowsMerged etc.).
+    if(!cfg.vendasCanceladasInfo)cfg.vendasCanceladasInfo={};
+    cfg.vendasCanceladasInfo[String(os)]={motivo,canceladoPor:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),canceladoEm:new Date().toISOString()};
     if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
     localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
     renderAll();
@@ -11082,10 +11107,22 @@ function renderVendasCanceladas(){
   if(!lista.length){el.innerHTML='<p style="font-size:.75rem;color:var(--ink4)">Nenhuma venda cancelada no momento. 🎉</p>';return;}
   el.innerHTML=lista.map(os=>{
     const info=_infoVendaCanceladaPorOs(os);
+    // Motivo/quem/quando (2026-08-18, a pedido do usuário: "preciso sempre saber quem
+    // cancelou e qual o motivo") — só existe pra cancelamentos feitos DEPOIS desta
+    // funcionalidade existir (ver cancelarVenda). Cancelamento antigo (ex.: OS 242, cancelada
+    // antes disso existir) mostra aviso em vez de inventar uma informação que não foi
+    // capturada na hora.
+    const ci=(cfg.vendasCanceladasInfo&&cfg.vendasCanceladasInfo[String(os)])||null;
+    const quandoTxt=ci&&ci.canceladoEm?new Date(ci.canceladoEm).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+    const motivoHtml=ci
+      ?`<div style="font-size:.72rem;color:#b91c1c;margin-top:4px"><strong>Motivo:</strong> ${String(ci.motivo||'—').replace(/</g,'&lt;')}</div>
+         <div style="font-size:.68rem;color:#94a3b8;margin-top:2px">Cancelado por ${ci.canceladoPor||'—'}${quandoTxt?' em '+quandoTxt:''}</div>`
+      :`<div style="font-size:.68rem;color:#94a3b8;margin-top:4px;font-style:italic">Motivo/quem não registrado — cancelamento anterior a 18/08/2026 (antes deste registro existir)</div>`;
     return`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border-lt);border-radius:10px;background:#fff">
       <div style="min-width:0">
         <div style="font-weight:700;font-size:.82rem;color:#1e293b">OS ${os} — ${info.cliente}</div>
         <div style="font-size:.72rem;color:#64748b;margin-top:2px">${info.categoria}${info.mes?' · '+info.mes:''}</div>
+        ${motivoHtml}
       </div>
       <button onclick="reativarVendaCancelada('${String(os).replace(/'/g,"\\'")}')" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 14px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0">🔓 Reativar</button>
     </div>`;
@@ -11162,12 +11199,30 @@ function getVendaRowsMerged(){
   // editar o pedido de maio e preencher o número/PDF).
   const importadosFSOs=new Set();
   importadosFS.forEach(p=>{importadosFSOs.add(String(p.os));if(p.origPlanilhaOs)importadosFSOs.add(String(p.origPlanilhaOs));});
+  // Pedido real já emitido (origemComercial, tipo Venda/Permuta, NÃO importadoPlanilha) —
+  // se o MESMO nº de OS também existir como pedido importadoPlanilha (linha antiga da
+  // planilha, ou shadow pedido criado por editarVendaLista antes de a OS ser emitida de
+  // verdade pelo fluxo normal), a linha importadoPlanilha é provisória/sombra e some daqui:
+  // senão a venda conta 2x na Lista de Vendas, Metas e Gráficos (achado 2026-08-18, OS 242
+  // — "BURGER KING HORTOLÂNDIA... JULIO" da planilha + "ZAMP S.A." do pedido real emitido,
+  // mesma venda). O caso já coberto acima (origPlanilhaOs) só resolve quando é o PRÓPRIO
+  // pedido importado que é editado e vira o definitivo; este cobre quando surge um pedido
+  // real SEPARADO com o mesmo nº de OS.
+  const realPedidosOsTokens=new Set();
+  pedidos.filter(p=>isComercialPedido(p)&&!p.importadoPlanilha).forEach(p=>{
+    if(p.os!=null)_osTokens(p.os).forEach(tok=>realPedidosOsTokens.add(tok));
+  });
+  const importadosFSSemDupReal=importadosFS.filter(p=>{
+    const bateOs=p.os!=null&&_osTokens(p.os).some(tok=>realPedidosOsTokens.has(tok));
+    const bateOrig=p.origPlanilhaOs&&_osTokens(p.origPlanilhaOs).some(tok=>realPedidosOsTokens.has(tok));
+    return !bateOs&&!bateOrig;
+  });
   // OS composto (ex.: "18711 / 18712") tratado via _osTokens() global — basta UM token
   // bater pra excluir a linha da planilha (ver comentário na definição de _osTokens acima).
-  const xlsxSemFS=(typeof XLSX_VENDAS!=='undefined'?XLSX_VENDAS:[]).filter(r=>!_osTokens(r.p).some(tok=>importadosFSOs.has(tok)));
+  const xlsxSemFS=(typeof XLSX_VENDAS!=='undefined'?XLSX_VENDAS:[]).filter(r=>!_osTokens(r.p).some(tok=>importadosFSOs.has(tok)||realPedidosOsTokens.has(tok)));
   _vrmCache=[
     ...xlsxSemFS,
-    ...importadosFS.map(pedidoToVendaRow),
+    ...importadosFSSemDupReal.map(pedidoToVendaRow),
     ...pedidos.filter(p=>isComercialPedido(p)&&!p.importadoPlanilha).map(pedidoToVendaRow)
   ].filter(r=>!isVendaCancelada(r.p));
   return _vrmCache;
@@ -11686,17 +11741,22 @@ function _antesOuIgualJulhoI(dataStr){
 // mês em que a venda aconteceu — só depois que o mês da venda fecha de vez é que dá pra
 // saber com certeza se bateu meta (comissão cheia) ou não (metade). Ex.: venda de julho
 // com entrada paga antes do dia 15/07 caía direto na quinzena de 15/07 (mês ainda aberto,
-// % incerta); agora essa quinzena é empurrada automaticamente pro dia 5 do mês seguinte
-// (05/08), primeiro ponto em que o mês da venda já fechou e a % é definitiva. Só entra em
-// ação quando a quinzena calculada bate no mesmo mês da venda — quinzenas que já caem num
-// mês posterior (parcelas futuras de pedidos parcelados) não são mexidas.
+// % incerta); essa quinzena era empurrada automaticamente pro dia 5 do mês seguinte (05/08),
+// primeiro ponto em que o mês da venda já fechou e a % é definitiva.
+//
+// REVERTIDA 2026-08-18 (pedido explícito do usuário): essa trava estava fazendo comissão de
+// venda nova confirmada DENTRO da janela certa (Financeiro sempre revisa e confirma até o
+// fechamento — 14/08 pra quinzena de 15/08, por ex.) sumir da quinzena esperada e só aparecer
+// na seguinte, mesmo o dinheiro já tendo entrado e sido confirmado a tempo — quinzena de
+// 15/08 aparecendo bem mais baixa que o total realmente recebido no período. Agora a
+// quinzena de pagamento da comissão segue só a data de confirmação (_quinzenaParaComissao),
+// sem esperar o mês da venda fechar. Isso significa que o % (bateu/não bateu meta) de uma
+// venda do mês corrente pode ser calculado ainda com o mês em andamento — se as vendas do
+// resto do mês empurrarem o total pra cima/baixo da meta depois, o % mostrado pode mudar
+// (mas isso já era assim mesmo pra qualquer outro mês fechado recalculado ao vivo, não é
+// coisa nova desta mudança). Função mantida (não removida) só pra não precisar tocar nos 3
+// pontos que a chamam em getComissaoItemsAll() — agora é passthrough.
 function _empurraQuinzenaMesFechado(qi,emY,emM){
-  if(!qi)return qi;
-  if(qi.y===emY&&qi.m===emM){
-    let ny=emY,nm=emM+1;
-    if(nm>12){nm=1;ny++;}
-    return {y:ny,m:nm,half:'I'};
-  }
   return qi;
 }
 function getComissaoItemsAll(){
@@ -11711,7 +11771,21 @@ function getComissaoItemsAll(){
   // mesmo _osTokens() global, e também registra origPlanilhaOs (OS provisório da planilha
   // antes de editar o pedido), senão a linha antiga da planilha reaparece igual.
   const osFirestore=new Set();
-  pedidos.filter(isComercialPedido).forEach(p=>{
+  // Mesmo dedup de getVendaRowsMerged (ver comentário lá, achado 2026-08-18 com a OS 242
+  // duplicada): pedido importadoPlanilha cujo nº de OS já pertence a um pedido real emitido
+  // (origemComercial, não-planilha) é linha sombra/provisória e não pode gerar parcela de
+  // comissão própria aqui, senão a comissão da mesma venda é calculada e cobrada 2x.
+  const _realPedidosOsTokensCom=new Set();
+  pedidos.filter(p=>isComercialPedido(p)&&!p.importadoPlanilha).forEach(p=>{
+    if(p.os!=null)_osTokens(p.os).forEach(tok=>_realPedidosOsTokensCom.add(tok));
+  });
+  pedidos.filter(p=>{
+    if(!isComercialPedido(p))return false;
+    if(!p.importadoPlanilha)return true;
+    const bateOs=p.os!=null&&_osTokens(p.os).some(tok=>_realPedidosOsTokensCom.has(tok));
+    const bateOrig=p.origPlanilhaOs&&_osTokens(p.origPlanilhaOs).some(tok=>_realPedidosOsTokensCom.has(tok));
+    return !bateOs&&!bateOrig;
+  }).forEach(p=>{
     if(p.os!=null)_osTokens(p.os).forEach(tok=>osFirestore.add(tok));
     if(p.origPlanilhaOs)_osTokens(p.origPlanilhaOs).forEach(tok=>osFirestore.add(tok));
     // Venda cancelada (cfg.vendasCanceladas, marcada por Nº de OS) não entra aqui —
@@ -13172,6 +13246,18 @@ function _dreMesRealItem(i){
   const d=parseDataBR(i.dataAtiva);
   if(d)return{y:d.getFullYear(),m:d.getMonth()+1};
   return{y:i.emY,m:i.emM};
+}
+// Data ISO (AAAA-MM-DD) em que a parcela foi REALMENTE recebida — mesma prioridade de
+// _dreMesRealItem() acima, só que devolvendo a data inteira (não só ano/mês), pra dar pra
+// filtrar por um intervalo De/Até (ver filtro "✅ Data de Recebimento" em Contas a Receber,
+// 2026-08-18). Item ainda não confirmado (sem conf nenhum) devolve '' — nunca bate contra
+// nenhum período, já que não foi recebido de verdade ainda.
+function _dataRecebimentoRealIso(i){
+  const conf=getPagConf(i.confKey);
+  if(!conf)return'';
+  if(conf.dataRecebimentoReal&&/^\d{4}-\d{2}-\d{2}/.test(conf.dataRecebimentoReal))return conf.dataRecebimentoReal.slice(0,10);
+  if(conf.confirmedAt)return String(conf.confirmedAt).slice(0,10);
+  return'';
 }
 function calcularDRE(y,m,empresaFiltro,regime){
   regime=regime||'competencia';
@@ -22071,10 +22157,11 @@ function _finFilteredItems(){
   const fmv=document.getElementById('fin-fil-mes-venda')?.value||'';
   const fv=document.getElementById('fin-fil-vend')?.value||'';
   const fs=document.getElementById('fin-fil-status')?.value||'';
+  const tipoData=document.getElementById('fin-fil-tipo-data')?.value||'venc';
   const di=document.getElementById('fin-fil-data-ini')?.value||'';
   const df=document.getElementById('fin-fil-data-fim')?.value||'';
   items=items.filter(i=>{
-    const iso=_finToIso(i.dataAtiva);
+    const iso=tipoData==='receb'?_dataRecebimentoRealIso(i):_finToIso(i.dataAtiva);
     // 'aberto' (2026-07-31, a pedido do usuário — cards clicáveis "A Receber"/"A Pagar")
     // = Pendente OU Atrasado juntos, o mesmo total que o card mostra (_finItemsTodosStatus
     // com i.statusCalc!=='confirmado'); os outros valores continuam comparação exata.
@@ -22121,10 +22208,11 @@ function _finItemsTodosStatus(){
   const q=(document.getElementById('fin-fil-busca')?.value||'').toLowerCase().trim();
   const fmv=document.getElementById('fin-fil-mes-venda')?.value||'';
   const fv=document.getElementById('fin-fil-vend')?.value||'';
+  const tipoData=document.getElementById('fin-fil-tipo-data')?.value||'venc';
   const di=document.getElementById('fin-fil-data-ini')?.value||'';
   const df=document.getElementById('fin-fil-data-fim')?.value||'';
   items=items.filter(i=>{
-    const iso=_finToIso(i.dataAtiva);
+    const iso=tipoData==='receb'?_dataRecebimentoRealIso(i):_finToIso(i.dataAtiva);
     return (!q||(i.cliente||'').toLowerCase().includes(q)||String(i.pedidoOs||'').toLowerCase().includes(q))
       &&(!fmv||MESES_PT[i.emM]===fmv)
       &&(!fv||vendedorMatch(i.nomeVend,fv))
@@ -22378,6 +22466,9 @@ function fcAplicarFiltros(){
   const cpDi=document.getElementById('cp-fil-data-ini');if(cpDi)cpDi.value=di;
   const finDf=document.getElementById('fin-fil-data-fim');if(finDf)finDf.value=df;
   const cpDf=document.getElementById('cp-fil-data-fim');if(cpDf)cpDf.value=df;
+
+  const tipoData=document.getElementById('fc-fil-tipo-data')?.value||'venc';
+  const finTipoData=document.getElementById('fin-fil-tipo-data');if(finTipoData)finTipoData.value=tipoData;
 
   const mv=document.getElementById('fc-fil-mes-venda')?.value||'';
   const finMv=document.getElementById('fin-fil-mes-venda');if(finMv)finMv.value=mv;
