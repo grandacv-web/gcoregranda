@@ -2423,6 +2423,7 @@ select.fc{cursor:pointer}
 </div>
 </div>
 
+
 <!-- DETALHE DA TAREFA MODAL -->
 <div class="mov" id="mo-tarefa-detalhe" onclick="cio(event,'mo-tarefa-detalhe')">
 <div class="mvmod" style="width:560px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column">
@@ -4688,6 +4689,7 @@ let _reabrirProjetos27JulMigracaoFeita=false;
 let _centrosCustoExtraMigracaoFeita=false;
 let _centrosCustoExtra2RemocaoMigracaoFeita=false;
 let _restaurarUsuariosMigracaoFeita=false;
+let _baixaPDF0408MigracaoFeita=false;
 function setupRealtimeSync(){
   if(!window._fbWatchPedidos)return;
   window._fbWatchPedidos(function(snapshot){
@@ -4785,6 +4787,12 @@ function setupRealtimeSync(){
     if(!_restaurarUsuariosMigracaoFeita&&_getUserCat().isAdm){
       _restaurarUsuariosMigracaoFeita=true;
       _migrarRestaurarUsuariosSumidos20260808().catch(e=>{_restaurarUsuariosMigracaoFeita=false;console.error('Erro na migração de restauração de usuários',e);});
+    }
+    // Baixa histórica das 17 OS do relatório de comissão do Gerente de 04/08/2026 (ver
+    // _migrarBaixaHistoricaPDF0408 abaixo) — só admin, mesmo padrão de flag PERSISTIDO acima.
+    if(!_baixaPDF0408MigracaoFeita&&_getUserCat().isAdm){
+      _baixaPDF0408MigracaoFeita=true;
+      _migrarBaixaHistoricaPDF0408().catch(e=>{_baixaPDF0408MigracaoFeita=false;console.error('Erro na baixa histórica das 17 OS do PDF de 04/08',e);});
     }
     // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache)
     // montado ANTES dessa atualização de pedidos — editar OS/valores/vendedor num pedido
@@ -11336,7 +11344,10 @@ const _EXCLUIR_COMISSAO_0804=new Set(['109','120','169','171','180','184','188',
 // desses números de OS (pequenos, tipo 56/28/30/235, já documentados como historicamente
 // colidíveis — ver revert de 2026-08-18 em getComissaoItemsAll). Ver
 // [[project_comissao_duplicada_reabertura_pagamento_1308]].
-const _EXCLUIR_COMISSAO_1808_OS=new Set(['56','30','28','29','65','83','96','141','131','150','148','162','183','261','236','235','253']);
+// _EXCLUIR_COMISSAO_1808_OS foi REMOVIDO daqui (2026-08-18, mesmo dia) — baseava-se numa
+// história não confirmada pelo usuário (ver comentário em getComissaoItemsAll). Os 17 pedidos
+// agora são tratados por _migrarBaixaHistoricaPDF0408() (setupRealtimeSync), na fonte, sem
+// exclusão manual.
 function getVendaRowsMerged(){
   if(_vrmCache)return _vrmCache;
   const importadosFS=pedidos.filter(p=>p.importadoPlanilha);
@@ -11477,18 +11488,34 @@ function setPagConf(confKey,data){
   // clicava via essa função achava que o sistema "não fazia nada" (mesmo bug silencioso já
   // visto antes em Salvar Configurações, ver [[project_bug_modal_mo_cfg_inexistente]]). Agora
   // qualquer falha aqui vira aviso visível em vez de travar o clique sem explicação.
+  // CORRIGIDO 2026-08-18 — o comentário acima já dizia "qualquer falha vira aviso visível",
+  // mas isso não era verdade: só o updateDoc tinha .catch(); o FALLBACK (_fbSaveCfg) rodava
+  // sem nenhum .catch(), então se ele TAMBÉM falhasse (ex.: sem internet no momento do
+  // clique), a rejeição ficava silenciosa — sem toast, sem console.error visível pro usuário.
+  // Quem clicou via essa função via a tela reagir normalmente (linha some, toast de sucesso
+  // em salvarConfirmarRecebimento(), que dispara incondicionalmente e não espera essa
+  // gravação terminar) mesmo que NADA tenha sido salvo no servidor — exatamente o tipo de
+  // "confirmei aqui mas sumiu depois" que o usuário relatou (Débora confirmou vários
+  // pedidos, prints depois não mostravam nenhum). Agora toda falha (updateDoc E fallback)
+  // sempre termina em toast visível, nunca mais silenciosa.
+  const _avisaFalhaSalvarPagConf=e=>{
+    console.error('Falha ao gravar pagConf no servidor — nada foi salvo de verdade',e);
+    if(typeof toast==='function')toast('⚠️ Não deu pra salvar essa confirmação no servidor (sem internet ou erro de conexão) — feche e abra o sistema de novo e confirme esse recebimento outra vez','terr');
+  };
   try{
     if(window._fbUpdatePagConf){
       window._fbUpdatePagConf(confKey,data).catch(e=>{
         console.error('Erro ao gravar pagConf via updateDoc, tentando fallback completo',e);
-        if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+        if(window._fbSaveCfg)window._fbSaveCfg(cfg).catch(_avisaFalhaSalvarPagConf);
+        else _avisaFalhaSalvarPagConf(e);
       });
     } else if(window._fbSaveCfg){
-      window._fbSaveCfg(cfg);
+      window._fbSaveCfg(cfg).catch(_avisaFalhaSalvarPagConf);
     }
   }catch(e){
     console.error('Erro síncrono ao gravar pagConf, tentando fallback completo',e);
-    if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    if(window._fbSaveCfg)window._fbSaveCfg(cfg).catch(_avisaFalhaSalvarPagConf);
+    else _avisaFalhaSalvarPagConf(e);
   }
   try{
     localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
@@ -11877,21 +11904,36 @@ function comPeriodoLimpar(){
   renderDashComissoes();
 }
 
-// CORRIGIDO 2026-08-18 (usuário: "pegue as baixas que o financeiro deu e corrija os valores,
-// eu quero os valores reais"). i.qy/i.qm/i.qhalf (calculado em getComissaoItemsAll) passa por
-// _empurraQuinzenaMesFechado(), que EMPURRA a quinzena pro mês seguinte sempre que o mês da
-// venda (emY/emM) bate com o mês da confirmação — regra certa pra decidir quando a COMISSÃO
-// pode ser paga (não paga comissão no mesmo mês da venda), mas ERRADA pra "quanto dinheiro
-// entrou": o dinheiro entrou de verdade na data em que o Financeiro confirmou, esse empurrão
-// só existe pra comissão, não muda o caixa. Pelo comentário de _empurraQuinzenaMesFechado,
-// "mês de venda e mês de confirmação bate" é "bem comum" — por isso os cards de Quinzena
-// 1/2 (dinheiro recebido) apareciam menores do que o real, ou até R$0,00 quando TODOS os itens
-// confirmados numa janela tinham vindo de venda do mesmo mês. Esta função recalcula a
-// quinzena a partir do confirmedAt puro (sem o empurrão), só para exibição de "recebido" —
-// não mexe em i.qy/i.qm/i.qhalf usados por getComissaoItems/PDF/pagamento de comissão em
-// lugar nenhum. Item sem confirmedAt (confirmação automática de histórico pré-julho, sem
-// clique registrado) cai de volta no qy/qm/qhalf já calculado, que pra esses casos não passa
-// pelo empurrão mesmo (não tem conf.confirmedAt, ver _quinzenaParaComissao).
+// CORRIGIDO 2026-08-18 (usuário, repetido várias vezes: "quinzena dois vc vai colocar tudo
+// que foi clicado como confirmado o pagamento a partir de 05/08"). Antes esta função usava
+// getQuinzenaInfo(), que EMPURRA qualquer confirmação feita depois do dia 14 pro card do MÊS
+// SEGUINTE (regra certa pra comissão, errada pra "recebido" — ver comentário antigo abaixo).
+// Isso escondia confirmações feitas hoje (18/08, depois do dia 14) do card "Quinzena 2 de
+// Agosto", porque iam parar automaticamente em "Quinzena 1 de Setembro" — o usuário só olha
+// pro mês corrente, então nunca via esse dinheiro aparecer em lugar nenhum. Trocado por uma
+// janela de data direta, sem esse empurrão: Quinzena 1 = 15 do mês anterior até dia 4 deste
+// mês (sem mudança); Quinzena 2 = dia 5 deste mês em diante, sem parar mais no dia 14 — vai
+// até o dia 4 do mês seguinte, cobrindo qualquer confirmação feita a qualquer momento depois
+// do dia 5. Ver _janelaRecebido()/_itemNaJanelaRecebido() logo abaixo, usadas em
+// renderDashCards() e renderDetalheQuinzenaCard().
+function _janelaRecebido(y,m,half){
+  if(half==='I'){
+    let py=y,pm=m-1;if(pm<1){pm=12;py--;}
+    return {start:new Date(py,pm-1,15,0,0,0,0),end:new Date(y,m-1,4,23,59,59,999)};
+  }
+  let ny=y,nm=m+1;if(nm>12){nm=1;ny++;}
+  return {start:new Date(y,m-1,5,0,0,0,0),end:new Date(ny,nm-1,4,23,59,59,999)};
+}
+function _itemNaJanelaRecebido(item,y,m,half){
+  if(!item.confirmedAt)return false;
+  const d=new Date(item.confirmedAt);
+  if(isNaN(d))return false;
+  const {start,end}=_janelaRecebido(y,m,half);
+  return d>=start&&d<=end;
+}
+// Mantida por compatibilidade (não usada mais nos cards de recebido, ver acima) — ainda
+// referenciada em nenhum outro lugar, só deixada pra não quebrar nada que eventualmente
+// dependa dela.
 function _quinzenaRecebidoRaw(item){
   if(item.confirmedAt){
     const d=new Date(item.confirmedAt);
@@ -11930,9 +11972,16 @@ function renderDashCards(){
   // Bug real: antes esses cards vinham de getComissaoItems(y,m), então uma quinzena com
   // recebimento confirmado mas comissão retirada da lista (ex.: os 17 pedidos da correção de
   // 18/08) aparecia com o valor recebido MENOR do que realmente entrou.
+  // REVERTIDO (mesmo dia, poucos minutos depois) — excluir os 17 OS do PDF de 04/08 daqui
+  // zerou a Quinzena 1 (que estava correta, R$106.088,16 batendo exatamente com a lista de
+  // Todos os Confirmados). Ou seja: pelo menos parte desses 17 pedidos NUNCA saiu da
+  // Quinzena 1 pra começo de conversa — a "reabertura em 13/08" registrada nos comentários
+  // acima não está acontecendo nos dados reais agora (usuário confirmou que ninguém mexeu
+  // manualmente nesses pedidos). Excluir OS por número aqui é perigoso demais sem certeza de
+  // qual item é qual — volta a mostrar tudo que está confirmado, sem essa lista hardcoded.
   const _allConf=getComissaoItemsAll().filter(i=>i.status==='confirmado');
-  const _itemsQ1=_allConf.filter(i=>{const qi=_quinzenaRecebidoRaw(i);return qi.y===y&&qi.m===m&&qi.half==='I';});
-  const _itemsQ2=_allConf.filter(i=>{const qi=_quinzenaRecebidoRaw(i);return qi.y===y&&qi.m===m&&qi.half==='II';});
+  const _itemsQ1=_allConf.filter(i=>_itemNaJanelaRecebido(i,y,m,'I'));
+  const _itemsQ2=_allConf.filter(i=>_itemNaJanelaRecebido(i,y,m,'II'));
   const totalQ1=_itemsQ1.reduce((s,i)=>s+i.valor,0);
   const totalQ2=_itemsQ2.reduce((s,i)=>s+i.valor,0);
   // Os dois cards de quinzena são clicáveis (pedido do usuário) — abrem a lista de tudo que
@@ -11940,7 +11989,7 @@ function renderDashCards(){
   c.innerHTML=[
     {label:'Vendas do Mês',val:fmtR(totalVendas),sub:totalMeta>0?`Meta: ${fmtR(totalMeta)}`:'Meta não definida',color:'#2563eb'},
     {label:'Quinzena 1 · paga dia 5',val:fmtR(totalQ1),sub:'Líquido confirmado até dia 4 · clique pra ver a lista',color:'#16a34a',onclick:`abrirDetalheQuinzenaCard(${y},${m},'I')`},
-    {label:'Quinzena 2 · paga dia 15',val:fmtR(totalQ2),sub:'Líquido confirmado de dia 5 a 14 · clique pra ver a lista',color:'#0d9488',onclick:`abrirDetalheQuinzenaCard(${y},${m},'II')`},
+    {label:'Quinzena 2 · paga dia 15',val:fmtR(totalQ2),sub:'Líquido confirmado a partir do dia 5 · clique pra ver a lista',color:'#0d9488',onclick:`abrirDetalheQuinzenaCard(${y},${m},'II')`},
     {label:'Meta da Empresa',val:fmtR(totalMeta),sub:totalMeta>0&&totalVendas>=totalMeta?'✅ Meta atingida':'Acompanhe os vendedores',color:'#e91e63'},
   ].map(card=>`<div${card.onclick?` onclick="${card.onclick}"`:''} style="background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e5e7eb${card.onclick?';cursor:pointer':''}"${card.onclick?' onmouseover="this.style.borderColor=\'#94a3b8\'" onmouseout="this.style.borderColor=\'#e5e7eb\'"':''}>
     <div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:6px">${card.label}</div>
@@ -11966,11 +12015,7 @@ function renderDetalheQuinzenaCard(){
   const dia=half==='I'?5:15;
   const titleEl=document.getElementById('qzd-titulo');
   if(titleEl)titleEl.textContent=`💰 Recebido — Quinzena ${half==='I'?'1':'2'} · paga dia ${String(dia).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;
-  const items=getComissaoItemsAll().filter(i=>{
-      if(i.status!=='confirmado')return false;
-      const qi=_quinzenaRecebidoRaw(i);
-      return qi.y===y&&qi.m===m&&qi.half===half;
-    })
+  const items=getComissaoItemsAll().filter(i=>i.status==='confirmado'&&_itemNaJanelaRecebido(i,y,m,half))
     .sort((a,b)=>(a.confirmedAt||'').localeCompare(b.confirmedAt||''));
   if(!items.length){body.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhum recebimento confirmado nesta quinzena.</div>';return;}
   const totalLq=items.reduce((s,i)=>s+i.valor,0);
@@ -12286,7 +12331,16 @@ function getComissaoItemsAll(){
   // getComissaoItems/getComissaoItemsAll direto. Agora nunca mais aparece em lugar nenhum.
   // Pode apagar esta lista mais tarde se o número de OS acabar sendo reaproveitado por outra
   // venda (não costuma acontecer, ver _osJaEmUso()).
-  const _all=all.filter(i=>!_osTokens(i.pedidoOs).some(tok=>_EXCLUIR_COMISSAO_0804.has(tok)));
+  const _allSemDup=all.filter(i=>!_osTokens(i.pedidoOs).some(tok=>_EXCLUIR_COMISSAO_0804.has(tok)));
+  // Fatura duplicada (2026-08-18, a pedido do usuário) — Pedido 270, C&A CTV CATANDUVA:
+  // usuário identificou esse lançamento como duplicado em Financeiro/Contas a Receber e pediu
+  // pra tirar de vez ("exclua essa fatura do c&a ctv pq ta duplicada, tire ela do financeiro" e
+  // depois, mais direto ainda, "EXCLUA O C&A CTV do contas a receber" — pedido ampliado pra OS
+  // inteira, não só a Parcela 1). Diferente de _EXCLUIR_COMISSAO_0804 (que só tira da comissão
+  // a pagar, mantendo o recebimento visível), aqui o pedido inteiro é removido de TUDO —
+  // Contas a Receber, Comissões, DRE — porque é lançamento duplicado, não dinheiro recebido de
+  // verdade duas vezes.
+  const _all=_allSemDup.filter(i=>!_osTokens(i.pedidoOs).some(tok=>tok==='270'));
   // Comissão já paga por fora (2026-08-13) — anota cada item com a marca de cfg.comissaoPagaFora
   // (se existir pro confKey dele), SEM remover nada da lista: Contas a Receber e "Todos os
   // Confirmados" continuam mostrando o recebimento normalmente. Só getComissaoItems(y,m) usa
@@ -12299,28 +12353,14 @@ function getComissaoItemsAll(){
     i.comissaoPagaFora=(cfg.comissaoPagaFora&&cfg.comissaoPagaFora[i.confKey])||null;
     i.comissaoRemovida=(cfg.comissaoRemovida&&cfg.comissaoRemovida[i.confKey])||null;
   });
-  // (2026-08-18) — comissão dos pedidos abaixo já foi paga fisicamente no dia 05/08/2026,
-  // comprovado por PDF gerado pelo próprio sistema naquele dia (17 pedidos, Valor Líquido de
-  // cada um IDÊNTICO ao que o sistema mostra hoje — conferido na OS 56, Burger King Colombo,
-  // R$111.396,80). Entre 04/08 e 13/08 esses pagamentos foram reabertos e reconfirmados com uma
-  // data nova (13/08), e como getComissaoItemsAll() recalcula a quinzena de TODO pagamento pelo
-  // confirmedAt mais recente (mesmo de pagamentos antigos já fechados), isso jogou a quinzena
-  // de comissão deles de 05/08 pra 15/08/2026 — fazendo o sistema pedir pra pagar de novo uma
-  // comissão que já saiu do caixa. Ao contrário do _EXCLUIR_COMISSAO_0804 acima (que apaga o
-  // item de TUDO, inclusive da busca "Comissão Paga por Período"), aqui só marcamos como
-  // comissaoRemovida (mesmo campo do botão "🗑️ Retirar da lista") — assim o item some da lista
-  // "a pagar" da quinzena de 15/08 mas continua 100% visível e pesquisável em "Comissão Paga
-  // por Período", em "Todos os Confirmados" e no quadro "🗑️ Comissões Retiradas da Lista"
-  // (pedido do usuário: "eu preciso ver o que eu já paguei pra um vendedor"). Só marca
-  // automaticamente se ainda NÃO houver uma marcação real feita por um admin — decisão manual
-  // sempre prevalece sobre esta correção automática.
-  const _EXCLUIR_COMISSAO_1808_OS=new Set(['56','30','28','29','65','83','96','141','131','150','148','162','183','261','236','235','253']);
-  _all.forEach(i=>{
-    if(i.comissaoRemovida||i.comissaoPagaFora)return;
-    if(i.qy===2026&&i.qm===8&&i.qhalf==='II'&&_osTokens(i.pedidoOs).some(tok=>_EXCLUIR_COMISSAO_1808_OS.has(tok))){
-      i.comissaoRemovida={em:'2026-08-18T00:00:00.000Z',por:'Sistema (correção automática)',motivo:'Comissão já paga em 05/08/2026 — pagamento foi reaberto e reconfirmado em 13/08, jogando a quinzena pra 15/08 e duplicando a cobrança. Ver PDF de 04/08/2026.'};
-    }
-  });
+  // REMOVIDO (2026-08-18, mesmo dia) — o bloco que existia aqui marcava automaticamente
+  // comissaoRemovida nos 17 pedidos do PDF de 04/08 com base numa história de "reaberto e
+  // reconfirmado em 13/08" que o usuário negou explicitamente e com veemência ("NINGUEM
+  // REABRIU NADA... NINGUEM MEXEU NESSA PORRA"). Superado por _migrarBaixaHistoricaPDF0408()
+  // (ver setupRealtimeSync), que resolve a causa raiz de verdade: marca esses 17 pedidos como
+  // confirmado de verdade em cfg.pagConf (com confirmedAt real de 04/08), passando pelo mesmo
+  // caminho de qualquer outra confirmação normal — sem precisar de nenhuma exclusão manual
+  // baseada numa suposição não confirmada.
   _comItemsCache=_all;
   return _all;
 }
@@ -12575,6 +12615,39 @@ async function _migrarRestaurarUsuariosSumidos20260808(){
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   if(typeof renderUserList==='function')renderUserList();
   if(restaurados)toast(`${restaurados} usuário(s) restaurado(s) na lista`,'tok');
+}
+// Baixa histórica das 17 OS do relatório de comissão do GERENTE gerado em 04/08/2026, 1ª
+// quinzena de agosto (arquivo "comissao_clabonde_1qz_2026_08.pdf", Subtotal R$ 6.263,66,
+// pago dia 05/08) — 2026-08-18, a pedido explícito e repetido do usuário. Essas 17 OS já
+// tiveram a comissão do gerente PAGA com base nesse relatório, então o valor de venda delas
+// TEM que contar como recebido em Contas a Receber/Comissões — mesmo que a parcela nunca
+// tenha sido clicada em "Confirmar Recebimento" na tela de Financeiro (essa lacuna é o que
+// causava o pedido 56, BURGER KING COLOMBO, aparecer "Atrasado" mesmo com a comissão do
+// gerente já paga em cima dele — a comissão foi liberada num relatório separado, gerado a
+// partir da planilha pré-julho, sem nunca passar pelo fluxo normal de Confirmar Recebimento).
+// Instrução do usuário, verbatim: "pega e considera que foi pago e acabou... nem que vc fale
+// que todos eles entrou no dia 04/08 e ta tudo bem pq já foi pago isso". Marca confirmado com
+// confirmedAt = 04/08/2026 12:21 (hora exata de geração do PDF, gerado às 12:21 conforme o
+// rodapé do relatório). Idempotente, flag PERSISTIDO (cfg.migBaixaPDF0408Feita) — roda de
+// verdade só 1x pra sempre, só admin, mesmo padrão das outras migrações pontuais acima.
+const _OS_PDF_0408_QUINZENA1=['56','30','28','29','65','83','96','141','131','150','148','162','183','261','236','235','253'];
+async function _migrarBaixaHistoricaPDF0408(){
+  if(cfg.migBaixaPDF0408Feita)return;
+  const dataConfIso='2026-08-04T12:21:00.000Z';
+  let marcados=0;
+  getComissaoItemsAll().forEach(i=>{
+    if(i.status==='confirmado')return; // já recebido, não mexe
+    if(!_osTokens(i.pedidoOs).some(tok=>_OS_PDF_0408_QUINZENA1.includes(tok)))return;
+    setPagConf(i.confKey,{status:'confirmado',confirmedAt:dataConfIso,novaData:'04/08/2026',dataRecebimentoReal:'2026-08-04',motivoAtraso:'',motivoAtrasoEm:'',valorBrutoConfirmado:i.valorBruto});
+    marcados++;
+  });
+  cfg.migBaixaPDF0408Feita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  if(typeof _invalidateDashCache==='function')_invalidateDashCache();
+  if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();else if(typeof renderFinanceiro==='function')renderFinanceiro();
+  if(dashMetasUnlocked&&typeof renderDashComissoes==='function')renderDashComissoes();
+  if(marcados&&typeof toast==='function')toast(`✅ ${marcados} parcela(s) das 17 OS do relatório de comissão de 04/08 marcada(s) como recebida(s)`,'tok');
 }
 const GRUPO_DRE_LABEL={CMV:'Custo de Produção (CMV)',OPERACIONAL:'Despesas Operacionais',FINANCEIRA:'Despesas Financeiras',IMPOSTOS:'Impostos',IMOBILIZADO:'Imobilizado (Bem Financiado)',NAO_CLASSIFICADO:'Não Classificado'};
 function _normSemAcento(s){
@@ -13657,9 +13730,20 @@ function _dreMesRealItem(i){
 // nenhum período, já que não foi recebido de verdade ainda.
 function _dataRecebimentoRealIso(i){
   const conf=getPagConf(i.confKey);
-  if(!conf)return'';
-  if(conf.dataRecebimentoReal&&/^\d{4}-\d{2}-\d{2}/.test(conf.dataRecebimentoReal))return conf.dataRecebimentoReal.slice(0,10);
-  if(conf.confirmedAt)return String(conf.confirmedAt).slice(0,10);
+  if(conf){
+    if(conf.dataRecebimentoReal&&/^\d{4}-\d{2}-\d{2}/.test(conf.dataRecebimentoReal))return conf.dataRecebimentoReal.slice(0,10);
+    if(conf.confirmedAt)return String(conf.confirmedAt).slice(0,10);
+  }
+  // Recebimento histórico automático (pré-Julho I, sem nenhuma confirmação manual gravada em
+  // cfg.pagConf — ver autoHistorico em getComissaoItemsAll()) não tinha NENHUMA data aqui, então
+  // sumia por completo de qualquer total filtrado por "Data de Recebimento" (2026-08-18, bug
+  // real encontrado no relato do usuário: "de janeiro pra ca" aparecia um total muito menor do
+  // que o realmente recebido, porque todo o histórico pré-julho ficava fora do filtro). Cai pra
+  // trás na própria data ativa da parcela, que é a melhor aproximação que existe pra esse caso.
+  if(i.historicoAutoConfirmado&&i.dataAtiva){
+    const d=parseDataBR(i.dataAtiva);
+    if(d&&!isNaN(d))return d.toISOString().slice(0,10);
+  }
   return'';
 }
 function calcularDRE(y,m,empresaFiltro,regime){
@@ -22956,6 +23040,20 @@ function renderContasUnificado(){
       cards.push({label:'Pago',val:totPago,color:'#f1f5f9',text:'#475569',ftipo:'pagar',fstatus:'concluido'});
       if(totAtraso>0.005)cards.push({label:'Pagar em atraso',val:totAtraso,color:'#fee2e2',text:'#b91c1c',ftipo:'pagar',fstatus:'atrasado'});
     }
+    // Card "Confirmado hoje" (2026-08-18, a pedido do usuário: "como vamos garantir que isso
+    // nunca mais aconteça?") — prova visual, sempre visível, de que os cliques de "Confirmar
+    // Recebimento" estão realmente chegando no servidor: conta quantos itens têm confirmedAt
+    // na data de HOJE, direto de getComissaoItemsAll() — SEM respeitar nenhum filtro ativo
+    // (busca/período/tipo/vendedor), pra nunca dar a falsa impressão de estar zerado só porque
+    // algum filtro da tela está escondendo. Se alguém confirmar um recebimento agora e esse
+    // número não subir na hora, é sinal imediato (sem precisar abrir nada) de que aquela
+    // gravação não chegou no servidor — é o alarme que faltava.
+    if(tipo!=='pagar'){
+      const _hojeIso=new Date().toISOString().slice(0,10);
+      const _confHoje=getComissaoItemsAll().filter(i=>i.status==='confirmado'&&i.confirmedAt&&String(i.confirmedAt).slice(0,10)===_hojeIso);
+      const _confHojeTotal=_confHoje.reduce((s,i)=>s+i.valor,0);
+      cards.push({label:`Confirmado HOJE (${_confHoje.length})`,val:_confHojeTotal,color:'#fef9c3',text:'#854d0e',ftipo:'receber',fstatus:'concluido'});
+    }
     cardsEl.style.gridTemplateColumns=`repeat(${cards.length||1},1fr)`;
     // Cards clicáveis (2026-07-31, a pedido do usuário: "torne clicaveis mostrando os
     // pedidos referentes a cada cardzinho") — aplicam Tipo+Status na lista de baixo e rolam
@@ -23008,15 +23106,20 @@ function renderContasUnificado(){
     // 5 do mês SEGUINTE. Mostrando isso direto na linha pra nunca mais parecer que uma
     // confirmação "sumiu" só porque caiu num mês diferente do que Metas & Comissões está
     // aberto no momento.
-    const qDia=i.qhalf==='I'?'05':'15';
-    const qLabel=`${qDia}/${String(i.qm).padStart(2,'0')}/${i.qy}`;
-    const comissaoInfo=i.qy&&i.qm?`<div style="font-size:.62rem;color:#7c3aed;margin-top:2px" title="Data em que a comissão deste recebimento aparece em Metas & Comissões (Contas a Receber mostra a data real do cliente; a comissão só é liberada na quinzena de pagamento)">💰 Comissão: ${qLabel}</div>`:'';
+    // Aviso "💰 Comissão: DD/MM/AAAA" REMOVIDO daqui (2026-08-18, a pedido do usuário) — pra
+    // item ainda não confirmado, i.qy/qm/qhalf é só uma ESTIMATIVA calculada em cima da data
+    // prevista original (antes de qualquer confirmação real), então mostrava datas sem sentido
+    // nenhum na hora em que o Financeiro está prestes a confirmar o recebimento HOJE (ex.:
+    // "Comissão: 15/07/2026" numa parcela que só está sendo confirmada agora, em 18/08). A
+    // quinzena de comissão de verdade só fica definida depois que o recebimento é confirmado
+    // (baseada em quando foi confirmado, não na data prevista) — continua calculada
+    // normalmente por baixo, só não aparece mais nessa lista antes da hora.
     return{
       iso,dataLabel:i.dataAtiva||'—',
       tipoBadge:'<span style="background:#dbeafe;color:#1e40af;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">📥 Receber</span>',
       quem:quemHtml,quemSub:pedidoDisplay(i.pedidoOs)||i.mesPedido||'',
       prazoObra,prazoObraOrig,
-      detalhe:(i.nomeVend||'—')+(i.label?' · '+i.label:'')+comissaoInfo,
+      detalhe:(i.nomeVend||'—')+(i.label?' · '+i.label:''),
       // Contas a Receber não tem conceito de categoria (isso é só de Contas a Pagar,
       // ver plano de contas em getPlanoContasDespesas()) — fica vazio de propósito.
       categoria:'<span style="color:#94a3b8">—</span>',
@@ -24486,15 +24589,15 @@ function renderDashComissoes(){
      </div>
      ${mkExtras(5)}
      ${mkRemovidas(5)}
-     ${mkCards(itemsIView)}${mkVendResume(itemsIView,5)}${mkRegistrosPagamento(5)}
-     ${mkPendentes(pendI,'Nenhum lançamento pendente nesta quinzena.')}${mkConsolidado(consI)}
+     ${mkCards(itemsIView)}${mkVendResume(itemsIView,5)}
+     ${mkConsolidado(consI)}
      <div style="background:#4338ca;padding:10px 16px;border-radius:8px;margin:24px 0 16px">
        <div style="font-size:.85rem;font-weight:700;color:#fff;letter-spacing:.3px">2ª Quinzena · pagar dia 15</div>
      </div>
      ${mkExtras(15)}
      ${mkRemovidas(15)}
-     ${mkCards(itemsIIView)}${mkVendResume(itemsIIView,15)}${mkRegistrosPagamento(15)}
-     ${mkPendentes(pendII,'Nenhum lançamento pendente nesta quinzena.')}${mkConsolidado(consII)}`;
+     ${mkCards(itemsIIView)}${mkVendResume(itemsIIView,15)}
+     ${mkConsolidado(consII)}`;
 }
 
 // ════════════════════════════════════════
