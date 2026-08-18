@@ -1845,6 +1845,7 @@ select.fc{cursor:pointer}
       <div>
         <div class="em-ttl">Emissão de Pedido</div>
         <div class="em-sub" id="em-sub">Passo 1 de 5 · Dados</div>
+        <div id="em-rascunho-status" style="display:none;font-size:.66rem;color:#7c3aed;font-weight:600;margin-top:2px"></div>
       </div>
     </div>
     <button class="em-x" onclick="closeEM()">&#10005;</button>
@@ -3948,9 +3949,12 @@ async function adicionarTarefaComercialAvulsa(pedidoId,tipo,responsavel,prazoTar
   renderTarefasComerciais();
   _refreshTarefasBadge();
   toast('Tarefa adicionada!','tok');
-  // Notifica o responsável por e-mail (só tarefa manual, ver _enviarEmailTarefa()) — não
-  // trava nada se falhar, é só um aviso a mais além do toast de sucesso acima.
-  if(responsavel)_enviarEmailTarefa(novaT,{os:p.os,cliente:p.cliente,job:p.job}).catch(e=>console.error('Erro ao notificar tarefa por e-mail',e));
+  // Notificação por e-mail de tarefa DESLIGADA (2026-08-18, pedido explícito do usuário:
+  // "tire as notificações por email para tarefas, deixe apenas emissão de pedido e
+  // finalização de pedido") — _enviarEmailTarefa() continua existindo (não removida), só
+  // não é mais chamada daqui. Se precisar reativar no futuro, é só descomentar a linha
+  // abaixo — nada mais precisa mudar.
+  // if(responsavel)_enviarEmailTarefa(novaT,{os:p.os,cliente:p.cliente,job:p.job}).catch(e=>console.error('Erro ao notificar tarefa por e-mail',e));
 }
 // Tarefa avulsa SEM venda nenhuma vinculada — guardada em cfg.tarefasGerais (sincronizado
 // igual todo o resto do cfg) em vez de dentro de um pedido, já que não existe pedido pra
@@ -3967,7 +3971,9 @@ async function adicionarTarefaGeralAvulsa(tipo,responsavel,prazoTarefa,descricao
   renderTarefasComerciais();
   _refreshTarefasBadge();
   toast('Tarefa adicionada!','tok');
-  if(responsavel)_enviarEmailTarefa(novaT,null).catch(e=>console.error('Erro ao notificar tarefa por e-mail',e));
+  // Notificação por e-mail de tarefa DESLIGADA (2026-08-18) — ver comentário em
+  // adicionarTarefaComercialAvulsa() acima, mesmo motivo/mesma reversão.
+  // if(responsavel)_enviarEmailTarefa(novaT,null).catch(e=>console.error('Erro ao notificar tarefa por e-mail',e));
 }
 // Só quem LANÇOU a tarefa (criadoPor) — ou um administrador — pode excluí-la. Quem só
 // RECEBEU (responsavel) não pode excluir, só concluir/reabrir (ver _podeMexerNaTarefa()).
@@ -5667,7 +5673,9 @@ async function _consPendAdicionar(){
     renderConselhoPedidos();
     _refreshTarefasBadge();
     toast('Pendência adicionada — tarefa criada pro responsável.','tok');
-    if(responsavel)_enviarEmailTarefa(novaT,{os:p.os,cliente:p.cliente,job:p.job}).catch(e=>console.error('Erro ao notificar tarefa de pendência por e-mail',e));
+    // Notificação por e-mail de tarefa DESLIGADA (2026-08-18) — ver comentário em
+    // adicionarTarefaComercialAvulsa() acima, mesmo motivo/mesma reversão.
+    // if(responsavel)_enviarEmailTarefa(novaT,{os:p.os,cliente:p.cliente,job:p.job}).catch(e=>console.error('Erro ao notificar tarefa de pendência por e-mail',e));
   }catch(e){toast('Erro ao salvar pendência: '+e.message,'terr');}
 }
 // Marcar/desmarcar resolvida também conclui/reabre a tarefa vinculada — é a mesma ação no
@@ -7213,6 +7221,9 @@ function selRC(el,cls){
   if(cls==='rc_inst'){saveSt();renderEM();}
   else if(cls==='rc_frt'){saveSt();renderEM();}
   else{updCond();if(cls==='rc_frt'&&ed.fdist)atualizaPrazo();}
+  // Chip clicado não dispara input/change nativo — agenda o autosave do rascunho na mão
+  // (ver _emAgendarRascunho(), 2026-08-18).
+  if(typeof _emAgendarRascunho==='function')_emAgendarRascunho();
 }
 function rTG(cls,val,label,cur,yes){const on=cur===val;
   return`<button class="tgb${yes?' yes':' no'}${on?' on':''} ${cls}" data-val="${val}" onclick="togBtn(this,'${cls}')">${label}</button>`}
@@ -7221,6 +7232,9 @@ function togBtn(el,cls){
   el.closest('.tg-grp').querySelectorAll('button').forEach(b=>b.classList.remove('on'));
   el.classList.add('on');if(map[cls])ed[map[cls]]=el.dataset.val;
   if(cls==='tg_elv'||cls==='tg_med'){saveSt();renderEM();}else updCond();
+  // Botão Sim/Não clicado não dispara input/change nativo — agenda o autosave do rascunho
+  // na mão (ver _emAgendarRascunho(), 2026-08-18).
+  if(typeof _emAgendarRascunho==='function')_emAgendarRascunho();
 }
 function updCond(){
   const si=ed.i_tipo==='Por nossa conta';
@@ -8818,9 +8832,14 @@ function _buildPedidoBaseDoEd(){
 // _buildPedidoBaseDoEd() pro mesmo formato de objeto que a emissão de verdade usa, então
 // reabrir este rascunho depois (openEmissao(p.id)) reconstrói o formulário certinho, com tudo
 // que já foi preenchido.
-// Chamada automaticamente por closeEM() (2026-08-08) — não fecha o modal nem interrompe nada
-// sozinha (quem fecha é sempre closeEM(), ANTES de chamar esta função), só persiste e avisa.
-async function salvarRascunhoConselho(){
+// Chamada automaticamente por closeEM() (2026-08-08) e também pelo autosave contínuo
+// enquanto o formulário está aberto (_emAgendarRascunho(), 2026-08-18) — não fecha o modal
+// nem interrompe nada sozinha, só persiste e avisa (ou atualiza o statuszinho, se `silent`).
+// `silent=true` é usado pelo autosave em segundo plano (a cada campo preenchido) — sem isso
+// cada tecla digitada dispararia um toast novo por cima do anterior, inundando a tela; o
+// toast "de verdade" continua só no fechar (X/Esc), que é o momento em que faz sentido
+// confirmar pro usuário que pode sair tranquilo.
+async function salvarRascunhoConselho(silent){
   saveSt();
   const{p,_pedidoExistente}=_buildPedidoBaseDoEd();
   p.conselhoStatus='rascunho';
@@ -8834,13 +8853,63 @@ async function salvarRascunhoConselho(){
   editing=p.id;
   try{
     await savePedidoFS(p);
-    toast('Rascunho salvo automaticamente — continue de onde parou quando quiser.','tok');
+    if(silent){
+      const st=document.getElementById('em-rascunho-status');
+      if(st){st.style.display='';st.textContent='💾 Rascunho salvo automaticamente às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}
+    }else{
+      toast('Rascunho salvo automaticamente — continue de onde parou quando quiser.','tok');
+    }
   }catch(e){
     console.error('Erro ao salvar rascunho automaticamente',e);
-    toast('Não consegui salvar o rascunho automaticamente — tente de novo','terr');
+    if(!silent)toast('Não consegui salvar o rascunho automaticamente — tente de novo','terr');
   }
   if(typeof renderConselhoPedidos==='function')renderConselhoPedidos();
 }
+// ── AUTOSAVE CONTÍNUO DA EMISSÃO/RASCUNHO (2026-08-18) ──────────────────────────────────
+// Até aqui o rascunho só era salvo no fechar do modal (closeEM(), ver acima) — se o
+// vendedor fechasse a ABA do navegador, desse F5, a internet caísse ou o computador
+// travasse ANTES de clicar em fechar, tudo que tinha sido digitado sumia (relato do
+// usuário: "já tinha colocado os valores e daí ao sair ele some tudo"). Mesmo padrão já
+// usado com sucesso no rascunho de Finalização de Obra (_plAgendarRascunho(), 2026-07-23):
+// debounce de 900ms a cada campo alterado, salvando silenciosamente em segundo plano —
+// assim o rascunho no Firestore nunca fica muito desatualizado em relação ao que está na
+// tela, não dependendo mais de um "fechar" limpo pra não perder nada.
+// Só roda pra rascunho de Conselho (_emIsRascunhoConselho()) — editar um pedido JÁ EMITIDO
+// continua exigindo clicar em "Salvar ✓" pra persistir, exatamente como closeEM() já
+// decidia (nunca publicar uma edição de pedido real sozinho, sem confirmação).
+let _emRascunhoTimer=null;
+function _emAgendarRascunho(){
+  if(!_emIsRascunhoConselho())return;
+  const mo=document.getElementById('mo-em');
+  if(!mo||!mo.classList.contains('open'))return;
+  clearTimeout(_emRascunhoTimer);
+  _emRascunhoTimer=setTimeout(()=>{
+    if(editing||_rascunhoTemConteudo())salvarRascunhoConselho(true);
+  },900);
+}
+// Delegado no container fixo #em-bd (nunca é substituído, só seu innerHTML muda a cada
+// renderStep()) — cobre todo <input>/<select>/<textarea> de qualquer aba sem precisar
+// religar um listener por campo a cada re-render. Os seletores tipo-chip (selRC) e os
+// botões Sim/Não (togBtn) não disparam evento nativo de input/change — chamam
+// _emAgendarRascunho() direto no fim de cada função (ver as duas abaixo).
+(function(){
+  const bd=document.getElementById('em-bd');
+  if(bd){bd.addEventListener('input',_emAgendarRascunho);bd.addEventListener('change',_emAgendarRascunho);}
+})();
+// Backstop pra fechar a ABA/navegador (não o botão ✕ de dentro do app, que já é coberto por
+// closeEM()) DENTRO da janela de até 900ms antes do autosave debounced acima ter tido tempo
+// de rodar — nesse caso não tem como o sistema salvar sozinho (a página fecha antes de
+// qualquer chamada assíncrona terminar), então avisa o navegador pra perguntar antes de sair.
+// Só ativa com o modal de Emissão aberto e em rascunho (mesma trava de _emAgendarRascunho) —
+// nunca incomoda o resto do sistema.
+window.addEventListener('beforeunload',function(e){
+  const mo=document.getElementById('mo-em');
+  if(!mo||!mo.classList.contains('open'))return;
+  if(!_emIsRascunhoConselho())return;
+  if(!(editing||_rascunhoTemConteudo()))return;
+  e.preventDefault();
+  e.returnValue='';
+});
 
 async function submit(){
   saveSt();
