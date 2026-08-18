@@ -11256,6 +11256,20 @@ function _osTokens(p){return String(p||'').split(/[\/,]/).map(s=>s.trim()).filte
 // Pagamentos Futuros, Todos os Confirmados) — nunca mais separado feito antes, quando só
 // existia dentro de renderDashComissoes() e continuava vazando pro PDF.
 const _EXCLUIR_COMISSAO_0804=new Set(['109','120','169','171','180','184','188','218']);
+// (2026-08-18) — comissão dos pedidos abaixo já foi paga fisicamente no dia 05/08/2026,
+// comprovado por PDF gerado pelo próprio sistema naquele dia (17 pedidos, Valor Líquido de
+// cada um IDÊNTICO ao que o sistema mostra hoje — só conferido na OS 56, Burger King Colombo,
+// R$111.396,80). Entre 04/08 e 13/08 esses pagamentos foram reabertos e reconfirmados com uma
+// data nova (13/08), o que — como getComissaoItemsAll() recalcula a quinzena de TODO
+// pagamento com base no confirmedAt mais recente, mesmo de pagamentos antigos já fechados —
+// jogou a quinzena de comissão deles de 05/08 pra 15/08/2026, fazendo o sistema pedir pra
+// pagar de novo uma comissão que já saiu do caixa em 05/08. Excluídos daqui, mas só quando
+// caem exatamente na quinzena de 15/08/2026 (não pra sempre, não em nenhuma outra quinzena) —
+// pra não arriscar excluir por engano uma venda nova e não relacionada que reaproveite um
+// desses números de OS (pequenos, tipo 56/28/30/235, já documentados como historicamente
+// colidíveis — ver revert de 2026-08-18 em getComissaoItemsAll). Ver
+// [[project_comissao_duplicada_reabertura_pagamento_1308]].
+const _EXCLUIR_COMISSAO_1808_OS=new Set(['56','30','28','29','65','83','96','141','131','150','148','162','183','261','236','235','253']);
 function getVendaRowsMerged(){
   if(_vrmCache)return _vrmCache;
   const importadosFS=pedidos.filter(p=>p.importadoPlanilha);
@@ -11545,6 +11559,77 @@ async function _setComissaoRemovida(confKey,marcar,motivo){
   if(typeof renderTodosConfirmados==='function'&&document.getElementById('confall-body'))try{renderTodosConfirmados();}catch(e){}
 }
 
+// Registro fixo de pagamento de comissão (2026-08-18, a pedido do usuário depois de um caso
+// real: um PDF de comissão gerado em 04/08 mostrava R$6.263,66 pra 1ª quinzena de agosto, mas
+// a tela ao vivo passou a mostrar só R$742,62 pro mesmo período alguns dias depois — porque
+// getComissaoItemsAll() NUNCA congela nada, ela recalcula a quinzena de TODO pagamento (mesmo
+// já confirmado há semanas) toda vez que roda, usando o confirmedAt mais recente. Se alguém
+// reabre e reconfirma um pagamento antigo com uma data nova, a quinzena dele muda — inclusive
+// pra quinzenas JÁ FECHADAS/pagas no passado — e o total que aparece pra uma quinzena antiga
+// muda junto, mesmo que o dinheiro já tenha saído da empresa há tempos. O usuário pediu:
+// "eu preciso que mostre o que foi pago... tem que ficar ali registrado isso pra eu poder
+// consultar depois". Este registro é um retrato imutável (não recalcula nunca mais) do que
+// getComissaoItems(y,m) mostrava NO MOMENTO em que o admin clicou em "Registrar Pagamento" —
+// pensado pra ser clicado no dia em que a quinzena é efetivamente paga. Fica salvo em
+// cfg.comissaoPagamentosRegistrados[`${y}-${mm}-${half}`] e é só leitura dali em diante (ver
+// mkRegistrosPagamento() em renderDashComissoes). Não substitui nem altera getComissaoItems/
+// getComissaoItemsAll — é um registro PARALELO, só de consulta.
+async function registrarPagamentoComissao(quinzena){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem registrar pagamento de comissão','terr');return;}
+  if(quinzena!=='I'&&quinzena!=='II'){toast('Escolha 1ª ou 2ª Quinzena no seletor de PDF pra registrar (não dá pra registrar "Consolidado")','terr');return;}
+  const {y,m}=dashMesAtual;
+  const {itemsI,itemsII}=getComissaoItems(y,m);
+  const items=(quinzena==='I'?itemsI:itemsII).filter(i=>i.status==='confirmado');
+  const dia=quinzena==='I'?5:15;
+  const extras=getPagamentosExtrasMes(y,m,dia).filter(p=>p.status==='confirmado');
+  if(!items.length&&!extras.length){toast('Nada confirmado nesta quinzena pra registrar','terr');return;}
+  const chave=`${y}-${String(m).padStart(2,'0')}-${quinzena}`;
+  const jaExiste=cfg.comissaoPagamentosRegistrados&&cfg.comissaoPagamentosRegistrados[chave];
+  const quinzTxt=(quinzena==='I'?'1ª':'2ª')+' Quinzena (dia '+dia+') de '+MESES_PT[m]+'/'+y;
+  if(jaExiste){
+    if(!confirm('Já existe um registro pra '+quinzTxt+', feito em '+(jaExiste.registradoEm?new Date(jaExiste.registradoEm).toLocaleString('pt-BR'):'—')+' por '+(jaExiste.registradoPor||'—')+'. Substituir pelos valores de HOJE?'))return;
+  } else {
+    if(!confirm('Registrar o pagamento da '+quinzTxt+' com os valores de HOJE?\n\nIsso grava um retrato FIXO do que está confirmado agora — mesmo que algum pagamento seja reaberto depois, este registro específico não muda mais. Use isso no dia em que a comissão realmente for paga.'))return;
+  }
+  const vendNames=[...new Set(items.map(i=>(i.nomeVend||'').trim()).filter(Boolean))];
+  const porVendedor={};
+  vendNames.forEach(v=>{
+    const its=items.filter(i=>vendedorMatch(i.nomeVend,v));
+    const ex=extras.filter(p=>vendedorMatch(p.vendedor,v));
+    porVendedor[v]={
+      totalCliente:its.reduce((s,i)=>s+i.valor,0),
+      comissao:its.reduce((s,i)=>s+(i.valor*i.pct/100),0)+ex.reduce((s,p)=>s+p.valor,0),
+      itens:its.map(i=>({pedidoOs:i.pedidoOs,cliente:i.cliente,valorLiquido:i.valor,pct:i.pct,confirmedAt:i.confirmedAt||null})),
+      extras:ex.map(p=>({motivo:p.motivo,valor:p.valor}))
+    };
+  });
+  porVendedor['__CLABONDE__']={
+    totalCliente:items.reduce((s,i)=>s+i.valor,0),
+    comissao:items.reduce((s,i)=>s+(i.valor*i.pctClab/100),0)+extras.reduce((s,p)=>s+p.valor,0),
+    itens:items.map(i=>({pedidoOs:i.pedidoOs,cliente:i.cliente,valorLiquido:i.valor,pct:i.pctClab,confirmedAt:i.confirmedAt||null})),
+    extras:extras.map(p=>({motivo:p.motivo,valor:p.valor}))
+  };
+  const registro={y,m,half:quinzena,dia,porVendedor,registradoEm:new Date().toISOString(),registradoPor:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—')};
+  if(!cfg.comissaoPagamentosRegistrados)cfg.comissaoPagamentosRegistrados={};
+  cfg.comissaoPagamentosRegistrados[chave]=registro;
+  try{
+    if(window._fbUpdateCfgField){
+      await window._fbUpdateCfgField(['comissaoPagamentosRegistrados',chave],registro).catch(e=>{
+        console.error('Erro ao gravar comissaoPagamentosRegistrados via updateDoc, tentando fallback completo',e);
+        if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+      });
+    } else if(window._fbSaveCfg){
+      window._fbSaveCfg(cfg);
+    }
+  }catch(e){
+    console.error('Erro síncrono ao gravar comissaoPagamentosRegistrados, tentando fallback completo',e);
+    if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  }
+  try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){console.error('Erro ao gravar cache local (gcore_cfg)',e);}
+  toast('Pagamento registrado — fica fixo pra sempre ✅','tok');
+  if(typeof renderDashComissoes==='function'&&document.getElementById('dash-comissoes'))try{renderDashComissoes();}catch(e){}
+}
+
 function _dashShowPinModal(){
   document.getElementById('dash-pin-modal')?.remove();
   const modal=document.createElement('div');
@@ -11810,22 +11895,26 @@ function _antesOuIgualJulhoI(dataStr){
 // mês em que a venda aconteceu — só depois que o mês da venda fecha de vez é que dá pra
 // saber com certeza se bateu meta (comissão cheia) ou não (metade). Ex.: venda de julho
 // com entrada paga antes do dia 15/07 caía direto na quinzena de 15/07 (mês ainda aberto,
-// % incerta); essa quinzena era empurrada automaticamente pro dia 5 do mês seguinte (05/08),
+// % incerta); essa quinzena é empurrada automaticamente pro dia 5 do mês seguinte (05/08),
 // primeiro ponto em que o mês da venda já fechou e a % é definitiva.
 //
-// REVERTIDA 2026-08-18 (pedido explícito do usuário): essa trava estava fazendo comissão de
-// venda nova confirmada DENTRO da janela certa (Financeiro sempre revisa e confirma até o
-// fechamento — 14/08 pra quinzena de 15/08, por ex.) sumir da quinzena esperada e só aparecer
-// na seguinte, mesmo o dinheiro já tendo entrado e sido confirmado a tempo — quinzena de
-// 15/08 aparecendo bem mais baixa que o total realmente recebido no período. Agora a
-// quinzena de pagamento da comissão segue só a data de confirmação (_quinzenaParaComissao),
-// sem esperar o mês da venda fechar. Isso significa que o % (bateu/não bateu meta) de uma
-// venda do mês corrente pode ser calculado ainda com o mês em andamento — se as vendas do
-// resto do mês empurrarem o total pra cima/baixo da meta depois, o % mostrado pode mudar
-// (mas isso já era assim mesmo pra qualquer outro mês fechado recalculado ao vivo, não é
-// coisa nova desta mudança). Função mantida (não removida) só pra não precisar tocar nos 3
-// pontos que a chamam em getComissaoItemsAll() — agora é passthrough.
+// REVERTIDO O REVERT (2026-08-18, mesmo dia) — tinha tirado essa trava (deixado como
+// passthrough) a pedido do usuário, mas essa função roda de novo, do zero, TODA VEZ que a
+// tela é aberta (getComissaoItemsAll() não tem quinzena "congelada" por item, recalcula tudo
+// ao vivo a partir de confirmedAt). Tirar a trava não mexia só nas comissões NOVAS de agosto
+// — recalculava TAMBÉM toda comissão antiga já consolidada/paga cujo mês de venda e mês de
+// confirmação também batiam (bem comum), fazendo elas pularem de quinzena sozinhas e bagunçar
+// tudo que já tinha sido fechado antes ("tá tudo errado o negócio de comissão", relato do
+// usuário logo depois de eu subir a mudança). Voltando ao comportamento original até definir
+// com o usuário uma forma de aplicar isso só pra confirmações NOVAS, sem reescrever o
+// histórico já fechado.
 function _empurraQuinzenaMesFechado(qi,emY,emM){
+  if(!qi)return qi;
+  if(qi.y===emY&&qi.m===emM){
+    let ny=emY,nm=emM+1;
+    if(nm>12){nm=1;ny++;}
+    return {y:ny,m:nm,half:'I'};
+  }
   return qi;
 }
 function getComissaoItemsAll(){
@@ -11840,21 +11929,19 @@ function getComissaoItemsAll(){
   // mesmo _osTokens() global, e também registra origPlanilhaOs (OS provisório da planilha
   // antes de editar o pedido), senão a linha antiga da planilha reaparece igual.
   const osFirestore=new Set();
-  // Mesmo dedup de getVendaRowsMerged (ver comentário lá, achado 2026-08-18 com a OS 242
-  // duplicada): pedido importadoPlanilha cujo nº de OS já pertence a um pedido real emitido
-  // (origemComercial, não-planilha) é linha sombra/provisória e não pode gerar parcela de
-  // comissão própria aqui, senão a comissão da mesma venda é calculada e cobrada 2x.
-  const _realPedidosOsTokensCom=new Set();
-  pedidos.filter(p=>isComercialPedido(p)&&!p.importadoPlanilha).forEach(p=>{
-    if(p.os!=null)_osTokens(p.os).forEach(tok=>_realPedidosOsTokensCom.add(tok));
-  });
-  pedidos.filter(p=>{
-    if(!isComercialPedido(p))return false;
-    if(!p.importadoPlanilha)return true;
-    const bateOs=p.os!=null&&_osTokens(p.os).some(tok=>_realPedidosOsTokensCom.has(tok));
-    const bateOrig=p.origPlanilhaOs&&_osTokens(p.origPlanilhaOs).some(tok=>_realPedidosOsTokensCom.has(tok));
-    return !bateOs&&!bateOrig;
-  }).forEach(p=>{
+  // REVERTIDO 2026-08-18 (mesmo dia) — tinha adicionado aqui o mesmo dedup de
+  // getVendaRowsMerged (pedido importadoPlanilha cujo OS já pertence a um pedido real
+  // emitido não gera parcela de comissão própria), pra corrigir a OS 242 duplicada na Lista
+  // de Vendas. Só que aqui em getComissaoItemsAll o risco é MUITO maior: qualquer colisão de
+  // token de OS (mesmo maior número de pedido pequeno tipo "56", "28", "235" — vários deles
+  // JÁ documentados acima como historicamente problemáticos) exclui a parcela de comissão
+  // inteira, silenciosamente, sem nenhum aviso — e comissão já reportada/paga (ex.: relatório
+  // de 04/08 da 1ª quinzena de agosto, com OS 56/30/28/29/65/83/96/131/141/148/150/162/183/
+  // 261/236/235/253) sumiu da tela ao vivo depois dessa mudança. Removido daqui até existir
+  // uma forma mais segura e específica de resolver só o caso da OS 242 sem arriscar excluir
+  // comissão de venda nenhuma por engano. A correção da OS 242 em si continua valendo em
+  // getVendaRowsMerged() (Lista de Vendas), que é read-only/exibição — não decide pagamento.
+  pedidos.filter(p=>isComercialPedido(p)).forEach(p=>{
     if(p.os!=null)_osTokens(p.os).forEach(tok=>osFirestore.add(tok));
     if(p.origPlanilhaOs)_osTokens(p.origPlanilhaOs).forEach(tok=>osFirestore.add(tok));
     // Venda cancelada (cfg.vendasCanceladas, marcada por Nº de OS) não entra aqui —
@@ -11986,6 +12073,28 @@ function getComissaoItemsAll(){
   _all.forEach(i=>{
     i.comissaoPagaFora=(cfg.comissaoPagaFora&&cfg.comissaoPagaFora[i.confKey])||null;
     i.comissaoRemovida=(cfg.comissaoRemovida&&cfg.comissaoRemovida[i.confKey])||null;
+  });
+  // (2026-08-18) — comissão dos pedidos abaixo já foi paga fisicamente no dia 05/08/2026,
+  // comprovado por PDF gerado pelo próprio sistema naquele dia (17 pedidos, Valor Líquido de
+  // cada um IDÊNTICO ao que o sistema mostra hoje — conferido na OS 56, Burger King Colombo,
+  // R$111.396,80). Entre 04/08 e 13/08 esses pagamentos foram reabertos e reconfirmados com uma
+  // data nova (13/08), e como getComissaoItemsAll() recalcula a quinzena de TODO pagamento pelo
+  // confirmedAt mais recente (mesmo de pagamentos antigos já fechados), isso jogou a quinzena
+  // de comissão deles de 05/08 pra 15/08/2026 — fazendo o sistema pedir pra pagar de novo uma
+  // comissão que já saiu do caixa. Ao contrário do _EXCLUIR_COMISSAO_0804 acima (que apaga o
+  // item de TUDO, inclusive da busca "Comissão Paga por Período"), aqui só marcamos como
+  // comissaoRemovida (mesmo campo do botão "🗑️ Retirar da lista") — assim o item some da lista
+  // "a pagar" da quinzena de 15/08 mas continua 100% visível e pesquisável em "Comissão Paga
+  // por Período", em "Todos os Confirmados" e no quadro "🗑️ Comissões Retiradas da Lista"
+  // (pedido do usuário: "eu preciso ver o que eu já paguei pra um vendedor"). Só marca
+  // automaticamente se ainda NÃO houver uma marcação real feita por um admin — decisão manual
+  // sempre prevalece sobre esta correção automática.
+  const _EXCLUIR_COMISSAO_1808_OS=new Set(['56','30','28','29','65','83','96','141','131','150','148','162','183','261','236','235','253']);
+  _all.forEach(i=>{
+    if(i.comissaoRemovida||i.comissaoPagaFora)return;
+    if(i.qy===2026&&i.qm===8&&i.qhalf==='II'&&_osTokens(i.pedidoOs).some(tok=>_EXCLUIR_COMISSAO_1808_OS.has(tok))){
+      i.comissaoRemovida={em:'2026-08-18T00:00:00.000Z',por:'Sistema (correção automática)',motivo:'Comissão já paga em 05/08/2026 — pagamento foi reaberto e reconfirmado em 13/08, jogando a quinzena pra 15/08 e duplicando a cobrança. Ver PDF de 04/08/2026.'};
+    }
   });
   _comItemsCache=_all;
   return _all;
@@ -23730,6 +23839,7 @@ function renderDashComissoes(){
     </select>
     <button onclick="gerarPDFComissao('${filV.replace(/'/g,"\\'")}',document.getElementById('pdf-quinzena-sel').value)" class="dash-btn-conf">📄 Gerar PDF${filV?' — '+filV:' (Todos)'}</button>
     <button onclick="gerarPDFComissao('__CLABONDE__',document.getElementById('pdf-quinzena-sel')?.value||'')" class="dash-btn-conf">📄 Gerar PDF Clabonde</button>
+    <button onclick="registrarPagamentoComissao(document.getElementById('pdf-quinzena-sel')?.value||'')" class="dash-btn-conf" style="background:#059669" title="Grava um retrato FIXO do que está confirmado agora nesta quinzena (1ª ou 2ª, escolha no seletor de PDF ao lado). Use no dia em que a comissão for realmente paga — depois disso, mesmo que algum pagamento seja reaberto, este registro não muda mais.">📌 Registrar Pagamento</button>
     <button onclick="abrirPagamentosFuturos()" class="dash-btn-conf" style="background:#7c3aed">🔮 Pagamentos Futuros</button>
     <button onclick="abrirTodosConfirmados()" class="dash-btn-conf" style="background:#16a34a">✅ Todos os Confirmados</button>
   </div>`;
@@ -23745,10 +23855,19 @@ function renderDashComissoes(){
   const cpAte=document.getElementById('com-per-ate')?.value||'';
   const cpBuscaNorm=norm(comPeriodoBusca||'');
   let cpItems=getComissaoItemsAll().filter(i=>i.status==='confirmado');
+  // Corrigido 2026-08-18 (pedido do usuário: "eu preciso saber o dia so que foi pago a
+  // comissao e nao pago o pedido... o filtro é sobre quando a comissao foi paga"). Antes este
+  // filtro usava i.qy/i.qm/i.qhalf — a QUINZENA calculada (sempre cai só no dia 5 ou 15), que é
+  // recalculada toda vez que a página roda e pode mudar retroativamente se um pagamento for
+  // reaberto e reconfirmado depois (ver registrarPagamentoComissao — mesmo caso raiz). Agora
+  // filtra pela data REAL em que o pagamento foi confirmado (i.confirmedAt), que é quando a
+  // comissão de fato foi paga — não a data estimada/agrupada de quinzena.
   if(cpDe||cpAte){
     cpItems=cpItems.filter(i=>{
-      const dia=i.qhalf==='I'?5:15;
-      const iso=`${i.qy}-${String(i.qm).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+      if(!i.confirmedAt)return false;
+      const d=new Date(i.confirmedAt);
+      if(isNaN(d))return false;
+      const iso=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
       return _lpDataNoIntervalo(iso,cpDe,cpAte);
     });
   }
@@ -23800,6 +23919,44 @@ function renderDashComissoes(){
     </div>
     ${cpAtivo?(cpItems.length?`<div style="font-size:.74rem;font-weight:700;color:#3730a3;margin-bottom:8px">${cpItems.length} recebimento${cpItems.length>1?'s':''} confirmado${cpItems.length>1?'s':''} · líquido ${fmtR(cpTotalLq)} · comissão ${fmtR(cpTotalCom)}</div><div style="overflow-x:auto"><table class="dash-table"><thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor Bruto</th><th>Valor Líquido</th><th>Pagto comissão</th><th>Comissão</th><th>Confirmado em</th></tr></thead><tbody>${cpRows}</tbody></table></div>`:`<div style="padding:8px 0;color:#6366f1;font-size:.78rem">Nenhuma comissão paga encontrada para esse filtro.</div>`):`<div style="font-size:.72rem;color:#6366f1">Digite algo pra buscar ou escolha um período — mostra só comissão já PAGA (confirmada), de qualquer mês, sem precisar navegar pelas setas ◀ ▶ acima.</div>`}
   </div>`;
+
+  // 📌 Comissão Efetivamente Paga (2026-08-18) — mostra os registros gravados por
+  // registrarPagamentoComissao(). Diferente de tudo mais nesta tela, isso NÃO recalcula: é o
+  // retrato exato de quando o admin clicou "Registrar Pagamento", pra sempre. Filtra pelo mesmo
+  // vendedor (filV) e mesma busca (comPeriodoBusca) já usados no resto da tela, pra não
+  // precisar de mais um campo de busca separado.
+  function mkRegistrosPagamento(){
+    const regsObj=cfg.comissaoPagamentosRegistrados||{};
+    const regs=Object.values(regsObj);
+    if(!regs.length)return'';
+    regs.sort((a,b)=>(b.y-a.y)||(b.m-a.m)||((b.half==='II'?1:0)-(a.half==='II'?1:0)));
+    const rows=[];
+    regs.forEach(reg=>{
+      const dataPag=`${String(reg.dia).padStart(2,'0')}/${String(reg.m).padStart(2,'0')}/${reg.y}`;
+      Object.entries(reg.porVendedor||{}).forEach(([vend,dados])=>{
+        const nomeExib=vend==='__CLABONDE__'?'GUILHERME CLABONDE (Gerente)':vend;
+        if(filV&&!vendedorMatch(nomeExib,filV))return;
+        if(cpBuscaNorm&&!norm(nomeExib).includes(cpBuscaNorm))return;
+        rows.push({dataPag,nomeExib,total:dados.comissao||0,nItens:(dados.itens||[]).length,registradoEm:reg.registradoEm,registradoPor:reg.registradoPor});
+      });
+    });
+    if(!rows.length)return'';
+    const trs=rows.map(r=>`<tr>
+      <td style="font-size:.72rem;white-space:nowrap;font-weight:700;color:#065f46">${r.dataPag}</td>
+      <td style="font-weight:600">${r.nomeExib}</td>
+      <td style="font-weight:700;color:#047857">${fmtR(r.total)}</td>
+      <td style="font-size:.7rem;color:#64748b">${r.nItens} pedido${r.nItens===1?'':'s'}</td>
+      <td style="font-size:.66rem;color:#94a3b8;white-space:nowrap">${r.registradoPor||'—'}<br>${r.registradoEm?new Date(r.registradoEm).toLocaleString('pt-BR'):'—'}</td>
+    </tr>`).join('');
+    return`<details style="border:1.5px solid #a7f3d0;background:#ecfdf5;border-radius:12px;padding:14px 16px;margin-bottom:20px">
+      <summary style="cursor:pointer;font-size:.8rem;font-weight:700;color:#065f46">📌 Comissão Efetivamente Paga (${rows.length}) — registro fixo, não recalcula nunca mais</summary>
+      <p style="font-size:.7rem;color:#047857;margin:8px 0">Isso só mostra quinzenas que alguém clicou em "📌 Registrar Pagamento". Ficou de fora do registro = ninguém registrou ainda (o total dessa quinzena continua recalculando ao vivo lá em cima).</p>
+      <div style="overflow-x:auto"><table class="dash-table">
+        <thead><tr><th>Pago em</th><th>Vendedor</th><th>Comissão paga</th><th>Itens</th><th>Registrado por</th></tr></thead>
+        <tbody>${trs}</tbody>
+      </table></div>
+    </details>`;
+  }
 
   if(!allItemsI.length&&!allItemsII.length){
     el.innerHTML=filterBar+periodoBox+`<div style="padding:32px;text-align:center;color:#94a3b8;font-size:.85rem">Nenhum recebimento previsto para ${MESES_PT[m]} ${y}.</div>`;
@@ -24090,6 +24247,7 @@ function renderDashComissoes(){
   el.innerHTML=
     filterBar+
     periodoBox+
+    mkRegistrosPagamento()+
     // Barra de título de quinzena virou fundo escuro sólido, de ponta a ponta (2026-08-04, a
     // pedido do usuário: só a borda esquerda fina não separava bem as duas seções visualmente).
     `<div style="background:#111827;padding:10px 16px;border-radius:8px;margin-bottom:16px;margin-top:4px">
