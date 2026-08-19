@@ -5823,7 +5823,7 @@ function viewP(id){
     if(!ent.length)return'';
     return`<div class="vm-sec"><h4>${t}</h4><div class="vm-gr">${ent.map(([k,v])=>`<div class="vf"><div class="l">${k}</div><div class="v">${v}</div></div>`).join('')}</div></div>`;
   };
-  const v=p.valores||{},pg=p.pagamento||{},inst=p.instalacao||{},fr=p.frete||{};
+  const v=p.valores||{},pg=_ordenarPagamento(p.pagamento||{}),inst=p.instalacao||{},fr=p.frete||{};
   document.getElementById('vp-bd').innerHTML=`
     <div class="vm-sec"><h4>Dados Gerais</h4><div class="vm-gr">
       <div class="vf"><div class="l">Tipo</div><div class="v">${p.tipo}</div></div>
@@ -6209,7 +6209,14 @@ async function editarValoresPedido(pedidoId){
   setIn2('ev-de',_brToIso(pagExist['Data da Entrada']||''));
   const parcEntries=Object.entries(pagExist).map(([k,val])=>{
     const mt=k.match(/^Parcela\s+(\d+)\s+·\s+(.+)$/);
-    return mt?{idx:parseInt(mt[1],10),date:mt[2].trim(),val}:null;
+    if(mt)return{idx:parseInt(mt[1],10),date:mt[2].trim(),val};
+    // 2026-08-19: parcela salva SEM data (bug de validação na Emissão que permitia isso,
+    // corrigido em stepNext()/submit() — ver comentário completo lá e em getParcelas();
+    // caso real: OS 253) — sem esse fallback o valor da parcela nem aparecia aqui, obrigando
+    // reconstruir os valores do zero de memória/e-mail pra conseguir corrigir só a data.
+    const mt2=k.match(/^Parcela\s+(\d+)$/);
+    if(mt2)return{idx:parseInt(mt2[1],10),date:'',val};
+    return null;
   }).filter(Boolean).sort((a,b)=>a.idx-b.idx);
   const npSel=document.getElementById('ev-np');
   if(npSel)npSel.value=parcEntries.length?(parcEntries.length+(parcEntries.length>1?' parcelas':' parcela')):'Sem parcelamento';
@@ -6381,7 +6388,11 @@ async function salvarValoresPedido(){
       }
     });
     if(nParc>0)novoPag['Nº de Parcelas']=nParc+(nParc>1?' parcelas':' parcela');
-    p.pagamento=novoPag;
+    // _ordenarPagamento() aqui é só higiene pra daqui pra frente — este bloco é justamente
+    // quem embaralhava a ordem (preserva chaves "desconhecidas" tipo Ordem de Compra/NF no
+    // topo, só depois adiciona Entrada/Parcelas), causando Parcela 2 aparecer antes da
+    // Parcela 1 no e-mail/"Ver Detalhes" (OS 317, 2026-08-19). Não muda nenhum valor.
+    p.pagamento=_ordenarPagamento(novoPag);
   }
   // Atualiza dados do pedido (OS, Ordem de Compra, JOB, Prazo, Vendedor, Categoria/Tipo) — nome do cliente não é editável aqui
   const gi=id=>{const el=document.getElementById(id);return el?el.value.trim():'';};
@@ -6683,7 +6694,16 @@ function getTabs(){
   return t;
 }
 
-function openEmissao(eid2){
+async function openEmissao(eid2){
+  // VER uma venda/emissão já emitida (reabrir pra consulta, "Ver/Editar" do Conselho, "Editar"
+  // de Ver Detalhes, "Completar" de pendências) fica liberado pra qualquer usuário comercial —
+  // não é editar, é só olhar (2026-08-19, correção do usuário: "ACHO QUE VER a emissao nao tem
+  // problema nenhum, qualquer usuario comercial pode ver - mas alterar dai e so com senha de
+  // adm"). A trava de admin+senha ficava aqui antes (bloqueando inclusive a visualização) — foi
+  // movida pra submit(), que é o único ponto em que uma venda já emitida de fato é alterada/
+  // persistida (ver comentário lá). Reabrir um RASCUNHO ainda não emitido (conselhoStatus===
+  // 'rascunho' sem origemComercial) nunca teve trava — é o próprio vendedor completando o que
+  // ele mesmo começou.
   editing=eid2||null;
   if(eid2){
     const p=pedidos.find(x=>x.id===eid2);
@@ -6703,7 +6723,10 @@ function openEmissao(eid2){
       // link do PDF da OS/OC/chumbador e o status de ART/produção/layout/fotos, e o
       // "Reenviar E-mail" passava a mandar o e-mail sem esses dados (ver relato do
       // usuário: reenvio saindo sem o PDF do pedido pra baixar).
-      arq_os_url:p.arq_os_url||'',
+      // arq_os (nome do arquivo) nunca foi persistido no pedido, só a URL — mesmo placeholder
+      // "Arquivo já enviado" usado em arq_oc acima, pra zona de upload (ver renderStep
+      // 'dados', #uz-os) reconhecer que já tem arquivo ao reabrir um rascunho/pedido salvo.
+      arq_os:p.arq_os_url?'Arquivo já enviado':'',arq_os_url:p.arq_os_url||'',
       art:proj.art||'',cnpj_art:proj.cnpj_art||'',cnpj_art_url:proj.cnpj_art_url||'',
       arq_prod:proj.arq_prod||'',layout_inst:proj.layout_inst||'',fotos_orig:proj.fotos_orig||'',pasta_arquivos:proj.pasta_arquivos||'',laudo:proj.laudo||'',
       iacomp:inst['Quem vai acompanhar a obra']||'',itel:inst['Telefone']||'',
@@ -6712,8 +6735,22 @@ function openEmissao(eid2){
       iinteg:inst['Necessita integração na empresa']||'',iseg:inst['Precisa de seguro para esta obra']||'',vseg:'',
       ibloqenergia:inst['Necessita de Bloqueio de Energia']||'',
       pintubo:inst['Pintura de Tubo']||'',vpintub:'',
-      icep:'',ilog:'',inum_e:'',icomp:'',ibairro:'',icidade:p.locCidade||'',iuf:p.locUf||'',icep_ok:false,
-      minfo:inst['Informações sobre a Medição']||'',fcep:'',flog:'',fnum_e:'',fcomp:'',fbairro:'',fcidade:'',fuf:'',fdist:'',fcep_ok:false,
+      // Restaura os campos individuais de CEP/endereço a partir de p.instEndereco/
+      // p.freteEndereco (ver [[project_cep_validado_emissao]] e o comentário em
+      // _buildPedidoBaseDoEd()) — antes eram sempre resetados pra '' aqui, então reabrir um
+      // rascunho ou um pedido já emitido apagava o CEP/logradouro/bairro digitados e
+      // validados antes, mesmo já tendo sido confirmado no ViaCEP. Pedidos salvos ANTES
+      // desta correção não têm p.instEndereco/p.freteEndereco — caem no fallback antigo
+      // (locCidade/locUf só, resto em branco), não dá pra recuperar retroativamente.
+      icep:(p.instEndereco&&p.instEndereco.cep)||'',ilog:(p.instEndereco&&p.instEndereco.log)||'',inum_e:(p.instEndereco&&p.instEndereco.num)||'',icomp:(p.instEndereco&&p.instEndereco.comp)||'',ibairro:(p.instEndereco&&p.instEndereco.bairro)||'',icidade:(p.instEndereco&&p.instEndereco.cidade)||p.locCidade||'',iuf:(p.instEndereco&&p.instEndereco.uf)||p.locUf||'',icep_ok:!!(p.instEndereco&&p.instEndereco.cepOk),
+      minfo:inst['Informações sobre a Medição']||'',fcep:(p.freteEndereco&&p.freteEndereco.cep)||'',flog:(p.freteEndereco&&p.freteEndereco.log)||'',fnum_e:(p.freteEndereco&&p.freteEndereco.num)||'',fcomp:(p.freteEndereco&&p.freteEndereco.comp)||'',fbairro:(p.freteEndereco&&p.freteEndereco.bairro)||'',fcidade:(p.freteEndereco&&p.freteEndereco.cidade)||'',fuf:(p.freteEndereco&&p.freteEndereco.uf)||'',fdist:(p.freteEndereco&&p.freteEndereco.dist)||'',fcep_ok:!!(p.freteEndereco&&p.freteEndereco.cepOk),
+      // Prazo Estimado de Frete calculado (ed.prazo_frete_txt) nunca era restaurado ao
+      // reabrir — submit() exige esse campo quando o frete é "Por nossa conta" (bloqueia com
+      // mensagem que cita CEP/UF), então reabrir um rascunho com frete por nossa conta e
+      // tentar emitir sem reabrir a aba Frete pra recalcular travava a emissão mesmo já
+      // tendo sido calculado e salvo antes. Restaura direto do que já foi salvo em
+      // fr['Prazo Estimado de Entrega'].
+      prazo_frete_txt:fr['Prazo Estimado de Entrega']||'',
       fend:fr['Endereço de Entrega']||'',fie:fr['Inscrição Estadual']||'',chumbador:p.chumbador||'',arq_chumb:p.arq_chumb_url?'Arquivo já enviado':'',arq_chumb_url:p.arq_chumb_url||'',os_chumb:p.os_chumb||'',
       facomp:fr['Quem Acompanhou a Descarga']||'',ftel:fr['Telefone Descarga']||'',bases:p.bases||'',
       // Conselho de Pedidos (2026-08-07) — reconstrói a partir do que já foi salvo (rascunho
@@ -6909,6 +6946,23 @@ function stepNext(){
       if(de>d30){toast('❌ A data da entrada não pode ultrapassar 30 dias a partir de hoje — caso contrário não é considerada entrada. Corrija antes de continuar.','terr');return;}
     }
     // Validações das parcelas
+    // BUG GRAVE corrigido em 2026-08-19 (OS 253 "ALVIM INVESTIMENTOS/BURGER KING GRUPO
+    // ALVIM"): o vendedor preencheu o VALOR de 3 parcelas mas deixou a DATA de todas em
+    // branco. Nada aqui bloqueava isso, porque toda validação abaixo (retroativa/
+    // duplicada/ordem crescente) só roda sobre `datas` (ed.pdatas.filter(d=>d)) — que
+    // ficava um array VAZIO nesse caso, então nenhum dos loops sequer executava. O pedido
+    // saiu normalmente (e-mail de emissão até listou "Parcela 1/2/3" certinho) mas
+    // _buildPedidoBaseDoEd() salva a chave de cada parcela como "Parcela N" quando não tem
+    // data, formato que getParcelas() NUNCA reconhece (o regex exige "Parcela N · data") —
+    // as 3 parcelas (R$200.000 de Bruto) ficaram completamente invisíveis em Contas a
+    // Receber e Comissões desde a emissão, sem nenhum aviso, até o usuário notar manualmente
+    // comparando com o e-mail. Agora bloqueia ANTES de avançar: toda parcela com valor
+    // preenchido tem que ter uma Data Prevista preenchida também, sem exceção — dinheiro
+    // registrado sem data pra cobrar é dinheiro que nunca aparece pra ninguém confirmar.
+    const valsParcCheck=[...document.querySelectorAll('.pd-val')].map(i=>moneyToNum(i.value));
+    for(let i=0;i<valsParcCheck.length;i++){
+      if(valsParcCheck[i]>0&&!ed.pdatas[i]){toast(`❌ A Parcela ${i+1} tem valor preenchido mas está SEM Data Prevista! Preencha a data antes de continuar — sem data, essa parcela nunca vai aparecer em Contas a Receber.`,'terr');return;}
+    }
     const datas=ed.pdatas.filter(d=>d);
     // Parcelas retroativas
     for(let i=0;i<datas.length;i++){
@@ -7362,6 +7416,14 @@ function renderStep(id){
       </div>
     </div>`;
   }else if(id==='dados'){
+    // Zona de upload do PDF da OS (#uz-os, logo abaixo) agora reflete ed.arq_os/arq_os_url —
+    // antes era sempre renderizada em branco, diferente das outras zonas da Emissão (uz-oc/
+    // uz-cnpj-art/uz-chumb, que já checavam o estado). Qualquer re-render desta aba (trocar de
+    // step e voltar, reabrir rascunho/pedido salvo) fazia o PDF já enviado "sumir" da tela,
+    // mesmo intacto em ed/no pedido — vendedor achava que precisava reanexar. Restauração do
+    // nome do arquivo ao reabrir (placeholder "Arquivo já enviado", mesmo padrão de arq_oc) em
+    // openEmissao(). Ver [[project_cep_validado_emissao]] (mesmo tipo de dado perdido ao
+    // reabrir, achado na mesma investigação).
     bd.innerHTML=`<div class="fsec">
       <div class="fsec-t"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> DADOS GERAIS DO PEDIDO</div>
       <div style="border:1.5px solid #eef0f5;border-radius:12px;padding:16px;margin-bottom:14px">
@@ -7373,11 +7435,11 @@ function renderStep(id){
             ${ed.os_travado?'<div id="em-os-lock-note" style="font-size:.68rem;color:var(--ink4);margin-top:4px">🔒 Preenchido automaticamente a partir do PDF da Ordem de Serviço.</div>':''}
           </div>
           <div class="fg"><label>PDF da OS</label>
-            <div class="upload-zone" id="uz-os" onclick="document.getElementById('em-pdf').click()">
-              <span class="uz-icon">📄</span>
-              <div class="uz-title">Clique para selecionar ou arraste aqui</div>
+            <div class="upload-zone${(ed.arq_os||ed.arq_os_url)?' has-file':''}" id="uz-os" onclick="document.getElementById('em-pdf').click()">
+              <span class="uz-icon">${(ed.arq_os||ed.arq_os_url)?'✅':'📄'}</span>
+              <div class="uz-title">${(ed.arq_os||ed.arq_os_url)?'Arquivo enviado':'Clique para selecionar ou arraste aqui'}</div>
               <div class="uz-sub">PDF · Máx. 10MB</div>
-              <div class="uz-file" id="uz-os-name" style="display:none"></div>
+              <div class="uz-file" id="uz-os-name" style="${(ed.arq_os||ed.arq_os_url)?'display:flex':'display:none'}">${(ed.arq_os||ed.arq_os_url)?`✓ ${ed.arq_os||'Arquivo já enviado'}`:''}${ed.arq_os_url?` &nbsp;<a href="${ed.arq_os_url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--brand);font-size:.7rem">[abrir]</a>`:''}</div>
               <input type="file" accept=".pdf" id="em-pdf" style="display:none" onchange="emOsPdfSelecionado(this)">
             </div>
           </div>
@@ -8087,7 +8149,9 @@ function addRem(){
 // os_chumb, locCidade/locUf) que só existia em ed e nunca tinha sido salvo no pedido —
 // corrigido junto: esses campos agora são persistidos em p (ver construção de p em submit()).
 function buildEmissaoEmailContent(p){
-  const val=p.valores||{},pag=p.pagamento||{},inst=p.instalacao||{},fr=p.frete||{},proj=p.projetos||{};
+  // pag passa por _ordenarPagamento() pra nunca exibir "Parcela 2" antes de "Parcela 1" no
+  // e-mail (ver comentário em _ordenarPagamento, achado no pedido 317 "PLK RIOMAR KENNEDY").
+  const val=p.valores||{},pag=_ordenarPagamento(p.pagamento||{}),inst=p.instalacao||{},fr=p.frete||{},proj=p.projetos||{};
   // "Elevações"/"Valor das Elevações" já têm seção própria (ELEVAÇÕES, mais abaixo) —
   // tirado daqui pra não duplicar a mesma informação em Valores e em Elevações.
   const valSemElev=Object.fromEntries(Object.entries(val).filter(([k])=>k!=='Elevações'&&k!=='Valor das Elevações'));
@@ -8615,9 +8679,14 @@ function _atualizarAvisosValorPdf(){
 // (cor/tinta, descritivo, digitação). O texto fica em ed.osPdfTexto pra ser reaproveitado
 // no submit(), quando ed.i_tipo/vinst/etc já estarão preenchidos.
 async function emOsPdfSelecionado(input){
-  setUpload('uz-os','uz-os-name',input,'arq_os');
   const f=input.files[0];
   if(!f)return;
+  // Antes só era gravado em ed.arq_os dentro de saveSt(), ao sair da aba — se o vendedor
+  // trocasse de aba rápido (ou o autosave rodasse) antes disso, a zona de upload podia
+  // re-renderizar sem "lembrar" que já tinha arquivo selecionado. Grava na hora, igual ao
+  // padrão já usado em uploadCnpjArt()/em-oc-file.
+  ed.arq_os=f.name;
+  setUpload('uz-os','uz-os-name',input,'arq_os');
   const panel=document.getElementById('os-check-result');
   if(panel)panel.innerHTML='<div style="margin-top:10px;font-size:.78rem;color:#94a3b8">🔍 Analisando PDF da OS...</div>';
   try{
@@ -8852,6 +8921,20 @@ function _buildPedidoBaseDoEd(){
     // usuário). Ver _lpEtapasCfgAtual/_lpEtapasDefParaPedido.
     lpEtapasCfg:(_pedidoExistente&&_pedidoExistente.lpEtapasCfg)?_pedidoExistente.lpEtapasCfg:_lpEtapasCfgAtual(),
     locCidade:(ed.icidade||ed.fcidade||''),locUf:(ed.iuf||ed.fuf||''),
+    // CEP validado na Emissão (2026-07-20) trava/preenche Logradouro/Bairro/Cidade/UF a
+    // partir do ViaCEP, mas esses campos individuais (ed.icep/ilog/inum_e/icomp/ibairro e os
+    // equivalentes de frete) nunca eram salvos no pedido — só existiam combinados na string
+    // de exibição inst['Endereço de Instalação']/fr['Endereço de Entrega']. Resultado: toda
+    // vez que um rascunho do Conselho (ou um pedido já emitido) era reaberto pra completar/
+    // editar, openEmissao() não tinha como restaurar esses campos e reiniciava tudo em branco
+    // — o vendedor via a rua sumida mesmo tendo digitado e validado o CEP antes, e ao tentar
+    // emitir de novo caía na mesma trava de "CEP obrigatório" (ou, se o frete também tivesse
+    // sido perdido, em "Prazo Estimado de Frete não calculado", que também cita CEP/UF).
+    // Agora persistidos à parte de inst/fr (que são despejados linha a linha no e-mail de
+    // emissão) pra não duplicar informação nenhuma no e-mail — só para openEmissao() conseguir
+    // reidratar o formulário corretamente ao reabrir. Ver [[project_cep_validado_emissao]].
+    instEndereco:{cep:ed.icep||'',log:ed.ilog||'',num:ed.inum_e||'',comp:ed.icomp||'',bairro:ed.ibairro||'',cidade:ed.icidade||'',uf:ed.iuf||'',cepOk:!!ed.icep_ok},
+    freteEndereco:{cep:ed.fcep||'',log:ed.flog||'',num:ed.fnum_e||'',comp:ed.fcomp||'',bairro:ed.fbairro||'',cidade:ed.fcidade||'',uf:ed.fuf||'',dist:ed.fdist||'',cepOk:!!ed.fcep_ok},
     // Conselho de Pedidos (2026-08-07) — sempre grava o que já tiver no formulário, seja
     // rascunho ainda incompleto ou pedido já emitido (fica registrado pra sempre, mesmo depois
     // de emitido, como prova de que o Conselho foi feito). criadoPor/criadoEm só são setados
@@ -8969,6 +9052,26 @@ window.addEventListener('beforeunload',function(e){
 });
 
 async function submit(){
+  // Alterar (gravar) uma venda/emissão que JÁ SAIU (origemComercial:true, ou pedido antigo de
+  // antes do Conselho existir mas já emitido de verdade) exige admin+senha, mesmo padrão de
+  // editarValoresPedido()/delP() (2026-08-19, pedido do usuário: "nao pode editar uma venda e
+  // uma emissao um usuario qualquer, somente administrador" — refinado depois: "VER a emissao
+  // nao tem problema nenhum, qualquer usuario comercial pode ver - mas alterar dai e so com
+  // senha de adm"). VER/reabrir fica liberado pra qualquer um (ver openEmissao(), sem trava) —
+  // a trava de fato só entra aqui, no momento em que a alteração seria de fato salva. Pedido
+  // ainda em rascunho de Conselho (conselhoStatus==='rascunho' sem origemComercial) continua
+  // sem trava — completar o próprio rascunho não é "editar uma venda já emitida".
+  if(editing){
+    const pChk=pedidos.find(x=>x.id===editing);
+    const isDraftEmAndamento=pChk&&pChk.conselhoStatus==='rascunho'&&!pChk.origemComercial;
+    if(pChk&&!isDraftEmAndamento){
+      const {isAdm}=_getUserCat();
+      if(!isAdm){toast('Apenas administradores podem alterar uma venda/emissão já emitida','terr');return;}
+      const senha=await pedirSenhaAdmin('Alterar Emissão','Digite sua senha de administrador para salvar esta alteração:');
+      if(!senha){toast('Cancelado','tinf');return;}
+      if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
+    }
+  }
   saveSt();
   const tabs=getTabs();
   const idx=id=>tabs.findIndex(t=>t.id===id);
@@ -9065,6 +9168,15 @@ async function submit(){
     if(ed.tem_oc==='Sim'&&!ed.arq_oc)erros.push({msg:'Faça upload do arquivo da Ordem de Compra',aba:idxPag,label:'Pagamento'});
     if(!ed.tem_ent)erros.push({msg:'Informe se o pedido tem entrada',aba:idxPag,label:'Pagamento'});
     if(!ed.nf)erros.push({msg:'Informe a Emissão de NF',aba:idxPag,label:'Pagamento'});
+    // Mesma trava de 2026-08-19 já aplicada em stepNext() (ver comentário completo lá) —
+    // repetida aqui como segunda camada de defesa, caso submit() seja chamado sem passar
+    // de novo pela validação de stepNext() (ex.: reabrir um rascunho já na última aba).
+    // Toda parcela com valor tem que ter data, senão ela nunca aparece em Contas a Receber.
+    if(ed.pvals&&ed.pvals.length){
+      ed.pvals.forEach((v,i)=>{
+        if(v>0&&!(ed.pdatas&&ed.pdatas[i]))erros.push({msg:`A Parcela ${i+1} tem valor preenchido mas está sem Data Prevista — preencha a data antes de emitir`,aba:idxPag,label:'Pagamento'});
+      });
+    }
   }
   // Aba projetos
   const idxProj=idx('projetos');
@@ -10457,23 +10569,61 @@ function getParcelas(p){
   }
   Object.entries(pag).forEach(([k,v])=>{
     const mt=k.match(/^Parcela\s+(\d+)\s+·\s+(.+)$/);
-    if(mt)pushItem(k,v,`Parcela ${mt[1]} (Líquido)`,mt[2].trim(),`${p.id}::${k}`);
+    if(mt){pushItem(k,v,`Parcela ${mt[1]} (Líquido)`,mt[2].trim(),`${p.id}::${k}`);return;}
+    // REDE DE SEGURANÇA (2026-08-19) — parcela salva SEM data (bug real: OS 253 "ALVIM
+    // INVESTIMENTOS/BURGER KING GRUPO ALVIM", 3 parcelas de R$66.666,66 sem NENHUMA data
+    // preenchida na Emissão — nada bloqueava isso então, ver correção em stepNext()/submit()
+    // logo acima nesta mesma sessão). Até agora essa chave "Parcela N" pura (sem "· data")
+    // NUNCA batia no regex acima e a parcela inteira desaparecia de Contas a Receber/
+    // Comissões pra sempre, sem aviso nenhum — só percebido porque o usuário comparou com o
+    // e-mail de emissão manualmente. Nunca mais: se sobrar uma chave "Parcela N" sem data,
+    // ainda assim entra na lista (usando a data de EMISSÃO do pedido como marcador óbvio —
+    // já nasce "Atrasado", forçando aparecer em Contas a Receber pra alguém corrigir a data
+    // de verdade em Editar Valores) em vez de simplesmente sumir.
+    const mt2=k.match(/^Parcela\s+(\d+)$/);
+    if(mt2&&p.emissaoEm){
+      const dataFallback=p.emissaoEm.split('-').reverse().join('/');
+      pushItem(k,v,`Parcela ${mt2[1]} (Líquido)`,dataFallback,`${p.id}::${k}`);
+      const last=res[res.length-1];if(last)last.dataIndefinida=true;
+    }
   });
   // BUG corrigido 2026-08-04 (OS 235 "BURGUER M2A COMERCIO LTDA" e 236 "MISS BURGUER
   // COMERCIO LTDA" aparecendo 2x em Recebimentos & Comissões, Contas a Receber e Pagamentos
   // Futuros, com a comissão contada em dobro): o pedido tinha o MESMO pagamento salvo duas
   // vezes em p.pagamento — uma vez como "Entrada" e de novo como "Parcela 1 · <data>", os
   // dois com o Bruto batendo (dentro de centavos de arredondamento). getParcelas() lia os
-  // dois campos como se fossem parcelas diferentes. Detecta e remove a duplicata: quando
-  // "Entrada" e alguma "Parcela N" têm Bruto batendo (tolerância R$0,05 — cobre
-  // arredondamento de proporção, mas nunca bate por coincidência entre duas parcelas reais
-  // de valor diferente), mantém só a Parcela (tem data explícita) e descarta a Entrada
-  // solta. Roda ANTES da reconciliação com a planilha logo abaixo, pra não distorcer a soma.
+  // dois campos como se fossem parcelas diferentes. Detecta e remove a duplicata quando
+  // "Entrada" e alguma "Parcela N" têm Bruto batendo.
+  //
+  // CORRIGIDO DE NOVO em 2026-08-19 (auditoria "todas as vendas desde 01/07"): a regra
+  // acima só comparava Entrada×Parcela por VALOR parecido (tolerância R$0,05) — mas um
+  // plano LEGÍTIMO de "Entrada + 1 Parcela" faturado 50/50 (comum: metade agora, metade
+  // depois) tem exatamente essa cara (os dois valores ficam parecidos, cada um ~metade do
+  // Bruto) e vinha sendo apagado por engano, sumindo com a Entrada inteira do Contas a
+  // Receber. Achado ao auditar TODAS as vendas de 01/07 em diante: OS 235 (R$12.016,87 +
+  // R$12.016,87 = R$24.033,74, a 1 centavo do Bruto R$24.033,75), OS 236 (R$2.610,06 +
+  // R$2.610,07 = R$5.220,13, batendo EXATO com o Bruto) e OS 273 "HUMAI ALIMENTACAO"
+  // (R$3.446,37 + R$3.446,38 = R$6.892,75, batendo EXATO com o Bruto) — nas 3, a SOMA dos
+  // dois valores já bate com o Bruto do pedido, sinal de que são duas parcelas DIFERENTES
+  // de um plano 50/50, não a mesma parcela duplicada (uma duplicata de verdade faria a soma
+  // dobrar e passar bem do Bruto). Por isso a remoção agora só acontece quando dá pra
+  // confirmar que É duplicata: mantendo os dois valores a soma passa longe do Bruto (mais
+  // de R$1 de diferença) E tirando a Entrada a soma bate exata com o Bruto — só nesse caso
+  // fica claro que o valor foi contado 2x. OS 235/236 pararam de cair nessa regra (a soma
+  // dos dois já batia com o Bruto desde o início, não eram duplicata) — se havia alguma
+  // outra evidência concreta de duplicata de verdade nesses dois pedidos (ex.: e-mail de
+  // emissão mostrando a mesma parcela 2x), reveja manualmente em Editar Valores.
   if(res.length>1){
     const entradaIdx=res.findIndex(r=>r.label==='Entrada');
     if(entradaIdx>-1){
       const dupIdx=res.findIndex((r,idx)=>idx!==entradaIdx&&Math.abs(r.valorBruto-res[entradaIdx].valorBruto)<0.05);
-      if(dupIdx>-1)res.splice(entradaIdx,1);
+      if(dupIdx>-1){
+        const somaComAmbos=res.reduce((s,r)=>s+r.valorBruto,0);
+        const somaSemEntrada=somaComAmbos-res[entradaIdx].valorBruto;
+        if(totalBruto>0&&Math.abs(somaComAmbos-totalBruto)>1&&Math.abs(somaSemEntrada-totalBruto)<1){
+          res.splice(entradaIdx,1);
+        }
+      }
     }
   }
   // Planilha vence: se a OS bate com uma linha da planilha colada, a SOMA das parcelas
@@ -10564,7 +10714,41 @@ function getParcelas(p){
       });
     }
   }
+  // ORDEM DE EXIBIÇÃO (2026-08-19, OS 317 "PLK RIOMAR KENNEDY") — até aqui `res` segue a
+  // ordem CRUA das chaves de p.pagamento, que pode estar embaralhada (salvarValoresPedido,
+  // usado em "Editar Valores", reconstrói o objeto preservando primeiro as chaves
+  // "desconhecidas" tipo Ordem de Compra/Emissão de NF e só depois Entrada/Parcelas — ver
+  // comentário lá). Isso fazia a Parcela 2 aparecer ANTES da Parcela 1 no e-mail e em "Ver
+  // Detalhes" (Datas de Pagamento), mesmo com os valores certos. Não afeta nenhuma soma/
+  // comissão (isso é só ordem de exibição do array) — só reordena Entrada primeiro, depois
+  // Parcela 1, 2, 3... por número.
+  res.sort((a,b)=>{
+    const na=a.label==='Entrada'?-1:(parseInt((String(a.label).match(/^Parcela\s+(\d+)/)||[])[1],10)??9999);
+    const nb=b.label==='Entrada'?-1:(parseInt((String(b.label).match(/^Parcela\s+(\d+)/)||[])[1],10)??9999);
+    return na-nb;
+  });
   return res;
+}
+// Reordena as chaves de um objeto p.pagamento numa ordem lógica pra EXIBIÇÃO (e-mail de
+// emissão, "Ver Detalhes") — nunca usar isso pra decidir valor/soma de nada, só afeta a
+// ordem em que os campos aparecem na tela/e-mail. Necessário pelo mesmo motivo do sort em
+// getParcelas() logo acima: salvarValoresPedido() embaralha a ordem das chaves ao salvar
+// uma edição em "Editar Valores" (achado no pedido 317 "PLK RIOMAR KENNEDY", 2026-08-19).
+function _ordenarPagamento(pag){
+  pag=pag||{};
+  const ORDEM_FIXA=['Ordem de Compra do Cliente','Valor de Entrada','Valor de Entrada (Líquido)','Data da Entrada','Forma de Pgto. da Entrada','Nº de Parcelas','Forma das Parcelas'];
+  const chaves=Object.keys(pag);
+  const parcNums=[...new Set(chaves.map(k=>{const mt=k.match(/^Parcela\s+(\d+)/);return mt?parseInt(mt[1],10):null;}).filter(n=>n!=null))].sort((a,b)=>a-b);
+  const out={};
+  ORDEM_FIXA.forEach(k=>{if(k in pag)out[k]=pag[k];});
+  parcNums.forEach(n=>{
+    const kBruto=chaves.find(k=>new RegExp(`^Parcela\\s+${n}\\s+·`).test(k))||(('Parcela '+n) in pag?'Parcela '+n:null);
+    const kLiq=`Parcela ${n} (Líquido)`;
+    if(kBruto&&!(kBruto in out))out[kBruto]=pag[kBruto];
+    if(kLiq in pag&&!(kLiq in out))out[kLiq]=pag[kLiq];
+  });
+  chaves.forEach(k=>{if(!(k in out))out[k]=pag[k];});
+  return out;
 }
 
 // Auditoria manual (2026-07-15): confere, pedido a pedido, se a soma do Bruto/Líquido
@@ -11330,7 +11514,20 @@ function _osTokens(p){return String(p||'').split(/[\/,]/).map(s=>s.trim()).filte
 // pra ficar num único lugar e valer em QUALQUER consumidor de getComissaoItemsAll (tela, PDF,
 // Pagamentos Futuros, Todos os Confirmados) — nunca mais separado feito antes, quando só
 // existia dentro de renderDashComissoes() e continuava vazando pro PDF.
-const _EXCLUIR_COMISSAO_0804=new Set(['109','120','169','171','180','184','188','218']);
+const _EXCLUIR_COMISSAO_0804=new Set(['109','120','169','171','180','184','188']);
+// 2026-08-19: a OS 218 (BOBS SEROPÉDICA RJ) foi TIRADA da lista acima. Ela tinha 4 parcelas
+// (Entrada 15/07/2026 + Parcela 1/2/3 em 05/09, 05/10 e 05/11/2026) — mas a exclusão acima é
+// por Nº de OS inteiro, então junto com a Entrada (essa sim já paga em julho quinzena 2, o
+// motivo original da exclusão de 2026-08-04) também sumiam as 3 parcelas FUTURAS, ainda não
+// recebidas, de Contas a Receber inteiro — sem chance nenhuma de o Financeiro confirmar o
+// recebimento delas quando chegasse a hora. Usuário reportou pedidos emitidos no sistema
+// "sumindo" do Financeiro antes de dar pra confirmar recebimento; auditei TODOS os pedidos
+// comerciais não cancelados comparando getParcelas(p) x getComissaoItemsAll() e essa foi a
+// única OS da lista com mais de 1 parcela (as outras 7 têm 1 parcela cada — excluir a OS
+// inteira nelas não esconde nada além da própria parcela já paga, sem efeito colateral).
+// Agora só o confKey exato da Entrada (a parcela realmente já paga) fica de fora — ver uso
+// logo abaixo, junto com _EXCLUIR_COMISSAO_0804.
+const _EXCLUIR_COMISSAO_0804_CONFKEY_218='p_1783367270573_mzldf::entrada';
 // (2026-08-18) — comissão dos pedidos abaixo já foi paga fisicamente no dia 05/08/2026,
 // comprovado por PDF gerado pelo próprio sistema naquele dia (17 pedidos, Valor Líquido de
 // cada um IDÊNTICO ao que o sistema mostra hoje — só conferido na OS 56, Burger King Colombo,
@@ -12212,6 +12409,22 @@ function getComissaoItemsAll(){
   // comissão de venda nenhuma por engano. A correção da OS 242 em si continua valendo em
   // getVendaRowsMerged() (Lista de Vendas), que é read-only/exibição — não decide pagamento.
   pedidos.filter(p=>isComercialPedido(p)).forEach(p=>{
+    // 2026-08-19: só "reivindica" o token de OS pro Firestore (bloqueando o ramo sintético
+    // da planilha logo abaixo) quando o pedido de fato tem pagamento próprio pra mostrar
+    // (getParcelas(p).length>0). Achado no pente-fino pedido pelo usuário: "Incluir na
+    // Finalização de Obra" (Lista de Vendas) cria um pedido Firestore só pra rastrear a
+    // etapa de instalação em Planejamento, DE PROPÓSITO com pagamento:{} vazio — o
+    // financeiro dessa venda sempre continuou vindo da planilha (XLSX_VENDAS), nunca foi
+    // pra duplicar aqui. Mas mesmo com pagamento vazio, o pedido ainda reivindicava o token
+    // de OS aqui embaixo, bloqueando o ramo sintético (mais abaixo) de gerar o recebível de
+    // verdade dessa venda — sem NADA no lugar. 3 vendas (~R$36 mil em parcela ainda não
+    // recebida) ficaram assim escondidas de Contas a Receber. Só afeta pedido
+    // importadoPlanilha sem pagamento próprio — pedido real (não vindo da planilha) sempre
+    // continua reivindicando o token exatamente como antes, sem mudança nenhuma; não mexe
+    // em nada do histórico de 2026-08-04/08-18 documentado logo abaixo.
+    let temPagamentoProprio=true;
+    try{temPagamentoProprio=getParcelas(p).length>0;}catch(e){}
+    if(p.importadoPlanilha&&!temPagamentoProprio)return;
     if(p.os!=null)_osTokens(p.os).forEach(tok=>osFirestore.add(tok));
     if(p.origPlanilhaOs)_osTokens(p.origPlanilhaOs).forEach(tok=>osFirestore.add(tok));
     // Venda cancelada (cfg.vendasCanceladas, marcada por Nº de OS) não entra aqui —
@@ -12331,7 +12544,7 @@ function getComissaoItemsAll(){
   // getComissaoItems/getComissaoItemsAll direto. Agora nunca mais aparece em lugar nenhum.
   // Pode apagar esta lista mais tarde se o número de OS acabar sendo reaproveitado por outra
   // venda (não costuma acontecer, ver _osJaEmUso()).
-  const _allSemDup=all.filter(i=>!_osTokens(i.pedidoOs).some(tok=>_EXCLUIR_COMISSAO_0804.has(tok)));
+  const _allSemDup=all.filter(i=>!_osTokens(i.pedidoOs).some(tok=>_EXCLUIR_COMISSAO_0804.has(tok))&&i.confKey!==_EXCLUIR_COMISSAO_0804_CONFKEY_218);
   // Fatura duplicada (2026-08-18, a pedido do usuário) — Pedido 270, C&A CTV CATANDUVA:
   // usuário identificou esse lançamento como duplicado em Financeiro/Contas a Receber e pediu
   // pra tirar de vez ("exclua essa fatura do c&a ctv pq ta duplicada, tire ela do financeiro" e
@@ -12934,13 +13147,17 @@ function _cpFilteredItems(){
   const df=document.getElementById('cp-fil-data-fim')?.value||'';
   // 'aberto' (2026-07-31, cards clicáveis "A Pagar") = Pendente OU Atrasado juntos, mesmo
   // padrão de _finFilteredItems() — ver comentário lá.
+  // 2026-08-19, mesmo ajuste de _finFilteredItems() (busca ignora o período) — o campo de
+  // busca é compartilhado (fc-fil-busca espelha pra cp-fil-busca) então precisa se comportar
+  // igual dos dois lados, senão buscar por um fornecedor fora do período escolhido também
+  // sumiria da lista de Contas a Pagar do mesmo jeito que sumia em Contas a Receber.
   items=items.filter(c=>
     (!q||(c.fornecedor||'').toLowerCase().includes(q)||(c.despesaDesc||'').toLowerCase().includes(q))
     &&(!femp||c.empresa===femp)
     &&(!fcat||c.centroCusto===fcat)
     &&(!fstat||(fstat==='aberto'?(c.statusCalc==='pendente'||c.statusCalc==='atrasado'):c.statusCalc===fstat))
-    &&(!di||(c.vencimento&&c.vencimento>=di))
-    &&(!df||(c.vencimento&&c.vencimento<=df))
+    &&(!!q||!di||(c.vencimento&&c.vencimento>=di))
+    &&(!!q||!df||(c.vencimento&&c.vencimento<=df))
   );
   items.sort((a,b)=>(a.vencimento||'').localeCompare(b.vencimento||''));
   return items;
@@ -12956,12 +13173,13 @@ function _cpItemsTodosStatus(){
   const fcat=document.getElementById('cp-fil-categoria')?.value||'';
   const di=document.getElementById('cp-fil-data-ini')?.value||'';
   const df=document.getElementById('cp-fil-data-fim')?.value||'';
+  // 2026-08-19, mesmo ajuste de busca-ignora-período (ver _cpFilteredItems() acima).
   items=items.filter(c=>
     (!q||(c.fornecedor||'').toLowerCase().includes(q)||(c.despesaDesc||'').toLowerCase().includes(q))
     &&(!femp||c.empresa===femp)
     &&(!fcat||c.centroCusto===fcat)
-    &&(!di||(c.vencimento&&c.vencimento>=di))
-    &&(!df||(c.vencimento&&c.vencimento<=df))
+    &&(!!q||!di||(c.vencimento&&c.vencimento>=di))
+    &&(!!q||!df||(c.vencimento&&c.vencimento<=df))
   );
   return items;
 }
@@ -22653,12 +22871,21 @@ function _finFilteredItems(){
     // = Pendente OU Atrasado juntos, o mesmo total que o card mostra (_finItemsTodosStatus
     // com i.statusCalc!=='confirmado'); os outros valores continuam comparação exata.
     const statusOk=!fs||(fs==='aberto'?(i.statusCalc==='pendente'||i.statusCalc==='atrasado'):i.statusCalc===fs);
-    return (!q||(i.cliente||'').toLowerCase().includes(q)||String(i.pedidoOs||'').toLowerCase().includes(q))
+    const buscaOk=!q||(i.cliente||'').toLowerCase().includes(q)||String(i.pedidoOs||'').toLowerCase().includes(q);
+    // 2026-08-19, a pedido do usuário: pedido 323 (ArcelorMittal) emitido em agosto, com
+    // vencimento em outubro, buscado por "323" com o período manualmente ampliado pra
+    // jan-ago não aparecia — a busca por texto sempre foi ANDada com o período (di/df),
+    // então um vencimento fora da janela escolhida escondia o resultado mesmo quando o
+    // texto batia exatamente. Buscar por nome/OS é uma intenção explícita de achar aquele
+    // pedido específico onde quer que ele esteja no tempo, então busca com texto agora
+    // ignora o filtro de período (di/df) — sem busca, o período continua funcionando
+    // exatamente como antes (padrão mês vigente, setinhas, filtro manual etc.)
+    return buscaOk
       &&(!fmv||MESES_PT[i.emM]===fmv)
       &&(!fv||vendedorMatch(i.nomeVend,fv))
       &&statusOk
-      &&(!di||(iso&&iso>=di))
-      &&(!df||(iso&&iso<=df));
+      &&(!!q||!di||(iso&&iso>=di))
+      &&(!!q||!df||(iso&&iso<=df));
   });
   items.sort(_cmpMesVenda);
   return items;
@@ -22700,11 +22927,14 @@ function _finItemsTodosStatus(){
   const df=document.getElementById('fin-fil-data-fim')?.value||'';
   items=items.filter(i=>{
     const iso=tipoData==='receb'?_dataRecebimentoRealIso(i):_finToIso(i.dataAtiva);
+    // Mesmo ajuste de 2026-08-19 de _finFilteredItems() — busca com texto ignora o
+    // período, senão os cards resumo ficariam inconsistentes com a tabela logo abaixo
+    // (que já ignora o período quando há busca).
     return (!q||(i.cliente||'').toLowerCase().includes(q)||String(i.pedidoOs||'').toLowerCase().includes(q))
       &&(!fmv||MESES_PT[i.emM]===fmv)
       &&(!fv||vendedorMatch(i.nomeVend,fv))
-      &&(!di||(iso&&iso>=di))
-      &&(!df||(iso&&iso<=df));
+      &&(!!q||!di||(iso&&iso>=di))
+      &&(!!q||!df||(iso&&iso<=df));
   });
   items.sort((a,b)=>{const da=parseDataBR(a.dataAtiva),db=parseDataBR(b.dataAtiva);return (da&&db)?da-db:0;});
   return items;
@@ -24406,7 +24636,7 @@ function renderDashComissoes(){
     // quinzena" — não fazia sentido a lista em si ficar escondida atrás de um clique numa tela
     // que já tem coisa demais espalhada). Antes só abria sozinho com busca ativa.
     return`<details open style="margin:6px 0 16px">
-      <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">✅ O que o Financeiro confirmou e está contando pra esta quinzena (${items.length}) — Líquido: ${fmtR(totalVal)} · Comissão: ${fmtR(totalCom)}</summary>
+      <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">✅ O que o Financeiro confirmou e está contando pra esta quinzena (${items.length} ${items.length===1?'item':'itens'}) — Líquido: ${fmtR(totalVal)} · Comissão: ${fmtR(totalCom)}</summary>
       <div style="overflow-x:auto;margin-top:8px"><table class="dash-table">
         <thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor Bruto</th><th>Valor Líquido</th><th>%</th><th>Comissão</th><th>Confirmado em</th><th>Detalhes</th><th>Ação</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -24574,9 +24804,16 @@ function renderDashComissoes(){
   // (A exclusão pontual das OS 109/120/169/171/180/184/188/218 agora é feita na FONTE, dentro
   // de getComissaoItemsAll() — ver comentário lá — então já chega filtrada aqui em itemsI/II,
   // sem precisar repetir o filtro nesta tela.)
-  const consI=itemsIView.filter(i=>i.status==='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
+  // CORRIGIDO 2026-08-18 — a lista "confirmado" (mkConsolidado, sempre visível abaixo de cada
+  // quinzena) usava i.qy/qm/qhalf (a quinzena ESTIMADA de pagamento de comissão), enquanto os
+  // cards "QUINZENA 1/2" lá em cima e o modal do clique usam _itemNaJanelaRecebido (a janela
+  // real de quando foi confirmado). As duas contas podiam divergir e mostrar números
+  // diferentes na mesma tela. Agora usam exatamente a mesma fonte/janela — a lista sempre bate
+  // com o total do card, e atualiza sozinha a cada confirmação nova (a tela inteira re-renderiza
+  // toda vez que chega uma atualização de pedidos/config do Firestore, ver setupRealtimeSync).
+  const consI=getComissaoItemsAll().filter(i=>i.status==='confirmado'&&_itemNaJanelaRecebido(i,y,m,'I')&&(!filV||vendedorMatch(i.nomeVend,filV)));
   const pendI=itemsIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
-  const consII=itemsIIView.filter(i=>i.status==='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
+  const consII=getComissaoItemsAll().filter(i=>i.status==='confirmado'&&_itemNaJanelaRecebido(i,y,m,'II')&&(!filV||vendedorMatch(i.nomeVend,filV)));
   const pendII=itemsIIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
 
   el.innerHTML=
@@ -25782,7 +26019,18 @@ const XLSX_VENDAS=[
   {mes:"JUNHO",m:6,p:"214",cl:"BURGER KING DRIVE AV. GETÚLIO VARGAS - BAURU",cat:"MANUTENÇÃO",v:"JULIO",br:18200.0,ft:3000.0,vi:1300.0,el:1600.0,mo:1000.0,art:100.0,ba:0.0,ou:0.0,lq:11200.0,op:7000.0,entrega:"07/08/2026",parcelas:[{dataStr:"15/08/2026",valor:11200.0}]},
   {mes:"JUNHO",m:6,p:"196",cl:"BURGER KING PATO BRANCO PR",cat:"FRANQUEADO SHOPPING",v:"JULIO",br:38000.0,ft:5280.0,vi:1400.0,el:0.0,mo:7200.0,art:1328.0,ba:0.0,ou:0.0,lq:22792.0,op:15208.0,entrega:"08/07/2026",parcelas:[{dataStr:"05/08/2026",valor:13675.2}]},
   {mes:"JUNHO",m:6,p:"198",cl:"BURGER KING ADISER BALNEÁRIO CAMBORIÚ SC",cat:"FRANQUEADO SHOPPING",v:"JULIO",br:7400.0,ft:2500.0,vi:1000.0,el:0.0,mo:900.0,art:0.0,ba:0.0,ou:0.0,lq:3000.0,op:4400.0,entrega:"23/07/2026",parcelas:[{dataStr:"05/08/2026",valor:3000.0}]},
-  {mes:"JUNHO",m:6,p:"211",cl:"BURGER KING BRAGANÇA PAULISTA",cat:"FRANQUEADO DRIVE",v:"JULIO",br:251224.0,ft:12000.0,vi:4000.0,el:4200.0,mo:13200.0,art:2000.0,ba:0.0,ou:0.0,lq:215824.0,op:35400.0,entrega:"17/07/2026",parcelas:[{dataStr:"15/07/2026",valor:53956.0},{dataStr:"05/08/2026",valor:53956.0},{dataStr:"15/08/2026",valor:53956.0}]},
+  // 2026-08-19: pedido 211 (BURGER KING BRAGANÇA PAULISTA) aparecia com 3 parcelas de
+  // R$53.956,00 líquido (R$62.806,00 bruto-equivalente cada, já que xRatio=lq/br≈0,859 em
+  // getComissaoItemsAll()) e o usuário reportou como "fatura triplicada". Não é duplicação:
+  // conferido contra "PLANILHA ATUALIZADA DE VENDAS 2026.xlsx" (aba "VENDAS 2026", linha do
+  // pedido 211/O.C. 323), que tem QUATRO parcelas iguais de R$53.956,00 (colunas JULHO I,
+  // JULHO II, AGOSTO I, AGOSTO II — convenção "Mês I"=dia 05, "Mês II"=dia 15, confirmada
+  // comparando várias outras linhas da planilha com o array abaixo). 4×53.956=215.824,00 =
+  // Valor Líquido do pedido exatamente. A transcrição pra este array tinha capturado só 3
+  // das 4 parcelas (faltava a de "JULHO I" = 05/07/2026) — por isso a soma das parcelas
+  // (188.418,00) não batia com o líquido total (215.824,00), uma diferença de exatamente
+  // uma parcela. Adicionada a parcela que faltava; total de parcelas agora bate com lq.
+  {mes:"JUNHO",m:6,p:"211",cl:"BURGER KING BRAGANÇA PAULISTA",cat:"FRANQUEADO DRIVE",v:"JULIO",br:251224.0,ft:12000.0,vi:4000.0,el:4200.0,mo:13200.0,art:2000.0,ba:0.0,ou:0.0,lq:215824.0,op:35400.0,entrega:"17/07/2026",parcelas:[{dataStr:"05/07/2026",valor:53956.0},{dataStr:"15/07/2026",valor:53956.0},{dataStr:"05/08/2026",valor:53956.0},{dataStr:"15/08/2026",valor:53956.0}]},
   {mes:"JUNHO",m:6,p:"242",cl:"BURGER KING HORTOLÂNDIA SHOPPING",cat:"BK É FOGO",v:"JULIO",br:79775.91,ft:7000.0,vi:2500.0,el:0.0,mo:10000.0,art:500.0,ba:0.0,ou:0.0,lq:59775.91,op:20000.0,entrega:"14/08/2026",parcelas:[{dataStr:"05/08/2026",valor:35865.55},{dataStr:"05/09/2026",valor:23910.36}]},
   {mes:"JUNHO",m:6,p:"223",cl:"BURGER KING ASSIS SP",cat:"MANUTENÇÃO",v:"JULIO",br:88848.0,ft:7500.0,vi:1500.0,el:6000.0,mo:4500.0,art:500.0,ba:0.0,ou:0.0,lq:68848.0,op:20000.0,entrega:"20/07/2026",parcelas:[{dataStr:"15/08/2026",valor:68848.0}]},
   {mes:"JUNHO",m:6,p:"219",cl:"BURGER KING BARRETOS SP",cat:"MANUTENÇÃO",v:"JULIO",br:128457.0,ft:9000.0,vi:2200.0,el:6800.0,mo:5000.0,art:500.0,ba:0.0,ou:0.0,lq:104957.0,op:23500.0,entrega:"10/08/2026",parcelas:[{dataStr:"15/08/2026",valor:104957.0}]},
@@ -26023,7 +26271,7 @@ function verVendaDetalhe(os,pedidoId){
       _vvCurrentPedidoId=pedidoId;
       document.getElementById('vv-t').textContent=`OS ${p.os||'—'} — ${p.cliente}`;
       document.getElementById('vv-s').textContent=`${p.tipo} · JOB: ${p.job||'—'} · Emitido no sistema`;
-      let v=p.valores||{};const pg=p.pagamento||{},inst=p.instalacao||{},fr=p.frete||{},proj2=p.projetos||{};
+      let v=p.valores||{};const pg=_ordenarPagamento(p.pagamento||{}),inst=p.instalacao||{},fr=p.frete||{},proj2=p.projetos||{};
       // Mesma regra do pedidoToVendaRow: se a OS bate com uma linha da planilha colada,
       // a planilha vence os valores financeiros exibidos aqui também — senão "Ver Detalhes"
       // mostraria um Bruto/Líquido diferente do que aparece na Lista de Vendas.
@@ -27533,7 +27781,7 @@ function _prospRenderCard(e){
     </div>
     <div style="display:flex;gap:8px;margin:16px 0">
       <button onclick="prospAbrirEditarEmpresa('${e.id}')" style="flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:9px;padding:10px;font-size:.8rem;font-weight:700;cursor:pointer">✏️ Editar Empresa</button>
-      <button onclick="prospExcluirEmpresa('${e.id}')" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:10px 14px;font-size:.8rem;font-weight:700;cursor:pointer">🗑️ Excluir</button>
+      ${_getUserCat().isAdm?`<button onclick="prospExcluirEmpresa('${e.id}')" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:10px 14px;font-size:.8rem;font-weight:700;cursor:pointer">🗑️ Excluir</button>`:''}
     </div>
     <div style="border-top:1px solid var(--border-lt);margin:16px 0;padding-top:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -27753,6 +28001,12 @@ async function prospSalvarEmpresa(){
   if(_prospCardAtualId===e.id)_prospRenderCard(e);
 }
 async function prospExcluirEmpresa(id){
+  // Só admin exclui empresa do funil (2026-08-19, pedido do usuário) — o botão já fica
+  // escondido pra quem não é admin em _prospRenderCard(), esta trava aqui é só rede de
+  // segurança (mesmo padrão usado em editarVendaLista/retirarComissaoLista) caso alguém
+  // chame a função direto.
+  const {isAdm}=_getUserCat();
+  if(!isAdm){toast('Apenas administradores podem excluir empresas da prospecção','terr');return;}
   const e=prospEmpresas.find(x=>x.id===id);
   if(!e)return;
   if(!confirm('Excluir "'+e.nome+'" da prospecção? Isso apaga também a linha do tempo e as tarefas dela. Esta ação não pode ser desfeita.'))return;
