@@ -1034,19 +1034,12 @@ select.fc{cursor:pointer}
             <!-- Trocado o filtro "Todos os vendedores" pelo navegador de mês por setinhas
                  (2026-07-23, a pedido do usuário: "mais prático") — mostra tudo que tem pra
                  acontecer no mês (Pagar + Receber, ou só um dos dois via filtro Tipo),
-                 movendo direto as datas De/Até pro 1º e último dia do mês escolhido. Colocado
-                 antes do "Mês da venda" (2026-07-23, a pedido do usuário). -->
+                 movendo direto as datas De/Até pro 1º e último dia do mês escolhido. -->
             <div class="dash-mes-nav" style="margin:0">
               <button onclick="fcMesMov(-1)" type="button">◀</button>
               <div class="dash-mes-label" id="fc-mes-lbl">—</div>
               <button onclick="fcMesMov(1)" type="button">▶</button>
             </div>
-            <select id="fc-fil-mes-venda" onchange="fcAplicarFiltros()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
-              <option value="">📅 Mês da venda (Receber)</option>
-              <option>JANEIRO</option><option>FEVEREIRO</option><option>MARÇO</option><option>ABRIL</option>
-              <option>MAIO</option><option>JUNHO</option><option>JULHO</option><option>AGOSTO</option>
-              <option>SETEMBRO</option><option>OUTUBRO</option><option>NOVEMBRO</option><option>DEZEMBRO</option>
-            </select>
             <select id="fc-fil-empresa" onchange="fcAplicarFiltros()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
               <option value="">🏢 Todas as empresas (Pagar)</option>
             </select>
@@ -1059,12 +1052,22 @@ select.fc{cursor:pointer}
                  i.dataAtiva (vencimento/data prevista da parcela), nunca contra a data em que o
                  Financeiro realmente confirmou o recebimento (conf.dataRecebimentoReal). Padrão
                  continua "Vencimento" (comportamento de sempre, ninguém é afetado sem mexer);
-                 "Recebimento" troca a data usada pelo filtro pra _dataRecebimentoRealIso(i). -->
+                 "Data de Pagamento" troca a data usada pelo filtro pra _dataRecebimentoRealIso(i).
+                 "Mês da Venda" (2026-08-19, a pedido do usuário: "coloque para a pessoa
+                 selecionar o periodo de data que ela quer ali e do lado pra ela escolher se o
+                 periodo que ela colocou é do mes da venda ou da data de pagamento pra filtrar")
+                 substitui o antigo dropdown separado "Mês da venda (Receber)" — que só filtrava
+                 por NOME do mês, sem ano, e não combinava com o período De/Até. Agora o mesmo
+                 período De/Até escolhido é comparado contra o mês/ano da venda (i.emY/i.emM,
+                 por mês cheio — o dia dentro do mês é ignorado nos dois extremos), então dá pra
+                 filtrar "Maio 2026 até Agosto 2026" de um jeito que o dropdown antigo não fazia.
+                 Ver _finPeriodoOk() (função de comparação de período compartilhada). -->
             <select id="fc-fil-tipo-data" onchange="fcAplicarFiltros()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
-              <option value="venc">📅 Data de Vencimento</option>
-              <option value="receb">✅ Data de Recebimento</option>
+              <option value="venc">📅 Filtrar por Data de Vencimento</option>
+              <option value="receb">✅ Filtrar por Data de Pagamento</option>
+              <option value="venda">🗓️ Filtrar por Mês da Venda</option>
             </select>
-            <span style="font-size:.75rem;color:#94a3b8;font-weight:600">Data de</span>
+            <span style="font-size:.75rem;color:#94a3b8;font-weight:600">Período de</span>
             <input id="fc-fil-data-ini" type="date" style="width:150px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit" onchange="fcAplicarFiltros()">
             <span style="font-size:.75rem;color:#94a3b8;font-weight:600">até</span>
             <input id="fc-fil-data-fim" type="date" style="width:150px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit" onchange="fcAplicarFiltros()">
@@ -1088,7 +1091,6 @@ select.fc{cursor:pointer}
           <div style="display:none" aria-hidden="true">
             <div id="fin-cards"></div>
             <input id="fin-fil-busca">
-            <select id="fin-fil-mes-venda"><option value=""></option></select>
             <select id="fin-fil-vend"><option value=""></option></select>
             <select id="fin-fil-status"><option value=""></option><option value="aberto"></option><option value="pendente"></option><option value="atrasado"></option><option value="confirmado"></option></select>
             <select id="fin-fil-tipo-data"><option value="venc"></option><option value="receb"></option></select>
@@ -3495,7 +3497,28 @@ window._fbSaveProspEmpresa=(e)=>setDoc(doc(db,'prospEmpresas',String(e.id)),e);
 window._fbDeleteProspEmpresa=(id)=>deleteDoc(doc(db,'prospEmpresas',String(id)));
 window._fbWatchProspEmpresas=(cb,errCb)=>onSnapshot(collection(db,'prospEmpresas'),cb,errCb||(e=>console.error('prospEmpresas watch error',e)));
 // Config global (compartilhada entre todos os usuários)
-window._fbSaveCfg=(data)=>setDoc(doc(db,'sistema','config'),data);
+// Blindado com try/catch (2026-08-19) — setDoc() valida os dados ANTES de mandar pra rede e
+// LANÇA UM ERRO SÍNCRONO (não uma promise rejeitada) quando algum campo é inválido pro
+// Firestore (ex.: nome de campo começando E terminando com "__", reservado internamente —
+// ver o bug real do dia: cfg.comissaoPagamentosRegistrados['2026-08-I'].porVendedor.
+// __CLABONDE__ vinha de _seedHistoricoComissaoClabonde0408()/registrarPagamentoComissao()).
+// Sem este try/catch, esse throw síncrono escapava de QUALQUER função que chamasse
+// _fbSaveCfg(cfg) sem seu próprio try/catch — e a maioria não tinha, incluindo
+// addMotivoAdiamento()/addCentroCusto()/saveCfg() ("Salvar Configurações"). O resultado era
+// 100% silencioso pro usuário: nenhum toast, nenhuma mudança na lista, nada — porque a função
+// inteira parava de executar bem antes de chegar no toast('...','tok') do final. Agora
+// qualquer erro de validação vira um toast vermelho explicando o problema, e a função sempre
+// devolve uma promise (nunca lança na hora), então quem encadeia .catch() nela também nunca
+// mais quebra por causa disso.
+window._fbSaveCfg=(data)=>{
+  try{
+    return setDoc(doc(db,'sistema','config'),data);
+  }catch(e){
+    console.error('_fbSaveCfg: setDoc() lançou erro síncrono (dado inválido pro Firestore) — nada foi salvo no servidor',e);
+    if(typeof toast==='function')toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — sua alteração pode não ter sido salva pra todo mundo, avise o Guilherme.','terr');
+    return Promise.reject(e);
+  }
+};
 window._fbLoadCfg=()=>getDocs(collection(db,'sistema')).then(snap=>{const d=snap.docs.find(x=>x.id==='config');return d?d.data():null;});
 window._fbWatchCfg=(cb)=>onSnapshot(doc(db,'sistema','config'),snap=>{if(snap.exists())cb(snap.data());});
 // Escrita ATÔMICA de um campo aninhado só (2026-08-04) — usada por setPagConf() pra confirmar
@@ -3563,7 +3586,22 @@ window._fbDeleteCfgField=(parts)=>updateDoc(doc(db,'sistema','config'),new Field
 // desatualizado no servidor — o dado "sumia" ao trocar de página porque nunca chegou a ser
 // salvo de verdade no Firestore, só parecia salvo na tela. updateDoc com FieldPath grava só
 // cfg.dashExtra[chave], nunca depende do resto do cfg em memória.
-window._fbUpdateCfgField=(parts,value)=>updateDoc(doc(db,'sistema','config'),new FieldPath(...parts),value);
+// Blindado com try/catch (2026-08-19, mesmo motivo do _fbSaveCfg acima) — updateDoc() também
+// valida o VALOR sendo escrito e lança erro síncrono se ele contiver algum campo aninhado
+// inválido (ex.: "__algo__"). Sem isso, uma chamada como
+// window._fbUpdateCfgField([...]).catch(fallback) nunca chegava a anexar o .catch() — o
+// próprio ato de chamar a função já lançava o erro antes de existir uma promise pra encadear
+// nela, e o fallback (geralmente _fbSaveCfg(cfg) tentando de novo com o cfg inteiro) nunca era
+// chamado do jeito que o código pretendia. Agora sempre devolve uma promise de verdade, então
+// todo .catch(...) já escrito nos ~15 lugares que usam isso passa a funcionar como pretendido.
+window._fbUpdateCfgField=(parts,value)=>{
+  try{
+    return updateDoc(doc(db,'sistema','config'),new FieldPath(...parts),value);
+  }catch(e){
+    console.error('_fbUpdateCfgField: updateDoc() lançou erro síncrono (dado inválido pro Firestore) no campo '+parts.join('.'),e);
+    return Promise.reject(e);
+  }
+};
 // Funções administrativas (Cloud Functions) — definir senha / apagar usuário direto no Firebase Auth, sem e-mail.
 window._fbAdminSetPassword=(email,newPassword)=>httpsCallable(functions,'adminSetPassword')({email,newPassword});
 window._fbAdminDeleteUser=(email)=>httpsCallable(functions,'adminDeleteUser')({email});
@@ -3609,6 +3647,13 @@ function renderCfgPermissoes(){
 let pedidos=[],contasPagar=[],contasReceberManual=[],simReservas=[],cfg={s:'service_t99xeta',t:'template_7rz15hy',k:'wtJbXi3uGODPaFIqc',e:'guilherme@granda.ind.br, guilherme.clabonde@granda.ind.br',r:'GUILHERME CLABONDE',cld_cloud:'derlxsg74',cld_preset:'gcoregranda',cld_logo:'',freteTabela:'',freteOrigem:'PONTA GROSSA/PR',avisos:'• Este documento é um resumo do pedido emitido pelo sistema Granda.\n• Em caso de dúvidas entre em contato com seu responsável comercial.\n• Prazos de entrega estão sujeitos à confirmação de produção.'};
 let sf='os',sa=true,vid=null,eid=null;
 let step=0,ed={},editing=null;
+// Trava contra duplo-clique em submit() (2026-08-19, achado: OS 330 mandou 2 e-mails de
+// "EMISSÃO DE PEDIDO" idênticos no mesmo minuto). O botão "Emitir Pedido"/"Próximo" nunca era
+// desabilitado durante o processamento, e submit() tem paradas assíncronas no meio (aviso da
+// checagem heurística do PDF da OS, senha de admin pra reemitir) — um segundo clique nessa
+// janela reentrava em submit() inteiro, salvando e mandando e-mail de novo pro mesmo pedido.
+// Ver o try/finally dentro de submit().
+let _submitPedidoEmAndamento=false;
 
 const uid=()=>'p_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
 const vEl=id=>document.getElementById(id)?.value||'';
@@ -4690,6 +4735,7 @@ let _centrosCustoExtraMigracaoFeita=false;
 let _centrosCustoExtra2RemocaoMigracaoFeita=false;
 let _restaurarUsuariosMigracaoFeita=false;
 let _baixaPDF0408MigracaoFeita=false;
+let _itensProducaoRetroativaMigracaoFeita=false;
 function setupRealtimeSync(){
   if(!window._fbWatchPedidos)return;
   window._fbWatchPedidos(function(snapshot){
@@ -4793,6 +4839,13 @@ function setupRealtimeSync(){
     if(!_baixaPDF0408MigracaoFeita&&_getUserCat().isAdm){
       _baixaPDF0408MigracaoFeita=true;
       _migrarBaixaHistoricaPDF0408().catch(e=>{_baixaPDF0408MigracaoFeita=false;console.error('Erro na baixa histórica das 17 OS do PDF de 04/08',e);});
+    }
+    // Correção retroativa dos Itens de Produção que ficaram vazios por causa do bug do
+    // Autosave x extração de PDF (ver _migrarItensProducaoRetroativa acima) — só admin, mesmo
+    // padrão de flag PERSISTIDO, roda de verdade só 1x pra sempre.
+    if(!_itensProducaoRetroativaMigracaoFeita&&_getUserCat().isAdm){
+      _itensProducaoRetroativaMigracaoFeita=true;
+      _migrarItensProducaoRetroativa().catch(e=>{_itensProducaoRetroativaMigracaoFeita=false;console.error('Erro na correção retroativa de Itens de Produção',e);});
     }
     // Sem isso, getComissaoItemsAll() continuava servindo o array em cache (_comItemsCache)
     // montado ANTES dessa atualização de pedidos — editar OS/valores/vendedor num pedido
@@ -5211,7 +5264,13 @@ function buildSidebarCats(){
   // _menusPadraoPorCategoria).
   const cats=_rhOnlySidebar?['RH']:_planOnlySidebar?['LISTA_PEDIDOS','PLANEJAMENTO']:[...(_temAcessoProspeccao()?['PROSPECCAO_CLIENTES']:[]),...(_temAcessoFerramentas()?['FERRAMENTAS']:[]),...(_temAcessoHistorico()?['HISTORICO']:[]),...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['LISTA_PEDIDOS','PLANEJAMENTO']:[]),...(_isSetorUser('PROJETOS')?['PROJETOS']:[]),...(_isSetorUser('COMPRAS')?['COMPRAS']:[]),...(_isSetorUser('PRODUÇÃO')?['PRODUÇÃO']:[]),...(_isRhUser()?['RH']:[])];
   const catIcons={'FERRAMENTAS':'🧰','RH':'👥','FINANCEIRO':'💰','COMPRAS':'🛒','PCP':'📋','PRODUÇÃO':'🏭','QUALIDADE':'✅','PLANEJAMENTO':'🏗️','PROJETOS':'📐','HISTORICO':'🔍','COMISSAO_PLANEJAMENTO':'📈','LISTA_PEDIDOS':'📦','PROSPECCAO_CLIENTES':'🎯'};
-  const catLabelsSidebar={'FERRAMENTAS':'FERRAMENTAS','HISTORICO':'HISTÓRICO DE PEDIDOS','COMISSAO_PLANEJAMENTO':'COMISSÃO PLANEJAMENTO','LISTA_PEDIDOS':'LISTA DE PEDIDOS','PROSPECCAO_CLIENTES':'PROSPECÇÃO DE CLIENTES'};
+  // Rótulos do sidebar em "Primeira maiúscula, resto minúsculo" (2026-08-19, a pedido do
+  // usuário — só pra ficar mais bonito, os valores de `cat` continuam tudo maiúsculo por
+  // baixo, são só a chave interna de setSection()/id do botão, nunca exibidos diretamente).
+  // Antes só 5 dos 10 itens tinham entrada aqui; os outros (FINANCEIRO/PLANEJAMENTO/PROJETOS/
+  // COMPRAS/PRODUÇÃO/RH) caíam no fallback `||cat`, que é a chave crua (tudo maiúsculo) — por
+  // isso precisavam de entrada explícita aqui também, não só os 5 que já tinham.
+  const catLabelsSidebar={'FERRAMENTAS':'Ferramentas','HISTORICO':'Histórico de pedidos','COMISSAO_PLANEJAMENTO':'Comissão planejamento','LISTA_PEDIDOS':'Lista de pedidos','PROSPECCAO_CLIENTES':'Prospecção de clientes','FINANCEIRO':'Financeiro','PLANEJAMENTO':'Planejamento','PROJETOS':'Projetos','COMPRAS':'Compras','PRODUÇÃO':'Produção','RH':'Rh'};
   container.innerHTML=cats.map(cat=>`
     <button class="sb-btn" id="sb-cat-${cat.replace(/\s/g,'_')}" onclick="setSection('cat:${cat}')" title="${catLabelsSidebar[cat]||cat}" style="font-size:.7rem">
       <span style="font-size:1rem;flex-shrink:0;width:18px;text-align:center">${catIcons[cat]||'📁'}</span>
@@ -6708,15 +6767,59 @@ async function openEmissao(eid2){
   if(eid2){
     const p=pedidos.find(x=>x.id===eid2);
     const v=p.valores||{},pg=p.pagamento||{},inst=p.instalacao||{},fr=p.frete||{},proj=p.projetos||{};
+    // Restaura os campos de VALOR (Total, Instalação, Mobilização, Remoção, Frete, Elevações,
+    // Medição, ART, Laudo, Seguro, Pintura de Tubo) a partir do que já foi salvo — antes eram
+    // TODOS sempre resetados pra '' aqui (bug real, achado 2026-08-19 a partir do relato do
+    // usuário: "os valores que a pessoa coloca ali... precisam ficar, nao pode ficar sumindo
+    // e ela ter que preencher de novo sempre"), então reabrir QUALQUER rascunho ou pedido já
+    // emitido apagava a aba Valores inteira e obrigava redigitar tudo antes de conseguir
+    // avançar (a validação de stepNext()/submit() exige esses campos, então nunca deixava
+    // salvar em branco por engano — mas travava a edição até redigitar). Pior ainda: vtotal
+    // lia a chave errada ('Valor Total', que NUNCA é gravada — ver _buildPedidoBaseDoEd(), que
+    // sempre grava em 'Valor Bruto') e mesmo se lesse a certa, formatava errado (removia os
+    // pontos de milhar em vez de manter o formato brasileiro que o campo espera, ver
+    // fmtMoney()). Usa o mesmo padrão já testado de editarValoresPedido() (toFmt): parseia com
+    // moneyToNum (tolerante a qualquer formato salvo) e reformata em pt-BR só com 2 casas.
+    const toFmtEd=val=>{const n=moneyToNum(val||'0');return n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';};
+    // Entrada + Parcelas — mesmo parser já testado de editarValoresPedido()/updParcEV() (ver
+    // ali). Antes eram TODOS resetados (tem_ent:'Não tem entrada', nparc:'Sem parcelamento',
+    // sem nenhum valor/data) — como as duas respostas-padrão são RESPOSTAS VÁLIDAS, a validação
+    // de stepNext()/submit() não bloqueava nada, então reabrir um pedido com Entrada e/ou
+    // Parcelas já cadastradas e clicar em "Salvar ✓"/"Emitir" sem notar (ex.: só pra corrigir
+    // um e-mail ou o CEP) APAGAVA o plano de pagamento inteiro do pedido — o risco financeiro
+    // mais grave encontrado nesta auditoria (2026-08-19, a partir do relato do usuário sobre
+    // valores da Emissão sumindo ao reabrir).
+    const parcEntriesEd=Object.entries(pg).map(([k,pv])=>{
+      const mt=k.match(/^Parcela\s+(\d+)\s+·\s+(.+)$/);
+      if(mt)return{idx:parseInt(mt[1],10),date:mt[2].trim(),val:pv};
+      const mt2=k.match(/^Parcela\s+(\d+)$/);
+      if(mt2)return{idx:parseInt(mt2[1],10),date:'',val:pv};
+      return null;
+    }).filter(Boolean).sort((a,b)=>a.idx-b.idx);
     ed={tipo:p.tipo,resp:p.responsavel,cli:p.cliente,emails:[...(p.emails||[])],email_comprador:p.email_comprador||(p.emails||[])[0]||'',email_engenheiro:p.email_engenheiro||(p.emails||[])[1]||'',email_financeiro:p.email_financeiro||'',job:p.job,prazo:p.prazo,os:p.os,obs:p.obs,
-      etapa:p.etapa,tipoPedido:p.tipoPedido||'',vtotal:(v['Valor Total']||'').replace('R$ ','').replace(/\./g,'').replace(',','.'),vmed:'',vart:'',vlaudo:'',
-      i_tipo:v['Instalação']||'Não tem instalação',vinst:'',vmob:'',vrem:'',remocao:'',
-      f_tipo:v['Frete']||'Por nossa conta',fmod:v['Modalidade Logística']||'',vfrete:'',
-      elevacoes:v['Elevações']||'Não',elevs:[...(p.elevacoes||[])],velev:'',elevBloqVia:p.elevBloqVia||'',
+      etapa:p.etapa,tipoPedido:p.tipoPedido||'',vtotal:toFmtEd(v['Valor Bruto']||v['Valor Total']),vmed:toFmtEd(inst['Valor da Medição']),vart:toFmtEd(proj['Valor da ART']),vlaudo:toFmtEd(proj['Valor do Laudo Técnico']),
+      // i_tipo/medicao/f_tipo liam a chave errada (v['Instalação']/v['Medição Técnica']/
+      // v['Frete'] nunca são gravadas — ver _buildPedidoBaseDoEd, que grava em
+      // inst['Tipo de Instalação']/inst['Medição Técnica']/fr['Modalidade do Frete']) — sempre
+      // caíam no valor-padrão, resetando pra "Não tem instalação"/"Não"/"Por nossa conta"
+      // mesmo quando o pedido tinha instalação/medição/frete configurados diferente.
+      i_tipo:inst['Tipo de Instalação']||'Não tem instalação',vinst:toFmtEd(inst['Valor da Instalação']),vmob:toFmtEd(inst['Valor da Mobilização']),vrem:toFmtEd(inst['Valor da Remoção']),remocao:inst['Valor da Remoção']?'Sim':'',
+      f_tipo:fr['Modalidade do Frete']||'Por nossa conta',fmod:v['Modalidade Logística']||'',vfrete:toFmtEd(fr['Valor do Frete']),
+      elevacoes:v['Elevações']||'Não',elevs:[...(p.elevacoes||[])],velev:toFmtEd(v['Valor das Elevações']),elevBloqVia:p.elevBloqVia||'',
       remocoes:[...(p.remocoes||[])],
-      medicao:v['Medição Técnica']||'Não',
-      tem_oc:pg['Tem Ordem de Compra']||'',arq_oc:p.arq_oc_url?'Arquivo já enviado':'',arq_oc_url:p.arq_oc_url||'',tem_ent:'Não tem entrada',vent:'',dent:'',fent:'',
-      nparc:'Sem parcelamento',fparc:'',pdatas:[],nf:pg['Emissão de NF']||'',obsfin:'',
+      medicao:inst['Medição Técnica']||'Não',
+      // tem_oc lia 'Tem Ordem de Compra' (nunca gravada; a chave real é 'Ordem de Compra do
+      // Cliente') — corrigido junto com tem_ent/vent/dent/fent/nparc/fparc/pdatas/pvals, que
+      // eram TODOS resetados sem olhar pg nenhuma vez (ver comentário do parcEntriesEd acima).
+      tem_oc:pg['Ordem de Compra do Cliente']||'',arq_oc:p.arq_oc_url?'Arquivo já enviado':'',arq_oc_url:p.arq_oc_url||'',
+      tem_ent:pg['Valor de Entrada']?'Tem entrada':'Não tem entrada',vent:toFmtEd(pg['Valor de Entrada']),dent:_brToIso(pg['Data da Entrada']||''),fent:pg['Forma de Pgto. da Entrada']||'',
+      nparc:parcEntriesEd.length?(parcEntriesEd.length+(parcEntriesEd.length>1?' parcelas':' parcela')):'Sem parcelamento',fparc:pg['Forma das Parcelas']||'',
+      pdatas:parcEntriesEd.map(pe=>_brToIso(pe.date)),pvals:parcEntriesEd.map(pe=>moneyToNum(pe.val||'0')),
+      // nf lia 'Emissão de NF' (nunca gravada; a chave real é 'Emissão de Nota Fiscal') —
+      // sempre voltava vazio, e como é campo obrigatório ("Informe a Emissão de Nota Fiscal"),
+      // travava a emissão até escolher de novo mesmo já tendo sido escolhido antes. obsfin
+      // nem tentava ler nada (hardcoded '').
+      nf:pg['Emissão de Nota Fiscal']||'',obsfin:pg['Observações Financeiras']||'',
       // arq_os_url/arq_oc_url/arq_chumb_url/chumbador/os_chumb/art/cnpj_art*/arq_prod/layout_inst/fotos_orig
       // precisam vir do pedido salvo (p / p.projetos) — antes essas chaves eram sempre
       // resetadas pra '' aqui, então qualquer edição de um pedido já emitido apagava o
@@ -6729,12 +6832,16 @@ async function openEmissao(eid2){
       arq_os:p.arq_os_url?'Arquivo já enviado':'',arq_os_url:p.arq_os_url||'',
       art:proj.art||'',cnpj_art:proj.cnpj_art||'',cnpj_art_url:proj.cnpj_art_url||'',
       arq_prod:proj.arq_prod||'',layout_inst:proj.layout_inst||'',fotos_orig:proj.fotos_orig||'',pasta_arquivos:proj.pasta_arquivos||'',laudo:proj.laudo||'',
-      iacomp:inst['Quem vai acompanhar a obra']||'',itel:inst['Telefone']||'',
+      // iacomp/iinteg/iseg liam chave errada (inst['Quem vai acompanhar a obra']/
+      // ['Necessita integração na empresa']/['Precisa de seguro para esta obra'] nunca são
+      // gravadas — as reais são ['Quem Acompanhou a Obra']/['Integração na Empresa']/
+      // ['Seguro de Obra'], ver _buildPedidoBaseDoEd) — sempre voltavam vazias.
+      iacomp:inst['Quem Acompanhou a Obra']||'',itel:inst['Telefone']||'',
       iend:inst['Endereço de Instalação']||'',ihor:inst['Horário']||'Comercial',
       inum:inst['Instaladores']||'',idias:inst['Estimativa']||'',
-      iinteg:inst['Necessita integração na empresa']||'',iseg:inst['Precisa de seguro para esta obra']||'',vseg:'',
+      iinteg:inst['Integração na Empresa']||'',iseg:inst['Seguro de Obra']||'',vseg:toFmtEd(inst['Valor do Seguro']),
       ibloqenergia:inst['Necessita de Bloqueio de Energia']||'',
-      pintubo:inst['Pintura de Tubo']||'',vpintub:'',
+      pintubo:inst['Pintura de Tubo']||'',vpintub:toFmtEd(inst['Valor Mão de Obra (Pintura de Tubo)']),
       // Restaura os campos individuais de CEP/endereço a partir de p.instEndereco/
       // p.freteEndereco (ver [[project_cep_validado_emissao]] e o comentário em
       // _buildPedidoBaseDoEd()) — antes eram sempre resetados pra '' aqui, então reabrir um
@@ -6752,7 +6859,8 @@ async function openEmissao(eid2){
       // fr['Prazo Estimado de Entrega'].
       prazo_frete_txt:fr['Prazo Estimado de Entrega']||'',
       fend:fr['Endereço de Entrega']||'',fie:fr['Inscrição Estadual']||'',chumbador:p.chumbador||'',arq_chumb:p.arq_chumb_url?'Arquivo já enviado':'',arq_chumb_url:p.arq_chumb_url||'',os_chumb:p.os_chumb||'',
-      facomp:fr['Quem Acompanhou a Descarga']||'',ftel:fr['Telefone Descarga']||'',bases:p.bases||'',
+      // ftel lia 'Telefone Descarga' (nunca gravada; a chave real é 'Telefone da Descarga').
+      facomp:fr['Quem Acompanhou a Descarga']||'',ftel:fr['Telefone da Descarga']||'',bases:p.bases||'',
       // Conselho de Pedidos (2026-08-07) — reconstrói a partir do que já foi salvo (rascunho
       // reaberto pra completar, ou pedido já emitido sendo editado).
       conselhoData:p.conselhoData||'',conselhoEscopo:p.conselhoEscopo||'',conselhoEscopoObs:p.conselhoEscopoObs||'',
@@ -6868,6 +6976,12 @@ function validarAba(id){
     // de frete, caso ele tenha frete") — sem isso a Lista de Pedidos/Planejamento não
     // conseguem calcular as etapas de frete/instalação. Preencha CEP+UF de entrega na aba
     // Frete que calcula sozinho (ver atualizaPrazo()).
+    // Segunda chance ANTES de bloquear (2026-08-19) — ver comentário completo em
+    // _calcPrazoFreteTxt(). Só bloqueia se mesmo recalculando do zero (cidade/UF já salvos
+    // em ed) não der pra achar nada — CEP genuinamente não encontrado/preenchido.
+    if(ed.f_tipo==='Por nossa conta'&&!ed.prazo_frete_txt){
+      ed.prazo_frete_txt=_calcPrazoFreteTxt(ed.fcidade,ed.fuf,ed.fmod,ed.fdist);
+    }
     if(ed.f_tipo==='Por nossa conta'&&!ed.prazo_frete_txt)erros.push('Prazo Estimado de Frete não calculado — preencha o CEP/UF de entrega na aba Frete');
     if(!ed.elevacoes)erros.push('Informe se o pedido tem elevações');
     if(ed.elevacoes==='Sim'&&!ed.velev)erros.push('Valor das elevações não informado');
@@ -7107,7 +7221,15 @@ function saveSt(){
   }else if(id==='frete'){
     ed.fcep=gv('em-fcep');ed.flog=gv('em-flog');ed.fnum_e=gv('em-fnum');ed.fcomp=gv('em-fcomp');
     ed.fbairro=gv('em-fbairro');ed.fcidade=gv('em-fcidade');ed.fuf=gv('em-fuf');
-    ed.fdist=gv('em-fdist');
+    // "ed.fdist=gv('em-fdist')" REMOVIDO (2026-08-19) — nunca existiu nenhum campo
+    // id="em-fdist" na aba Frete (só existe como propriedade em `ed`, calculada por
+    // calcDistancia()/atualizaPrazo()). document.getElementById('em-fdist') sempre voltava
+    // null, então gv() sempre retornava '' aqui — toda vez que saveSt() rodava com a aba
+    // Frete ativa (ex.: dentro de stepNext()/submit()), ed.fdist era zerado por engano,
+    // mesmo logo depois de calcDistancia() ter calculado a distância certa. Contribuía pro
+    // "Prazo Estimado de Frete não calculado" reaparecer sem motivo real (ver
+    // _calcPrazoFreteTxt() abaixo, que agora recalcula puro/sem depender disso de qualquer
+    // forma) e também zerava fr['Distância'] salvo no pedido (Dedicado) à toa.
     ed.fend=`${ed.flog}${ed.fnum_e?', '+ed.fnum_e:''}${ed.fcomp?', '+ed.fcomp:''} - ${ed.fbairro} - ${ed.fcidade}/${ed.fuf}`;
     ed.fie=gv('em-fi');ed.facomp=gv('em-fc');ed.ftel=gv('em-ft2');}
 }
@@ -8007,6 +8129,37 @@ function getFreteTable(){
   if(cfg.freteTabela){try{return Object.assign({},defaults,JSON.parse(cfg.freteTabela));}catch(e){}}
   return defaults;
 }
+// Núcleo PURO do cálculo de Prazo Estimado de Frete — sem DOM, só cidade/UF/modalidade/
+// distância já conhecidos. Usado como "segunda chance" pelas validações de obrigatoriedade
+// (validarAba('valores') e a checagem final de submit()) logo ANTES de bloquear a emissão
+// com "Prazo Estimado de Frete não calculado" (2026-08-19, a pedido do usuário: "so é pra
+// dar erro se o cep ta errado e o cep so ta errado se nao for encontrado" — depois de mais
+// um relato de erro de CEP num pedido cujo CEP estava certo e já validado/travado pelo
+// ViaCEP). Achado: `ed.prazo_frete_txt` só é preenchido por eventos de UI (digitar o CEP,
+// clicar "Usar as mesmas informações de instalação", trocar de aba) — se QUALQUER um desses
+// não rodar na ordem esperada (ex.: usuário volta pra aba Frete e sai de novo sem re-disparar
+// o cálculo, ou algum campo mudou por outro caminho), o texto fica vazio mesmo com CEP/UF
+// perfeitamente válidos, e a validação bloqueava sem alternativa. Agora, antes de bloquear,
+// esta função tenta recalcular do zero a partir do que já está salvo em `ed` (cidade/UF/
+// modalidade) — só bloqueia de verdade se mesmo assim não der pra calcular nada (UF vazio/
+// não cadastrado), que é a ÚNICA situação em que a "culpa" é genuinamente do CEP não ter
+// sido encontrado/preenchido. Mesma fórmula de atualizaPrazo() (não duplicada por acaso —
+// mantida em paralelo pra não arriscar mexer na função já testada que atualiza a tela).
+function _calcPrazoFreteTxt(cidade,uf,fmod,distArg){
+  const tabela=getFreteTable();
+  const ufN=(uf||'').toUpperCase().trim();
+  if(fmod!=='Dedicado'){
+    if(ufN&&tabela[ufN]!=null){const d=tabela[ufN];return`${d} dia${d>1?'s':''} útei${d>1?'s':'l'}`;}
+    return'';
+  }
+  const origem=cfg.freteOrigem||'PONTA GROSSA/PR';
+  const origemCidade=(origem.split('/')[0]||'').trim();
+  if(cidade&&origemCidade&&norm(cidade)===norm(origemCidade))return'1 dia útil';
+  const dist=distArg!=null&&distArg!==''?parseFloat(distArg):(cidade?DIST_PG_NORM[norm(cidade)]:null);
+  if(dist){const d=Math.ceil(dist/800);return`${d} dia${d>1?'s':''} corrido${d>1?'s':''}`;}
+  if(ufN&&tabela[ufN]!=null){const d=tabela[ufN];return`${d} dia${d>1?'s':''} útei${d>1?'s':'l'} (estimado por UF)`;}
+  return'';
+}
 function atualizaPrazo(distArg,cidadeArg,ufArg){
   const dist=distArg!=null?distArg:parseFloat(ed.fdist)||0;
   const cidade=cidadeArg||ed.fcidade||'';
@@ -8055,8 +8208,23 @@ function atualizaPrazo(distArg,cidadeArg,ufArg){
     return;
   }
   if(!dist){
+    // Cidade fora da tabela de ~90 cidades perto de Ponta Grossa (impossível cadastrar toda
+    // cidade do Brasil) — antes travava a emissão inteira sem alternativa nenhuma (relato do
+    // usuário, 2026-08-19: "continua dando erro do cep da emissao de pedido", ex. real: CEP
+    // de Petrolina/PE). Agora, se o UF é conhecido, cai pra ESTIMATIVA pela tabela por UF
+    // (a mesma usada pra Fracionado) — mais impreciso que a distância real km/800, mas nunca
+    // mais impede emitir só por falta de uma cidade específica na tabela pequena. Deixa claro
+    // que é estimativa, com a opção de reabrir a aba Frete depois pra ajustar se souber o
+    // prazo real do transportador.
+    const ufDias=uf&&tabela[uf]!=null?tabela[uf]:null;
+    if(ufDias!=null){
+      res.innerHTML=`<span style="color:var(--warning)">⚠️ Cidade "<strong>${cidade}</strong>" não está na tabela de distâncias (Dedicado) — usando estimativa por UF (${uf}): <strong>${ufDias} DIA${ufDias>1?'S':''} ÚTEI${ufDias>1?'S':'L'}</strong>. Se souber o prazo real do transportador, ajuste manualmente.</span>`;
+      if(infoEl)infoEl.textContent=`📍 Estimativa por UF (${uf}) — distância exata não cadastrada pra ${cidade||'esta cidade'}`;
+      ed.prazo_frete_txt=`${ufDias} dia${ufDias>1?'s':''} útei${ufDias>1?'s':'l'} (estimado por UF)`;
+      return;
+    }
     res.innerHTML=cidade
-      ?`<span style="color:var(--warning)">⚠️ Cidade "<strong>${cidade}</strong>" não encontrada na tabela. Verifique o CEP.</span>`
+      ?`<span style="color:var(--warning)">⚠️ Cidade "<strong>${cidade}</strong>" não encontrada na tabela e o UF "${uf||'?'}" também não está configurado em Configurações → Fretes. Verifique o CEP ou cadastre o UF na tabela de fretes.</span>`
       :'<span style="color:var(--ink4)">Preencha o CEP de entrega para calcular.</span>';
     if(infoEl)infoEl.textContent='';
     ed.prazo_frete_txt='';return;
@@ -8960,8 +9128,21 @@ function _buildPedidoBaseDoEd(){
     // de outro campo do pedido apagaria o progresso item a item que o usuário já tiver marcado
     // no checklist de Produção. Mesmo padrão de "preserva o que já existe" já usado acima pra
     // lpEtapasCfg/conselhoPendencias.
-    itensProducao:(_pedidoExistente&&_pedidoExistente.itensProducao)?_pedidoExistente.itensProducao:(ed.osPdfTexto?_extrairItensProducaoPdf(ed.osPdfTexto):[]),
-    itensProducaoOrigem:(_pedidoExistente&&_pedidoExistente.itensProducaoOrigem)?_pedidoExistente.itensProducaoOrigem:(ed.osPdfTexto?'pdf':'vazio')
+    //
+    // BUG corrigido em 2026-08-19 (achado na OS 325, com PDF anexado mas Itens de Produção
+    // vazio): a condição original checava só "_pedidoExistente.itensProducao" com truthy — e um
+    // array VAZIO ([]) é truthy em JS. Como o Autosave Contínuo (2026-08-18) já salva um
+    // rascunho do Conselho assim que o vendedor abre a Emissão (antes de ainda ter anexado o
+    // PDF da OS), esse 1º autosave gravava itensProducao:[] + itensProducaoOrigem:'vazio' no
+    // pedido. Nos saves seguintes — inclusive na emissão final, já com o PDF anexado e
+    // ed.osPdfTexto preenchido — a condição via "_pedidoExistente.itensProducao" como []
+    // (truthy) e "preservava" o vazio pra sempre, nunca chegando a rodar a extração de verdade.
+    // Agora só conta como "já extraído/decidido" (e preserva) se a lista tiver pelo menos 1
+    // item OU se a origem for 'manual' (usuário editou/removeu tudo de propósito em
+    // prodSalvarItens() — esse "vazio" é intencional e não deve ser sobrescrito). Caso
+    // contrário, tenta extrair de novo agora que ed.osPdfTexto pode já estar disponível.
+    itensProducao:(_pedidoExistente&&_pedidoExistente.itensProducao&&(_pedidoExistente.itensProducao.length||_pedidoExistente.itensProducaoOrigem==='manual'))?_pedidoExistente.itensProducao:(ed.osPdfTexto?_extrairItensProducaoPdf(ed.osPdfTexto):((_pedidoExistente&&_pedidoExistente.itensProducao)||[])),
+    itensProducaoOrigem:(_pedidoExistente&&_pedidoExistente.itensProducao&&(_pedidoExistente.itensProducao.length||_pedidoExistente.itensProducaoOrigem==='manual'))?_pedidoExistente.itensProducaoOrigem:(ed.osPdfTexto?'pdf':((_pedidoExistente&&_pedidoExistente.itensProducaoOrigem)||'vazio'))
   };
   return{p,_pedidoExistente};
 }
@@ -9052,6 +9233,12 @@ window.addEventListener('beforeunload',function(e){
 });
 
 async function submit(){
+  if(_submitPedidoEmAndamento){
+    toast('Aguarde — já estamos processando a emissão deste pedido, não clique de novo...','tinf');
+    return;
+  }
+  _submitPedidoEmAndamento=true;
+  try{
   // Alterar (gravar) uma venda/emissão que JÁ SAIU (origemComercial:true, ou pedido antigo de
   // antes do Conselho existir mas já emitido de verdade) exige admin+senha, mesmo padrão de
   // editarValoresPedido()/delP() (2026-08-19, pedido do usuário: "nao pode editar uma venda e
@@ -9152,6 +9339,12 @@ async function submit(){
   // preencher CEP+UF na aba Frete (ver atualizaPrazo()) — se este erro aparecer mesmo com
   // CEP preenchido, normalmente é porque a Modalidade Logística/UF foi alterada depois e
   // precisa reabrir a aba Frete pra recalcular.
+  // Segunda chance ANTES de bloquear (2026-08-19) — ver comentário completo em
+  // _calcPrazoFreteTxt(). Só bloqueia se mesmo recalculando do zero (cidade/UF já salvos
+  // em ed) não der pra achar nada — CEP genuinamente não encontrado/preenchido.
+  if(ed.f_tipo==='Por nossa conta'&&!ed.prazo_frete_txt){
+    ed.prazo_frete_txt=_calcPrazoFreteTxt(ed.fcidade,ed.fuf,ed.fmod,ed.fdist);
+  }
   if(ed.f_tipo==='Por nossa conta'&&!ed.prazo_frete_txt)erros.push({msg:'Prazo Estimado de Frete não calculado — reabra a aba Frete e confira o CEP/UF de entrega',aba:idx('frete'),label:'Frete'});
   if(!ed.elevacoes)erros.push({msg:'Informe se o pedido tem elevações',aba:idxVal,label:'Valores'});
   if(ed.elevacoes==='Sim'&&!ed.velev)erros.push({msg:'Valor das elevações não informado',aba:idxVal,label:'Valores'});
@@ -9265,6 +9458,7 @@ async function submit(){
       toast('Pedido emitido, mas sem e-mail de destino cadastrado — nenhum e-mail foi enviado.','twar');
     }
   }
+  }finally{_submitPedidoEmAndamento=false;}
 }
 
 // CONFIGURAÇÕES
@@ -11199,9 +11393,13 @@ function savePctComissaoPessoal(vendedor,tipo,val){
   if(!cfg.pctComissaoPessoal)cfg.pctComissaoPessoal={};
   if(!cfg.pctComissaoPessoal[vend])cfg.pctComissaoPessoal[vend]={bate:null,naoBate:null};
   const key=tipo==='bate'?'bate':'naoBate';
-  cfg.pctComissaoPessoal[vend][key]=isNaN(val)?null:val;
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg).catch(e=>console.error(e));
-  else localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  const valFinal=isNaN(val)?null:val;
+  cfg.pctComissaoPessoal[vend][key]=valFinal;
+  // Grava só este campo (FieldPath), atômico — mesma correção de setMetaMes/
+  // savePctComissaoMes abaixo (2026-08-19, ver comentário lá pro motivo completo).
+  if(window._fbUpdateCfgField)window._fbUpdateCfgField(['pctComissaoPessoal',vend,key],valFinal).catch(e=>console.error(e));
+  else if(window._fbSaveCfg)window._fbSaveCfg(cfg).catch(e=>console.error(e));
+  try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
   renderDashMetas();
 }
 
@@ -11209,9 +11407,22 @@ function setMetaMes(y,m,vendedor,valor){
   const k=dasKey(y,m);
   if(!cfg.metasMes)cfg.metasMes={};
   if(!cfg.metasMes[k])cfg.metasMes[k]={};
-  cfg.metasMes[k][vendedor.toUpperCase()]=valor;
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg);
-  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  const vUp=vendedor.toUpperCase();
+  cfg.metasMes[k][vUp]=valor;
+  // Corrigido 2026-08-19 (relato do usuário: "quando digito a comissao ali... e mudo de
+  // pagina ele some a porcentagem, nao fica") — mesmo bug já documentado e corrigido em
+  // gcSaveExtra (2026-08-08, ver comentário de window._fbUpdateCfgField): salvar com
+  // _fbSaveCfg(cfg) faz setDoc SEM merge do documento 'config' INTEIRO. Se outro save
+  // concorrente (troca de aba, outro campo sendo salvo em paralelo, ou o listener em tempo
+  // real recebendo uma versão mais antiga) terminar DEPOIS com uma cópia desatualizada do
+  // cfg em memória, ele sobrescreve o documento inteiro e apaga o valor que acabou de ser
+  // digitado — mesmo já tendo sido salvo com sucesso um instante antes. setMetaMes/
+  // savePctComissaoMes (chamadas juntas por gcSalvarMetaComissao, 3 saves em sequência) ainda
+  // usavam esse padrão antigo. Agora grava só o campo exato via FieldPath — nunca mais
+  // sobrescreve o cfg inteiro nem corre risco de apagar o que outra pessoa salvou.
+  if(window._fbUpdateCfgField)window._fbUpdateCfgField(['metasMes',k,vUp],valor).catch(e=>console.error(e));
+  else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
 }
 
 // % de comissão POR MÊS, por vendedor (2026-08-18) — mesmo padrão de armazenamento de
@@ -11227,8 +11438,12 @@ function savePctComissaoMes(y,m,vendedor,tipo,val){
   if(!cfg.pctComissaoMes[k])cfg.pctComissaoMes[k]={};
   if(!cfg.pctComissaoMes[k][vend])cfg.pctComissaoMes[k][vend]={bate:null,naoBate:null};
   const key=tipo==='bate'?'bate':'naoBate';
-  cfg.pctComissaoMes[k][vend][key]=isNaN(val)?null:val;
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg).catch(e=>console.error(e));
+  const valFinal=isNaN(val)?null:val;
+  cfg.pctComissaoMes[k][vend][key]=valFinal;
+  // Mesma correção de setMetaMes acima (2026-08-19) — grava só este campo (FieldPath),
+  // atômico, nunca mais o cfg inteiro.
+  if(window._fbUpdateCfgField)window._fbUpdateCfgField(['pctComissaoMes',k,vend,key],valFinal).catch(e=>console.error(e));
+  else if(window._fbSaveCfg)window._fbSaveCfg(cfg).catch(e=>console.error(e));
   try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
 }
 
@@ -11380,15 +11595,25 @@ function verificarComemoracoesMetas(){
   }
 }
 
+// 2026-08-19: usuário decidiu reverter a decisão de 22/07 — Permuta deixa de contar como venda
+// (não entra em Lista de Vendas/Metas/Comissões/Financeiro), só o Tipo "Venda" conta. Pedido
+// explícito do usuário: "só daqui pra frente", SEM reclassificar retroativamente as Permutas já
+// emitidas/faturadas/comissionadas desde 22/07 — por isso o corte por emissaoEm abaixo, em vez de
+// simplesmente tirar 'Permuta' da condição (o que apagaria retroativamente comissão já paga).
+const _PERMUTA_NAO_CONTA_DESDE='2026-08-19';
 function isComercialPedido(p){
   // importadoPlanilha = veio da planilha de vendas ou foi lançado em "Adicionar Venda Manual"
   // — aqui o campo "tipo" guarda a CATEGORIA do produto (não Venda/Garantia/etc), então sempre conta.
   if(p.importadoPlanilha)return true;
   // origemComercial = emitido pelo fluxo normal de "Novo Pedido" — só conta como venda de fato
-  // se o Tipo escolhido no pedido for "Venda" ou "Permuta" (2026-07-22, comissão normal pros
-  // dois). Garantia/Retrabalho, Amostra, Interno e Brinde não entram em Lista de Vendas,
-  // Metas nem Comissões (mas continuam existindo como pedidos).
-  return !!(p.origemComercial&&(p.tipo==='Venda'||p.tipo==='Permuta'));
+  // se o Tipo escolhido no pedido for "Venda". Garantia/Retrabalho, Amostra, Interno e Brinde
+  // nunca contaram. Permuta contava (2026-07-22) até 18/08; pedidos de Permuta já emitidos até
+  // essa data ficam como estavam (grandfathered abaixo), mas Permuta emitida a partir de
+  // _PERMUTA_NAO_CONTA_DESDE não entra mais em Lista de Vendas, Metas, Comissões nem Financeiro.
+  if(!p.origemComercial)return false;
+  if(p.tipo==='Venda')return true;
+  if(p.tipo==='Permuta')return !!(p.emissaoEm&&p.emissaoEm<_PERMUTA_NAO_CONTA_DESDE);
+  return false;
 }
 // Vendas canceladas pelo cliente — guardado por Nº de OS (e não por id de pedido), porque
 // vendas vindas só da planilha (XLSX_VENDAS) não têm um documento no Firestore pra apagar.
@@ -11869,6 +12094,83 @@ async function _setComissaoRemovida(confKey,marcar,motivo){
   if(typeof renderTodosConfirmados==='function'&&document.getElementById('confall-body'))try{renderTodosConfirmados();}catch(e){}
 }
 
+// Comissão QUITADA — confirmação item a item de que a comissão já foi paga ao vendedor
+// (2026-08-19, a pedido do usuário: "coloque um botãozinho do lado de cada comissão de marcar
+// check e daí as que eu selecionar eu clico num botão ali na quinzena dizendo confirmar que foi
+// pago... fica registrado neste mês e na quinzena correspondente pra eu poder consultar depois
+// quanto eu paguei pra cada pessoa"). Substitui o antigo "📌 Registrar Pagamento" (um retrato
+// de TUDO que estava confirmado na quinzena inteira de uma vez, sem dar pra escolher item por
+// item — função registrarPagamentoComissao() abaixo, mantida só por compatibilidade com o
+// registro histórico já gravado em cfg.comissaoPagamentosRegistrados, mas não usada mais por
+// nenhum botão da tela). Grava cfg.comissaoQuitada[confKey]={em,por} — escrita atômica (só esse
+// campo, nunca o cfg inteiro), mesmo padrão de _setComissaoRemovida logo acima.
+async function _setComissaoQuitada(confKey,marcar,por){
+  if(!cfg.comissaoQuitada)cfg.comissaoQuitada={};
+  if(marcar){
+    const data={em:new Date().toISOString(),por:por||usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'};
+    cfg.comissaoQuitada[confKey]=data;
+    try{
+      if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['comissaoQuitada',confKey],data).catch(e=>{
+        console.error('Erro ao gravar comissaoQuitada via updateDoc, tentando fallback completo',e);
+        if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+      });
+      else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }catch(e){
+      console.error('Erro síncrono ao gravar comissaoQuitada, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }
+  } else {
+    delete cfg.comissaoQuitada[confKey];
+    try{
+      if(window._fbDeleteCfgField)await window._fbDeleteCfgField(['comissaoQuitada',confKey]).catch(e=>{
+        console.error('Erro ao remover comissaoQuitada via updateDoc, tentando fallback completo',e);
+        if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+      });
+      else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }catch(e){
+      console.error('Erro síncrono ao remover comissaoQuitada, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }
+  }
+  try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){console.error('Erro ao gravar cache local (gcore_cfg)',e);}
+}
+// Botão "✅ Confirmar que foi pago" de cada quinzena — só processa as linhas com checkbox
+// marcado (data-dia escopa pra 5=1ªQuinzena/15=2ªQuinzena, então marcar tudo numa quinzena
+// nunca afeta a outra). O que não for marcado fica exatamente onde está, em "⏳ A confirmar
+// pagamento" — não entra nessa confirmação, óbvio, já que não foi selecionado.
+async function confirmarComissaoQuitadaSelecionados(dia){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem confirmar pagamento de comissão','terr');return;}
+  const chks=[...document.querySelectorAll(`.com-quitar-chk[data-dia="${dia}"]:checked`)];
+  if(!chks.length){toast('Marque pelo menos uma comissão pra confirmar','terr');return;}
+  const quinzTxt=dia===5?'1ª Quinzena (dia 5)':'2ª Quinzena (dia 15)';
+  if(!confirm(`Confirmar que ${chks.length} comissão${chks.length>1?'ões foram':' foi'} paga${chks.length>1?'s':''} (${quinzTxt})?\n\nFica registrado com a data de hoje pra você consultar depois quanto foi pago pra cada pessoa.`))return;
+  const por=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
+  for(const chk of chks){
+    await _setComissaoQuitada(chk.dataset.ck,true,por);
+  }
+  toast(`${chks.length} comissão${chks.length>1?'ões':''} marcada${chks.length>1?'s':''} como paga${chks.length>1?'s':''} ✅`,'tok');
+  if(typeof renderDashComissoes==='function')try{renderDashComissoes();}catch(e){}
+}
+async function desfazerComissaoQuitada(confKey){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem desfazer isso','terr');return;}
+  if(!confirm('Desfazer a marcação de "comissão paga" desta linha? Ela volta pra lista "⏳ A confirmar pagamento".'))return;
+  await _setComissaoQuitada(confKey,false,'');
+  toast('Desfeito — comissão voltou pra lista a confirmar.','tok');
+  if(typeof renderDashComissoes==='function')try{renderDashComissoes();}catch(e){}
+}
+// "☑️ Marcar todas / ☐ Desmarcar todas" por quinzena (2026-08-19, a pedido do usuário: "ter
+// uma opção de marcar todas por quinzena, para facilitar") — só mexe no checkbox na tela, não
+// salva nada sozinho; ainda precisa clicar em "Confirmar que foi pago" depois.
+function marcarTodasComQuitar(dia,marcar){
+  document.querySelectorAll(`.com-quitar-chk[data-dia="${dia}"]`).forEach(c=>{c.checked=marcar;});
+  _atualizarContadorQuitar(dia);
+}
+function _atualizarContadorQuitar(dia){
+  const n=document.querySelectorAll(`.com-quitar-chk[data-dia="${dia}"]:checked`).length;
+  const btn=document.getElementById('com-btn-confirmar-'+dia);
+  if(btn)btn.textContent=`✅ Confirmar que foi pago (${n})`;
+}
+
 // Registro fixo de pagamento de comissão (2026-08-18, a pedido do usuário depois de um caso
 // real: um PDF de comissão gerado em 04/08 mostrava R$6.263,66 pra 1ª quinzena de agosto, mas
 // a tela ao vivo passou a mostrar só R$742,62 pro mesmo período alguns dias depois — porque
@@ -11884,6 +12186,12 @@ async function _setComissaoRemovida(confKey,marcar,motivo){
 // cfg.comissaoPagamentosRegistrados[`${y}-${mm}-${half}`] e é só leitura dali em diante (ver
 // mkRegistrosPagamento() em renderDashComissoes). Não substitui nem altera getComissaoItems/
 // getComissaoItemsAll — é um registro PARALELO, só de consulta.
+// DESATIVADA da UI em 2026-08-19 (nenhum botão chama mais esta função) — substituída pela
+// confirmação item a item (cfg.comissaoQuitada, ver _setComissaoQuitada()/
+// confirmarComissaoQuitadaSelecionados() acima), que deixa escolher exatamente quais comissões
+// confirmar em vez de tudo-ou-nada na quinzena inteira. Função mantida (não apagada) só porque
+// mkRegistrosPagamento() ainda lê cfg.comissaoPagamentosRegistrados pra mostrar o registro
+// histórico já gravado antes desta mudança (inclusive o de 04/08 reconstruído na seed acima).
 async function registrarPagamentoComissao(quinzena){
   if(!_getUserCat().isAdm){toast('Apenas administradores podem registrar pagamento de comissão','terr');return;}
   if(quinzena!=='I'&&quinzena!=='II'){toast('Escolha 1ª ou 2ª Quinzena no seletor de PDF pra registrar (não dá pra registrar "Consolidado")','terr');return;}
@@ -11913,7 +12221,7 @@ async function registrarPagamentoComissao(quinzena){
       extras:ex.map(p=>({motivo:p.motivo,valor:p.valor}))
     };
   });
-  porVendedor['__CLABONDE__']={
+  porVendedor['_CLABONDE_']={
     totalCliente:items.reduce((s,i)=>s+i.valor,0),
     comissao:items.reduce((s,i)=>s+(i.valor*i.pctClab/100),0)+extras.reduce((s,p)=>s+p.valor,0),
     itens:items.map(i=>({pedidoOs:i.pedidoOs,cliente:i.cliente,valorLiquido:i.valor,pct:i.pctClab,confirmedAt:i.confirmedAt||null})),
@@ -11979,7 +12287,7 @@ function _seedHistoricoComissaoClabonde0408(){
   const registro={
     y:2026,m:8,half:'I',dia:5,
     porVendedor:{
-      __CLABONDE__:{
+      _CLABONDE_:{
         totalCliente:itensClab.reduce((s,i)=>s+i.valorLiquido,0),
         comissao:6263.66,
         itens:itensClab,
@@ -12408,7 +12716,39 @@ function getComissaoItemsAll(){
   // uma forma mais segura e específica de resolver só o caso da OS 242 sem arriscar excluir
   // comissão de venda nenhuma por engano. A correção da OS 242 em si continua valendo em
   // getVendaRowsMerged() (Lista de Vendas), que é read-only/exibição — não decide pagamento.
+  //
+  // RETOMADO — versão mais estreita (2026-08-19, OS 178 lançando comissão/Contas a Receber
+  // 3x: 1 pedido real "ZAMP S.A." + 2 pedidos "sombra" importadoPlanilha, "BURGER KING DUQUE
+  // BANDEIRANTES SP"/"BURGER KING AV. BANDEIRANTES", cada um com seu próprio Nº de Parcelas/
+  // datas, mas os TRÊS com Valor Bruto e Valor Líquido IDÊNTICOS — R$19.939,00/R$12.139,00 —
+  // confirmando que é a MESMA venda duplicada, não 3 vendas reais diferentes reaproveitando o
+  // mesmo número por coincidência). O revert acima excluía só por OS bater — exatamente o que
+  // causou a perda de comissão real documentada ali. Este critério é mais estreito: só marca
+  // como duplicata quando o token de OS bate E o Valor Bruto do pedido importadoPlanilha bate
+  // (±R$1) com o de algum pedido REAL (isComercialPedido, não importadoPlanilha) com o mesmo
+  // token — coincidência de OS reaproveitado por venda diferente quase certamente tem Bruto
+  // diferente, então não seria excluída por engano. Auditei TODOS os pedidos importadoPlanilha
+  // vs todos os pedidos reais ativos hoje: a ÚNICA colisão de OS+Bruto em toda a base é
+  // exatamente a OS 178 (os 2 sombras) — nenhum dos OS citados no comentário do revert
+  // (56/30/28/29/65/83/96/131/141/148/150/162/183/261/236/235/253) tem hoje um pedido
+  // importadoPlanilha colidindo com um pedido real, então este critério não reabre aquela
+  // regressão.
+  const _realPedidosBrutoPorOsToken={};
+  pedidos.filter(p=>isComercialPedido(p)&&!p.importadoPlanilha).forEach(p=>{
+    if(p.os==null)return;
+    const brReal=moneyToNum((p.valores||{})['Valor Bruto']||(p.valores||{})['Valor Total']||'0');
+    _osTokens(p.os).forEach(tok=>{
+      if(!_realPedidosBrutoPorOsToken[tok])_realPedidosBrutoPorOsToken[tok]=[];
+      _realPedidosBrutoPorOsToken[tok].push(brReal);
+    });
+  });
   pedidos.filter(p=>isComercialPedido(p)).forEach(p=>{
+    if(p.importadoPlanilha){
+      const brImp=moneyToNum((p.valores||{})['Valor Bruto']||(p.valores||{})['Valor Total']||'0');
+      const toksImp=[...(p.os!=null?_osTokens(p.os):[]),...(p.origPlanilhaOs?_osTokens(p.origPlanilhaOs):[])];
+      const ehDuplicataDeReal=toksImp.some(tok=>(_realPedidosBrutoPorOsToken[tok]||[]).some(br=>Math.abs(br-brImp)<1));
+      if(ehDuplicataDeReal)return;
+    }
     // 2026-08-19: só "reivindica" o token de OS pro Firestore (bloqueando o ramo sintético
     // da planilha logo abaixo) quando o pedido de fato tem pagamento próprio pra mostrar
     // (getParcelas(p).length>0). Achado no pente-fino pedido pelo usuário: "Incluir na
@@ -12562,9 +12902,17 @@ function getComissaoItemsAll(){
   // "🗑️ Retirar da lista" em Metas & Comissões (admin, motivo obrigatório): serve pra QUALQUER
   // item (pendente ou confirmado) cuja comissão simplesmente não vai ser paga. Ver
   // _setComissaoRemovida()/abrirRetirarComissao().
+  // Comissão QUITADA — confirmação item a item de que a comissão já foi paga DE VERDADE ao
+  // vendedor (2026-08-19, a pedido do usuário, substitui o antigo "📌 Registrar Pagamento" que
+  // gravava um retrato de TUDO que estava confirmado na quinzena de uma vez, sem dar pra
+  // escolher item por item). Ver _setComissaoQuitada()/confirmarComissaoQuitadaSelecionados()
+  // em renderDashComissoes(). Item confirmado (cliente pagou) mas ainda sem comissaoQuitada
+  // aparece como "⏳ A confirmar pagamento"; só depois de marcado aqui é que conta como
+  // efetivamente pago ao vendedor, com data/quem marcou — consultável depois por mês/quinzena.
   _all.forEach(i=>{
     i.comissaoPagaFora=(cfg.comissaoPagaFora&&cfg.comissaoPagaFora[i.confKey])||null;
     i.comissaoRemovida=(cfg.comissaoRemovida&&cfg.comissaoRemovida[i.confKey])||null;
+    i.comissaoQuitada=(cfg.comissaoQuitada&&cfg.comissaoQuitada[i.confKey])||null;
   });
   // REMOVIDO (2026-08-18, mesmo dia) — o bloco que existia aqui marcava automaticamente
   // comissaoRemovida nos 17 pedidos do PDF de 04/08 com base numa história de "reaberto e
@@ -12578,15 +12926,34 @@ function getComissaoItemsAll(){
   return _all;
 }
 
-function getComissaoItems(y,m){
+// Uma quinzena, pra QUALQUER tela que precise separar itens em 1ª/2ª Quinzena — junta os
+// itens JÁ CONFIRMADOS que caíram de verdade nesta quinzena (pela janela real de confirmação,
+// _itemNaJanelaRecebido/i.confirmedAt — mesma fonte que renderDashCards()/mkConsolidado já
+// usavam desde 2026-08-18) com os itens AINDA NÃO confirmados estimados pra esta quinzena
+// (i.qy/qm/qhalf, calculado a partir do vencimento — só informação disponível antes de
+// confirmar de verdade). CORRIGIDO 2026-08-19: antes esta função usava SÓ a estimativa
+// (i.qy/qm/qhalf) pra tudo, inclusive item já confirmado — só mkConsolidado tinha sido
+// corrigido pra usar a janela real. Resultado: a lista na tela (mkConsolidado) mostrava um
+// item confirmado numa quinzena, mas os cards/resumo por vendedor (mkCards/mkVendResume, que
+// recebem o retorno desta função) ficavam vazios pra essa mesma quinzena — e o PDF/"Registrar
+// Pagamento" (que também usam esta função) davam "Nenhum lançamento confirmado" mesmo com a
+// lista certa na tela, porque filtravam pela estimativa antiga em vez de olhar pra quando o
+// Financeiro confirmou de verdade. Agora as três coisas (lista, cards/resumo, PDF/registro)
+// sempre concordam, porque todas partem exatamente do mesmo critério de quinzena.
+function getComissaoItemsQuinzena(y,m,half){
   const all=getComissaoItemsAll();
   // Exclui itens marcados como "comissão já paga por fora" (setComissaoPagaFora) ou "retirada
   // da lista" (abrirRetirarComissao) — eles continuam com o status normal em Contas a Receber/
   // Todos os Confirmados, só não entram mais na quinzena "a pagar" de Metas & Comissões nem no
   // PDF de comissão (gerarPDFComissao usa esta mesma função), evitando pagar a mesma comissão
   // duas vezes ou pagar uma que foi explicitamente retirada.
-  const itemsI=all.filter(i=>i.qy===y&&i.qm===m&&i.qhalf==='I'&&!i.comissaoPagaFora&&!i.comissaoRemovida);
-  const itemsII=all.filter(i=>i.qy===y&&i.qm===m&&i.qhalf==='II'&&!i.comissaoPagaFora&&!i.comissaoRemovida);
+  const confirmados=all.filter(i=>i.status==='confirmado'&&!i.comissaoPagaFora&&!i.comissaoRemovida&&_itemNaJanelaRecebido(i,y,m,half));
+  const pendentes=all.filter(i=>i.status!=='confirmado'&&!i.comissaoPagaFora&&!i.comissaoRemovida&&i.qy===y&&i.qm===m&&i.qhalf===half);
+  return [...confirmados,...pendentes];
+}
+function getComissaoItems(y,m){
+  const itemsI=getComissaoItemsQuinzena(y,m,'I');
+  const itemsII=getComissaoItemsQuinzena(y,m,'II');
   return {itemsI,itemsII};
 }
 
@@ -12597,7 +12964,7 @@ function getComissaoItems(y,m){
 function getComissaoItemsFuturos(vendedorFiltro){
   const pend=getComissaoItemsAll().filter(i=>i.status!=='confirmado'&&!i.comissaoRemovida);
   if(!vendedorFiltro)return pend;
-  if(vendedorFiltro==='__CLABONDE__')return pend; // Clabonde ganha sobre o total, não por vendedor
+  if(vendedorFiltro==='_CLABONDE_')return pend; // Clabonde ganha sobre o total, não por vendedor
   return pend.filter(i=>vendedorMatch(i.nomeVend,vendedorFiltro));
 }
 
@@ -12861,6 +13228,48 @@ async function _migrarBaixaHistoricaPDF0408(){
   if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();else if(typeof renderFinanceiro==='function')renderFinanceiro();
   if(dashMetasUnlocked&&typeof renderDashComissoes==='function')renderDashComissoes();
   if(marcados&&typeof toast==='function')toast(`✅ ${marcados} parcela(s) das 17 OS do relatório de comissão de 04/08 marcada(s) como recebida(s)`,'tok');
+}
+// Correção retroativa (2026-08-19, achado na OS 325 com PDF anexado mas Itens de Produção
+// vazio) — ver o comentário completo do bug em itensProducao dentro de _buildPedidoBaseDoEd().
+// Resumo: o Autosave Contínuo (2026-08-18) gravava um rascunho ANTES do PDF da OS ser
+// anexado, travando itensProducao:[] pra sempre porque a condição antiga tratava array vazio
+// como "já decidido". Resultado: 100% dos pedidos emitidos desde que a extração automática foi
+// lançada (23/24/325/331) ficaram sem os itens — o usuário de Produção tinha que cadastrar
+// tudo manualmente, o oposto do que foi pedido. O bug de código já foi corrigido (não acontece
+// mais daqui pra frente); esta migração conserta os pedidos que já foram emitidos com o
+// problema, re-baixando o PDF já salvo (p.arq_os_url) e rodando a mesma extração de novo.
+// Mesmo padrão de flag PERSISTIDO (cfg.migItensProducaoRetroativaFeita) das migrações acima —
+// roda de verdade só 1x pra sempre, só admin. Idempotente: só mexe em pedido com
+// itensProducao vazio/inexistente E itensProducaoOrigem !== 'manual' (nunca sobrescreve um
+// checklist já extraído/com progresso marcado nem uma correção manual do usuário de Produção).
+async function _migrarItensProducaoRetroativa(){
+  if(cfg.migItensProducaoRetroativaFeita)return;
+  const elegiveis=pedidos.filter(p=>p.origemComercial&&p.arq_os_url&&(!p.itensProducao||!p.itensProducao.length)&&p.itensProducaoOrigem!=='manual');
+  let corrigidos=0;const osCorrigidos=[];const osFalhas=[];
+  for(const p of elegiveis){
+    try{
+      const resp=await fetch(p.arq_os_url);
+      if(!resp.ok)throw new Error('HTTP '+resp.status);
+      const blob=await resp.blob();
+      const texto=await _extrairTextoPDF(blob);
+      const itens=_extrairItensProducaoPdf(texto);
+      if(itens&&itens.length){
+        p.itensProducao=itens;
+        p.itensProducaoOrigem='pdf';
+        await savePedidoFS(p);
+        corrigidos++;osCorrigidos.push(p.os||p.id);
+      }else{
+        osFalhas.push(p.os||p.id); // PDF sem itens reconhecíveis — precisa cadastro manual mesmo
+      }
+    }catch(e){
+      console.error('Falha ao reprocessar Itens de Produção da OS',p.os,e);
+      osFalhas.push(p.os||p.id);
+    }
+  }
+  cfg.migItensProducaoRetroativaFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  if(corrigidos&&typeof toast==='function')toast(`✅ Itens de Produção recuperados automaticamente do PDF em ${corrigidos} pedido(s) (OS ${osCorrigidos.slice(0,10).join(', ')}${osCorrigidos.length>10?'...':''})`,'tok');
+  if(osFalhas.length&&typeof toast==='function')toast(`⚠️ ${osFalhas.length} pedido(s) precisam de cadastro manual de Itens de Produção (PDF sem itens reconhecíveis ou erro ao ler): OS ${osFalhas.slice(0,10).join(', ')}${osFalhas.length>10?'...':''}`,'twar');
 }
 const GRUPO_DRE_LABEL={CMV:'Custo de Produção (CMV)',OPERACIONAL:'Despesas Operacionais',FINANCEIRA:'Despesas Financeiras',IMPOSTOS:'Impostos',IMOBILIZADO:'Imobilizado (Bem Financiado)',NAO_CLASSIFICADO:'Não Classificado'};
 function _normSemAcento(s){
@@ -22856,17 +23265,38 @@ function salvarConfirmarRecebimento(){
 // de renderFinanceiro() e gerarPDFFinanceiro()) pra qualquer view nova ler exatamente os
 // mesmos itens que a tabela mostra, sem repetir a lógica de filtro em 4 lugares.
 function _finToIso(s){const d=parseDataBR(s);return d&&!isNaN(d)?d.toISOString().slice(0,10):'';}
+function _finPeriodoIso(i,tipoData){return tipoData==='receb'?_dataRecebimentoRealIso(i):_finToIso(i.dataAtiva);}
+// Compara o item contra o período De/Até escolhido, no modo escolhido no dropdown
+// "Filtrar por..." (Vencimento/Pagamento/Mês da Venda) — função única usada por
+// _finFilteredItems()/_finItemsTodosStatus()/gerarPDFFinanceiro() pra nunca divergir entre
+// a tabela, os cards resumo e o PDF/Excel exportado (2026-08-19, a pedido do usuário:
+// "coloque para a pessoa selecionar o periodo de data que ela quer ali e do lado pra ela
+// escolher se o periodo que ela colocou é do mes da venda ou da data de pagamento pra
+// filtrar"). "Mês da Venda" compara só ano+mês (i.emY/i.emM) contra o ano+mês de "De"/"Até"
+// — o dia dentro do mês escolhido não importa nesse modo, é intencional: representa "toda
+// venda feita nesse(s) mês(es)", igual ao antigo dropdown avulso "Mês da venda (Receber)"
+// (removido nessa mudança, ficou redundante), só que agora combinando com um intervalo
+// De/Até de verdade (com ano) em vez de um único mês por nome sem ano.
+function _finPeriodoOk(i,tipoData,di,df){
+  if(tipoData==='venda'){
+    if(!i.emY||!i.emM)return false;
+    const maItem=i.emY*100+i.emM;
+    const maDi=di?parseInt(di.slice(0,4),10)*100+parseInt(di.slice(5,7),10):null;
+    const maDf=df?parseInt(df.slice(0,4),10)*100+parseInt(df.slice(5,7),10):null;
+    return(!maDi||maItem>=maDi)&&(!maDf||maItem<=maDf);
+  }
+  const iso=_finPeriodoIso(i,tipoData);
+  return(!di||(iso&&iso>=di))&&(!df||(iso&&iso<=df));
+}
 function _finFilteredItems(){
   let items=getContasReceber();
   const q=(document.getElementById('fin-fil-busca')?.value||'').toLowerCase().trim();
-  const fmv=document.getElementById('fin-fil-mes-venda')?.value||'';
   const fv=document.getElementById('fin-fil-vend')?.value||'';
   const fs=document.getElementById('fin-fil-status')?.value||'';
   const tipoData=document.getElementById('fin-fil-tipo-data')?.value||'venc';
   const di=document.getElementById('fin-fil-data-ini')?.value||'';
   const df=document.getElementById('fin-fil-data-fim')?.value||'';
   items=items.filter(i=>{
-    const iso=tipoData==='receb'?_dataRecebimentoRealIso(i):_finToIso(i.dataAtiva);
     // 'aberto' (2026-07-31, a pedido do usuário — cards clicáveis "A Receber"/"A Pagar")
     // = Pendente OU Atrasado juntos, o mesmo total que o card mostra (_finItemsTodosStatus
     // com i.statusCalc!=='confirmado'); os outros valores continuam comparação exata.
@@ -22881,11 +23311,9 @@ function _finFilteredItems(){
     // ignora o filtro de período (di/df) — sem busca, o período continua funcionando
     // exatamente como antes (padrão mês vigente, setinhas, filtro manual etc.)
     return buscaOk
-      &&(!fmv||MESES_PT[i.emM]===fmv)
       &&(!fv||vendedorMatch(i.nomeVend,fv))
       &&statusOk
-      &&(!!q||!di||(iso&&iso>=di))
-      &&(!!q||!df||(iso&&iso<=df));
+      &&(!!q||_finPeriodoOk(i,tipoData,di,df));
   });
   items.sort(_cmpMesVenda);
   return items;
@@ -22894,18 +23322,18 @@ function _finFilteredItems(){
 // Caixa/Aging/Concentração, que por definição só fazem sentido sobre o que ainda está
 // em aberto (Pendente ou Atrasado). Sem isso, se alguém deixasse o filtro de Status em
 // "Recebido" na Lista, o Fluxo de Caixa apareceria zerado ao trocar de aba, o que
-// pareceria um bug (a projeção "sumiu") em vez de ser só o filtro de outra tela.
+// pareceria um bug (a projeção "sumiu") em vez de ser só o filtro de outra tela. Sempre
+// compara por Vencimento (dataAtiva), nunca por Pagamento/Mês da Venda — projeção de caixa
+// é sobre o que ainda VAI vencer, então o "tipo de data" escolhido na tela não se aplica aqui.
 function _finItemsEmAberto(){
   let items=getContasReceber().filter(i=>i.statusCalc==='pendente'||i.statusCalc==='atrasado');
   const q=(document.getElementById('fin-fil-busca')?.value||'').toLowerCase().trim();
-  const fmv=document.getElementById('fin-fil-mes-venda')?.value||'';
   const fv=document.getElementById('fin-fil-vend')?.value||'';
   const di=document.getElementById('fin-fil-data-ini')?.value||'';
   const df=document.getElementById('fin-fil-data-fim')?.value||'';
   items=items.filter(i=>{
     const iso=_finToIso(i.dataAtiva);
     return (!q||(i.cliente||'').toLowerCase().includes(q)||String(i.pedidoOs||'').toLowerCase().includes(q))
-      &&(!fmv||MESES_PT[i.emM]===fmv)
       &&(!fv||vendedorMatch(i.nomeVend,fv))
       &&(!di||(iso&&iso>=di))
       &&(!df||(iso&&iso<=df));
@@ -22920,21 +23348,17 @@ function _finItemsEmAberto(){
 function _finItemsTodosStatus(){
   let items=getContasReceber();
   const q=(document.getElementById('fin-fil-busca')?.value||'').toLowerCase().trim();
-  const fmv=document.getElementById('fin-fil-mes-venda')?.value||'';
   const fv=document.getElementById('fin-fil-vend')?.value||'';
   const tipoData=document.getElementById('fin-fil-tipo-data')?.value||'venc';
   const di=document.getElementById('fin-fil-data-ini')?.value||'';
   const df=document.getElementById('fin-fil-data-fim')?.value||'';
   items=items.filter(i=>{
-    const iso=tipoData==='receb'?_dataRecebimentoRealIso(i):_finToIso(i.dataAtiva);
     // Mesmo ajuste de 2026-08-19 de _finFilteredItems() — busca com texto ignora o
     // período, senão os cards resumo ficariam inconsistentes com a tabela logo abaixo
     // (que já ignora o período quando há busca).
     return (!q||(i.cliente||'').toLowerCase().includes(q)||String(i.pedidoOs||'').toLowerCase().includes(q))
-      &&(!fmv||MESES_PT[i.emM]===fmv)
       &&(!fv||vendedorMatch(i.nomeVend,fv))
-      &&(!!q||!di||(iso&&iso>=di))
-      &&(!!q||!df||(iso&&iso<=df));
+      &&(!!q||_finPeriodoOk(i,tipoData,di,df));
   });
   items.sort((a,b)=>{const da=parseDataBR(a.dataAtiva),db=parseDataBR(b.dataAtiva);return (da&&db)?da-db:0;});
   return items;
@@ -23187,9 +23611,6 @@ function fcAplicarFiltros(){
   const tipoData=document.getElementById('fc-fil-tipo-data')?.value||'venc';
   const finTipoData=document.getElementById('fin-fil-tipo-data');if(finTipoData)finTipoData.value=tipoData;
 
-  const mv=document.getElementById('fc-fil-mes-venda')?.value||'';
-  const finMv=document.getElementById('fin-fil-mes-venda');if(finMv)finMv.value=mv;
-
   const vend=document.getElementById('fc-fil-vend')?.value||'';
   const finVend=document.getElementById('fin-fil-vend');if(finVend)finVend.value=vend;
 
@@ -23270,20 +23691,11 @@ function renderContasUnificado(){
       cards.push({label:'Pago',val:totPago,color:'#f1f5f9',text:'#475569',ftipo:'pagar',fstatus:'concluido'});
       if(totAtraso>0.005)cards.push({label:'Pagar em atraso',val:totAtraso,color:'#fee2e2',text:'#b91c1c',ftipo:'pagar',fstatus:'atrasado'});
     }
-    // Card "Confirmado hoje" (2026-08-18, a pedido do usuário: "como vamos garantir que isso
-    // nunca mais aconteça?") — prova visual, sempre visível, de que os cliques de "Confirmar
-    // Recebimento" estão realmente chegando no servidor: conta quantos itens têm confirmedAt
-    // na data de HOJE, direto de getComissaoItemsAll() — SEM respeitar nenhum filtro ativo
-    // (busca/período/tipo/vendedor), pra nunca dar a falsa impressão de estar zerado só porque
-    // algum filtro da tela está escondendo. Se alguém confirmar um recebimento agora e esse
-    // número não subir na hora, é sinal imediato (sem precisar abrir nada) de que aquela
-    // gravação não chegou no servidor — é o alarme que faltava.
-    if(tipo!=='pagar'){
-      const _hojeIso=new Date().toISOString().slice(0,10);
-      const _confHoje=getComissaoItemsAll().filter(i=>i.status==='confirmado'&&i.confirmedAt&&String(i.confirmedAt).slice(0,10)===_hojeIso);
-      const _confHojeTotal=_confHoje.reduce((s,i)=>s+i.valor,0);
-      cards.push({label:`Confirmado HOJE (${_confHoje.length})`,val:_confHojeTotal,color:'#fef9c3',text:'#854d0e',ftipo:'receber',fstatus:'concluido'});
-    }
+    // Card "Confirmado hoje" REMOVIDO (2026-08-19, a pedido do usuário: "tire esse botao do
+    // confirmado hoje"). Existia desde 2026-08-18 como prova visual de que os cliques de
+    // "Confirmar Recebimento" chegavam no servidor (ver histórico no memory), mas o usuário
+    // não quer mais esse card na tela. Não mexe em mais nada da lógica de confirmação — só
+    // deixou de desenhar este card específico.
     cardsEl.style.gridTemplateColumns=`repeat(${cards.length||1},1fr)`;
     // Cards clicáveis (2026-07-31, a pedido do usuário: "torne clicaveis mostrando os
     // pedidos referentes a cada cardzinho") — aplicam Tipo+Status na lista de baixo e rolam
@@ -24211,9 +24623,9 @@ async function gerarPDFFinanceiro(){
   if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
   const {jsPDF}=window.jspdf;
 
-  const fmv=document.getElementById('fin-fil-mes-venda')?.value||'';
   const fv=document.getElementById('fin-fil-vend')?.value||'';
   const fs=document.getElementById('fin-fil-status')?.value||'';
+  const tipoData=document.getElementById('fin-fil-tipo-data')?.value||'venc';
   const di=document.getElementById('fin-fil-data-ini')?.value||'';
   const df=document.getElementById('fin-fil-data-fim')?.value||'';
   const q=(document.getElementById('fin-fil-busca')?.value||'').toLowerCase().trim();
@@ -24227,12 +24639,16 @@ async function gerarPDFFinanceiro(){
   const totAtraso=items.filter(i=>i.statusCalc==='atrasado').reduce((s,i)=>s+i.valorBruto,0);
   const totConf=items.filter(i=>i.statusCalc==='confirmado').reduce((s,i)=>s+i.valorBruto,0);
 
+  // Rótulo do período reflete o modo escolhido no dropdown "Filtrar por..." (2026-08-19) —
+  // antes dizia sempre "Pagamento de/até" mesmo quando o período filtrava por Vencimento
+  // (o padrão), o que já era enganoso; agora mostra Vencimento/Pagamento/Mês da Venda de
+  // acordo com o que realmente foi aplicado.
+  const periodoLbl=tipoData==='receb'?'Pagamento':tipoData==='venda'?'Mês da Venda':'Vencimento';
   const filtrosAtivos=[];
-  if(fmv)filtrosAtivos.push('Mês da venda: '+fmv);
   if(fv)filtrosAtivos.push('Vendedor: '+fv);
   if(fs)filtrosAtivos.push('Status: '+statusLbl(fs));
-  if(di)filtrosAtivos.push('Pagamento de: '+fmtD(di));
-  if(df)filtrosAtivos.push('Pagamento até: '+fmtD(df));
+  if(di)filtrosAtivos.push(periodoLbl+' de: '+fmtD(di));
+  if(df)filtrosAtivos.push(periodoLbl+' até: '+fmtD(df));
   if(q)filtrosAtivos.push('Busca: "'+q+'"');
   const filtrosLbl=filtrosAtivos.length?filtrosAtivos.join('  ·  '):'Todos os lançamentos (sem filtro)';
 
@@ -24397,8 +24813,7 @@ function renderDashComissoes(){
       <option value="II">PDF: 2ª Quinzena (dia 15)</option>
     </select>
     <button onclick="gerarPDFComissao('${filV.replace(/'/g,"\\'")}',document.getElementById('pdf-quinzena-sel').value)" class="dash-btn-conf">📄 Gerar PDF${filV?' — '+filV:' (Todos)'}</button>
-    <button onclick="gerarPDFComissao('__CLABONDE__',document.getElementById('pdf-quinzena-sel')?.value||'')" class="dash-btn-conf">📄 Gerar PDF Clabonde</button>
-    <button onclick="registrarPagamentoComissao(document.getElementById('pdf-quinzena-sel')?.value||'')" class="dash-btn-conf" style="background:#059669" title="Grava um retrato FIXO do que está confirmado agora nesta quinzena (1ª ou 2ª, escolha no seletor de PDF ao lado). Use no dia em que a comissão for realmente paga — depois disso, mesmo que algum pagamento seja reaberto, este registro não muda mais.">📌 Registrar Pagamento</button>
+    <button onclick="gerarPDFComissao('_CLABONDE_',document.getElementById('pdf-quinzena-sel')?.value||'')" class="dash-btn-conf">📄 Gerar PDF Clabonde</button>
     <button onclick="abrirPagamentosFuturos()" class="dash-btn-conf" style="background:#7c3aed">🔮 Pagamentos Futuros</button>
     <button onclick="abrirTodosConfirmados()" class="dash-btn-conf" style="background:#16a34a">✅ Todos os Confirmados</button>
   </div>`;
@@ -24448,6 +24863,7 @@ function renderDashComissoes(){
       <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${pedidoDisplay(i.pedidoOs)||'—'}</td>
       <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:130px">${i.cliente||'—'}</td>
       <td>${i.nomeVend||'—'}</td>
+      <td style="font-size:.72rem">${i.label||'—'}</td>
       <td style="font-weight:700;color:#1e40af">${fmtR(i.valorBruto)}</td>
       <td style="font-weight:700">${fmtR(i.valor)}</td>
       <td style="font-size:.7rem;white-space:nowrap">pagto dia ${String(dia).padStart(2,'0')}/${String(i.qm).padStart(2,'0')}/${i.qy}</td>
@@ -24476,7 +24892,7 @@ function renderDashComissoes(){
       </div>
       ${cpAtivo?`<button onclick="comPeriodoLimpar()" style="background:none;border:1px solid #c7d2fe;border-radius:8px;padding:6px 12px;font-size:.75rem;color:#4338ca;cursor:pointer;white-space:nowrap">✕ Limpar</button>`:''}
     </div>
-    ${cpAtivo?(cpItems.length?`<div style="font-size:.74rem;font-weight:700;color:#3730a3;margin-bottom:8px">${cpItems.length} recebimento${cpItems.length>1?'s':''} confirmado${cpItems.length>1?'s':''} · líquido ${fmtR(cpTotalLq)} · comissão ${fmtR(cpTotalCom)}</div><div style="overflow-x:auto"><table class="dash-table"><thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor Bruto</th><th>Valor Líquido</th><th>Pagto comissão</th><th>Comissão</th><th>Confirmado em</th></tr></thead><tbody>${cpRows}</tbody></table></div>`:`<div style="padding:8px 0;color:#6366f1;font-size:.78rem">Nenhuma comissão paga encontrada para esse filtro.</div>`):`<div style="font-size:.72rem;color:#6366f1">Digite algo pra buscar ou escolha um período — mostra só comissão já PAGA (confirmada), de qualquer mês, sem precisar navegar pelas setas ◀ ▶ acima.</div>`}
+    ${cpAtivo?(cpItems.length?`<div style="font-size:.74rem;font-weight:700;color:#3730a3;margin-bottom:8px">${cpItems.length} recebimento${cpItems.length>1?'s':''} confirmado${cpItems.length>1?'s':''} · líquido ${fmtR(cpTotalLq)} · comissão ${fmtR(cpTotalCom)}</div><div style="overflow-x:auto"><table class="dash-table"><thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Parcela</th><th>Valor Bruto</th><th>Valor Líquido</th><th>Pagto comissão</th><th>Comissão</th><th>Confirmado em</th></tr></thead><tbody>${cpRows}</tbody></table></div>`:`<div style="padding:8px 0;color:#6366f1;font-size:.78rem">Nenhuma comissão paga encontrada para esse filtro.</div>`):`<div style="font-size:.72rem;color:#6366f1">Digite algo pra buscar ou escolha um período — mostra só comissão já PAGA (confirmada), de qualquer mês, sem precisar navegar pelas setas ◀ ▶ acima.</div>`}
   </div>`;
 
   // 📌 Já Pago Nesta Quinzena (2026-08-18, reescrito no mesmo dia) — mostra o registro gravado
@@ -24495,7 +24911,7 @@ function renderDashComissoes(){
     if(!reg)return'';
     const rows=[];
     Object.entries(reg.porVendedor||{}).forEach(([vend,dados])=>{
-      const nomeExib=vend==='__CLABONDE__'?'GUILHERME CLABONDE (Gerente)':vend;
+      const nomeExib=vend==='_CLABONDE_'?'GUILHERME CLABONDE (Gerente)':vend;
       if(filV&&!vendedorMatch(nomeExib,filV))return;
       rows.push({nomeExib,total:dados.comissao||0,nItens:(dados.itens||[]).length});
     });
@@ -24609,44 +25025,106 @@ function renderDashComissoes(){
       }).join('')}</tbody></table></div>`;
   }
 
-  function mkConsolidado(items){
+  // Linha compartilhada pelas duas sub-listas abaixo (a confirmar / já paga) — só muda a
+  // última célula (Ação).
+  function mkConsRow(i,acaoHtml){
+    const com=i.valor*i.pct/100;
+    const dataConf=i.confirmedAt?new Date(i.confirmedAt).toLocaleDateString('pt-BR'):'—';
+    return`<tr style="background:#f0fdf4">
+      <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${i.mesPedido||'—'}</td>
+      <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${pedidoDisplay(i.pedidoOs)||'—'}</td>
+      <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:130px">${i.cliente}</td>
+      <td>${i.nomeVend}</td>
+      <td style="font-weight:700;color:#1e40af">${fmtR(i.valorBruto)}</td>
+      <td>${mkLiqCell(i)}</td>
+      <td style="font-weight:700;color:#e91e63">${i.pct>0?i.pct.toFixed(2).replace('.',',')+'%':'—'}</td>
+      <td style="font-weight:700;color:#7c3aed">${fmtR(com)}</td>
+      <td style="font-size:.7rem;color:#16a34a;white-space:nowrap">${dataConf}</td>
+      <td>${mkDetalhesCell(i)}</td>
+      <td>${acaoHtml}</td>
+    </tr>`;
+  }
+  const CONS_HEAD='<th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor Bruto</th><th>Valor Líquido</th><th>%</th><th>Comissão</th><th>Confirmado em</th><th>Detalhes</th><th>Ação</th>';
+  // REESCRITO 2026-08-19 (a pedido do usuário) — antes era UMA lista só ("O que o Financeiro
+  // confirmou..."), com um botão único "📌 Registrar Pagamento" que gravava TUDO que estava
+  // confirmado na quinzena de uma vez, sem dar pra escolher item por item. Agora recebido do
+  // cliente (confirmado) e pago ao vendedor (comissaoQuitada) são dois passos distintos: item
+  // confirmado mas ainda não quitado aparece em "⏳ A confirmar pagamento" com checkbox — o
+  // usuário marca quais quer confirmar agora e clica "Confirmar que foi pago" (ou "Marcar
+  // todas" pra pegar a quinzena inteira de uma vez); o resto fica onde está, sem entrar nessa
+  // confirmação. Item já quitado migra sozinho pra "✅ Comissão já paga ao vendedor", com data
+  // e quem marcou — fica registrado ali, por mês/quinzena, pra consultar depois quanto foi
+  // pago pra cada pessoa (ver getComissaoItemsAll()/_setComissaoQuitada()).
+  function mkConsolidado(items,dia){
     if(!items.length)return'';
-    const totalVal=items.reduce((s,i)=>s+i.valor,0);
-    const totalCom=items.reduce((s,i)=>s+(i.valor*i.pct/100),0);
-    const rows=items.map(i=>{
-      const com=i.valor*i.pct/100;
-      const ck=i.confKey.replace(/'/g,"\\'");
-      const dataConf=i.confirmedAt?new Date(i.confirmedAt).toLocaleDateString('pt-BR'):'—';
-      return`<tr style="background:#f0fdf4">
-        <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${i.mesPedido||'—'}</td>
-        <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${pedidoDisplay(i.pedidoOs)||'—'}</td>
-        <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:130px">${i.cliente}</td>
-        <td>${i.nomeVend}</td>
-        <td style="font-weight:700;color:#1e40af">${fmtR(i.valorBruto)}</td>
-        <td>${mkLiqCell(i)}</td>
-        <td style="font-weight:700;color:#e91e63">${i.pct>0?i.pct.toFixed(2).replace('.',',')+'%':'—'}</td>
-        <td style="font-weight:700;color:#7c3aed">${fmtR(com)}</td>
-        <td style="font-size:.7rem;color:#16a34a;white-space:nowrap">${dataConf}</td>
-        <td>${mkDetalhesCell(i)}</td>
-        <td><span style="font-size:.68rem;color:#94a3b8" title="Reabrir agora é só em Financeiro → Contas a Receber">Ver em Financeiro</span><button onclick="abrirRetirarComissao('${ck}','${(i.cliente||'').replace(/'/g,"\\'")}',${com},'${pedidoDisplay(i.pedidoOs)||''}')" style="background:none;border:1px solid #fecaca;border-radius:6px;padding:3px 8px;font-size:.62rem;color:#dc2626;cursor:pointer;margin-left:6px" title="Essa comissão não vai ser paga por algum motivo — retira da lista a pagar, exige motivo">🗑️ Retirar</button></td>
-      </tr>`;
-    }).join('');
-    // Sempre aberto por padrão (2026-08-18, pedido do usuário: "eu quero que venha uma lista
-    // de tudo que o financeiro deu baixa e ta sendo considerado como pagamento daquela
-    // quinzena" — não fazia sentido a lista em si ficar escondida atrás de um clique numa tela
-    // que já tem coisa demais espalhada). Antes só abria sozinho com busca ativa.
-    return`<details open style="margin:6px 0 16px">
-      <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">✅ O que o Financeiro confirmou e está contando pra esta quinzena (${items.length} ${items.length===1?'item':'itens'}) — Líquido: ${fmtR(totalVal)} · Comissão: ${fmtR(totalCom)}</summary>
-      <div style="overflow-x:auto;margin-top:8px"><table class="dash-table">
-        <thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor Bruto</th><th>Valor Líquido</th><th>%</th><th>Comissão</th><th>Confirmado em</th><th>Detalhes</th><th>Ação</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-    </details>`;
+    const aConfirmar=items.filter(i=>!i.comissaoQuitada);
+    const pagos=items.filter(i=>i.comissaoQuitada);
+    let out='';
+    if(aConfirmar.length){
+      const totalVal=aConfirmar.reduce((s,i)=>s+i.valor,0);
+      const totalCom=aConfirmar.reduce((s,i)=>s+(i.valor*i.pct/100),0);
+      const rows=aConfirmar.map(i=>{
+        const com=i.valor*i.pct/100;
+        const ck=i.confKey.replace(/'/g,"\\'");
+        const chk=`<input type="checkbox" class="com-quitar-chk" data-ck="${ck}" data-dia="${dia}" onchange="_atualizarContadorQuitar(${dia})" style="width:15px;height:15px;cursor:pointer;margin-right:6px;vertical-align:middle">`;
+        const rtc=`<button onclick="abrirRetirarComissao('${ck}','${(i.cliente||'').replace(/'/g,"\\'")}',${com},'${pedidoDisplay(i.pedidoOs)||''}')" style="background:none;border:1px solid #fecaca;border-radius:6px;padding:3px 8px;font-size:.62rem;color:#dc2626;cursor:pointer;margin-left:6px" title="Essa comissão não vai ser paga por algum motivo — retira da lista a pagar, exige motivo">🗑️ Retirar</button>`;
+        const acao=`<div style="display:flex;align-items:center;white-space:nowrap">${chk}<span style="font-size:.66rem;color:#b45309;font-weight:700">⏳ A confirmar</span>${rtc}</div>`;
+        return mkConsRow(i,acao);
+      }).join('');
+      // Sempre aberto por padrão (mesmo motivo do antigo mkConsolidado, 2026-08-18) — é a
+      // lista acionável desta quinzena, não devia ficar escondida atrás de um clique.
+      out+=`<details open style="margin:6px 0 16px">
+        <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">⏳ Comissão a confirmar pagamento ao vendedor (${aConfirmar.length} ${aConfirmar.length===1?'item':'itens'}) — Líquido: ${fmtR(totalVal)} · Comissão: ${fmtR(totalCom)}</summary>
+        <div style="display:flex;align-items:center;gap:8px;margin:8px 0;flex-wrap:wrap">
+          <button onclick="marcarTodasComQuitar(${dia},true)" style="background:none;border:1px solid #e5e7eb;border-radius:7px;padding:6px 10px;font-size:.72rem;color:#374151;cursor:pointer;font-weight:600">☑️ Marcar todas</button>
+          <button onclick="marcarTodasComQuitar(${dia},false)" style="background:none;border:1px solid #e5e7eb;border-radius:7px;padding:6px 10px;font-size:.72rem;color:#374151;cursor:pointer;font-weight:600">☐ Desmarcar todas</button>
+          <button id="com-btn-confirmar-${dia}" onclick="confirmarComissaoQuitadaSelecionados(${dia})" class="dash-btn-conf" style="background:#059669">✅ Confirmar que foi pago (0)</button>
+        </div>
+        <div style="overflow-x:auto"><table class="dash-table">
+          <thead><tr>${CONS_HEAD}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </details>`;
+    }
+    if(pagos.length){
+      const totalValP=pagos.reduce((s,i)=>s+i.valor,0);
+      const totalComP=pagos.reduce((s,i)=>s+(i.valor*i.pct/100),0);
+      const rows=pagos.map(i=>{
+        const ck=i.confKey.replace(/'/g,"\\'");
+        const q=i.comissaoQuitada;
+        const dataQ=q.em?new Date(q.em).toLocaleDateString('pt-BR'):'—';
+        const acao=`<div style="white-space:nowrap"><span style="font-size:.68rem;color:#16a34a;font-weight:700" title="Marcado por ${(q.por||'—').replace(/"/g,'')}">✅ Pago em ${dataQ}</span><button onclick="desfazerComissaoQuitada('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.62rem;color:#64748b;cursor:pointer;margin-left:6px" title="Desfazer — volta pra 'a confirmar'">↩ Desfazer</button></div>`;
+        return mkConsRow(i,acao);
+      }).join('');
+      out+=`<details style="margin:6px 0 16px">
+        <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">✅ Comissão já paga ao vendedor nesta quinzena (${pagos.length} ${pagos.length===1?'item':'itens'}) — Líquido: ${fmtR(totalValP)} · Comissão: ${fmtR(totalComP)}</summary>
+        <div style="overflow-x:auto;margin-top:8px"><table class="dash-table">
+          <thead><tr>${CONS_HEAD}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table></div>
+      </details>`;
+    }
+    return out;
   }
 
-  function mkCards(items){
+  function mkCards(items,half){
     const prev=items.filter(i=>i.status!=='confirmado').reduce((s,i)=>s+i.valor,0);
-    const conf=items.filter(i=>i.status==='confirmado').reduce((s,i)=>s+i.valor,0);
+    // "Receb. confirmado" corrigido (2026-08-19) — usuário relatou que o card do Financeiro
+    // pra Quinzena 1/Agosto dizia R$988.954,93 recebido, mas esta tela mostrava só
+    // R$731.228,13. Causa: `items` aqui já vem de getComissaoItems()/getComissaoItemsQuinzena(),
+    // que de propósito EXCLUI itens com comissaoPagaFora/comissaoRemovida (pra não pagar
+    // comissão em dobro — ver [[project_comissao_paga_por_fora]]/[[project_retirar_comissao_lista]]).
+    // Isso é certo pro cálculo da COMISSÃO (cc, abaixo), mas "Receb. confirmado" descreve
+    // dinheiro que o CLIENTE pagou de verdade — esse dinheiro entrou no caixa mesmo quando a
+    // comissão dele já foi paga por fora/retirada, então excluir aqui escondia recebimento
+    // real e divergia do card do Financeiro pra mesma quinzena. Recalculado direto de
+    // getComissaoItemsAll() com a mesma janela real (_itemNaJanelaRecebido) usada no card do
+    // Financeiro (ver renderDashCards), aplicando os mesmos filtros de vendedor/busca já
+    // ativos nesta tela — só a Comissão continua excluindo paga-fora/removida.
+    let confItems=getComissaoItemsAll().filter(i=>i.status==='confirmado'&&_itemNaJanelaRecebido(i,y,m,half));
+    if(filV)confItems=confItems.filter(i=>vendedorMatch(i.nomeVend,filV));
+    if(busca)confItems=confItems.filter(i=>[i.pedidoOs,i.cliente,i.job,i.cidade,i.nomeVend].some(v=>v&&norm(String(v)).includes(busca)));
+    const conf=confItems.reduce((s,i)=>s+i.valor,0);
     // "Comissão a pagar" (comissão de itens ainda não confirmados) foi tirada daqui a pedido
     // do usuário (2026-08-04): esse número é só projeção/futuro e só deve aparecer em
     // "🔮 Pagamentos Futuros", pra não misturar comissão já garantida (cliente pagou) com
@@ -24811,9 +25289,19 @@ function renderDashComissoes(){
   // diferentes na mesma tela. Agora usam exatamente a mesma fonte/janela — a lista sempre bate
   // com o total do card, e atualiza sozinha a cada confirmação nova (a tela inteira re-renderiza
   // toda vez que chega uma atualização de pedidos/config do Firestore, ver setupRealtimeSync).
-  const consI=getComissaoItemsAll().filter(i=>i.status==='confirmado'&&_itemNaJanelaRecebido(i,y,m,'I')&&(!filV||vendedorMatch(i.nomeVend,filV)));
+  // CORRIGIDO 2026-08-19 — essa correção de 08-18 recalculava consI/consII direto de
+  // getComissaoItemsAll(), SEM o filtro de comissaoRemovida/comissaoPagaFora que itemsI/itemsII
+  // (getComissaoItems/getComissaoItemsQuinzena) já aplicam — então uma comissão CONFIRMADA
+  // retirada da lista (🗑️ Retirar, ver abrirRetirarComissao/_setComissaoRemovida) continuava
+  // aparecendo aqui pra sempre, com o próprio botão Retirar ainda visível nela: "cliquei em
+  // Retirar ... e não saiu da lista" (2026-08-19, relatado pelo usuário). Também não respeitava
+  // a busca de texto, diferente do resto da tela. Agora deriva de itemsIView/itemsIIView (que já
+  // passaram por getComissaoItems — janela real pro confirmado, vendedor, busca e exclusão de
+  // comissaoRemovida/comissaoPagaFora) só filtrando pelo confirmado — nunca mais diverge do
+  // resto da tela, e um item retirado agora realmente some daqui.
+  const consI=itemsIView.filter(i=>i.status==='confirmado');
   const pendI=itemsIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
-  const consII=getComissaoItemsAll().filter(i=>i.status==='confirmado'&&_itemNaJanelaRecebido(i,y,m,'II')&&(!filV||vendedorMatch(i.nomeVend,filV)));
+  const consII=itemsIIView.filter(i=>i.status==='confirmado');
   const pendII=itemsIIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
 
   el.innerHTML=
@@ -24826,15 +25314,15 @@ function renderDashComissoes(){
      </div>
      ${mkExtras(5)}
      ${mkRemovidas(5)}
-     ${mkCards(itemsIView)}${mkVendResume(itemsIView,5)}
-     ${mkConsolidado(consI)}
+     ${mkCards(itemsIView,'I')}${mkVendResume(itemsIView,5)}
+     ${mkConsolidado(consI,5)}
      <div style="background:#4338ca;padding:10px 16px;border-radius:8px;margin:24px 0 16px">
        <div style="font-size:.85rem;font-weight:700;color:#fff;letter-spacing:.3px">2ª Quinzena · pagar dia 15</div>
      </div>
      ${mkExtras(15)}
      ${mkRemovidas(15)}
-     ${mkCards(itemsIIView)}${mkVendResume(itemsIIView,15)}
-     ${mkConsolidado(consII)}`;
+     ${mkCards(itemsIIView,'II')}${mkVendResume(itemsIIView,15)}
+     ${mkConsolidado(consII,15)}`;
 }
 
 // ════════════════════════════════════════
@@ -24849,7 +25337,7 @@ function abrirPagamentosFuturos(){
     const vends=[...new Set(pend.map(i=>(i.nomeVend||'').trim()).filter(Boolean))].filter(v=>!v.toUpperCase().includes('KELLEN')).sort();
     sel.innerHTML='<option value="">— Todos os vendedores —</option>'
       +vends.map(v=>`<option value="${v}">${v}</option>`).join('')
-      +'<option value="__CLABONDE__">GUILHERME CLABONDE (Gerente)</option>';
+      +'<option value="_CLABONDE_">GUILHERME CLABONDE (Gerente)</option>';
   }
   renderPagamentosFuturos();
   openM('mo-pagfut');
@@ -24858,7 +25346,7 @@ function abrirPagamentosFuturos(){
 function renderPagamentosFuturos(){
   const body=document.getElementById('pagfut-body');if(!body)return;
   const filV=document.getElementById('pagfut-vend')?.value||'';
-  const useClabPct=filV==='__CLABONDE__';
+  const useClabPct=filV==='_CLABONDE_';
   const items=getComissaoItemsFuturos(filV||null)
     .slice()
     .sort((a,b)=>(parseDataBR(a.dataAtiva)||0)-(parseDataBR(b.dataAtiva)||0));
@@ -24923,6 +25411,7 @@ function renderPagamentosFuturos(){
       <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${pedidoDisplay(i.pedidoOs)||'—'}</td>
       <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:120px">${i.cliente}</td>
       ${useClabPct?`<td style="font-size:.72rem">${i.nomeVend}</td>`:''}
+      <td style="font-size:.72rem">${i.label||'—'}</td>
       <td style="font-weight:700;color:#1e40af">${fmtR(i.valorBruto)}${estTagBr}</td>
       <td style="font-weight:700">${fmtR(i.valor)}${estTag}${divTag}</td>
       <td style="font-size:.72rem;white-space:nowrap">${_quinzenaPagDate(i.qy,i.qm,i.qhalf)}<br><span style="font-size:.62rem;color:#94a3b8">cliente paga ${i.dataAtiva}</span></td>
@@ -24930,8 +25419,15 @@ function renderPagamentosFuturos(){
       <td style="font-weight:700;color:#7c3aed">${fmtR(com)}</td>
     </tr>`;
   }).join('');
+  // Coluna "Parcela" (2026-08-19, a pedido do usuário: "coloque na lista de comissoes um
+  // detalhe melhor sobre se é entrada ou se é parcela 1, 2, etc do lado do valor que ta
+  // considerando") — esta tabela (🔮 Pagamentos Futuros, com filtro de vendedor) já mostrava
+  // Bruto e Líquido em colunas separadas, mas não dizia qual parcela cada linha era (só a
+  // tabela principal de Pendentes/Consolidados em Metas & Comissões tinha essa coluna,
+  // ver mkTable/i.label em renderDashComissoes). Reaproveita o mesmo i.label (ex.: "Entrada",
+  // "Parcela 1", "💰 Saldo") que já vem pronto de getComissaoItemsAll(), sem cálculo novo.
   body.innerHTML=`<div style="overflow-x:auto"><table class="dash-table">
-      <thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th>${useClabPct?'<th>Vendedor</th>':''}<th>Valor Bruto</th><th>Valor Líquido</th><th>Pagto comissão</th><th>%</th><th>Comissão</th></tr></thead>
+      <thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th>${useClabPct?'<th>Vendedor</th>':''}<th>Parcela</th><th>Valor Bruto</th><th>Valor Líquido</th><th>Pagto comissão</th><th>%</th><th>Comissão</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>
     <div style="margin-top:10px;font-size:.8rem;font-weight:700;color:#111827">Total Bruto: ${fmtR(totalValBr)} · Total Líquido: ${fmtR(totalVal)} · Comissão pendente: <span style="color:#7c3aed">${fmtR(totalCom)}</span></div>`;
@@ -25677,7 +26173,7 @@ async function gerarPDFComissao(vend,quinzena){
   items.sort(_cmpMesVenda);
 
   let title, note='', useClabPct=false, groupByVend=false;
-  if(vend==='__CLABONDE__'){
+  if(vend==='_CLABONDE_'){
     useClabPct=true;
     groupByVend=false;
     title='Comissão — Guilherme Clabonde (Gerente)';
@@ -25693,7 +26189,7 @@ async function gerarPDFComissao(vend,quinzena){
   // Corrige bug relatado 2026-07-16: bônus já confirmado/pago na 1ª quinzena reaparecia
   // "pra pagar" quando o relatório era gerado pra 2ª quinzena do mesmo mês.
   const _diaExtra=quinzena==='I'?5:quinzena==='II'?15:null;
-  const extrasParaPdf=getPagamentosExtrasMes(y,m,_diaExtra).filter(p=>p.status==='confirmado'&&(vend==='__CLABONDE__'?isClabonde((p.vendedor||'').toUpperCase()):vend?vendedorMatch(p.vendedor,vend):true));
+  const extrasParaPdf=getPagamentosExtrasMes(y,m,_diaExtra).filter(p=>p.status==='confirmado'&&(vend==='_CLABONDE_'?isClabonde((p.vendedor||'').toUpperCase()):vend?vendedorMatch(p.vendedor,vend):true));
   if(!items.length&&!extrasParaPdf.length){toast('Nenhum lançamento confirmado (pago) para gerar o relatório.','terr');return;}
 
   // Bruto + Líquido lado a lado no PDF (2026-08-04, pedido do usuário) — antes só saía
@@ -25851,7 +26347,7 @@ async function gerarPDFComissao(vend,quinzena){
 
   for(let p=1;p<=doc.internal.getNumberOfPages();p++)drawFooter(p);
 
-  const slug=(vend==='__CLABONDE__'?'clabonde':vend?vend.toLowerCase().replace(/\s+/g,'_'):'todos')+(quinzena==='I'?'_1qz':quinzena==='II'?'_2qz':'');
+  const slug=(vend==='_CLABONDE_'?'clabonde':vend?vend.toLowerCase().replace(/\s+/g,'_'):'todos')+(quinzena==='I'?'_1qz':quinzena==='II'?'_2qz':'');
   doc.save(`comissao_${slug}_${y}_${String(m).padStart(2,'0')}.pdf`);
 }
 
