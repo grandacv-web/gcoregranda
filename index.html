@@ -403,8 +403,15 @@ select.fc{cursor:pointer}
 .btn-prev:hover{border-color:#94a3b8;color:var(--ink)}
 .btn-next{background:linear-gradient(135deg,var(--brand),#0284c7);color:#fff;border:none;padding:10px 24px;border-radius:10px;cursor:pointer;font-size:.82rem;font-weight:700;transition:all .2s;box-shadow:0 4px 14px rgba(0,186,199,.35);font-family:inherit;letter-spacing:-.1px}
 .btn-next:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,186,199,.45)}
+/* Estado desabilitado (2026-08-20) — feedback visual claro enquanto submit() processa a
+   emissão (ver disable de #btn-nx/#btn-pv em submit()), pra não parecer travado sem motivo. */
+.btn-next:disabled,.btn-prev:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
 .btn-emit{background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;border:none;padding:10px 24px;border-radius:10px;cursor:pointer;font-size:.82rem;font-weight:700;box-shadow:0 4px 14px rgba(37,99,235,.35);font-family:inherit}
 .btn-emit:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(37,99,235,.45)}
+/* Estado desabilitado (2026-08-20) — no último passo o botão vira .btn-emit ("Emitir Este
+   Pedido ✓"), não .btn-next; sem esta regra o disable de submit() ficaria sem feedback visual
+   justo no botão que mais importa (ver comentário completo perto de .btn-next:disabled). */
+.btn-emit:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
 
 /* ── VIEW MODAL ── */
 .vm{background:var(--surface);border-radius:var(--radius-xl);width:680px;max-width:100%;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-xl)}
@@ -1478,6 +1485,7 @@ select.fc{cursor:pointer}
             <div class="dash-mes-label" id="sim-cal-lbl" style="min-width:150px"></div>
             <button onclick="_simCalMov(1)" type="button">▶</button>
           </div>
+          <div id="sim-cal-filtro-setores"></div>
           <div id="sim-cal-body"></div>
         </div>
         <!-- Painel de Reservas Ativas (2026-08-18) — ver renderSimReservasAtivas(). -->
@@ -1640,11 +1648,10 @@ select.fc{cursor:pointer}
     <div id="sec-cat-PRODUCAO" style="display:none">
       <div class="dash-tabs" style="margin-bottom:14px" id="prod-main-tabs">
         <button class="dash-tab active prod-main-tab" onclick="prodSetTab('lista',this)">📋 Lista</button>
-        <button class="dash-tab prod-main-tab" onclick="prodSetTab('kanban',this)">🗂️ Kanban</button>
-        <button class="dash-tab prod-main-tab" onclick="prodSetTab('calendario',this)">📅 Calendário</button>
+        <button class="dash-tab prod-main-tab" onclick="prodSetTab('dias',this)">🗓️ Dias</button>
       </div>
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
-        🏭 Cada pedido passa por um checklist de 3 subtarefas — Recebimento de Corte Galvanizado, Recebimento de Adesivos e Produzir — antes de ser considerado pronto. Clique em "Iniciar Produção" pra abrir; cada baixa continua indo pro Histórico do pedido, igual sempre foi. A Produção é distribuída em fatias de até <strong id="prod-cap-valor">—</strong> por dia útil, recuando a partir do prazo — o Calendário mostra quais dias já estão ocupados e quais estão livres pra novas vendas.
+        🏭 Cada pedido passa por um checklist de 3 subtarefas — Recebimento de Corte Galvanizado, Recebimento de Adesivos e Produzir — antes de ser considerado pronto. Clique em "Iniciar Produção" pra abrir; cada baixa continua indo pro Histórico do pedido, igual sempre foi. A Produção é distribuída em fatias de até <strong id="prod-cap-valor">—</strong> por dia útil, recuando a partir do prazo — a aba 🗓️ Dias mostra dia a dia quais já estão ocupados, quais estão livres pra novas vendas, e o total líquido a produzir no período (dia/semana/mês) selecionado.
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
         <input id="prod-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="prodRenderAtivo()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
@@ -1674,18 +1681,28 @@ select.fc{cursor:pointer}
       <div id="prod-sec-lista">
         <div id="prod-body"></div>
       </div>
-      <div id="prod-sec-kanban" style="display:none">
-        <div id="prod-kanban-body" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px"></div>
-      </div>
-      <div id="prod-sec-calendario" style="display:none">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+      <div id="prod-sec-dias" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px">
           <div class="dash-mes-nav" style="margin:0">
-            <button onclick="prodCalMov(-1)" type="button">◀</button>
-            <div class="dash-mes-label" id="prod-cal-lbl" style="min-width:150px"></div>
-            <button onclick="prodCalMov(1)" type="button">▶</button>
+            <button onclick="prodDiasNav(-1)" type="button">◀</button>
+            <div class="dash-mes-label" id="prod-dias-lbl" style="min-width:170px"></div>
+            <button onclick="prodDiasNav(1)" type="button">▶</button>
+            <button onclick="prodDiasHoje()" type="button" class="dash-btn-conf" style="background:#94a3b8;margin-left:6px">Hoje</button>
           </div>
+          <select id="prod-dias-periodo" onchange="prodDiasSetPeriodo(this.value)" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+            <option value="dia">Dia</option>
+            <option value="semana" selected>Semana</option>
+            <option value="mes">Mês</option>
+          </select>
         </div>
-        <div id="prod-cal-body"></div>
+        <div style="padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+          <span style="font-size:.78rem;color:#166534;font-weight:700">💰 Total líquido a produzir no período selecionado</span>
+          <span id="prod-dias-total" style="font-size:1.05rem;color:#166534;font-weight:800">—</span>
+        </div>
+        <div style="font-size:.68rem;color:var(--ink4);display:flex;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+          <span>🟢 Livre</span><span style="color:#0284c7">🔵 Ocupado</span><span style="color:#d97706">🟠 Lotado</span><span style="color:#dc2626">🔴 Estourado</span><span style="color:#b45309">🟠 SIMULAÇÃO = reserva do Simulador</span>
+        </div>
+        <div id="prod-dias-body" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px"></div>
       </div>
     </div>
     <!-- HISTÓRICO DE PEDIDOS (consulta, aberto pra qualquer usuário logado) -->
@@ -2077,9 +2094,9 @@ select.fc{cursor:pointer}
           style="width:100%;padding:7px 8px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.82rem;font-family:inherit;box-sizing:border-box;background:#fff">
       </div>
       <div>
-        <label style="font-size:.64rem;font-weight:600;color:#7c3aed;display:block;margin-bottom:3px">Entrada — Líquido (comissão) <span style="font-weight:400;color:#94a3b8">· automático</span> <span onclick="_evResetLiqManual(document.getElementById('ev-ve-liq'))" title="Voltar a calcular automaticamente" style="cursor:pointer">↺</span></label>
-        <input id="ev-ve-liq" type="text" inputmode="numeric" oninput="fmtMoney(this);this.dataset.manual='1';_updEvPagCheck()" placeholder="0,00"
-          style="width:100%;padding:7px 8px;border:1.5px solid #e9d5ff;border-radius:7px;font-size:.82rem;font-family:inherit;box-sizing:border-box;background:#fff">
+        <label style="font-size:.64rem;font-weight:600;color:#7c3aed;display:block;margin-bottom:3px">Entrada — Líquido (comissão) <span style="font-weight:400;color:#94a3b8">· automático 🔒</span></label>
+        <input id="ev-ve-liq" type="text" inputmode="numeric" readonly tabindex="-1" title="Calculado automaticamente pela proporção do pedido — não é editável" placeholder="0,00"
+          style="width:100%;padding:7px 8px;border:1.5px solid #e9d5ff;border-radius:7px;font-size:.82rem;font-family:inherit;box-sizing:border-box;background:#f3e8ff;color:#6d28d9;font-weight:700;cursor:not-allowed">
       </div>
       <div>
         <label style="font-size:.64rem;font-weight:600;color:#1d4ed8;display:block;margin-bottom:3px">Data prevista da Entrada</label>
@@ -2798,16 +2815,12 @@ select.fc{cursor:pointer}
   </div>
   <div id="mnr-info" style="font-size:.8rem;color:var(--ink3);margin-bottom:14px"></div>
   <div class="fg">
-    <label>Motivo(s) <span class="r">*</span> <span style="font-weight:400;color:var(--ink4)">— pode marcar mais de um</span></label>
-    <div id="mnr-motivos-list" style="display:flex;flex-direction:column;gap:7px;margin-bottom:2px"></div>
+    <label>O que aconteceu? <span class="r">*</span></label>
+    <textarea id="mnr-motivo-livre" class="fc" rows="3" placeholder="Explique por que não foi recebido..." style="text-transform:none"></textarea>
   </div>
   <div class="fg">
     <label>Nova data prevista <span class="r">*</span> <span style="font-weight:400;color:var(--ink4)">— sugerida pela quinzena, pode ajustar</span></label>
     <input type="date" id="mnr-nova-data" class="fc">
-  </div>
-  <div class="fg">
-    <label>Observação (opcional)</label>
-    <textarea id="mnr-obs" class="fc" rows="2" placeholder="Detalhe adicional, se quiser" style="text-transform:none"></textarea>
   </div>
   <button onclick="salvarNaoRecebido()" style="margin-top:10px;width:100%;background:#dc2626;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">Salvar</button>
 </div>
@@ -3005,7 +3018,6 @@ select.fc{cursor:pointer}
       <button class="cfg-menu-btn admin-only" data-sec="vendascanceladas" onclick="setCfgSec('vendascanceladas',this)">🚫 Vendas Canceladas</button>
       <button class="cfg-menu-btn admin-only" data-sec="gruposcliente" onclick="setCfgSec('gruposcliente',this)">🏢 Grupos de Cliente</button>
       <button class="cfg-menu-btn admin-only" data-sec="centrocusto" onclick="setCfgSec('centrocusto',this)">🏦 Centro de Custo</button>
-      <button class="cfg-menu-btn admin-only" data-sec="motivosadiamento" onclick="setCfgSec('motivosadiamento',this)">⏭ Motivos de Adiamento</button>
       <button class="cfg-menu-btn admin-only" data-sec="motivosprazo" onclick="setCfgSec('motivosprazo',this)">📅 Motivos de Alteração de Prazo</button>
       <button class="cfg-menu-btn admin-only" data-sec="tarefasauto" onclick="setCfgSec('tarefasauto',this)">📌 Tarefas Automáticas</button>
       <button class="cfg-menu-btn admin-only" data-sec="metas" onclick="setCfgSec('metas',this)">🎯 Metas</button>
@@ -3268,18 +3280,6 @@ select.fc{cursor:pointer}
           <div style="display:flex;gap:8px">
             <input class="fc" id="cfg-novo-centro-custo" placeholder="Ex: Marketing" style="flex:1" onkeydown="if(event.key==='Enter')addCentroCusto()">
             <button class="btn-next" style="white-space:nowrap;padding:9px 16px" onclick="addCentroCusto()">+ Adicionar</button>
-          </div>
-        </div>
-      </div>
-      <div class="cfg-sec" id="cfg-sec-motivosadiamento" style="display:none">
-        <div style="font-size:.7rem;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Motivos de Adiamento (Financeiro)</div>
-        <p style="font-size:.75rem;color:var(--ink3);margin-bottom:14px">Opções disponíveis ao marcar um pagamento como "Não recebido" na data prevista, em Financeiro → Contas a Receber — dá pra marcar mais de um motivo por adiamento. Alimenta o indicador "📊 Dados de Não Recebimento/Atrasos" do Fluxo de Caixa, pra você ver onde se concentram os problemas de recebimento.</p>
-        <div id="cfg-motivos-adiamento-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px"></div>
-        <div style="background:#f8fafc;border:1.5px solid var(--border-lt);border-radius:10px;padding:14px">
-          <div style="font-size:.72rem;font-weight:700;color:var(--ink3);margin-bottom:10px">+ Novo Motivo</div>
-          <div style="display:flex;gap:8px">
-            <input class="fc" id="cfg-novo-motivo-adiamento" placeholder="Ex: Problema fiscal" style="flex:1;text-transform:uppercase">
-            <button class="btn-next" style="white-space:nowrap;padding:9px 16px" onclick="addMotivoAdiamento()">+ Adicionar</button>
           </div>
         </div>
       </div>
@@ -3653,6 +3653,20 @@ let step=0,ed={},editing=null;
 // checagem heurística do PDF da OS, senha de admin pra reemitir) — um segundo clique nessa
 // janela reentrava em submit() inteiro, salvando e mandando e-mail de novo pro mesmo pedido.
 // Ver o try/finally dentro de submit().
+//
+// REFORÇADO (2026-08-20, usuário reportou que AINDA recebe 2 e-mails, "mais gente da equipe
+// também") — revisando de novo achei que essa trava de 2026-08-19, sozinha, não protege o
+// caso mais comum: _enviarEmailEmissao(...) e savePedidoFS(...) são chamados sem "await"
+// (fire-and-forget, de propósito, pra não travar a UI esperando a rede) — então o `finally`
+// que zera _submitPedidoEmAndamento roda quase instantaneamente, ANTES do e-mail de verdade
+// terminar de ser enviado. No caminho mais comum (emissão nova, sem checagem de PDF da OS,
+// sem senha de admin) submit() não tem NENHUM "await" real antes disso, então a função inteira
+// roda de forma síncrona — um clique duplo físico vira 2 chamadas de submit() em sequência,
+// e a 2ª só vê a trava (_submitPedidoEmAndamento) DEPOIS que a 1ª já zerou ela de volta pra
+// false. Corrigido de vez desabilitando o BOTÃO em si (não só uma flag em memória) assim que
+// o processamento começa — um botão com disabled=true não dispara clique nenhum no navegador,
+// então protege mesmo sem depender de timing de Promise nenhuma. Ver disable/enable de #btn-nx
+// e #btn-pv logo no início/fim de submit().
 let _submitPedidoEmAndamento=false;
 
 const uid=()=>'p_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
@@ -5990,36 +6004,38 @@ function _updEvLiq(){
 // pedido) — igual à regra antiga (2026-08-04, voltando a pedido do usuário: "o valor líquido
 // é automático... ele divide conforme for ali"). Chamado sempre que Bruto/Frete/Instalação/
 // Mobilização/Elevações/ART/Remoção/Medição do pedido mudam (via _updEvLiq) e sempre que o
-// Bruto de Entrada ou de alguma parcela muda. Só recalcula o que NÃO foi editado à mão
-// (dataset.manual!=='1') — se alguém digitar um Líquido diferente (caso legítimo, quando o
-// desconto da parcela específica não segue a proporção do pedido — ver bug OS 56 "BURGER
-// KING COLOMBO" de 2026-07-13 que motivou o campo existir separado), esse valor fica travado
-// até clicar no ↺ (_evResetLiqManual) pra voltar a calcular sozinho.
+// Bruto de Entrada ou de alguma parcela muda.
+//
+// TRAVADO DE VEZ (2026-08-20, pedido explícito do usuário: "nao é possivel ele alterar, isso
+// tem que ser automatico e travado") — até aqui existia um modo "manual" (dataset.manual,
+// destravado só clicando no ↺) que deixava o admin digitar um Líquido diferente da proporção
+// (criado em 2026-07-13 por causa da OS 56 "BURGER KING COLOMBO", um caso em que o líquido
+// vinha inflado). O usuário decidiu que não quer mais essa porta de escape — o campo tem que
+// ser SEMPRE a conta automática, sem exceção, então o guard de dataset.manual foi removido:
+// agora este cálculo SEMPRE sobrescreve os dois campos, e os inputs viraram readonly (ver
+// HTML de #ev-ve-liq e .ev-pd-liq) — não dá mais pra digitar nada neles. `_evResetLiqManual()`
+// e o botão ↺ foram removidos junto, não fazem mais sentido sem modo manual.
 function _evAutoCalcLiq(){
   const gv=id=>{const el=document.getElementById(id);return el?moneyToNum(el.value):0;};
   const br=gv('ev-br'),ft=gv('ev-ft'),mo=gv('ev-mo'),vi=gv('ev-vi'),el2=gv('ev-el'),art=gv('ev-art'),rem=gv('ev-rem'),med=gv('ev-med');
   const liqTotal=br-ft-mo-vi-el2-art-rem-med;
   const ratio=br>0?(liqTotal/br):1;
-  const fmt=n=>n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2}):'';
+  // maximumFractionDigits:2 (2026-08-20) — sem isso toLocaleString cai no padrão de até 3
+  // casas decimais quando o valor não é exato (ex.: proporção gerando fração de centavo),
+  // mostrando "R$ 38.190,218" em vez de "R$ 38.190,22" (achado pelo usuário via print de tela).
+  const fmt=n=>n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
   const veLiqEl=document.getElementById('ev-ve-liq');
-  if(veLiqEl&&veLiqEl.dataset.manual!=='1'){
+  if(veLiqEl){
     const v=gv('ev-ve')*ratio;
     veLiqEl.value=fmt(v);veLiqEl.dataset.raw=String(v);
   }
   document.querySelectorAll('#ev-parc-c > div').forEach(row=>{
     const valInp=row.querySelector('.ev-pd-val'),liqInp=row.querySelector('.ev-pd-liq');
-    if(!valInp||!liqInp||liqInp.dataset.manual==='1')return;
+    if(!valInp||!liqInp)return;
     const v=moneyToNum(valInp.value||'0')*ratio;
     liqInp.value=fmt(v);liqInp.dataset.raw=String(v);
   });
   _updEvPagCheck();
-}
-// Botão ↺ ao lado de cada Líquido — destrava o campo travado por edição manual e recalcula
-// pela proporção automática de novo.
-function _evResetLiqManual(el){
-  if(!el)return;
-  delete el.dataset.manual;
-  _evAutoCalcLiq();
 }
 // Converte data BR (DD/MM/YYYY, formato salvo em p.pagamento) pro formato ISO usado
 // pelos <input type=date> — inverso de fmtD(), só usado aqui pra pré-preencher a edição.
@@ -6053,8 +6069,8 @@ function updParcEV(){
           <input type="text" inputmode="numeric" placeholder="R$ 0,00" class="fc ev-pd-val" style="font-size:.78rem;padding:7px 8px;border:1.5px solid #bfdbfe;border-radius:7px;font-family:inherit;box-sizing:border-box;background:#fff;width:100%" oninput="fmtMoney(this);_evAutoCalcLiq()">
         </div>
         <div>
-          <label style="font-size:.6rem;font-weight:600;color:#7c3aed;display:block;margin-bottom:2px">Líquido <span style="font-weight:400;color:#94a3b8">· auto</span> <span onclick="_evResetLiqManual(this.parentElement.parentElement.querySelector('.ev-pd-liq'))" title="Voltar a calcular automaticamente" style="cursor:pointer">↺</span></label>
-          <input type="text" inputmode="numeric" placeholder="R$ 0,00" class="fc ev-pd-liq" style="font-size:.78rem;padding:7px 8px;border:1.5px solid #e9d5ff;border-radius:7px;font-family:inherit;box-sizing:border-box;background:#fff;width:100%" oninput="fmtMoney(this);this.dataset.manual='1';_updEvPagCheck()">
+          <label style="font-size:.6rem;font-weight:600;color:#7c3aed;display:block;margin-bottom:2px">Líquido <span style="font-weight:400;color:#94a3b8">· automático 🔒</span></label>
+          <input type="text" inputmode="numeric" readonly tabindex="-1" title="Calculado automaticamente pela proporção do pedido — não é editável" placeholder="R$ 0,00" class="fc ev-pd-liq" style="font-size:.78rem;padding:7px 8px;border:1.5px solid #e9d5ff;border-radius:7px;font-family:inherit;box-sizing:border-box;background:#f3e8ff;color:#6d28d9;font-weight:700;width:100%;cursor:not-allowed">
         </div>
         <div>
           <label style="font-size:.6rem;font-weight:600;color:#64748b;display:block;margin-bottom:2px">Data prevista</label>
@@ -6250,21 +6266,16 @@ async function editarValoresPedido(pedidoId){
     let nm=pdfZone.querySelector('.uz-file');if(nm)nm.remove();
   }
   // Pagamento: pré-preenche com o que já estiver salvo em p.pagamento (Entrada + Parcelas).
-  // Líquido (base da comissão) é AUTOMÁTICO por padrão — calculado pela proporção Bruto/
-  // Líquido do pedido inteiro (ver _evAutoCalcLiq(), 2026-08-04). Pedido antigo/já salvo com
-  // um Líquido explícito diferente da proporção (override manual de um caso excepcional, ex.:
-  // OS 56 "BURGER KING COLOMBO") preserva esse valor travado (dataset.manual) em vez de
-  // recalcular por cima dele sem avisar; pedido sem Líquido salvo (nunca editado, ou igual a
-  // zero) fica destravado e recebe o valor automático assim que o modal abre.
+  // Líquido (base da comissão) é SEMPRE automático (2026-08-20, ver comentário completo em
+  // _evAutoCalcLiq()) — o valor pré-preenchido aqui é só o último salvo, pra não piscar "R$
+  // 0,00" antes do _updEvLiq() no fim desta função recalcular e sobrescrever com a proporção
+  // atual; não existe mais estado "manual" pra preservar.
   const pagExist=p.pagamento||{};
   const evVeLabel=document.getElementById('ev-ve-label'),evPagHint=document.getElementById('ev-pag-hint');
   if(evVeLabel)evVeLabel.textContent='Entrada — Bruto (cliente paga)';
-  if(evPagHint)evPagHint.textContent='Bruto é o que o cliente efetivamente paga (libera Contas a Receber). Líquido é calculado automaticamente pela proporção do pedido — só mexa nele se o desconto dessa parcela específica for diferente do resto.';
+  if(evPagHint)evPagHint.textContent='Bruto é o que o cliente efetivamente paga (libera Contas a Receber). Líquido é calculado automaticamente pela proporção do pedido e não é editável.';
   setV('ev-ve',pagExist['Valor de Entrada']);
   setV('ev-ve-liq',pagExist['Valor de Entrada (Líquido)']);
-  const veLiqPreExistente=moneyToNum(pagExist['Valor de Entrada (Líquido)']||'0')>0;
-  const veLiqElL=document.getElementById('ev-ve-liq');
-  if(veLiqElL){if(veLiqPreExistente)veLiqElL.dataset.manual='1';else delete veLiqElL.dataset.manual;}
   setIn2('ev-de',_brToIso(pagExist['Data da Entrada']||''));
   const parcEntries=Object.entries(pagExist).map(([k,val])=>{
     const mt=k.match(/^Parcela\s+(\d+)\s+·\s+(.+)$/);
@@ -6284,11 +6295,12 @@ async function editarValoresPedido(pedidoId){
   parcEntries.forEach((pe,i)=>{
     const row=parcRows[i];if(!row)return;
     const valInp=row.querySelector('.ev-pd-val'),liqInp=row.querySelector('.ev-pd-liq'),dateInp=row.querySelector('.ev-pd-date');
-    if(valInp){const n=moneyToNum(pe.val||'0');valInp.value=n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2}):'';valInp.dataset.raw=String(n);}
+    if(valInp){const n=moneyToNum(pe.val||'0');valInp.value=n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';valInp.dataset.raw=String(n);}
     if(liqInp){
+      // Só um valor inicial pra não piscar vazio — _updEvLiq() no fim desta função recalcula
+      // e sobrescreve com a proporção atual (líquido não tem mais estado "manual", 2026-08-20).
       const liqVal=pagExist[`Parcela ${pe.idx} (Líquido)`];const n=moneyToNum(liqVal||'0');
-      liqInp.value=n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2}):'';liqInp.dataset.raw=String(n);
-      if(n>0)liqInp.dataset.manual='1';else delete liqInp.dataset.manual;
+      liqInp.value=n>0?n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';liqInp.dataset.raw=String(n);
     }
     if(dateInp)dateInp.value=_brToIso(pe.date);
   });
@@ -6989,6 +7001,10 @@ function validarAba(id){
     if(ed.medicao==='Sim'&&!ed.vmed)erros.push('Valor da medição técnica não informado');
     if(!ed.art)erros.push('Informe se há Emissão de ART');
     if(ed.art==='Sim'&&!ed.vart)erros.push('Valor da ART não informado');
+    // Custos lidos com confiança na seção "Outros" (Custos Operacionais) do PDF da OS não
+    // podem ficar zerados/sem marcar aqui (2026-08-20, a pedido do usuário) — ver
+    // _custosPdfPendentes().
+    erros.push(..._custosPdfPendentes(ed));
   }
   if(id==='pagamento'){
     if(!ed.tem_oc)erros.push('Informe se tem Ordem de Compra');
@@ -7020,6 +7036,12 @@ function validarAba(id){
     if(!ed.ibloqenergia)erros.push('Informe se necessita de bloqueio de energia para instalação');
     if(!ed.pintubo)erros.push('Informe se tem pintura de tubo');
     if(ed.pintubo==='Sim'&&!ed.vpintub)erros.push('Valor da mão de obra (pintura de tubo) não informado');
+    // Mesma trava de custo lido com confiança do PDF (ver _custosPdfPendentes) — aqui só o
+    // caso da Pintura de Tubo, que vive nesta aba (2026-08-20).
+    {
+      const _pendPintub=_custoPdfPinturaTuboPendente(ed);
+      if(_pendPintub)erros.push(_pendPintub);
+    }
   }
   if(id==='elevacoes'){
     if(!ed.elevBloqVia)erros.push('Informe se necessita de bloqueio da via para realização do trabalho');
@@ -7826,7 +7848,7 @@ function renderStep(id){
       <div class="fg"><label>Informações sobre a medição</label><textarea class="fc" id="em-minfo" placeholder="DESCREVA AS INFORMAÇÕES RELEVANTES SOBRE A MEDIÇÃO TÉCNICA DESTE PEDIDO...">${ed.minfo||''}</textarea></div>
     </div>`;
   }else if(id==='elevacoes'){
-    const ELEVS=['CAMINHÃO MUNCK','GUIDASTE','ANDAIME','PLATAFORMA ELEVATÓRIA','BALANCIM','RAPEL'];
+    const ELEVS=['CAMINHÃO MUNCK','GUINDASTE','ANDAIME','PLATAFORMA ELEVATÓRIA','BALANCIM','RAPEL'];
     const elevMap=Object.fromEntries((ed.elevs||[]).map(e=>[e.tipo,e]));
     bd.innerHTML=`<div class="fsec">
       <div class="fsec-t">&#128693; ELEVAÇÕES</div>
@@ -8663,21 +8685,54 @@ function _extrairNumeroOsDoPdf(texto){
 // validações de validarAba('valores')/submit() não mudam e continuam travando o envio sem
 // elas). Também NUNCA sobrescreve um campo que o vendedor já preencheu — só entra se o
 // campo ainda estiver vazio (mesmo padrão do _extrairNumeroOsDoPdf).
+//
+// ATUALIZAÇÃO (2026-08-20, a pedido do usuário): o print de um caso real mostrou Elevações
+// saindo ZERADA na Emissão mesmo com Caminhão Munck custando dinheiro na OS. A partir de
+// agora, todo custo encontrado com CONFIANÇA (dentro da seção "Outros" da OS — mesmo
+// marcador "Outros   Valor" que _extrairItensProducaoPdf já usa pra separar produto de custo
+// operacional) não é mais só um pré-preenchimento sugerido: se o campo correspondente da
+// Emissão continuar zerado/sem marcar, a emissão é BLOQUEADA (ver _custosPdfPendentes() e os
+// novos itens em validarAba('valores')/validarAba('instalacao')/submit()). Sem o marcador
+// "Outros   Valor" no PDF (layout diferente/antigo/escaneado), a extração cai pro texto
+// inteiro como sempre foi — mas aí NUNCA bloqueia, só pré-preenche (out._confiavel=false),
+// pra um PDF fora do padrão nunca travar a emissão por falso positivo.
 function _valorPertoDoRotulo(t,re,janela){
   const idx=t.search(re);
   if(idx<0)return null;
   const m=t.slice(idx,idx+(janela||160)).match(/r\$\s?([\d]{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})/i);
   return m?m[1]:null;
 }
+function _fmtValorPdf(n){
+  return (n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+// Equipamentos de elevação reconhecidos (mesma lista de tipos da aba Elevações, ver ELEVS em
+// renderTab) — qualquer um encontrado com valor na seção Outros SOMA pro total de Elevações
+// (um pedido pode ter mais de um equipamento, ex.: Munck + Andaime), a pedido do usuário.
+const _ELEV_KEYWORDS=[
+  {label:'CAMINHÃO MUNCK',re:/caminh[ãa]o\s*munck|\bmunck\b/i},
+  {label:'GUINDASTE',re:/\bguindaste\b/i},
+  {label:'PLATAFORMA ELEVATÓRIA',re:/plataforma\s*elevat[óo]ria/i},
+  {label:'ANDAIME',re:/\bandaime\b/i},
+  {label:'BALANCIM',re:/\bbalancim\b/i},
+  {label:'RAPEL',re:/\brap[eé]l\b/i}
+];
 function _extrairValoresPedidoPdf(texto){
-  const t=(texto||'').replace(/\s+/g,' ');
+  const tFull=(texto||'').replace(/\s+/g,' ');
   const out={};
-  // Valor Total do pedido — "Total" (não "Subtotal") com um R$ logo depois
-  const idxTotal=t.search(/\btotal\b/i);
-  if(idxTotal>=0&&!/subtotal/i.test(t.slice(Math.max(0,idxTotal-3),idxTotal+5))){
-    const v=_valorPertoDoRotulo(t.slice(idxTotal),/\btotal\b/i,60);
+  // Valor Total do pedido — sempre no texto inteiro (é o total geral do pedido, não fica
+  // dentro da seção "Outros") — "Total" (não "Subtotal") com um R$ logo depois.
+  const idxTotal=tFull.search(/\btotal\b/i);
+  if(idxTotal>=0&&!/subtotal/i.test(tFull.slice(Math.max(0,idxTotal-3),idxTotal+5))){
+    const v=_valorPertoDoRotulo(tFull.slice(idxTotal),/\btotal\b/i,60);
     if(v)out.vtotal=v;
   }
+  // Seção "Outros" (Custos Operacionais) — ver comentário grande acima. idxOutros>=0 é o
+  // sinal de confiança que libera o BLOQUEIO (out._confiavel); todo o resto da extração roda
+  // só dentro dela quando existe, senão cai pro texto inteiro (só pré-preenche).
+  const idxOutros=tFull.search(/\bOutros\s+Valor\b/i);
+  const confiavel=idxOutros>=0;
+  const t=confiavel?tFull.slice(idxOutros):tFull;
+  out._confiavel=confiavel;
   const art=_valorPertoDoRotulo(t,/\bart\b|anota[çc][ãa]o de responsabilidade/i);
   if(art)out.vart=art;
   // Base/Fundação: só decide a CATEGORIA (por nossa conta/tem valor), não guarda valor em
@@ -8688,8 +8743,14 @@ function _extrairValoresPedidoPdf(texto){
   if(mob)out.vmob=mob;
   const inst=_valorPertoDoRotulo(t,/servi[çc]o\s+de\s+instala[çc][ãa]o/i);
   if(inst)out.vinst=inst;
-  const munck=_valorPertoDoRotulo(t,/caminh[ãa]o\s*munck|\bmunck\b/i);
-  if(munck)out.velev=munck;
+  // Elevações — soma TODOS os equipamentos encontrados (ex.: Munck + Guindaste no mesmo
+  // pedido), a pedido do usuário ("já some o valor de tudo isso se tiver no pedido").
+  let elevTotal=0,elevAchados=[];
+  _ELEV_KEYWORDS.forEach(k=>{
+    const v=_valorPertoDoRotulo(t,k.re);
+    if(v){const n=moneyToNum(v);if(n>0){elevTotal+=n;elevAchados.push(k.label);}}
+  });
+  if(elevTotal>0){out.velev=_fmtValorPdf(elevTotal);out._elevAchados=elevAchados;}
   const medicao=_valorPertoDoRotulo(t,/medi[çc][ãa]o\s*t[ée]cnica|\bsurvey\b/i);
   if(medicao)out.vmed=medicao;
   const remocao=_valorPertoDoRotulo(t,/remo[çc][ãa]o\s+de\s+materia(is|l)/i);
@@ -8727,6 +8788,54 @@ function _extrairValoresPedidoPdf(texto){
     }
   }
   return out;
+}
+// Verifica se algum custo detectado com CONFIANÇA (dentro da seção "Outros" do PDF da OS, ver
+// _extrairValoresPedidoPdf) ainda está zerado/sem marcar nos campos correspondentes da
+// Emissão — a pedido do usuário (2026-08-20): "não deixar emitir o pedido com valor de
+// elevação zerado ... faça isso com os outros custos também". Só entra em ação quando
+// edState._pdfVals._confiavel===true; sem isso, nunca bloqueia (só o autopreenchimento de
+// sempre). Retorna uma lista de mensagens (string) — cada chamador decide o formato de erro
+// que usa (validarAba usa string simples, submit() usa {msg,aba,label}).
+function _custosPdfPendentes(edState){
+  const erros=[];
+  const pv=edState&&edState._pdfVals;
+  if(!pv||!pv._confiavel)return erros;
+  const mn=v=>moneyToNum(v||0);
+  if(pv.vart&&mn(pv.vart)>0&&(edState.art!=='Sim'||mn(edState.vart)<=0)){
+    erros.push(`O PDF da OS indica ART com valor (R$ ${_fmtValorPdf(mn(pv.vart))}) nos Custos Operacionais, mas "TEM ART?" está sem esse valor na Emissão — marque "Sim" e confira/preencha o valor.`);
+  }
+  if(pv.vmob&&mn(pv.vmob)>0&&(edState.i_tipo!=='Por nossa conta'||mn(edState.vmob)<=0)){
+    erros.push(`O PDF da OS indica Mobilização com valor (R$ ${_fmtValorPdf(mn(pv.vmob))}) nos Custos Operacionais, mas a Emissão está sem esse valor — marque Instalação "Por nossa conta" e confira/preencha o valor da Mobilização.`);
+  }
+  if(pv.vinst&&mn(pv.vinst)>0&&(edState.i_tipo!=='Por nossa conta'||mn(edState.vinst)<=0)){
+    erros.push(`O PDF da OS indica Serviço de Instalação com valor (R$ ${_fmtValorPdf(mn(pv.vinst))}) nos Custos Operacionais, mas a Emissão está sem esse valor — marque Instalação "Por nossa conta" e confira/preencha o valor da Instalação.`);
+  }
+  if(pv.velev&&mn(pv.velev)>0&&(edState.elevacoes!=='Sim'||mn(edState.velev)<=0)){
+    const equip=(pv._elevAchados&&pv._elevAchados.length)?pv._elevAchados.join(', '):'equipamento de elevação';
+    erros.push(`O PDF da OS indica ${equip} com valor (R$ ${_fmtValorPdf(mn(pv.velev))}) nos Custos Operacionais, mas a Emissão está com Elevações zerada/sem marcar — marque "Tem elevações? Sim" e confira/preencha o valor.`);
+  }
+  if(pv.vfrete&&mn(pv.vfrete)>0&&(edState.f_tipo!=='Por nossa conta'||mn(edState.vfrete)<=0)){
+    erros.push(`O PDF da OS indica Frete com valor (R$ ${_fmtValorPdf(mn(pv.vfrete))}) nos Custos Operacionais, mas a Emissão está sem esse valor — marque Frete "Por nossa conta" e confira/preencha o valor.`);
+  }
+  if(pv.vmed&&mn(pv.vmed)>0&&(edState.medicao!=='Sim'||mn(edState.vmed)<=0)){
+    erros.push(`O PDF da OS indica Medição Técnica com valor (R$ ${_fmtValorPdf(mn(pv.vmed))}) nos Custos Operacionais, mas a Emissão está sem esse valor — marque "Tem Medição Técnica? Sim" e confira/preencha o valor.`);
+  }
+  if(pv.vrem&&mn(pv.vrem)>0&&(edState.remocao!=='Sim'||mn(edState.vrem)<=0)){
+    erros.push(`O PDF da OS indica Remoção de Materiais com valor (R$ ${_fmtValorPdf(mn(pv.vrem))}) nos Custos Operacionais, mas a Emissão está sem esse valor — marque "Tem Remoção de Materiais? Sim" e confira/preencha o valor.`);
+  }
+  return erros;
+}
+// Mesma lógica de _custosPdfPendentes(), só que pro campo de Pintura de Tubo — que fica na
+// aba Instalação, não na aba Valores (ver ed.pintubo/em-vpintub), por isso é um checador
+// separado (as duas abas são validadas em pontos diferentes de validarAba()/submit()).
+function _custoPdfPinturaTuboPendente(edState){
+  const pv=edState&&edState._pdfVals;
+  if(!pv||!pv._confiavel)return null;
+  const mn=v=>moneyToNum(v||0);
+  if(pv.vpintub&&mn(pv.vpintub)>0&&(edState.pintubo!=='Sim'||mn(edState.vpintub)<=0)){
+    return `O PDF da OS indica Pintura de Tubo com valor (R$ ${_fmtValorPdf(mn(pv.vpintub))}) nos Custos Operacionais, mas está sem esse valor aqui — marque "Tem Pintura de Tubo? Sim" e confira/preencha o valor.`;
+  }
+  return null;
 }
 // ===================== EXTRAÇÃO DE ITENS DE PRODUÇÃO DO PDF DA OS (2026-08-18) =====================
 // A pedido do usuário: cada produto listado na OS vira 1 item do checklist de PRODUÇÃO (etapa
@@ -8911,10 +9020,15 @@ async function emOsPdfSelecionado(input){
     // preencher manualmente (validarAba/submit não mudam).
     const valoresPdf=_extrairValoresPedidoPdf(texto);
     _aplicarValoresPdfNaEd(valoresPdf);
-    const rotulos={vtotal:'Valor Total',vart:'ART',vinst:'Instalação',vmob:'Mobilização',velev:'Elevações (Munck)',vfrete:'Frete',vmed:'Medição Técnica',vpintub:'Pintura de Tubo (mão de obra)',vrem:'Remoção de Materiais'};
+    const rotuloElev=valoresPdf._elevAchados&&valoresPdf._elevAchados.length?`Elevações (${valoresPdf._elevAchados.join(', ')})`:'Elevações';
+    const rotulos={vtotal:'Valor Total',vart:'ART',vinst:'Instalação',vmob:'Mobilização',velev:rotuloElev,vfrete:'Frete',vmed:'Medição Técnica',vpintub:'Pintura de Tubo (mão de obra)',vrem:'Remoção de Materiais'};
     const achados=Object.keys(rotulos).filter(k=>valoresPdf[k]).map(k=>rotulos[k]);
     if(achados.length){
-      toast('📄 Valores pré-preenchidos a partir do PDF: '+achados.join(', ')+'. Confira antes de emitir.','tok');
+      // (2026-08-20) Custos achados dentro da seção "Outros" (Custos Operacionais) da OS agora
+      // BLOQUEIAM a emissão se ficarem zerados — ver _custosPdfPendentes(). Aviso reforçado
+      // pra deixar isso claro na hora, não só quando o vendedor tentar avançar/emitir.
+      const avisoObrigatorio=valoresPdf._confiavel?' ⚠️ Estes valores foram lidos dos Custos Operacionais da OS e agora são OBRIGATÓRIOS — não vai dar pra emitir com eles zerados.':'';
+      toast('📄 Valores pré-preenchidos a partir do PDF: '+achados.join(', ')+'. Confira antes de emitir.'+avisoObrigatorio,'tok');
     }
     // Seguro de Obra não tem valor auto-preenchido (ver _extrairValoresPedidoPdf) — só avisa
     // que detectou o item, pra lembrar o vendedor de digitar o valor da apólice manualmente.
@@ -9238,6 +9352,15 @@ async function submit(){
     return;
   }
   _submitPedidoEmAndamento=true;
+  // Desabilita o botão DE VERDADE (2026-08-20, ver comentário completo em
+  // _submitPedidoEmAndamento acima) — um <button disabled> não dispara evento de clique no
+  // navegador, então isso protege contra clique duplo físico mesmo sem depender de timing de
+  // Promise (a flag sozinha não bastava porque savePedidoFS/_enviarEmailEmissao são
+  // fire-and-forget). Reabilitado no finally, pra qualquer caminho que volte com erro de
+  // validação (modal continua aberto) deixar o usuário tentar de novo.
+  const _btnNx=document.getElementById('btn-nx'),_btnPv=document.getElementById('btn-pv');
+  if(_btnNx)_btnNx.disabled=true;
+  if(_btnPv)_btnPv.disabled=true;
   try{
   // Alterar (gravar) uma venda/emissão que JÁ SAIU (origemComercial:true, ou pedido antigo de
   // antes do Conselho existir mas já emitido de verdade) exige admin+senha, mesmo padrão de
@@ -9352,6 +9475,10 @@ async function submit(){
   if(ed.medicao==='Sim'&&!ed.vmed)erros.push({msg:'Valor da medição técnica não informado',aba:idxVal,label:'Valores'});
   if(!ed.art)erros.push({msg:'Informe se há Emissão de ART (TEM ART?)',aba:idxVal,label:'Valores'});
   if(ed.art==='Sim'&&!ed.vart)erros.push({msg:'Valor da ART não informado',aba:idxVal,label:'Valores'});
+  // Custos lidos com confiança na seção "Outros" (Custos Operacionais) do PDF da OS não podem
+  // ficar zerados/sem marcar (2026-08-20, a pedido do usuário) — segunda camada de defesa,
+  // mesma checagem já feita em validarAba('valores')/stepNext(). Ver _custosPdfPendentes().
+  _custosPdfPendentes(ed).forEach(msg=>erros.push({msg,aba:idxVal,label:'Valores'}));
   // Aba pagamento — só existe (e só é exigida) pra pedidos do tipo "Venda" ou "Permuta"
   // (2026-07-22); os demais tipos (Garantia/Retrabalho, Amostra, Interno, Brinde) não
   // cobram nada do cliente.
@@ -9383,6 +9510,12 @@ async function submit(){
   // Aba instalação
   const idxInst=idx('instalacao');
   if(ed.itel&&!validaTel(ed.itel))erros.push({msg:'Telefone da instalação inválido',aba:idxInst,label:'Instalação'});
+  // Custo de Pintura de Tubo lido com confiança do PDF (mesma trava de _custosPdfPendentes,
+  // ver comentário lá) — segunda camada de defesa, igual já feito em validarAba('instalacao').
+  {
+    const _pendPintub=_custoPdfPinturaTuboPendente(ed);
+    if(_pendPintub)erros.push({msg:_pendPintub,aba:idxInst,label:'Instalação'});
+  }
   // Aba frete
   const idxFrt=idx('frete');
   if(ed.ftel&&!validaTel(ed.ftel))erros.push({msg:'Telefone da descarga inválido',aba:idxFrt,label:'Frete'});
@@ -9458,7 +9591,13 @@ async function submit(){
       toast('Pedido emitido, mas sem e-mail de destino cadastrado — nenhum e-mail foi enviado.','twar');
     }
   }
-  }finally{_submitPedidoEmAndamento=false;}
+  }finally{
+    _submitPedidoEmAndamento=false;
+    // Reabilita os botões (só importa se o modal continuar aberto — ex.: validação falhou
+    // e voltou erro; se emitiu com sucesso o modal já foi fechado antes disso, ver acima).
+    if(_btnNx)_btnNx.disabled=false;
+    if(_btnPv)_btnPv.disabled=false;
+  }
 }
 
 // CONFIGURAÇÕES
@@ -10013,7 +10152,6 @@ function setCfgSec(sec,btn){
   if(sec==='vendascanceladas')renderVendasCanceladas();
   if(sec==='gruposcliente')renderGruposCliente();
   if(sec==='centrocusto')renderCentrosCusto();
-  if(sec==='motivosadiamento')renderMotivosAdiamento();
   if(sec==='motivosprazo')renderMotivosPrazoFinalizacao();
   if(sec==='tarefasauto')renderRegrasTarefasAuto();
   if(sec==='metas')initPagamentosExtrasForm();
@@ -10543,57 +10681,19 @@ function removeGrupoCliente(i){
   if(typeof finView!=='undefined'&&finView==='fluxo'&&typeof renderFinFluxo==='function')renderFinFluxo();
 }
 
-// Motivos de Adiamento (Financeiro) — opções pra marcar (pode ser mais de uma) quando um
-// pagamento não chega na data prevista (ver abrirMotivoNaoRecebido()/salvarNaoRecebido()).
-// Semeado com os 4 motivos pedidos pelo usuário na primeira vez que a tela é aberta —
-// depois é 100% editável aqui, sem precisar mexer em código nenhum. Alimenta também o
-// indicador "📊 Dados de Não Recebimento/Atrasos" do Fluxo de Caixa (ver cfg.logAdiamentos).
-function getMotivosAdiamento(){
-  return(cfg.motivosAdiamento&&cfg.motivosAdiamento.length)?cfg.motivosAdiamento:[
-    'PROCESSO DO CLIENTE','ESQUECIMENTO','PROBLEMA NA ENTREGA (GRANDA)','OBRA ADIADA/ATRASADA PELO CLIENTE'
-  ];
-}
-function renderMotivosAdiamento(){
-  const el=document.getElementById('cfg-motivos-adiamento-list');if(!el)return;
-  // Primeira vez que alguém abre essa tela: materializa a lista padrão em cfg pra virar
-  // editável, em vez de ficar só como fallback invisível dentro de getMotivosAdiamento().
-  if(!cfg.motivosAdiamento||!cfg.motivosAdiamento.length)cfg.motivosAdiamento=getMotivosAdiamento().slice();
-  const motivos=cfg.motivosAdiamento;
-  if(!motivos.length){el.innerHTML='<p style="font-size:.75rem;color:var(--ink4)">Nenhum motivo cadastrado.</p>';return;}
-  el.innerHTML=motivos.map((m,i)=>`
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;background:#f8fafc;border:1.5px solid var(--border-lt);border-radius:8px">
-      <span style="font-size:.8rem;font-weight:600;color:#1e293b">${m}</span>
-      <button onclick="removeMotivoAdiamento(${i})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.9rem" title="Remover">🗑</button>
-    </div>`).join('');
-}
-function addMotivoAdiamento(){
-  const inp=document.getElementById('cfg-novo-motivo-adiamento');
-  const v=(inp?.value||'').trim().toUpperCase();
-  if(!v){toast('Descreva o motivo','terr');return;}
-  if(!cfg.motivosAdiamento||!cfg.motivosAdiamento.length)cfg.motivosAdiamento=getMotivosAdiamento().slice();
-  if(cfg.motivosAdiamento.includes(v)){toast('Esse motivo já existe','terr');return;}
-  cfg.motivosAdiamento.push(v);
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg);
-  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
-  if(inp)inp.value='';
-  renderMotivosAdiamento();
-  toast('Motivo adicionado!','tok');
-}
-function removeMotivoAdiamento(i){
-  if(!confirm('Remover este motivo? Adiamentos já registrados com ele continuam mostrando o texto normalmente, só não vai mais aparecer como opção pra marcar de novo.'))return;
-  cfg.motivosAdiamento.splice(i,1);
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg);
-  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
-  renderMotivosAdiamento();
-  toast('Motivo removido','tok');
-}
+// Motivos de Adiamento (Financeiro) — REMOVIDO (2026-08-20, a pedido do usuário): a lista
+// fixa de motivos pré-cadastrados foi trocada por um campo de texto livre obrigatório em
+// abrirMotivoNaoRecebido()/salvarNaoRecebido() ("melhor deixar livre o usuario digita o que
+// ele quer" em vez de ter que manter uma lista de motivos cadastrados). cfg.motivosAdiamento
+// e as funções getMotivosAdiamento/renderMotivosAdiamento/addMotivoAdiamento/
+// removeMotivoAdiamento e a seção correspondente em Configurações foram removidas — registros
+// antigos em cfg.logAdiamentos continuam mostrando o motivo categorizado normalmente (o
+// formato de dados não mudou, só como ele é preenchido daqui pra frente).
 
 // Motivos de Alteração de Prazo (Finalização) — opção obrigatória ao mudar o Prazo de
 // Finalização de uma obra em Planejamento (ver abrirAlterarPrazoObra()/
-// salvarAlteracaoPrazoObra()). Lista separada de Motivos de Adiamento (Financeiro) porque
-// é um contexto diferente — atraso na OBRA, não no PAGAMENTO. Semeada com os 3 motivos
-// pedidos pelo usuário na primeira vez que a tela é aberta, depois 100% editável aqui
-// (mesmo padrão de getMotivosAdiamento/renderMotivosAdiamento, 2026-07-23).
+// salvarAlteracaoPrazoObra()). Contexto diferente (atraso na OBRA, não no PAGAMENTO) — o
+// usuário só pediu pra tirar a lista fixa do lado de Não Recebimento, esta continua igual.
 function getMotivosPrazoFinalizacao(){
   return(cfg.motivosPrazoFinalizacao&&cfg.motivosPrazoFinalizacao.length)?cfg.motivosPrazoFinalizacao:[
     'OBRA DO CLIENTE ATRASADA','ATRASO DE PRODUÇÃO GRANDA','OUTROS'
@@ -12817,7 +12917,7 @@ function getComissaoItemsAll(){
       // registrado (conf), pra nunca sobrepor uma decisão humana real (ex.: Financeiro já
       // marcou "não recebido" com motivo, ou já confirmou com valor negociado).
       const autoHistorico=!!xlsxRef&&!conf&&_antesOuIgualJulhoI(dataAtiva);
-      const item={...parc,valor:valorAjustado,valorBruto:valorBrutoAjustado,status:conf?conf.status:(autoHistorico?'confirmado':'pendente'),historicoAutoConfirmado:autoHistorico,confirmedAt:conf?conf.confirmedAt:null,motivoAtraso:conf?conf.motivoAtraso||'':'',motivoAtrasoEm:conf?conf.motivoAtrasoEm||'':'',pct,pctClab,dataAtiva,nomeVend:vendForPct||p.responsavel||'—',cliente:p.cliente||'—',categoria:xlsxRef?(xlsxRef.cat||''):(p.tipoPedido||''),mesPedido:emMes,emY,emM,pedidoOs:p.os!=null?p.os:'—',job:p.job||'',cidade:p.locCidade||'',_pid:p.id,pedidoPdfUrl:p.arq_os_url||'',ocUrl:p.ocUrl||'',qy:qi.y,qm:qi.m,qhalf:qi.half};
+      const item={...parc,valor:valorAjustado,valorBruto:valorBrutoAjustado,status:conf?conf.status:(autoHistorico?'confirmado':'pendente'),historicoAutoConfirmado:autoHistorico,confirmedAt:conf?conf.confirmedAt:null,motivoAtraso:conf?conf.motivoAtraso||'':'',motivoAtrasoEm:conf?conf.motivoAtrasoEm||'':'',motivoAtrasoPor:conf?conf.motivoAtrasoPor||'':'',confirmadoPor:conf?conf.confirmadoPor||'':'',reabertoPor:conf?conf.reabertoPor||'':'',pct,pctClab,dataAtiva,nomeVend:vendForPct||p.responsavel||'—',cliente:p.cliente||'—',categoria:xlsxRef?(xlsxRef.cat||''):(p.tipoPedido||''),mesPedido:emMes,emY,emM,pedidoOs:p.os!=null?p.os:'—',job:p.job||'',cidade:p.locCidade||'',_pid:p.id,pedidoPdfUrl:p.arq_os_url||'',ocUrl:p.ocUrl||'',qy:qi.y,qm:qi.m,qhalf:qi.half};
       all.push(item);
     });
   });
@@ -12850,7 +12950,7 @@ function getComissaoItemsAll(){
       // (só existe planilha, nunca foi emitido no sistema), então só depende de não
       // existir confirmação/motivo manual já registrado.
       const autoHistorico=!conf&&_antesOuIgualJulhoI(dataAtiva);
-      const item={pedidoId:confKey,pedido:synP,label:`Parcela ${idx+1}`,valor:valorAjustado,valorBruto:valorBrutoAjustado,liqEstimado:false,dataStr:parc.dataStr,confKey,status:conf?conf.status:(autoHistorico?'confirmado':'pendente'),historicoAutoConfirmado:autoHistorico,confirmedAt:conf?conf.confirmedAt:null,motivoAtraso:conf?conf.motivoAtraso||'':'',motivoAtrasoEm:conf?conf.motivoAtrasoEm||'':'',pct,pctClab,dataAtiva,nomeVend:vendNorm||x.v||'—',cliente:x.cl||'—',categoria:x.cat||'',mesPedido:emMes,emY,emM,pedidoOs:String(x.p),job:'',cidade:'',_pid:'',pedidoPdfUrl:'',ocUrl:'',qy:qi.y,qm:qi.m,qhalf:qi.half};
+      const item={pedidoId:confKey,pedido:synP,label:`Parcela ${idx+1}`,valor:valorAjustado,valorBruto:valorBrutoAjustado,liqEstimado:false,dataStr:parc.dataStr,confKey,status:conf?conf.status:(autoHistorico?'confirmado':'pendente'),historicoAutoConfirmado:autoHistorico,confirmedAt:conf?conf.confirmedAt:null,motivoAtraso:conf?conf.motivoAtraso||'':'',motivoAtrasoEm:conf?conf.motivoAtrasoEm||'':'',motivoAtrasoPor:conf?conf.motivoAtrasoPor||'':'',confirmadoPor:conf?conf.confirmadoPor||'':'',reabertoPor:conf?conf.reabertoPor||'':'',pct,pctClab,dataAtiva,nomeVend:vendNorm||x.v||'—',cliente:x.cl||'—',categoria:x.cat||'',mesPedido:emMes,emY,emM,pedidoOs:String(x.p),job:'',cidade:'',_pid:'',pedidoPdfUrl:'',ocUrl:'',qy:qi.y,qm:qi.m,qhalf:qi.half};
       all.push(item);
     });
   });
@@ -12871,7 +12971,7 @@ function getComissaoItemsAll(){
     const pct=getPctComissao(sd.emY,sd.emM,sd.nomeVend);
     const pctClab=getPctComissao(sd.emY,sd.emM,'CLABONDE');
     const {valor:valorAjustado,valorBruto:valorBrutoAjustado}=_aplicaValorConfirmado(sd,conf);
-    const item={confKey:sd.confKey,label:`💰 Saldo · ${sd.origemLabel||'Parcela'}`,dataStr:sd.dataStr,valor:valorAjustado,valorBruto:valorBrutoAjustado,liqEstimado:false,status:conf?conf.status:'pendente',historicoAutoConfirmado:false,confirmedAt:conf?conf.confirmedAt:null,motivoAtraso:conf?conf.motivoAtraso||'':'',motivoAtrasoEm:conf?conf.motivoAtrasoEm||'':'',pct,pctClab,dataAtiva,nomeVend:sd.nomeVend||'—',cliente:sd.cliente||'—',categoria:sd.categoria||'',mesPedido:sd.mesPedido||'—',emY:sd.emY,emM:sd.emM,pedidoOs:sd.pedidoOs||'—',job:sd.job||'',cidade:'',_pid:sd.pedidoId||'',pedidoPdfUrl:'',ocUrl:'',qy:qi.y,qm:qi.m,qhalf:qi.half};
+    const item={confKey:sd.confKey,label:`💰 Saldo · ${sd.origemLabel||'Parcela'}`,dataStr:sd.dataStr,valor:valorAjustado,valorBruto:valorBrutoAjustado,liqEstimado:false,status:conf?conf.status:'pendente',historicoAutoConfirmado:false,confirmedAt:conf?conf.confirmedAt:null,motivoAtraso:conf?conf.motivoAtraso||'':'',motivoAtrasoEm:conf?conf.motivoAtrasoEm||'':'',motivoAtrasoPor:conf?conf.motivoAtrasoPor||'':'',confirmadoPor:conf?conf.confirmadoPor||'':'',reabertoPor:conf?conf.reabertoPor||'':'',pct,pctClab,dataAtiva,nomeVend:sd.nomeVend||'—',cliente:sd.cliente||'—',categoria:sd.categoria||'',mesPedido:sd.mesPedido||'—',emY:sd.emY,emM:sd.emM,pedidoOs:sd.pedidoOs||'—',job:sd.job||'',cidade:'',_pid:sd.pedidoId||'',pedidoPdfUrl:'',ocUrl:'',qy:qi.y,qm:qi.m,qhalf:qi.half};
     all.push(item);
   });
   // Exclusão pontual (2026-08-04) — OS 109,120,169,171,180,184,188,218: usuário confirmou
@@ -17340,18 +17440,16 @@ let _prodTabAtiva='lista';
 function prodSetTab(tab,btn){
   document.querySelectorAll('.prod-main-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  const sl=document.getElementById('prod-sec-lista'),sk=document.getElementById('prod-sec-kanban'),sc=document.getElementById('prod-sec-calendario');
+  const sl=document.getElementById('prod-sec-lista'),sd=document.getElementById('prod-sec-dias');
   if(sl)sl.style.display=tab==='lista'?'':'none';
-  if(sk)sk.style.display=tab==='kanban'?'':'none';
-  if(sc)sc.style.display=tab==='calendario'?'':'none';
+  if(sd)sd.style.display=tab==='dias'?'':'none';
   _prodTabAtiva=tab;
   prodRenderAtivo();
 }
 function prodRenderAtivo(){
   const capEl=document.getElementById('prod-cap-valor');
   if(capEl)capEl.textContent=fmtR(_lpCapProducaoDia());
-  if(_prodTabAtiva==='kanban')renderProdKanban();
-  else if(_prodTabAtiva==='calendario')renderProdCalendario();
+  if(_prodTabAtiva==='dias')renderProdDias();
   else renderProdLista();
 }
 function renderProdLista(){
@@ -17387,6 +17485,127 @@ function renderProdLista(){
     }).join('')}
     </tbody></table></div>`;
 }
+// ===================== VISÃO POR DIAS — PRODUÇÃO (2026-08-20, piloto) =====================
+// Substitui Kanban+Calendário por UMA visão só: coluna por dia (dia/semana/mês navegável),
+// cada card = 1 pedido (ou 1 "fatia" dele, quando a Produção precisou dividir o líquido em
+// vários dias — ver _lpAlocarProducao/_lpProdAlocCache, "Parte X de Y"). Reaproveita 100% do
+// cálculo já existente (_prodEventosFiltrados, _lpMapaProducaoPorDia, _prodCorCapacidade) —
+// não recalcula nada novo, só reorganiza a exibição. Reservas ativas do Simulador (que já
+// disputavam espaço na capacidade, mas não apareciam como card em lugar nenhum) agora aparecem
+// com o badge 🟠 SIMULAÇÃO, extraídas direto de mapaCap[iso].itens (mesma fonte da capacidade,
+// então nunca diverge do número mostrado no cabeçalho do dia).
+let _prodDiasView={periodo:'semana',refIso:new Date().toISOString().slice(0,10)};
+function _prodDiasRange(){
+  const periodo=_prodDiasView.periodo;
+  const ref=new Date(_prodDiasView.refIso+'T00:00:00');
+  let ini,fim;
+  if(periodo==='dia'){ini=new Date(ref);fim=new Date(ref);}
+  else if(periodo==='mes'){ini=new Date(ref.getFullYear(),ref.getMonth(),1);fim=new Date(ref.getFullYear(),ref.getMonth()+1,0);}
+  else{const dow=ref.getDay();ini=new Date(ref);ini.setDate(ref.getDate()-dow);fim=new Date(ini);fim.setDate(ini.getDate()+6);}
+  const dias=[];
+  for(let d=new Date(ini);d<=fim;d.setDate(d.getDate()+1))dias.push(fmtISOLocal(d));
+  return{ini,fim,dias};
+}
+function prodDiasNav(dir){
+  const periodo=_prodDiasView.periodo;
+  const d=new Date(_prodDiasView.refIso+'T00:00:00');
+  if(periodo==='dia')d.setDate(d.getDate()+dir);
+  else if(periodo==='mes')d.setMonth(d.getMonth()+dir);
+  else d.setDate(d.getDate()+dir*7);
+  _prodDiasView.refIso=fmtISOLocal(d);
+  renderProdDias();
+}
+function prodDiasHoje(){_prodDiasView.refIso=new Date().toISOString().slice(0,10);renderProdDias();}
+function prodDiasSetPeriodo(p){_prodDiasView.periodo=p;renderProdDias();}
+function _prodDiaCardHtml(ev){
+  if(ev.isSimulacao){
+    const r=ev.reserva||{};
+    return `<div style="background:#fff7ed;border:1.5px dashed #f59e0b;border-radius:10px;padding:10px">
+      <span style="font-size:.6rem;font-weight:800;color:#b45309;background:#fed7aa;border-radius:20px;padding:1px 7px">🟠 SIMULAÇÃO</span>
+      <div style="font-size:.76rem;color:var(--ink2);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(r.cliente||'').replace(/"/g,'&quot;')}">${r.cliente||'Reserva'}</div>
+      <div style="font-size:.68rem;font-weight:700;color:#b45309;margin-top:2px">${fmtR(ev.valorChunk||0)}</div>
+    </div>`;
+  }
+  const cor=_projStatusCor(ev.statusPedido);
+  const aloc=_lpProdAlocCache[ev.p.id];
+  const ehProducao=ev.sub&&ev.sub.key==='producao';
+  const chunks=(ehProducao&&aloc&&aloc.chunks&&aloc.chunks.length>1)?aloc.chunks:null;
+  let parteTxt='';
+  if(chunks){
+    const idx=chunks.findIndex(c=>c.iso===ev.iso)+1;
+    const totalLiquido=chunks.reduce((s,c)=>s+c.valor,0);
+    parteTxt=`<div style="font-size:.62rem;color:var(--ink4);margin-top:2px">Parte ${idx>0?idx:'?'} de ${chunks.length} · total ${fmtR(totalLiquido)}</div>`;
+  }
+  const valorTxt=ehProducao&&ev.valorChunk!=null?fmtR(ev.valorChunk):'';
+  return `<div onclick="prodIniciarOuAbrirChecklist('${ev.p.id}')" style="background:#fff;border:1px solid ${ev.statusPedido==='atrasado'?'#dc2626':'var(--border-lt)'};border-radius:10px;padding:10px;cursor:pointer">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+      <span style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${ev.p.os||'—'}</span>
+      ${ev.estouroChunk?'<span title="Requer atenção — estourou a janela de recuo">⚠️</span>':''}
+    </div>
+    <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(ev.p.cliente||'').replace(/"/g,'&quot;')}">${ev.p.cliente||'—'}</div>
+    <div style="font-size:.66rem;color:var(--ink4)">${ev.sub.label}</div>
+    ${valorTxt?`<div style="font-size:.7rem;font-weight:700;color:${cor};margin-top:2px">${valorTxt}</div>`:''}
+    ${parteTxt}
+    <div style="font-size:.62rem;font-weight:700;margin-top:2px;color:${cor}">${_projStatusLabel(ev.statusPedido)}</div>
+  </div>`;
+}
+function renderProdDias(){
+  const body=document.getElementById('prod-dias-body');
+  if(!body)return;
+  if(!_isSetorUser('PRODUÇÃO')){body.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const mapaCap=_lpMapaProducaoPorDia();
+  const cap=_lpCapProducaoDia();
+  const eventos=_prodEventosFiltrados();
+  const{ini,fim,dias}=_prodDiasRange();
+  const porDia={};
+  dias.forEach(iso=>porDia[iso]=[]);
+  eventos.forEach(ev=>{if(porDia[ev.iso])porDia[ev.iso].push(ev);});
+  dias.forEach(iso=>{
+    ((mapaCap[iso]&&mapaCap[iso].itens)||[]).filter(it=>it.reserva).forEach(it=>{
+      porDia[iso].push({isSimulacao:true,reserva:it.reserva,valorChunk:it.liquido});
+    });
+  });
+  const totalPeriodo=dias.reduce((s,iso)=>s+((mapaCap[iso]&&mapaCap[iso].soma)||0),0);
+  const perEl=document.getElementById('prod-dias-periodo');
+  if(perEl)perEl.value=_prodDiasView.periodo;
+  const lblEl=document.getElementById('prod-dias-lbl');
+  if(lblEl)lblEl.textContent=_prodDiasView.periodo==='mes'?(MESES_PT[fim.getMonth()+1]+' '+fim.getFullYear()):_prodDiasView.periodo==='dia'?fmtD(dias[0]):(fmtD(dias[0])+' – '+fmtD(dias[dias.length-1]));
+  const totEl=document.getElementById('prod-dias-total');
+  if(totEl)totEl.textContent=fmtR(totalPeriodo);
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const nomesFeriados=Object.assign({},getFeriadosComNome(ini.getFullYear()),getFeriadosComNome(fim.getFullYear()));
+  body.innerHTML=dias.map(iso=>{
+    const itens=(porDia[iso]||[]).slice().sort((a,b)=>{
+      const oa=a.isSimulacao?1:0,ob=b.isSimulacao?1:0;
+      if(oa!==ob)return oa-ob;
+      return String((a.p&&a.p.os)||'').localeCompare(String((b.p&&b.p.os)||''),'pt-BR',{numeric:true});
+    });
+    const soma=(mapaCap[iso]&&mapaCap[iso].soma)||0;
+    const capInfo=_prodCorCapacidade(soma,cap);
+    const ehHoje=iso===hojeIso;
+    const nomeFeriado=nomesFeriados[iso];
+    const dataObj=new Date(iso+'T00:00:00');
+    const diaSemana=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dataObj.getDay()];
+    return `<div style="flex:0 0 260px;background:#f8fafc;border-radius:12px;border:1px solid ${nomeFeriado?'#f59e0b':(ehHoje?'var(--brand)':'var(--border-lt)')};display:flex;flex-direction:column;max-height:74vh">
+      <div style="padding:10px 12px;border-bottom:2px solid ${capInfo.cor};${ehHoje?'background:var(--brand-xlt)':''}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:.76rem;font-weight:800;color:${ehHoje?'var(--brand-d)':'var(--ink)'}">${diaSemana} ${String(dataObj.getDate()).padStart(2,'0')}/${String(dataObj.getMonth()+1).padStart(2,'0')}</span>
+          <span style="font-size:.64rem;font-weight:700;color:#fff;background:${capInfo.cor};border-radius:20px;padding:1px 8px">${itens.length}</span>
+        </div>
+        ${nomeFeriado?`<div style="font-size:.6rem;color:#b45309;font-weight:700;margin-top:1px">🎌 ${nomeFeriado}</div>`:''}
+        <div style="font-size:.72rem;font-weight:800;color:${capInfo.cor};margin-top:2px">${fmtR(soma)}</div>
+        <div style="font-size:.6rem;color:${capInfo.cor}">${capInfo.label} de ${fmtR(cap)}</div>
+      </div>
+      <div style="padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px">
+        ${itens.length?itens.map(ev=>_prodDiaCardHtml(ev)).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.7rem">—</div>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+// ===================== FIM VISÃO POR DIAS — PRODUÇÃO =====================
+// Kanban/Calendário antigos ficam definidos abaixo, sem uso nenhum (nada mais chama), só como
+// referência/segurança — se algum dia precisar reverter a tab 'dias' pra eles, o código não
+// precisa ser reescrito do zero.
 function renderProdKanban(){
   const wrap=document.getElementById('prod-kanban-body');
   if(!wrap)return;
@@ -18172,6 +18391,44 @@ function _simCalMov(dir){
   if(_simCalMes.m<1){_simCalMes.m=12;_simCalMes.y--;}
   _simRenderCalendario();
 }
+// Filtro de setores do Calendário da Simulação (2026-08-20, a pedido do usuário: "eu quero poder
+// selecionar o setor e tirar ou incluir ele no calendário pra visualizar melhor, por exemplo se
+// eu quiser ver só as datas de produção"). `_simCalSetoresOcultos` guarda as CHAVES de etapa
+// (mesmo `key` de LP_ETAPAS_PADRAO/_lpCorEtapa, ex.: 'producao','projeto','compras','corteGalv')
+// que o usuário desmarcou — vazio por padrão = mostra tudo, exatamente como já era antes desta
+// mudança (zero regressão pra quem nunca mexer no filtro). Lista de chips é montada
+// DINAMICAMENTE a partir do que realmente aparece nesse mês+simulação (não é uma lista fixa),
+// então cobre também etapa personalizada que um admin tenha criado em Configurações. Preferência
+// fica só na memória da aba (não salva no Firestore) — reseta ao recarregar a página, de
+// propósito, pra nunca esconder setor sem querer numa sessão futura.
+let _simCalSetoresOcultos=new Set();
+let _simCalChavesConhecidas=[];
+function _simCalToggleSetor(key){
+  if(_simCalSetoresOcultos.has(key))_simCalSetoresOcultos.delete(key);
+  else _simCalSetoresOcultos.add(key);
+  _simRenderCalendario();
+}
+function _simCalSetoresTodos(mostrar){
+  if(mostrar)_simCalSetoresOcultos.clear();
+  else _simCalChavesConhecidas.forEach(k=>_simCalSetoresOcultos.add(k));
+  _simRenderCalendario();
+}
+function _simRenderFiltroSetores(setoresMap){
+  const el=document.getElementById('sim-cal-filtro-setores');
+  if(!el)return;
+  if(!setoresMap.size){el.innerHTML='';return;}
+  const chips=[...setoresMap.entries()].map(([key,label])=>{
+    const ativo=!_simCalSetoresOcultos.has(key);
+    const cor=_lpCorEtapa(key);
+    return `<button type="button" onclick="_simCalToggleSetor('${key}')" style="font-size:.68rem;font-weight:700;border-radius:20px;padding:4px 10px;cursor:pointer;border:1.5px solid ${cor};background:${ativo?cor:'#fff'};color:${ativo?'#fff':cor}">${ativo?'✓ ':''}${label}</button>`;
+  }).join('');
+  el.innerHTML=`<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px">
+    <span style="font-size:.68rem;color:var(--ink4);font-weight:700">Setores no calendário:</span>
+    ${chips}
+    <button type="button" onclick="_simCalSetoresTodos(true)" class="dash-btn-conf" style="background:#94a3b8;font-size:.66rem;padding:3px 9px">Marcar todos</button>
+    <button type="button" onclick="_simCalSetoresTodos(false)" class="dash-btn-conf" style="background:#94a3b8;font-size:.66rem;padding:3px 9px">Desmarcar todos</button>
+  </div>`;
+}
 function _simRenderCalendario(){
   const wrap=document.getElementById('sim-cal-wrap');
   if(!wrap)return;
@@ -18186,16 +18443,21 @@ function _simRenderCalendario(){
   if(lbl)lbl.textContent=MESES_PT[m]+' '+y;
   const body=document.getElementById('sim-cal-body');
   if(!body)return;
+  const eventosReaisTodos=_simEventosReaisTodos();
+  const setoresMap=new Map();
+  eventosReaisTodos.forEach(ev=>{if(!setoresMap.has(ev.key))setoresMap.set(ev.key,ev.label);});
+  (_simUltimoResultado.etapas||[]).filter(e=>e.iso).forEach(e=>{if(!setoresMap.has(e.key))setoresMap.set(e.key,e.label);});
+  _simCalChavesConhecidas=[...setoresMap.keys()];
+  _simRenderFiltroSetores(setoresMap);
   const porDiaReal={};
-  _simEventosReaisTodos().forEach(ev=>{
+  eventosReaisTodos.filter(ev=>!_simCalSetoresOcultos.has(ev.key)).forEach(ev=>{
     const partes=ev.iso.split('-');
     if(parseInt(partes[0],10)===y&&parseInt(partes[1],10)===m){
       (porDiaReal[ev.iso]=porDiaReal[ev.iso]||[]).push(ev);
     }
   });
   const porDiaSim={};
-  (_simUltimoResultado.etapas||[]).forEach(e=>{
-    if(!e.iso)return;
+  (_simUltimoResultado.etapas||[]).filter(e=>e.iso&&!_simCalSetoresOcultos.has(e.key)).forEach(e=>{
     const partes=e.iso.split('-');
     if(parseInt(partes[0],10)===y&&parseInt(partes[1],10)===m){
       (porDiaSim[e.iso]=porDiaSim[e.iso]||[]).push(e);
@@ -20235,7 +20497,11 @@ function _rhParseHorarioSemanal(root){
   const previstoMin={0:0,1:0,2:0,3:0,4:0,5:0,6:0}; // índice = Date.getDay() (0=dom..6=sab)
   const entradaMin={0:null,1:null,2:null,3:null,4:null,5:null,6:null};
   const voltaAlmocoMin={0:null,1:null,2:null,3:null,4:null,5:null,6:null};
-  const _fallback=()=>({previstoMin:_rhPrevistoMinPadrao(),entradaMin:_rhEntradaPrevistaPadrao(),voltaAlmocoMin:_rhVoltaAlmocoPrevistaPadrao()});
+  // fonte:'padrao'|'arquivo' (2026-08-20) — pra diagnóstico do upload conseguir dizer se a escala
+  // usada veio do horário oficial da empresa (fallback) ou da tabela "Horário de Trabalho" DENTRO
+  // do arquivo do Hponto (que pode estar errada/desatualizada pra algum colaborador específico,
+  // ver _rhDescreverEscala). Não muda nenhum cálculo, só identifica a origem.
+  const _fallback=()=>({previstoMin:_rhPrevistoMinPadrao(),entradaMin:_rhEntradaPrevistaPadrao(),voltaAlmocoMin:_rhVoltaAlmocoPrevistaPadrao(),fonte:'padrao'});
   const horarioTd=_rhAchaTd(root,['Horario de Trabalho','Horário de Trabalho']);
   if(!horarioTd)return _fallback();
   const tabela=horarioTd.closest('table');
@@ -20260,7 +20526,7 @@ function _rhParseHorarioSemanal(root){
     voltaAlmocoMin[abrevMap[primeiro]]=tempos.length>2?_rhParseHoraHHMM(tempos[2]):null;
     achouAlgumDia=true;
   });
-  return achouAlgumDia?{previstoMin,entradaMin,voltaAlmocoMin}:_fallback();
+  return achouAlgumDia?{previstoMin,entradaMin,voltaAlmocoMin,fonte:'arquivo'}:_fallback();
 }
 // Status que zeram o "previsto" do dia mesmo caindo num dia de semana com escala normal —
 // feriado/férias/folga extra não são falta nem entram nas horas previstas.
@@ -20305,30 +20571,60 @@ function _rhParseDiasTable(root,horario,hojeIso){
       const ta=_rhParseHoraHHMM(logical[a]),tb=_rhParseHoraHHMM(logical[b]);
       if(ta!=null&&tb!=null&&tb>ta)trabalhadoMin+=(tb-ta);
     });
+    // Guarda os horários batidos crus (Ent1/Sai1/Ent2/Sai2 = manhã+tarde, o par mais comum;
+    // Ent3/Sai3/Ent4/Sai4 só aparecem em exceções, ex.: texto livre "FALTA DE ENERGIA HOF" no
+    // dia de Atestado) — pedido do usuário (2026-07-29): "quero ver o horário que ele chegou
+    // no dia tal", precisa do dado por dia, não só o total. Calculado ANTES da decisão de
+    // "é atestado de verdade?" logo abaixo, porque agora essa decisão depende dele.
+    const obsExtra=[logical[6],logical[7],logical[8],logical[9]].filter(v=>v&&!/^\d{2}:\d{2}$/.test(v)).join(' ');
     const diaSemana=new Date(iso+'T00:00:00').getDay();
     let previstoDiaMin=previstoMin[diaSemana]||0;
     const statusLower=status.toLowerCase();
     // Atestado/Declaração: guarda quantas horas o dia previa ANTES de zerar (pra mostrar no
     // card "Dias de Atestado" quantas horas ficaram cobertas), depois zera igual folga/feriado
     // — não deve contar como falta nem como perda na Assiduidade/Horas Cumpridas.
-    const ehAtestado=_RH_STATUS_ATESTADO.some(k=>statusLower.includes(k));
+    //
+    // Atestado "de mentirinha" (2026-08-20, a pedido do usuário) — o Hponto não tem status
+    // pra toda dispensa (ex.: "dispensamos porque acabou a luz"), então quem lança o ponto usa
+    // "Atestado" como status genérico E deixa um comentário/texto livre explicando o motivo
+    // real (mesmo texto livre que já aparece em obsExtra, ex.: "FALTA DE ENERGIA HOF" — ver
+    // comentário original disso acima). Regra do usuário: "quando tiver apenas atestado mesmo
+    // sem comentario dai é pq é atestado mesmo" — ou seja, só conta como atestado de verdade
+    // (indicador "Dias de Atestado") quando o status diz Atestado/Declaração e NÃO tem
+    // comentário junto. Com comentário, é dispensa justificada por outro motivo: continua
+    // não penalizando o funcionário (previsto zerado, trabalhado creditado, igual ao atestado
+    // de verdade), só não entra na contagem de "Dias de Atestado" — o motivo real continua
+    // visível no 📝 da tabela dia a dia (mesmo obsExtra).
+    //
+    // REFINADO (2026-08-20, testado contra os arquivos reais de ADRIANO MIGLIORINI e GUSTAVO
+    // BARBOSA que o usuário mandou como exemplo) — achado um caso real que a regra acima não
+    // cobria: Gustavo tem 2 dias (23/07 e 24/07) com status "Atestado" e um comentário no
+    // Hponto que só diz literalmente "atestado médico" — não é um motivo ALTERNATIVO (tipo
+    // "FALTA DE ENERGIA HOF" ou "CURSO NR35 MOROSEG", que SÃO um motivo diferente escondido
+    // atrás do status genérico Atestado), é só o texto confirmando que é atestado mesmo. Com a
+    // regra antiga, esses 2 dias caíam em "dispensa justificada" e sumiam do indicador "Dias de
+    // Atestado" (mostrava 0 quando deveria mostrar 2) — o oposto do que faz sentido. Agora só
+    // conta como "dispensa justificada" (motivo diferente) quando o comentário NÃO menciona
+    // atestado/declaração; se o comentário só confirma/repete a palavra atestado, continua
+    // contando como atestado de verdade.
+    const statusDizAtestado=_RH_STATUS_ATESTADO.some(k=>statusLower.includes(k));
+    const temComentarioAtestado=!!obsExtra.trim();
+    const comentarioSoConfirmaAtestado=temComentarioAtestado&&_RH_STATUS_ATESTADO.some(k=>obsExtra.toLowerCase().includes(k));
+    const ehAtestado=statusDizAtestado&&(!temComentarioAtestado||comentarioSoConfirmaAtestado);
+    const ehDispensaJustificada=statusDizAtestado&&temComentarioAtestado&&!comentarioSoConfirmaAtestado;
     const previstoOriginalDiaMin=previstoDiaMin;
     if(_RH_STATUS_NAO_UTIL.some(k=>statusLower.includes(k)))previstoDiaMin=0;
-    if(ehAtestado){
+    if(ehAtestado||ehDispensaJustificada){
       previstoDiaMin=0;
       // NOVO (2026-08-10, a pedido do usuário): considera que o colaborador trabalhou as horas
       // do dia normalmente mesmo com atestado — antes trabalhadoMin ficava com o que foi batido
       // de verdade no ponto (geralmente 0, já que não compareceu), o que fazia o total de
       // "Horas Trabalhadas" do período parecer menor só por causa do atestado. Não muda
       // falta/atraso/perdido/diasUteis (que já ficam neutros aqui porque previstoDiaMin virou 0
-      // acima) — só garante que a soma de horas trabalhadas não desconta esse dia.
+      // acima) — só garante que a soma de horas trabalhadas não desconta esse dia. Estendido
+      // em 2026-08-20 pra dispensa justificada (mesmo raciocínio: não é falta do funcionário).
       trabalhadoMin=previstoOriginalDiaMin;
     }
-    // Guarda os horários batidos crus (Ent1/Sai1/Ent2/Sai2 = manhã+tarde, o par mais comum;
-    // Ent3/Sai3/Ent4/Sai4 só aparecem em exceções, ex.: texto livre "FALTA DE ENERGIA HOF" no
-    // dia de Atestado) — pedido do usuário (2026-07-29): "quero ver o horário que ele chegou
-    // no dia tal", precisa do dado por dia, não só o total.
-    const obsExtra=[logical[6],logical[7],logical[8],logical[9]].filter(v=>v&&!/^\d{2}:\d{2}$/.test(v)).join(' ');
     // Atraso de ENTRADA (2026-07-30, pedido do usuário: "quero ver os horários que ele chegou
     // atrasado" — não bastava "trabalhou menos horas", que também acontece por sair mais cedo
     // ou almoço longo). Compara o Ent1 batido contra a entrada esperada daquele dia da semana;
@@ -20362,10 +20658,37 @@ function _rhParseDiasTable(root,horario,hojeIso){
     dias.push({
       data:iso,diaSemana,status,previstoMin:previstoDiaMin,trabalhadoMin,atrasoMin,atrasoEntradaMin,atrasoAlmocoMin,incompleto,
       entrada:logical[2]||'',saidaAlmoco:logical[3]||'',voltaAlmoco:logical[4]||'',saidaFinal:logical[5]||'',
-      obs:obsExtra||'',atestado:ehAtestado,previstoOriginalMin:ehAtestado?previstoOriginalDiaMin:0
+      obs:obsExtra||'',atestado:ehAtestado,dispensaJustificada:ehDispensaJustificada,
+      previstoOriginalMin:(ehAtestado||ehDispensaJustificada)?previstoOriginalDiaMin:0
     });
   });
   return dias;
+}
+// Descreve a escala semanal DETECTADA no arquivo e compara com a oficial da empresa (2026-08-20,
+// a pedido do usuário: "as horas faltadas estão sendo calculadas erradas, preciso que revise o
+// modo como é feito" — lembrando que o expediente oficial é 07:30–12:00 e 13:00–17:18). Revisei
+// a fórmula de "Horas Perdidas" (perdidoMin, ver _rhStats) a fundo e ela bate exatamente com esse
+// horário quando cai no padrão (RH_HORARIO_PADRAO_EMPRESA). Só que quando o arquivo do Hponto TEM
+// a tabela "Horário de Trabalho" preenchida, o parser usa o que está NO ARQUIVO, não o padrão
+// oficial (ver _rhParseHorarioSemanal) — se o cadastro de algum colaborador no Hponto estiver
+// errado/desatualizado lá (diferente de 07:30–17:18), as "Horas Perdidas" dele saem calculadas
+// em cima da escala errada, sem nenhum aviso visível. Antes o diagnóstico do upload só dizia SE
+// achou a tabela, não O QUE ela dizia — agora mostra a escala de cada dia e avisa se algum dia
+// diverge da oficial, pra dar pra confirmar/descartar essa causa sem precisar abrir o HTML na
+// mão. Não muda NENHUM cálculo existente — só adiciona visibilidade no resumo do upload.
+const _RH_DIAS_LABEL=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+function _rhDescreverEscala(horario){
+  const oficial=_rhPrevistoMinPadrao();
+  const partes=[],divergencias=[];
+  for(let i=0;i<7;i++){
+    const min=horario.previstoMin[i]||0;
+    partes.push(`${_RH_DIAS_LABEL[i]} ${min>0?_rhFmtHoras(min):'—'}`);
+    const min2=oficial[i]||0;
+    if(min!==min2){
+      divergencias.push(`${_RH_DIAS_LABEL[i]}: arquivo diz ${min>0?_rhFmtHoras(min):'sem expediente'}, oficial da empresa é ${min2>0?_rhFmtHoras(min2):'sem expediente'}`);
+    }
+  }
+  return{texto:partes.join(' · '),divergencias};
 }
 // Lê o arquivo (texto puro — é HTML, não binário) e monta {nome,funcao,departamento,dias[],
 // diagnostico[]}. O diagnóstico é sempre retornado (mesmo em caso de erro, via exceção com
@@ -20394,8 +20717,13 @@ async function _rhParseArquivo(file){
   const departamento=(departamentoRaw||'SEM DEPARTAMENTO').toUpperCase();
   diag.push(`Função: "${funcao||'—'}" · Departamento: "${departamento}".`);
   const horario=_rhParseHorarioSemanal(doc);
-  const temEscala=Object.values(horario.previstoMin).some(v=>v>0);
-  diag.push(temEscala?'Escala semanal (Horário de Trabalho) reconhecida.':'⚠️ Não achei a escala semanal "Horário de Trabalho" — horas previstas podem sair zeradas.');
+  const descEscala=_rhDescreverEscala(horario);
+  if(horario.fonte==='arquivo'){
+    diag.push(`Escala semanal (Horário de Trabalho) lida do arquivo: ${descEscala.texto}.`);
+    if(descEscala.divergencias.length)diag.push(`⚠️ Escala do arquivo diferente da oficial da empresa (07:30–12:00 e 13:00–17:18) em: ${descEscala.divergencias.join('; ')}. Isso muda direto as "Horas Perdidas" calculadas pra este colaborador — confira se é isso mesmo ou se é erro de cadastro no Hponto.`);
+  }else{
+    diag.push(`⚠️ Não achei a tabela "Horário de Trabalho" no arquivo — usando o horário oficial da empresa como padrão: ${descEscala.texto}.`);
+  }
   const hojeIso=fmtISOLocal(new Date());
   const dias=_rhParseDiasTable(doc,horario,hojeIso);
   diag.push(dias.length?`${dias.length} dia(s) já concluído(s) lido(s) da tabela "Dia".`:'⚠️ A tabela "Dia" não foi encontrada, ou nenhum dia concluído (só hoje/futuro) — nenhum indicador vai sair daqui.');
@@ -20479,7 +20807,7 @@ async function _rhSalvarRegistrosFuncionario(funcionarioId,dias,arquivoNome){
       diasMerged[d.data]={status:d.status,previstoMin:d.previstoMin,trabalhadoMin:d.trabalhadoMin,diaSemana:d.diaSemana,
         atrasoMin:d.atrasoMin||0,atrasoEntradaMin:d.atrasoEntradaMin||0,atrasoAlmocoMin:d.atrasoAlmocoMin||0,incompleto:!!d.incompleto,
         entrada:d.entrada||'',saidaAlmoco:d.saidaAlmoco||'',voltaAlmoco:d.voltaAlmoco||'',saidaFinal:d.saidaFinal||'',obs:d.obs||'',
-        atestado:!!d.atestado,previstoOriginalMin:d.previstoOriginalMin||0};
+        atestado:!!d.atestado,dispensaJustificada:!!d.dispensaJustificada,previstoOriginalMin:d.previstoOriginalMin||0};
     });
     const payload={funcionarioId,anoMes,atualizadoEm:new Date().toISOString(),arquivoOrigem:arquivoNome||'',dias:diasMerged};
     promessas.push(window._fbSaveRhPonto(docId,payload));
@@ -20605,7 +20933,18 @@ function _rhStats(diasArr){
     // agregado (ex.: Adriano perdeu ~4h52 num dia de Atestado, mas fez hora extra em outros
     // dias — o mês inteiro fechava "0 perdido" mesmo tendo prejuízo real naquele dia). Agora
     // cada dia só pode ADICIONAR perda (max(0,prev-trab)), nunca subtrair de outro dia.
-    if(prev>0)perdidoMin+=Math.max(0,prev-trab);
+    //
+    // CORRIGIDO (2026-08-20) — causa raiz real do "Horas Perdidas calculando errado" que o
+    // usuário reportou, achada testando contra o arquivo de ADRIANO MIGLIORINI mandado como
+    // exemplo: dia "incompleto" (ponto ainda não fechou no export, ver _rhParseDiasTable) tinha
+    // trabalhadoMin=0 e ENTRAVA aqui como se fosse 1 dia inteiro perdido (prev-0), mesmo o
+    // comentário/código deste arquivo dizendo explicitamente que dia incompleto é "dado
+    // insuficiente pra avaliar, não ausência real" — e mesmo esse dia já sendo excluído de
+    // faltasDias/diasAvaliaveis logo abaixo. No arquivo do Adriano isso inflava "Horas
+    // Perdidas" de 17:36 (2 faltas reais de 8:48 cada) pra 26:24 — um dia incompleto (29/07)
+    // somando +8:48 de perda que não existiu de verdade. Agora dia incompleto não soma em
+    // perdidoMin, igual já não somava em faltasDias.
+    if(prev>0&&!d.incompleto)perdidoMin+=Math.max(0,prev-trab);
     if(prev>0){
       diasUteis++;
       // Dia "incompleto" (só entrada batida, ponto do dia ainda não fechou no export) não
@@ -22082,7 +22421,7 @@ function _histPedidoEventos(p){
       // (pode ser diferente de quando alguém deu baixa no sistema) — sempre prioridade sobre
       // confirmedAt (só o timestamp de quando o sistema foi mexido), pra esse evento e os
       // indicadores de Histórico refletirem a data certa (2026-07-23, a pedido do usuário).
-      add('💰',`Pagamento confirmado — ${item.label}`,conf.dataRecebimentoReal||conf.confirmedAt||item.dataStr,`${fmtR(conf.valorBrutoConfirmado||item.valorBruto||item.valor||0)} recebido em ${fmtD(conf.dataRecebimentoReal)||fmtD(conf.novaData)||item.dataStr}`,'#16a34a');
+      add('💰',`Pagamento confirmado — ${item.label}`,conf.dataRecebimentoReal||conf.confirmedAt||item.dataStr,`${fmtR(conf.valorBrutoConfirmado||item.valorBruto||item.valor||0)} recebido em ${fmtD(conf.dataRecebimentoReal)||fmtD(conf.novaData)||item.dataStr}${conf.confirmadoPor?' — confirmado por '+conf.confirmadoPor:''}`,'#16a34a');
     }else if(conf.reabertoEm){
       // 2026-08-04, a pedido do usuário: reabrir um recebimento também é um evento — antes
       // esse dado se perdia por completo (reabrirPag() apagava a confirmação inteira), então
@@ -23111,39 +23450,39 @@ function abrirMotivoNaoRecebido(confKey,dataStr,cliente,valor){
   _mnrConfKey=confKey;_mnrDataStr=dataStr;_mnrCliente=cliente;_mnrValor=valor;
   const info=document.getElementById('mnr-info');
   if(info)info.innerHTML=`<strong>${cliente||'—'}</strong> · ${fmtR(valor||0)} · previsto para ${dataStr||'—'}`;
-  const list=document.getElementById('mnr-motivos-list');
-  if(list){
-    const motivos=getMotivosAdiamento();
-    list.innerHTML=motivos.map(m=>`
-      <label style="display:flex;align-items:center;gap:8px;font-size:.8rem;font-weight:500;color:#1e293b;cursor:pointer;background:#f8fafc;border:1.5px solid var(--border-lt);border-radius:8px;padding:8px 12px">
-        <input type="checkbox" class="mnr-motivo-chk" value="${m.replace(/"/g,'&quot;')}" style="width:16px;height:16px;flex-shrink:0;accent-color:#dc2626">
-        ${m}
-      </label>`).join('');
-  }
+  // (2026-08-20, a pedido do usuário) A lista fixa de motivos pré-cadastrados (cfg.motivosAdiamento)
+  // foi removida — "melhor deixar livre o usuario digita o que ele quer" em vez de se preocupar
+  // se o motivo certo já está cadastrado. Agora é só um campo de texto livre e obrigatório.
+  const motivoEl=document.getElementById('mnr-motivo-livre');if(motivoEl)motivoEl.value='';
   const dt=document.getElementById('mnr-nova-data');if(dt)dt.value=_sugereQuinzena(dataStr);
-  const obs=document.getElementById('mnr-obs');if(obs)obs.value='';
   openM('mo-motivo-nr');
 }
 function salvarNaoRecebido(){
-  const chks=[...document.querySelectorAll('.mnr-motivo-chk:checked')].map(c=>c.value);
-  if(!chks.length){toast('Marque ao menos um motivo — é obrigatório','terr');return;}
+  const motivoTxt=(document.getElementById('mnr-motivo-livre')?.value||'').trim();
+  if(!motivoTxt){toast('Explique o que aconteceu — é obrigatório','terr');return;}
   const novaDataISO=(document.getElementById('mnr-nova-data')?.value||'').trim();
   if(!novaDataISO){toast('Informe a nova data prevista — é obrigatório','terr');return;}
-  const obs=(document.getElementById('mnr-obs')?.value||'').trim();
   if(!_mnrConfKey)return;
   const[y,m,d]=novaDataISO.split('-');
   const novaDataBR=d+'/'+m+'/'+y;
-  const motivoTxt=chks.join(', ')+(obs?(' — '+obs):'');
   // Log histórico separado (append-only, cfg.pagConf só guarda o estado ATUAL e seria
   // sobrescrito no próximo adiamento) — é essa lista que alimenta o indicador
-  // "📊 Dados de Não Recebimento/Atrasos" do Fluxo de Caixa, com motivo/mês/ano.
+  // "📊 Dados de Não Recebimento/Atrasos" do Fluxo de Caixa. `motivos` continua um array (só
+  // com 1 item agora, o texto livre digitado) pra não quebrar nada que já lê esse formato —
+  // ver renderFinNaoRecebimento(). Como o texto agora é livre, o ranking "por motivo" ali
+  // tende a virar 1 linha por registro (texto raramente repete igual) — isso é esperado.
+  // quem registrou (2026-08-20, a pedido do usuário: "quero colocar só a informação no sistema
+  // de quem deu a baixa ali no recebido e quem reabriu, quem pagou a comissao, etc etc... o
+  // usuario no caso puxar automatico do que ta logado") — mesmo padrão de confirmadoPor/
+  // reabertoPor, puxado direto de usuarioLogado, sem exigir digitar nada.
+  const _mnrPor=(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—');
   if(!cfg.logAdiamentos)cfg.logAdiamentos=[];
   cfg.logAdiamentos.push({
     confKey:_mnrConfKey,cliente:_mnrCliente||'',valor:_mnrValor||0,
     dataPrevistaAnterior:_mnrDataStr||'',novaData:novaDataBR,
-    motivos:chks,observacao:obs,em:new Date().toISOString()
+    motivos:[motivoTxt],observacao:'',em:new Date().toISOString(),por:_mnrPor
   });
-  setPagConf(_mnrConfKey,{status:'pendente',novaData:novaDataBR,motivoAtraso:motivoTxt,motivoAtrasoEm:new Date().toISOString()});
+  setPagConf(_mnrConfKey,{status:'pendente',novaData:novaDataBR,motivoAtraso:motivoTxt,motivoAtrasoEm:new Date().toISOString(),motivoAtrasoPor:_mnrPor});
   closeM('mo-motivo-nr');
   toast('Marcado como não recebido — adiado para '+novaDataBR,'tok');
   const row=document.querySelector(`tr[data-ck="${CSS.escape(_mnrConfKey)}"]`);if(row)row.remove();
@@ -23252,7 +23591,11 @@ function salvarConfirmarRecebimento(){
       criadoEm:new Date().toISOString()
     });
   }
-  setPagConf(_cfrConfKey,{status:'confirmado',novaData:_cfrDataStr,confirmedAt:new Date().toISOString(),dataRecebimentoReal,motivoAtraso:'',motivoAtrasoEm:'',valorBrutoConfirmado:valorBrutoFinal});
+  // confirmadoPor (2026-08-20, a pedido do usuário: "cuidar com alterações de contas que já
+  // foi dada como recebidas") — reabrirPag() já registrava reabertoPor desde 2026-08-04, mas
+  // confirmar recebimento em si nunca guardava quem deu a baixa; agora fica registrado igual,
+  // e aparece no evento "Pagamento confirmado" do Histórico de Pedidos (ver _histPedidoEventos).
+  setPagConf(_cfrConfKey,{status:'confirmado',novaData:_cfrDataStr,confirmedAt:new Date().toISOString(),dataRecebimentoReal,motivoAtraso:'',motivoAtrasoEm:'',valorBrutoConfirmado:valorBrutoFinal,confirmadoPor:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—')});
   closeM('mo-confirmar-receb');
   toast(saldoDevedor>0.005?`Recebimento parcial confirmado (${fmtR(valorBrutoFinal)}) — saldo de ${fmtR(saldoDevedor)} lançado pra ${saldoDataBR} ✅`:(_cfrNegociado?`Recebimento confirmado com valor negociado (${fmtR(valorBrutoFinal)})! Comissão ajustada e liberada. ✅`:'Recebimento confirmado! Comissão liberada na quinzena. ✅'),'tok');
   const row=document.querySelector(`tr[data-ck="${CSS.escape(_cfrConfKey)}"]`);if(row)row.remove();
@@ -23452,11 +23795,18 @@ function renderFinanceiro(){
     // da quinzena "a pagar" de Metas & Comissões sem mexer no status de recebimento (continua
     // Recebido normalmente). Ver setComissaoPagaFora().
     const pagaForaTag=i.comissaoPagaFora
-      ?`<span style="font-size:.66rem;color:#7c3aed;font-weight:700;margin-left:6px" title="Marcado por ${i.comissaoPagaFora.por||'—'} em ${i.comissaoPagaFora.em?new Date(i.comissaoPagaFora.em).toLocaleDateString('pt-BR'):'—'} — não entra na quinzena de pagamento de comissão">💸 Comissão paga por fora${isFinAdm?` <button onclick="setComissaoPagaFora('${ck}',false)" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:1px 5px;font-size:.6rem;color:#64748b;cursor:pointer" title="Desmarcar">✕</button>`:''}</span>`
+      ?`<span style="font-size:.66rem;color:#7c3aed;font-weight:700;margin-left:6px" title="Marcado por ${i.comissaoPagaFora.por||'—'} em ${i.comissaoPagaFora.em?new Date(i.comissaoPagaFora.em).toLocaleDateString('pt-BR'):'—'} — não entra na quinzena de pagamento de comissão">💸 Comissão paga por fora${isFinAdm?` <button onclick="setComissaoPagaFora('${ck}',false)" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:1px 5px;font-size:.6rem;color:#64748b;cursor:pointer" title="Desmarcar">✕</button>`:''}</span><div style="font-size:.62rem;color:#94a3b8;margin-top:2px">por ${i.comissaoPagaFora.por||'—'}</div>`
       :(isFinAdm?`<button onclick="setComissaoPagaFora('${ck}',true)" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.66rem;color:#7c3aed;cursor:pointer;margin-left:6px" title="Marque se a comissão desta parcela já foi paga ao vendedor por fora — assim ela some da quinzena de pagamento, sem afetar o recebimento (continua Recebido)">💸 Já paga por fora</button>`:'');
+    // "Por quem" discreto (2026-08-20, a pedido do usuário: "quero colocar só a informação no
+    // sistema de quem deu a baixa ali no recebido e quem reabriu... algo discreto e pequeno mas
+    // bem visivel") — puxa automático de confirmadoPor/reabertoPor (já gravados por
+    // salvarConfirmarRecebimento()/reabrirPag() a partir de usuarioLogado), sem exigir hover
+    // pra ver quem fez a ação.
+    const _porConfTag=i.confirmadoPor?`<div style="font-size:.62rem;color:#94a3b8;margin-top:2px">por ${i.confirmadoPor}</div>`:'';
+    const _porReabTag=i.reabertoPor?`<div style="font-size:.62rem;color:#94a3b8;margin-top:2px">↩ reaberto por ${i.reabertoPor}</div>`:'';
     const acoes=i.statusCalc==='confirmado'
-      ?(isFinAdm?`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span> <button onclick="if(confirm('Reabrir este recebimento? Ele volta a aparecer como pendente e a comissão correspondente deixa de estar liberada.'))reabrirPag('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.68rem;color:#64748b;cursor:pointer;margin-left:6px" title="Reabrir">↩ Reabrir</button>${pagaForaTag}`:`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span>${pagaForaTag}`)
-      :(isFinAdm?`<button class="dash-btn-conf" onclick="abrirConfirmarRecebimento('${ck}','${da}','${cl}',${i.valorBruto})">✅ Confirmar</button><button class="dash-btn-adiar" style="background:#fee2e2;color:#dc2626" onclick="abrirMotivoNaoRecebido('${ck}','${da}','${cl}',${i.valorBruto})">❌ Não recebido</button>`:'<span style="font-size:.72rem;color:#94a3b8">Aguardando Financeiro</span>');
+      ?(isFinAdm?`<div style="white-space:nowrap"><span style="font-size:.72rem;color:#16a34a">Recebido ✓</span> <button onclick="if(confirm('Reabrir este recebimento? Ele volta a aparecer como pendente e a comissão correspondente deixa de estar liberada.'))reabrirPag('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.68rem;color:#64748b;cursor:pointer;margin-left:6px" title="Reabrir">↩ Reabrir</button>${pagaForaTag}${_porConfTag}</div>`:`<div style="white-space:nowrap"><span style="font-size:.72rem;color:#16a34a">Recebido ✓</span>${pagaForaTag}${_porConfTag}</div>`)
+      :(isFinAdm?`<div style="white-space:nowrap"><button class="dash-btn-conf" onclick="abrirConfirmarRecebimento('${ck}','${da}','${cl}',${i.valorBruto})">✅ Confirmar</button><button class="dash-btn-adiar" style="background:#fee2e2;color:#dc2626" onclick="abrirMotivoNaoRecebido('${ck}','${da}','${cl}',${i.valorBruto})">❌ Não recebido</button>${_porReabTag}</div>`:`<div style="white-space:nowrap"><span style="font-size:.72rem;color:#94a3b8">Aguardando Financeiro</span>${_porReabTag}</div>`);
     return`<tr data-ck="${ck}" style="${i.statusCalc==='confirmado'?'background:#f0fdf4;':i.statusCalc==='atrasado'?'background:#fef2f2;':''}">
       <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${i.mesPedido||'—'}</td>
       <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${pedidoDisplay(i.pedidoOs)||'—'}</td>
@@ -23467,7 +23817,7 @@ function renderFinanceiro(){
       <td style="font-size:.72rem;white-space:nowrap">${i.dataAtiva}</td>
       <td style="font-weight:700;color:${i.diasAtraso>0?'#dc2626':'#94a3b8'}">${i.diasAtraso>0?i.diasAtraso+' dia'+(i.diasAtraso>1?'s':''):'—'}</td>
       <td>${statusPill(i)}</td>
-      <td style="max-width:230px">${i.motivoAtraso?`<span style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:.74rem;line-height:1.4;color:#7c3aed;cursor:help" title="${i.motivoAtraso.replace(/"/g,'&quot;')}">${i.motivoAtraso}</span>`:'<span style="color:#94a3b8">—</span>'}</td>
+      <td style="max-width:230px">${i.motivoAtraso?`<span style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:.74rem;line-height:1.4;color:#7c3aed;cursor:help" title="${i.motivoAtraso.replace(/"/g,'&quot;')}">${i.motivoAtraso}</span>${i.motivoAtrasoPor?`<div style="font-size:.62rem;color:#94a3b8;margin-top:2px">por ${i.motivoAtrasoPor}</div>`:''}`:'<span style="color:#94a3b8">—</span>'}</td>
       <td style="white-space:nowrap">${acoes}</td>
     </tr>`;
   }).join('');
@@ -23717,11 +24067,18 @@ function renderContasUnificado(){
     // acima (ver comentário lá e em setComissaoPagaFora()). Duplicado aqui porque esta tela
     // (Contas Unificado) tem seu próprio template de linha, independente do de Financeiro.
     const pagaForaTag=i.comissaoPagaFora
-      ?`<span style="font-size:.66rem;color:#7c3aed;font-weight:700;margin-left:6px" title="Marcado por ${i.comissaoPagaFora.por||'—'} em ${i.comissaoPagaFora.em?new Date(i.comissaoPagaFora.em).toLocaleDateString('pt-BR'):'—'} — não entra na quinzena de pagamento de comissão">💸 Comissão paga por fora${isFinAdm?` <button onclick="setComissaoPagaFora('${ck}',false)" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:1px 5px;font-size:.6rem;color:#64748b;cursor:pointer" title="Desmarcar">✕</button>`:''}</span>`
+      ?`<span style="font-size:.66rem;color:#7c3aed;font-weight:700;margin-left:6px" title="Marcado por ${i.comissaoPagaFora.por||'—'} em ${i.comissaoPagaFora.em?new Date(i.comissaoPagaFora.em).toLocaleDateString('pt-BR'):'—'} — não entra na quinzena de pagamento de comissão">💸 Comissão paga por fora${isFinAdm?` <button onclick="setComissaoPagaFora('${ck}',false)" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:1px 5px;font-size:.6rem;color:#64748b;cursor:pointer" title="Desmarcar">✕</button>`:''}</span><div style="font-size:.62rem;color:#94a3b8;margin-top:2px">por ${i.comissaoPagaFora.por||'—'}</div>`
       :(isFinAdm?`<button onclick="setComissaoPagaFora('${ck}',true)" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.66rem;color:#7c3aed;cursor:pointer;margin-left:6px" title="Marque se a comissão desta parcela já foi paga ao vendedor por fora — assim ela some da quinzena de pagamento, sem afetar o recebimento (continua Recebido)">💸 Já paga por fora</button>`:'');
+    // "Por quem" discreto (2026-08-20, a pedido do usuário: "quero colocar só a informação no
+    // sistema de quem deu a baixa ali no recebido e quem reabriu... algo discreto e pequeno mas
+    // bem visivel") — puxa automático de confirmadoPor/reabertoPor (já gravados por
+    // salvarConfirmarRecebimento()/reabrirPag() a partir de usuarioLogado), sem exigir hover
+    // pra ver quem fez a ação.
+    const _porConfTag=i.confirmadoPor?`<div style="font-size:.62rem;color:#94a3b8;margin-top:2px">por ${i.confirmadoPor}</div>`:'';
+    const _porReabTag=i.reabertoPor?`<div style="font-size:.62rem;color:#94a3b8;margin-top:2px">↩ reaberto por ${i.reabertoPor}</div>`:'';
     const acoes=i.statusCalc==='confirmado'
-      ?(isFinAdm?`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span> <button onclick="if(confirm('Reabrir este recebimento? Ele volta a aparecer como pendente e a comissão correspondente deixa de estar liberada.'))reabrirPag('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.68rem;color:#64748b;cursor:pointer;margin-left:6px" title="Reabrir">↩ Reabrir</button>${pagaForaTag}`:`<span style="font-size:.72rem;color:#16a34a">Recebido ✓</span>${pagaForaTag}`)
-      :(isFinAdm?`<button class="dash-btn-conf" onclick="abrirConfirmarRecebimento('${ck}','${da}','${cl}',${i.valorBruto})">✅ Confirmar</button><button class="dash-btn-adiar" style="background:#fee2e2;color:#dc2626" onclick="abrirMotivoNaoRecebido('${ck}','${da}','${cl}',${i.valorBruto})">❌ Não recebido</button>`:'<span style="font-size:.72rem;color:#94a3b8">Aguardando Financeiro</span>');
+      ?(isFinAdm?`<div style="white-space:nowrap"><span style="font-size:.72rem;color:#16a34a">Recebido ✓</span> <button onclick="if(confirm('Reabrir este recebimento? Ele volta a aparecer como pendente e a comissão correspondente deixa de estar liberada.'))reabrirPag('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.68rem;color:#64748b;cursor:pointer;margin-left:6px" title="Reabrir">↩ Reabrir</button>${pagaForaTag}${_porConfTag}</div>`:`<div style="white-space:nowrap"><span style="font-size:.72rem;color:#16a34a">Recebido ✓</span>${pagaForaTag}${_porConfTag}</div>`)
+      :(isFinAdm?`<div style="white-space:nowrap"><button class="dash-btn-conf" onclick="abrirConfirmarRecebimento('${ck}','${da}','${cl}',${i.valorBruto})">✅ Confirmar</button><button class="dash-btn-adiar" style="background:#fee2e2;color:#dc2626" onclick="abrirMotivoNaoRecebido('${ck}','${da}','${cl}',${i.valorBruto})">❌ Não recebido</button>${_porReabTag}</div>`:`<div style="white-space:nowrap"><span style="font-size:.72rem;color:#94a3b8">Aguardando Financeiro</span>${_porReabTag}</div>`);
     // i.pedido é o MESMO objeto de `pedidos` (referência, não cópia — ver getParcelas/
     // getComissaoItemsAll) — então i.pedido.prazo sempre reflete o valor atual, mesmo que
     // tenha sido alterado em Planejamento depois do cache de comissão ter sido montado.
@@ -23767,7 +24124,7 @@ function renderContasUnificado(){
       categoria:'<span style="color:#94a3b8">—</span>',
       valor:i.valorBruto||0,valorTitle:'',
       statusLbl,
-      obsCol:i.diasAtraso>0?`<span style="font-weight:700;color:#dc2626">${i.diasAtraso} dia${i.diasAtraso>1?'s':''} de atraso</span>`:(i.motivoAtraso?`<span style="font-size:.74rem;color:#7c3aed;cursor:help" title="${i.motivoAtraso.replace(/"/g,'&quot;')}">${i.motivoAtraso}</span>`:'—'),
+      obsCol:i.diasAtraso>0?`<span style="font-weight:700;color:#dc2626">${i.diasAtraso} dia${i.diasAtraso>1?'s':''} de atraso</span>`:(i.motivoAtraso?`<span style="font-size:.74rem;color:#7c3aed;cursor:help" title="${i.motivoAtraso.replace(/"/g,'&quot;')}">${i.motivoAtraso}</span>${i.motivoAtrasoPor?`<div style="font-size:.62rem;color:#94a3b8;margin-top:2px">por ${i.motivoAtrasoPor}</div>`:''}`:'—'),
       acoes
     };
   });
@@ -25093,7 +25450,9 @@ function renderDashComissoes(){
         const ck=i.confKey.replace(/'/g,"\\'");
         const q=i.comissaoQuitada;
         const dataQ=q.em?new Date(q.em).toLocaleDateString('pt-BR'):'—';
-        const acao=`<div style="white-space:nowrap"><span style="font-size:.68rem;color:#16a34a;font-weight:700" title="Marcado por ${(q.por||'—').replace(/"/g,'')}">✅ Pago em ${dataQ}</span><button onclick="desfazerComissaoQuitada('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.62rem;color:#64748b;cursor:pointer;margin-left:6px" title="Desfazer — volta pra 'a confirmar'">↩ Desfazer</button></div>`;
+        // "Por quem" visível sem precisar de hover (2026-08-20, a pedido do usuário) — antes só
+        // aparecia no title do badge; agora fica sempre à mostra, discreto (cinza, pequeno).
+        const acao=`<div style="white-space:nowrap"><span style="font-size:.68rem;color:#16a34a;font-weight:700">✅ Pago em ${dataQ}</span><button onclick="desfazerComissaoQuitada('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.62rem;color:#64748b;cursor:pointer;margin-left:6px" title="Desfazer — volta pra 'a confirmar'">↩ Desfazer</button><div style="font-size:.62rem;color:#94a3b8;margin-top:2px">por ${(q.por||'—')}</div></div>`;
         return mkConsRow(i,acao);
       }).join('');
       out+=`<details style="margin:6px 0 16px">
@@ -26197,7 +26556,11 @@ async function gerarPDFComissao(vend,quinzena){
   // aparece na tela (Recebimentos & Comissões/Consolidados), mesmo a comissão continuando
   // calculada sempre sobre o líquido.
   const showQCol=!quinzena;
-  const head=['Mês Venda','Pedido','Cliente','Valor Bruto','Valor Líquido','%','Comissão',...(showQCol?['Quinzena']:[])];
+  // Coluna "Parcela" (2026-08-20, a pedido do usuário) — mesma info (i.label: "Entrada",
+  // "Parcela 1", "Parcela 2"... ou "💰 Saldo") que já aparece do lado do Bruto/Líquido nas
+  // telas de tela (mkTable/Pagamentos Futuros/Comissão Paga por Período, ver
+  // [[project_confirmado_hoje_removido_e_parcela_comissoes]]) — só faltava neste PDF.
+  const head=['Mês Venda','Pedido','Cliente','Parcela','Valor Bruto','Valor Líquido','%','Comissão',...(showQCol?['Quinzena']:[])];
 
   const NAVY=[26,43,94], PINK=[233,30,99], LIGHT=[241,245,249], GRAY=[100,116,139];
   const pageW=doc.internal.pageSize.getWidth();
@@ -26270,7 +26633,7 @@ async function gerarPDFComissao(vend,quinzena){
       const pct=useClabPct?i.pctClab:i.pct;
       const com=i.valor*pct/100;
       subtotal+=com;
-      const row=[i.mesPedido,pedidoDisplay(i.pedidoOs)||'—',i.cliente,fmtR(i.valorBruto),fmtR(i.valor),pct.toFixed(2).replace('.',',')+'%',fmtR(com)];
+      const row=[i.mesPedido,pedidoDisplay(i.pedidoOs)||'—',i.cliente,i.label||'—',fmtR(i.valorBruto),fmtR(i.valor),pct.toFixed(2).replace('.',',')+'%',fmtR(com)];
       if(showQCol)row.push(i._q);
       return row;
     });
@@ -26281,7 +26644,7 @@ async function gerarPDFComissao(vend,quinzena){
         styles:{fontSize:7.5,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1},
         headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:7.8},
         alternateRowStyles:{fillColor:LIGHT},
-        columnStyles:{3:{halign:'right'},4:{halign:'right'},5:{halign:'center'},6:{halign:'right',fontStyle:'bold',textColor:PINK},...(showQCol?{7:{halign:'center',fontStyle:'bold',textColor:NAVY}}:{})},
+        columnStyles:{4:{halign:'right'},5:{halign:'right'},6:{halign:'center'},7:{halign:'right',fontStyle:'bold',textColor:PINK},...(showQCol?{8:{halign:'center',fontStyle:'bold',textColor:NAVY}}:{})},
         margin:{top:32,left:14,right:14,bottom:20},
         didDrawPage:(data)=>{
           if(!drawnHeaderPages.has(data.pageNumber)){drawnHeaderPages.add(data.pageNumber);drawHeader();}
@@ -28042,6 +28405,20 @@ function renderProspKanban(){
     </div>`;
   }).join('');
 }
+// Campos mínimos exigidos pra um card SAIR da 1ª etapa do funil (2026-08-20, a pedido do
+// usuário: "para avançar de fases não deixar o card andar pra frente sem ter tudo preenchido
+// ... travar na pesquisa caso o usuário não preencha os dados e avisar isso pra ele"). Card pode
+// nascer e ficar parado na Pesquisa Inicial totalmente vazio — só quando alguém tenta MOVER pra
+// fora dela (ver prospMoverEtapa) é que isso é cobrado. Telefone/e-mail do decisor ficam de
+// fora de propósito (usuário disse explicitamente "pode ser colocado depois").
+function _prospCamposFaltantes(e){
+  const faltando=[];
+  if(e.unidadesExistentes===undefined||e.unidadesExistentes===null||e.unidadesExistentes==='')faltando.push('unidades existentes');
+  if(e.unidadesAbrir===undefined||e.unidadesAbrir===null||e.unidadesAbrir==='')faltando.push('unidades que pretende abrir');
+  if(!(e.decisores||[]).some(d=>(d.nome||'').trim()))faltando.push('nome de ao menos 1 decisor');
+  if(!(e.regioes||[]).length)faltando.push('região(ões) de expansão');
+  return faltando;
+}
 function _prospCardHtml(e){
   const prox=_prospProximaTarefa(e);
   const hojeIso=new Date().toISOString().slice(0,10);
@@ -28052,6 +28429,12 @@ function _prospCardHtml(e){
     const atrasada=prox.data&&prox.data<hojeIso;
     tarefaBadge=`<div style="font-size:.66rem;font-weight:700;margin-top:5px;color:${atrasada?'#dc2626':'#0369a1'};background:${atrasada?'#fee2e2':'#e0f2fe'};border-radius:6px;padding:3px 7px;display:inline-block">${atrasada?'⚠️':'🗓️'} ${_PROSP_TIPO_ICONE[prox.tipo]||'📌'} ${fmtD(prox.data)}</div>`;
   }
+  // Aviso de dados incompletos (2026-08-20) — só aparece pra card ainda na 1ª etapa do funil
+  // (etapas[0].key), avisando ANTES mesmo de alguém tentar arrastar (ver _prospCamposFaltantes
+  // e a trava correspondente em prospMoverEtapa).
+  const etapasCard=_prospEtapas();
+  const camposFaltando=e.etapa===etapasCard[0].key?_prospCamposFaltantes(e):[];
+  const incompletaBadge=camposFaltando.length?`<div title="Faltando: ${camposFaltando.join(', ').replace(/"/g,'&quot;')}" style="font-size:.62rem;font-weight:700;margin-top:5px;color:#b45309;background:#fef3c7;border-radius:6px;padding:3px 7px;display:inline-block">⚠️ Dados incompletos</div>`:'';
   return `<div class="prosp-card" draggable="true" ondragstart="prospDragStart(event,'${e.id}')" ondragend="prospDragEnd(event)" onclick="prospAbrirCard('${e.id}')" style="border-left:4px solid ${saude.cor}">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">
       <div style="font-size:.82rem;font-weight:800;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0" title="${(e.nome||'').replace(/"/g,'&quot;')}">${e.nome||'—'}</div>
@@ -28064,6 +28447,7 @@ function _prospCardHtml(e){
     ${Number(e.unidadesAbrir)>0?`<span class="prosp-chip" style="margin-top:5px;pointer-events:none">+${e.unidadesAbrir} unid. planejada${Number(e.unidadesAbrir)>1?'s':''}</span>`:''}
     <div style="font-size:.64rem;color:${saude.cor};font-weight:700;margin-top:5px">${saude.dias===0?'Interação hoje':saude.dias+'d sem interação'}</div>
     ${tarefaBadge}
+    ${incompletaBadge}
   </div>`;
 }
 
@@ -28084,12 +28468,27 @@ function prospDrop(ev,etapaKey){
 async function prospMoverEtapa(id,etapaKey){
   const e=prospEmpresas.find(x=>x.id===id);
   if(!e||e.etapa===etapaKey)return;
+  const etapas=_prospEtapas();
+  // Trava de avanço (2026-08-20, a pedido do usuário): "o card em pesquisa inicial [pode ficar]
+  // sem informações, mas para avançar de fases não deixar o card andar pra frente sem ter tudo
+  // preenchido... travar na pesquisa caso o usuário não preencha os dados e avisar isso pra
+  // ele". Só barra quem está SAINDO da 1ª etapa (etapas[0].key) — mover entre as etapas
+  // seguintes, ou voltar um card pra trás, nunca é bloqueado (o dado já foi cobrado na 1ª saída;
+  // regressão é sempre uma correção, não avanço). Cobre os 2 jeitos de mover card que existem
+  // (arrastar no Kanban via prospDrop, e o botão "Mover" do detalhe do card) porque os dois
+  // chamam esta função única.
+  if(e.etapa===etapas[0].key&&etapaKey!==etapas[0].key){
+    const faltando=_prospCamposFaltantes(e);
+    if(faltando.length){
+      toast('Preencha antes de avançar: '+faltando.join(', ')+'.','terr');
+      return;
+    }
+  }
   // Mudança de etapa também vira um evento AUTOMÁTICO na linha do tempo (marcado com
   // sistema:true, ver _prospRenderCard) — além de dar histórico completo do card sem a
   // pessoa precisar digitar nada, isso conta como "interação" pra saúde do funil (ver
   // _prospUltimaInteracao acima): avançar um card de etapa já prova que alguém está
   // cuidando dele.
-  const etapas=_prospEtapas();
   const labelAntiga=(etapas.find(x=>x.key===e.etapa)||{}).label||e.etapa||'—';
   const labelNova=(etapas.find(x=>x.key===etapaKey)||{}).label||etapaKey;
   e.etapa=etapaKey;
