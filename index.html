@@ -8520,7 +8520,15 @@ function buildEmissaoEmailContent(p){
   const _uf=(p.locUf||'').toUpperCase();
   const _locStr=_cidade&&_uf?` - ${_cidade}/${_uf}`:_cidade?` - ${_cidade}`:_uf?` - ${_uf}`:'';
   const subject=`EMISSÃO DE PEDIDO - OS Nº ${p.os} · ${p.cliente} - ${p.job||''}${_locStr}`.replace(/\s+-\s*$/,'').replace(/\s{2,}/g,' ').replace(/\//g,'-');
-  return{html_content,subject};
+  // Corrige acentos "sumindo" no e-mail de emissão recebido (2026-08-21): texto vindo de
+  // PDF (pdf.js às vezes extrai o acento como caractere combinante separado — forma NFD,
+  // "e" + acento agudo — em vez de "é" já composto) ou colado de outra fonte pode chegar
+  // decomposto. Alguns provedores de e-mail tratam esse caractere combinante isolado como
+  // lixo e descartam na entrega, fazendo o acento sumir mesmo aparecendo certo aqui no
+  // sistema. .normalize('NFC') recompõe pra forma acentuada única — não muda nada em texto
+  // que já está composto (a imensa maioria dos casos), só corrige o decomposto. Mudança
+  // local a este e-mail, não mexe em nada mais.
+  return{html_content:html_content.normalize('NFC'),subject:subject.normalize('NFC')};
 }
 
 // Envia (ou reenvia) o e-mail de emissão de um pedido já salvo, e grava o resultado
@@ -26259,10 +26267,22 @@ function _tfRelDadosMes(){
   // regra — continua contando normalmente, é o núcleo do que esse relatório sempre mediu.
   todas=todas.filter(t=>!t.avulsa||_criadoPorAdmin(t.criadoPor));
   if(!isAdm)todas=todas.filter(t=>t.responsavel===meuNome);
+  // Tarefa CONCLUÍDA só conta no mês do prazo original (métrica de desempenho daquele mês
+  // específico — igual sempre foi). Tarefa ainda ABERTA (pendente/aguardando aprovação),
+  // porém, precisa continuar aparecendo em todo mês seguinte até ser resolvida — antes,
+  // filtrar só pelo mês exato do prazo fazia uma tarefa vencida desde um mês anterior
+  // desaparecer por completo do relatório do mês atual (não contava nem como "pendente
+  // vencida" nem como nada), assim que a gente virava a página do calendário pro mês
+  // seguinte. Achado pelo usuário (2026-08-21): tarefa do Julio Cesar já vencida não
+  // aparecia como atrasada no relatório do mês corrente.
   const doMes=todas.filter(t=>{
     if(!t.prazoTarefa)return false;
     const partes=t.prazoTarefa.split('-');
-    return partes.length===3&&(+partes[0])===y&&(+partes[1])===m;
+    if(partes.length!==3)return false;
+    const py=+partes[0],pm=+partes[1];
+    if(isNaN(py)||isNaN(pm))return false;
+    if(t.status==='concluida')return py===y&&pm===m;
+    return py<y||(py===y&&pm<=m);
   });
   const porResp={};
   doMes.forEach(t=>{
