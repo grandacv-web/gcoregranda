@@ -1143,6 +1143,10 @@ select.fc{cursor:pointer}
             <button onclick="gerarPDFDRE()" class="dash-btn-conf" style="white-space:nowrap">📄 Gerar PDF</button>
             <button onclick="exportarExcelDRE()" class="dash-btn-conf" style="white-space:nowrap;background:#16a34a">📊 Exportar Excel</button>
           </div>
+          <!-- Indicadores por Centro de Custo (2026-08-21) — fica no TOPO da página do DRE,
+               antes dos cards/tabela que já existiam abaixo, a pedido do usuário. Ver
+               renderDreIndicadores(), chamada de dentro de renderDRE(). -->
+          <div id="dre-indicadores"></div>
           <div id="dre-cards" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px"></div>
           <div id="dre-body"></div>
         </div>
@@ -1679,6 +1683,9 @@ select.fc{cursor:pointer}
         <button onclick="document.getElementById('prod-fil-data-campo').value='';document.getElementById('prod-fil-data-de').value='';document.getElementById('prod-fil-data-ate').value='';prodRenderAtivo();" class="dash-btn-conf" style="background:#94a3b8" type="button">✕ Limpar datas</button>
       </div>
       <div id="prod-sec-lista">
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
+          <button onclick="prodExportarListaPDF()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
+        </div>
         <div id="prod-body"></div>
       </div>
       <div id="prod-sec-dias" style="display:none">
@@ -14572,15 +14579,176 @@ function calcularDRE(y,m,empresaFiltro,regime){
     porCategoria:Object.values(porCategoria).sort((a,b)=>b.total-a.total)
   };
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// INDICADORES POR CENTRO DE CUSTO — Fase extra do DRE (2026-08-21, a pedido do usuário: ele
+// mandou print de uma planilha "DRE REALIZADO" que mantém à parte, agrupando toda despesa do
+// mês pelos mesmos 14 temas já cadastrados como Centro de Custo extra desde 2026-08-07 (ver
+// CENTROS_CUSTO_SEED_EXTRA/_migrarSeedCentrosCustoExtra) — Custo Administrativo/Comercial/
+// Produção/Projetos, Salários, Comissões, Pró Labore, CMV, Operação, Impostos, Imobilizado,
+// Juros, Distribuição Sócios, Empréstimos — e mostrando cada tema como % da Receita Bruta do
+// mês, com 3 subtotais no meio (EBITDA, Lucro Líquido, e o saldo depois de Sócios/
+// Empréstimos, que no print do usuário aparece sem rótulo). Pedido do usuário: "organize um
+// relatório indicador... com base na soma de cada tema... a porcentagem é o tema dividido por
+// quanto vendeu". Reaproveita o mesmo Contas a Pagar (contasPagar/_cpValorAjustado) e a mesma
+// Receita Bruta já usados em calcularDRE() acima — função nova e auto-contida, não mexe em
+// calcularDRE() nem em mais nada do DRE que já existia (ver [[feedback_escopo_restrito_alto_risco]]).
+// ══════════════════════════════════════════════════════════════════════════
+// Ordem e agrupamento IDÊNTICOS ao print que o usuário mandou.
+const DRE_IND_TEMAS_PRE_EBITDA=['Custo Administrativo','Custo Comercial','Custo Produção','Custo Projetos','Salários','Comissões','Pró Labore','CMV','Operação'];
+const DRE_IND_TEMAS_PRE_LUCRO=['Impostos','Imobilizado','Juros'];
+const DRE_IND_TEMAS_PRE_RESIDUAL=['Distribuição Sócios','Empréstimos'];
+// Mesmo filtro de Contas a Pagar do mês usado dentro de calcularDRE() (cpMes) — duplicado aqui
+// de propósito, pequeno e auto-contido, pra não precisar tocar em calcularDRE() pra expor o
+// que ela já filtra internamente.
+function _dreIndCpMes(y,m,empresaFiltro,regime){
+  return contasPagar.filter(c=>{
+    if(regime==='realizado'){
+      if(c.status!=='pago'||!c.dataPagamento)return false;
+      const partes=c.dataPagamento.split('-');
+      if(parseInt(partes[0],10)!==y||parseInt(partes[1],10)!==m)return false;
+    }else{
+      if(!c.vencimento)return false;
+      const partes=c.vencimento.split('-');
+      if(parseInt(partes[0],10)!==y||parseInt(partes[1],10)!==m)return false;
+    }
+    if(empresaFiltro&&c.empresa!==empresaFiltro)return false;
+    return true;
+  });
+}
+// Mesma Receita Bruta de calcularDRE() (ver comentário grande lá em cima sobre os 2 regimes),
+// só que devolvendo SÓ o número — a versão calcularDRE() completa faz muito mais coisa (custo
+// de produção interno rateado etc.) que este relatório não precisa.
+function _dreIndReceitaBruta(y,m,empresaFiltro,regime){
+  if(empresaFiltro&&empresaFiltro!=='GRANDA')return 0;
+  if(regime==='realizado'){
+    let receita=0;
+    getComissaoItemsAll().filter(i=>i.status==='confirmado').forEach(i=>{
+      const real=_dreMesRealItem(i);
+      if(real.y===y&&real.m===m)receita+=i.valorBruto||0;
+    });
+    return receita;
+  }
+  return getVendaRowsMerged().filter(r=>r.m===m).reduce((s,r)=>s+(r.br||0),0);
+}
+function _dreIndSomaTema(cpMes,nomeTema){
+  const alvo=_normSemAcento(nomeTema).trim();
+  return cpMes.filter(c=>_normSemAcento(c.centroCusto||'').trim()===alvo).reduce((s,c)=>s+_cpValorAjustado(c),0);
+}
+function calcularDreIndicadores(y,m,empresaFiltro,regime){
+  regime=regime||'competencia';
+  const receita=_dreIndReceitaBruta(y,m,empresaFiltro,regime);
+  const cpMes=_dreIndCpMes(y,m,empresaFiltro,regime);
+  const mapTemas=lista=>lista.map(nome=>({nome,valor:_dreIndSomaTema(cpMes,nome)}));
+  const temasPreEbitda=mapTemas(DRE_IND_TEMAS_PRE_EBITDA);
+  const ebitda=receita-temasPreEbitda.reduce((s,t)=>s+t.valor,0);
+  const temasPreLucro=mapTemas(DRE_IND_TEMAS_PRE_LUCRO);
+  const lucroLiquido=ebitda-temasPreLucro.reduce((s,t)=>s+t.valor,0);
+  const temasPreResidual=mapTemas(DRE_IND_TEMAS_PRE_RESIDUAL);
+  const residual=lucroLiquido-temasPreResidual.reduce((s,t)=>s+t.valor,0);
+  // Não Classificado: Contas a Pagar do mês cujo Centro de Custo não bate com NENHUM dos 14
+  // temas acima — nunca deve sumir silenciosamente do relatório, mesmo padrão de transparência
+  // já usado no resto do DRE (ver qtdNaoClassificado em calcularDRE()).
+  const nomesConhecidos=new Set([...DRE_IND_TEMAS_PRE_EBITDA,...DRE_IND_TEMAS_PRE_LUCRO,...DRE_IND_TEMAS_PRE_RESIDUAL].map(n=>_normSemAcento(n).trim()));
+  const naoClassificado=cpMes.filter(c=>!nomesConhecidos.has(_normSemAcento(c.centroCusto||'').trim())).reduce((s,c)=>s+_cpValorAjustado(c),0);
+  return{y,m,empresaFiltro,regime,receita,temasPreEbitda,ebitda,temasPreLucro,lucroLiquido,temasPreResidual,residual,naoClassificado};
+}
+// Acumulado do ano (Jan até o mês selecionado) — soma a Receita e o saldo final (Lucro
+// Líquido já descontado de Distribuição de Sócios/Empréstimos) mês a mês, igual o "ACUMULADO"
+// do print do usuário. % recalculada (saldo acumulado ÷ receita acumulada) em vez de copiar o
+// número solto do print original (parecia um resíduo de formatação da planilha dele, sem
+// "%") — mais correto e consistente com o resto da tela.
+function calcularDreIndicadoresAcumulado(y,mFinal,empresaFiltro,regime){
+  let receita=0,residual=0;
+  for(let mm=1;mm<=mFinal;mm++){
+    const dm=calcularDreIndicadores(y,mm,empresaFiltro,regime);
+    receita+=dm.receita;residual+=dm.residual;
+  }
+  return{meses:mFinal,receita,residual};
+}
+let dreIndCharts={};
+function renderDreIndicadores(){
+  const el=document.getElementById('dre-indicadores');if(!el)return;
+  const{y,m}=_dreMesAtual;
+  const d=calcularDreIndicadores(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
+  const acc=calcularDreIndicadoresAcumulado(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
+  const pct=(v,base)=>base>0.005?(v/base*100).toFixed(2).replace('.',',')+'%':'—';
+
+  const linhasChart=[
+    ...d.temasPreEbitda.map(t=>({label:t.nome,valor:t.valor,tipo:'custo'})),
+    {label:'EBITDA',valor:d.ebitda,tipo:'subtotal'},
+    ...d.temasPreLucro.map(t=>({label:t.nome,valor:t.valor,tipo:'custo'})),
+    {label:'Lucro Líquido',valor:d.lucroLiquido,tipo:'subtotal'},
+    ...d.temasPreResidual.map(t=>({label:t.nome,valor:t.valor,tipo:'custo'})),
+    {label:'Saldo (após Sócios/Empréstimos)',valor:d.residual,tipo:'subtotal'}
+  ];
+
+  const linhaTabela=(label,valor,{bold,cor}={})=>`
+    <tr>
+      <td style="padding:${bold?'8px':'5px'} 4px;font-weight:${bold?800:500};font-size:${bold?'.82rem':'.78rem'};color:${bold?'#1e293b':'#475569'};border-top:${bold?'1.5px solid var(--border)':'none'}">${label}</td>
+      <td style="padding:${bold?'8px':'5px'} 4px;text-align:right;font-weight:${bold?800:600};font-size:${bold?'.82rem':'.78rem'};color:${cor||(bold?'#1e293b':'#334155')};border-top:${bold?'1.5px solid var(--border)':'none'};white-space:nowrap">${fmtR(valor)}</td>
+      <td style="padding:${bold?'8px':'5px'} 4px;text-align:right;font-weight:${bold?800:600};font-size:${bold?'.8rem':'.76rem'};color:${cor||'#94a3b8'};border-top:${bold?'1.5px solid var(--border)':'none'};white-space:nowrap">${pct(valor,d.receita)}</td>
+    </tr>`;
+
+  el.innerHTML=`
+    <div class="dash-card" style="margin-bottom:16px">
+      <div class="dash-sec-title">📊 Indicadores por Centro de Custo — % sobre a Receita Bruta do mês</div>
+      <p style="font-size:.72rem;color:var(--ink4);margin:0 0 14px">Agrupa toda despesa do mês (Contas a Pagar) pelo Centro de Custo cadastrado em cada lançamento, nos mesmos 14 temas configuráveis em Configurações → Centro de Custo. Cada tema aparece como % da Receita Bruta do mês (${fmtR(d.receita)}) — mesmo regime (${_dreRegimeAtual==='realizado'?'Realizado':'Competência'}) e filtro de empresa da tela acima.</p>
+      ${d.naoClassificado>0.005?`<div style="font-size:.78rem;padding:8px 12px;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:8px;color:#9a3412;margin-bottom:12px">🚨 ${fmtR(d.naoClassificado)} em Contas a Pagar do mês com Centro de Custo que não bate com nenhum dos 14 temas deste relatório — reclassifique em Contas a Pagar pra entrar na conta.</div>`:''}
+      <div style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;align-items:start">
+        <div style="height:${Math.max(280,linhasChart.length*30)}px;min-width:0"><canvas id="dre-ind-chart"></canvas></div>
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+          <tbody>
+            ${linhaTabela('RECEITA BRUTA',d.receita,{bold:true})}
+            ${d.temasPreEbitda.map(t=>linhaTabela(t.nome,t.valor)).join('')}
+            ${linhaTabela('= EBITDA',d.ebitda,{bold:true,cor:d.ebitda>=0?'#16a34a':'#dc2626'})}
+            ${d.temasPreLucro.map(t=>linhaTabela(t.nome,t.valor)).join('')}
+            ${linhaTabela('= LUCRO LÍQUIDO',d.lucroLiquido,{bold:true,cor:d.lucroLiquido>=0?'#16a34a':'#dc2626'})}
+            ${d.temasPreResidual.map(t=>linhaTabela(t.nome,t.valor)).join('')}
+            ${linhaTabela('= SALDO (após Sócios/Empréstimos)',d.residual,{bold:true,cor:d.residual>=0?'#16a34a':'#dc2626'})}
+          </tbody>
+        </table></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px">
+        <div style="background:#dbeafe;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#1e40af">EBITDA do mês</div><div style="font-size:1.05rem;font-weight:800;color:#1e40af">${fmtR(d.ebitda)}</div><div style="font-size:.68rem;color:#1e40af;opacity:.8">${pct(d.ebitda,d.receita)} da receita</div></div>
+        <div style="background:${d.lucroLiquido>=0?'#dcfce7':'#fee2e2'};border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${d.lucroLiquido>=0?'#166534':'#991b1b'}">Lucro Líquido do mês</div><div style="font-size:1.05rem;font-weight:800;color:${d.lucroLiquido>=0?'#166534':'#991b1b'}">${fmtR(d.lucroLiquido)}</div><div style="font-size:.68rem;color:${d.lucroLiquido>=0?'#166534':'#991b1b'};opacity:.8">${pct(d.lucroLiquido,d.receita)} da receita</div></div>
+        <div style="background:#f1f5f9;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#475569">Acumulado em ${acc.meses} mês(es) — ${y}</div><div style="font-size:1.05rem;font-weight:800;color:#475569">${fmtR(acc.residual)}</div><div style="font-size:.68rem;color:#475569;opacity:.8">${pct(acc.residual,acc.receita)} da receita acumulada</div></div>
+      </div>
+    </div>`;
+
+  if(dreIndCharts.principal){try{dreIndCharts.principal.destroy();}catch(e){}}
+  const ctx=document.getElementById('dre-ind-chart');
+  if(ctx&&typeof Chart!=='undefined'){
+    dreIndCharts.principal=new Chart(ctx,{
+      type:'bar',
+      data:{labels:linhasChart.map(l=>l.label),datasets:[{
+        data:linhasChart.map(l=>l.valor),
+        backgroundColor:linhasChart.map(l=>l.tipo==='subtotal'?(l.valor>=0?'rgba(29,78,216,.85)':'rgba(220,38,38,.85)'):'rgba(148,163,184,.75)'),
+        borderRadius:4
+      }]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,animation:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx2=>fmtR(ctx2.raw)+' ('+pct(ctx2.raw,d.receita)+')'}}},
+        scales:{x:{ticks:{font:{size:9},callback:v=>fmtR(v)},beginAtZero:true},y:{ticks:{font:{size:9}}}}
+      }
+    });
+  }
+}
 function renderDRE(){
   const el=document.getElementById('dre-body');if(!el)return;
   const lbl=document.getElementById('dre-mes-lbl');
   const cardsEl=document.getElementById('dre-cards');
+  const indEl=document.getElementById('dre-indicadores');
   if(!_isFinanceiroUser()){
     if(cardsEl)cardsEl.innerHTML='';
+    if(indEl)indEl.innerHTML='';
     el.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700;font-size:.85rem">🔒 ACESSO NÃO PERMITIDO — apenas Financeiro ou Administrador podem ver o DRE.</div>';
     return;
   }
+  // Indicadores por Centro de Custo (2026-08-21) — bloco novo no TOPO da página do DRE, antes
+  // dos cards/tabela que já existiam (ver calcularDreIndicadores()/renderDreIndicadores()
+  // acima). Renderizado aqui pra reagir sozinho a toda troca de mês/regime/empresa que já
+  // dispara renderDRE() (dreMov/dreSetEmpresa/dreSetRegime) — sem precisar de controles novos.
+  renderDreIndicadores();
   const selEmp=document.getElementById('dre-fil-empresa');
   if(selEmp&&selEmp.options.length<=1)selEmp.innerHTML='<option value="">🏢 Todas as empresas (consolidado)</option>'+EMPRESAS_CONTAS_PAGAR.filter(e=>e.id!=='OUTRA').map(e=>`<option value="${e.id}">${e.label}</option>`).join('');
 
@@ -17492,6 +17660,86 @@ function renderProdLista(){
       </tr>`;
     }).join('')}
     </tbody></table></div>`;
+}
+// ===================== EXPORTAÇÃO PDF — PRODUÇÃO (2026-08-21) =====================
+// Mesmo padrão já usado em Lista de Pedidos (ver lpExportarListaPDF/_lpFiltrosResumoTexto,
+// 2026-07-31): jsPDF+autoTable, mesma marca (logo, NAVY/PINK), cabeçalho com resumo dos
+// filtros ativos, rodapé com data/página. Sempre respeita os filtros ativos na aba Lista de
+// Produção (busca/status/intervalo de datas) — nunca exporta o que o usuário não está vendo.
+// Pedido do usuário: "coloque na produção o gerar em pdf" (ele foi procurar exportar PDF na
+// tela Produção e não achou — só existia em Lista de Pedidos até então). Sem emoji no texto da
+// tabela (jsPDF/helvetica quebra emoji em caractere ilegível, ver feedback_sem_emoji_em_pdf_jspdf).
+function _prodFiltrosResumoTexto(){
+  const busca=(document.getElementById('prod-fil-busca')?.value||'').trim();
+  const filStatusEl=document.getElementById('prod-fil-status');
+  const filDataCampo=document.getElementById('prod-fil-data-campo')?.value||'';
+  const filDataDe=document.getElementById('prod-fil-data-de')?.value||'';
+  const filDataAte=document.getElementById('prod-fil-data-ate')?.value||'';
+  const partes=[];
+  if(busca)partes.push('Busca: "'+busca+'"');
+  if(filStatusEl)partes.push('Status: '+filStatusEl.options[filStatusEl.selectedIndex].textContent.replace(/[^\x00-\x7FÀ-ſ]/g,'').trim());
+  if(filDataCampo&&(filDataDe||filDataAte)){
+    const opt=document.querySelector('#prod-fil-data-campo option[value="'+filDataCampo+'"]');
+    const rotulo=opt?opt.textContent.replace('📅 Filtrar por data: ',''):filDataCampo;
+    partes.push(rotulo+': '+(filDataDe?fmtD(filDataDe):'início')+' até '+(filDataAte?fmtD(filDataAte):'hoje'));
+  }
+  return partes.length?partes.join('  ·  '):'Sem filtro (todos os pedidos, exceto concluídos)';
+}
+async function prodExportarListaPDF(){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const infos=_prodListaFiltrada();
+  if(!infos.length){toast('Nenhum pedido encontrado com esses filtros para gerar o PDF.','terr');return;}
+  const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const filtrosLbl=_prodFiltrosResumoTexto();
+  const drawnFooterPages=new Set();
+  function drawHeader(){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+    doc.text('PRODUÇÃO',pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    const lines=doc.splitTextToSize('Filtros: '+filtrosLbl,pageW-28);
+    doc.text(lines,pageW-14,26.5,{align:'right'});
+    const lineY=27.5+(lines.length-1)*3.2;
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,lineY,pageW-14,lineY);
+    doc.setFont('helvetica','normal');
+    return lineY+6;
+  }
+  function drawFooter(pageNum){
+    if(drawnFooterPages.has(pageNum))return;
+    drawnFooterPages.add(pageNum);
+    doc.setPage(pageNum);
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
+  }
+  const curY=drawHeader();
+  const statusTxtMap={nao_iniciado:'Não iniciado',andamento:'Em andamento',atrasado:'Atrasado',concluido:'Concluído'};
+  const head=['OS','Cliente','JOB','Prazo Produção','Início sugerido','Checklist','Status'];
+  const bodyPdf=infos.map(x=>{
+    const{p,etapa,feitos,totalItens,statusPedido,inicioSugeridoIso,estourou}=x;
+    const inicioTxt=inicioSugeridoIso?(fmtD(inicioSugeridoIso)+(estourou?' (atenção)':'')):'—';
+    return[p.os||'—',p.cliente||'—',p.job||'—',fmtD(etapa.iso),inicioTxt,feitos.toFixed(1).replace(/\.0$/,'')+'/'+totalItens,statusTxtMap[statusPedido]||statusPedido];
+  });
+  doc.autoTable({
+    startY:curY,head:[head],body:bodyPdf,theme:'grid',
+    styles:{fontSize:7,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.8},
+    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:7.5},
+    alternateRowStyles:{fillColor:LIGHT},
+    columnStyles:{5:{halign:'center'},6:{halign:'center'}},
+    margin:{top:32,left:14,right:14,bottom:20},
+    didDrawPage:()=>{drawFooter(doc.internal.getNumberOfPages());}
+  });
+  drawFooter(doc.internal.getNumberOfPages());
+  doc.save(`producao_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('PDF gerado!','tok');
 }
 // ===================== VISÃO POR DIAS — PRODUÇÃO (2026-08-20, piloto) =====================
 // Substitui Kanban+Calendário por UMA visão só: coluna por dia (dia/semana/mês navegável),
@@ -26298,7 +26546,16 @@ function _tfRelDadosMes(){
   });
   const linhas=Object.entries(porResp).map(([resp,s])=>{
     const resolvido=s.noPrazo+s.comAtraso;
-    return{resp,...s,resolvido,total:resolvido+s.pendente+s.pendenteVencida,pct:resolvido>0?(s.noPrazo/resolvido*100):null};
+    // Aproveitamento agora também penaliza tarefa PENDENTE VENCIDA na hora, não só depois de
+    // concluída (2026-08-21, pedido do usuário: "se ele tem uma tarefa vencida, isso nao tem
+    // que aparecer no relatorio como entrega atrasada da tarefa?" — antes o % ficava "—"/de
+    // fora enquanto a pessoa simplesmente não concluía a tarefa vencida, escondendo o atraso
+    // do score até ela resolver, o que dava pra empurrar pra sempre sem penalidade nenhuma).
+    // base = tudo que já devia ter sido entregue (concluída no prazo + concluída com atraso +
+    // ainda pendente mas já vencida); tarefa pendente DENTRO do prazo continua de fora, porque
+    // ainda não venceu, não é atraso ainda.
+    const base=resolvido+s.pendenteVencida;
+    return{resp,...s,resolvido,total:resolvido+s.pendente+s.pendenteVencida,pct:base>0?(s.noPrazo/base*100):null};
   }).sort((a,b)=>(b.pct??-1)-(a.pct??-1));
   return linhas;
 }
@@ -26309,8 +26566,11 @@ function renderRelatorioTarefas(){
   const linhas=_tfRelDadosMes();
   const totNoPrazo=linhas.reduce((s,l)=>s+l.noPrazo,0);
   const totComAtraso=linhas.reduce((s,l)=>s+l.comAtraso,0);
+  const totPendenteVencida=linhas.reduce((s,l)=>s+l.pendenteVencida,0);
   const totResolvido=totNoPrazo+totComAtraso;
-  const pctGeral=totResolvido>0?(totNoPrazo/totResolvido*100):null;
+  // Base do % geral inclui pendente vencida junto com atraso (ver comentário em _tfRelDadosMes,
+  // 2026-08-21) — tarefa vencida já é atraso mesmo antes de ser concluída.
+  const pctGeral=(totResolvido+totPendenteVencida)>0?(totNoPrazo/(totResolvido+totPendenteVencida)*100):null;
   const pctCor=p=>p==null?'#94a3b8':(p>=90?'#16a34a':(p>=70?'#d97706':'#dc2626'));
   const linhasHtml=linhas.length?linhas.map(l=>`
     <tr>
@@ -26331,7 +26591,7 @@ function renderRelatorioTarefas(){
     <div class="dash-card" style="margin-bottom:14px">
       <div class="dash-sec-title">📊 Aproveitamento geral do mês</div>
       <div style="font-size:1.6rem;font-weight:800;color:${pctCor(pctGeral)}">${pctGeral==null?'—':pctGeral.toFixed(1).replace('.',',')+'%'}</div>
-      <div style="font-size:.78rem;color:#64748b;margin-top:4px">${totNoPrazo} no prazo · ${totComAtraso} com atraso · sobre ${totResolvido} tarefa(s) já concluída(s) com prazo definido nesse mês${isAdm?'':' (só as suas tarefas)'}</div>
+      <div style="font-size:.78rem;color:#64748b;margin-top:4px">${totNoPrazo} no prazo · ${totComAtraso} concluída(s) com atraso · ${totPendenteVencida} vencida(s) ainda pendente(s) · sobre ${totResolvido+totPendenteVencida} tarefa(s) já vencida(s)/concluída(s) com prazo definido nesse mês${isAdm?'':' (só as suas tarefas)'}</div>
     </div>
     ${linhas.length?`<div class="dash-card" style="margin-bottom:14px">
       <div class="dash-sec-title">👤 Aproveitamento por responsável</div>
@@ -26339,7 +26599,7 @@ function renderRelatorioTarefas(){
         ${linhas.map(l=>`<div style="background:#f8fafc;border-radius:10px;padding:12px 14px">
           <div style="font-size:.68rem;font-weight:700;color:#475569;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${l.resp.replace(/"/g,'&quot;')}">${l.resp}</div>
           <div style="font-size:1.15rem;font-weight:800;color:${pctCor(l.pct)}">${l.pct==null?'—':l.pct.toFixed(1).replace('.',',')+'%'}</div>
-          <div style="font-size:.66rem;color:#94a3b8;margin-top:2px">${l.noPrazo} no prazo · ${l.comAtraso} atraso</div>
+          <div style="font-size:.66rem;color:#94a3b8;margin-top:2px">${l.noPrazo} no prazo · ${l.comAtraso} concl. c/ atraso${l.pendenteVencida?` · ${l.pendenteVencida} vencida pend.`:''}</div>
         </div>`).join('')}
       </div>
     </div>`:''}
@@ -26349,7 +26609,7 @@ function renderRelatorioTarefas(){
         <thead><tr><th>Responsável</th><th>No prazo</th><th>Com atraso</th><th>Pendente</th><th>Pendente vencida</th><th>Aproveitamento</th></tr></thead>
         <tbody>${linhasHtml}</tbody>
       </table></div>
-      <div style="font-size:.7rem;color:#94a3b8;margin-top:10px">Aproveitamento = concluídas no prazo ÷ (concluídas no prazo + concluídas com atraso). Tarefas ainda pendentes (vencidas ou não) só entram no cálculo quando forem concluídas.</div>
+      <div style="font-size:.7rem;color:#94a3b8;margin-top:10px">Aproveitamento = concluídas no prazo ÷ (concluídas no prazo + concluídas com atraso + pendentes já vencidas). Tarefa vencida já entra como atraso na hora, mesmo antes de ser concluída — só tarefa ainda dentro do prazo fica de fora do cálculo.</div>
     </div>`;
 }
 function exportarRelatorioTarefas(){
