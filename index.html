@@ -698,6 +698,17 @@ select.fc{cursor:pointer}
           </div>
         </div>
         <div style="margin-bottom:14px"></div>
+        <!-- Vendas por Semana (2026-08-21, a pedido do usuário: "quanto cada vendedor vendeu
+             na semana 1, semana 2, semana 3... referente ao mês filtrado, e embaixo uma soma
+             da empresa geral por semana também, pra acompanhar o desempenho por semana") — ver
+             gcVendasPorSemana()/gcRenderVendasPorSemana(). -->
+        <div class="gc-chart-card">
+          <div class="gc-chart-title">📆 Vendas por Semana — Líquidas</div>
+          <div class="gc-chart-sub" id="gc-semana-sub">Por vendedor, dentro do mês filtrado</div>
+          <div id="gc-semana-aviso" style="margin-bottom:10px"></div>
+          <div style="position:relative;height:220px"><canvas id="gc-cSemana"></canvas></div>
+          <div id="gc-semana-tabela" style="margin-top:14px;overflow-x:auto"></div>
+        </div>
         <!-- Progresso Meta Anual -->
         <div class="gc-chart-card">
           <div class="gc-chart-title">🎯 Progresso da Meta Anual — Vendas Líquidas</div>
@@ -1009,6 +1020,7 @@ select.fc{cursor:pointer}
           <button class="dash-tab fin-main-tab" onclick="finMainSetTab('dre',this)">📊 DRE</button>
           <button class="dash-tab fin-main-tab" onclick="finMainSetTab('fluxocx',this)">💵 Fluxo de Caixa</button>
           <button class="dash-tab fin-main-tab" onclick="finMainSetTab('opped',this)">🛠️ Operacionais Pedidos</button>
+          <button class="dash-tab fin-main-tab" onclick="finMainSetTab('drecongelado',this)">❄️ DRE Congelado</button>
         </div>
         <!-- Lista unificada (2026-07-22, a pedido do usuário) — substitui as antigas abas
              separadas "Contas a Receber"/"Contas a Pagar" por uma lista só, com filtro de
@@ -1047,6 +1059,9 @@ select.fc{cursor:pointer}
               <div class="dash-mes-label" id="fc-mes-lbl">—</div>
               <button onclick="fcMesMov(1)" type="button">▶</button>
             </div>
+            <!-- Atalho direto pra "Todos os meses" (2026-08-21, a pedido do usuário) — sem
+                 precisar clicar ◀/▶ várias vezes; equivale a limpar o período De/Até. -->
+            <button type="button" onclick="fcMesTodos()" style="background:#fff;color:#101B3D;border:1px solid #cbd5e1;border-radius:8px;white-space:nowrap;padding:9px 14px;font-size:.78rem;font-weight:700;cursor:pointer">📅 Todos os meses</button>
             <select id="fc-fil-empresa" onchange="fcAplicarFiltros()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
               <option value="">🏢 Todas as empresas (Pagar)</option>
             </select>
@@ -1129,6 +1144,10 @@ select.fc{cursor:pointer}
             <button onclick="dreMov(-1)">◀</button>
             <div class="dash-mes-label" id="dre-mes-lbl">—</div>
             <button onclick="dreMov(1)">▶</button>
+            <!-- Atalho direto pra "Todos os meses" (2026-08-21, a pedido do usuário) — sem
+                 precisar clicar ◀/▶ várias vezes; "Todos os meses" mostra o DRE consolidado
+                 do ano inteiro (ver calcularDRE_ComTodos()). -->
+            <button type="button" onclick="dreMesTodos()" style="background:#fff;color:#101B3D;border:1px solid #cbd5e1;border-radius:8px;white-space:nowrap;padding:9px 14px;font-size:.78rem;font-weight:700;cursor:pointer;margin-left:6px">📅 Todos os meses</button>
             <!-- flex-basis:100% (2026-08-04) — quebra-linha forçado: select+botões de
                  exportar SEMPRE caem numa linha própria, nunca disputam espaço com a
                  navegação de mês. Sem isso, o flex-wrap da .dash-mes-nav só quebra quando
@@ -1158,6 +1177,10 @@ select.fc{cursor:pointer}
             <button onclick="fcxMov(-1)">◀</button>
             <div class="dash-mes-label" id="fcx-mes-lbl">—</div>
             <button onclick="fcxMov(1)">▶</button>
+            <!-- Atalho direto pra "Todos os meses" (2026-08-21, a pedido do usuário) — mostra
+                 um resumo mensal do ano inteiro em vez da grade dia a dia (ver
+                 _fcxRenderAnual()), já que 365+ dias numa lista só não caberia. -->
+            <button type="button" onclick="fcxMesTodos()" style="background:#fff;color:#101B3D;border:1px solid #cbd5e1;border-radius:8px;white-space:nowrap;padding:9px 14px;font-size:.78rem;font-weight:700;cursor:pointer;margin-left:6px">📅 Todos os meses</button>
             <span style="margin-left:auto;font-size:.75rem;color:#64748b;font-weight:600">💰 Saldo inicial em caixa (hoje)</span>
             <input id="fcx-saldo-inicial" type="text" placeholder="R$ 0,00" style="width:150px;padding:8px 12px;border-radius:8px;border:1.5px solid #1d4ed8;font-weight:700;color:#1d4ed8;font-size:.83rem;font-family:inherit" onchange="fcxSetSaldoInicial(this.value)">
           </div>
@@ -1186,6 +1209,18 @@ select.fc{cursor:pointer}
           </div>
           <div id="op-body"></div>
           <div id="op-pendencias" style="margin-top:22px"></div>
+        </div>
+        <!-- DRE COMPETÊNCIA CONGELADO (2026-08-21, a pedido do usuário) — relatório novo e
+             separado (confirmado com o usuário), não mexe em nada da aba "📊 DRE" dinâmica
+             ao lado. Ver renderDreCongelado()/_dreProporCongelamentoPosImport(). -->
+        <div id="fin-sec-drecongelado" style="display:none">
+          <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
+            ❄️ Retrato oficial e definitivo do DRE Competência de cada mês, congelado no momento em que a planilha de Contas a Pagar daquele período foi confirmada pela primeira vez (📥 Importar Excel, dentro de Contas a Pagar/Receber). Depois de congelado, um período NUNCA muda mais — é o histórico oficial daquele mês. O DRE dinâmico (aba "📊 DRE") continua funcionando normalmente, sem nenhuma mudança — este aqui é só um retrato à parte, e as baixas reais de contas a pagar/receber continuam alimentando o DRE Realizado (dinâmico) normalmente.
+          </div>
+          <select id="drecong-fil-empresa" onchange="renderDreCongelado()" style="margin-bottom:14px;padding:8px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+            <option value="">🏢 Todas as empresas (consolidado)</option>
+          </select>
+          <div id="drecong-body"></div>
         </div>
       </div>
     </div>
@@ -2966,6 +3001,20 @@ select.fc{cursor:pointer}
 </div>
 </div>
 
+<!-- VINCULAR RECEITA MANUAL A UM PEDIDO (2026-08-21, a pedido do usuário: "quero um botao
+     justamente para LINKAR A UM PEDIDO dai ela escolhe de qual pedido é aquela receita") -->
+<div class="mov" id="mo-vincular-pedido" onclick="cio(event,'mo-vincular-pedido')">
+<div class="mvmod" style="width:560px;max-width:97vw;max-height:92vh;overflow-y:auto;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <h3 style="margin-bottom:0">🔗 Vincular receita a um pedido</h3>
+    <button onclick="closeM('mo-vincular-pedido')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div style="font-size:.75rem;color:var(--ink4);margin-bottom:10px;padding:8px 12px;background:#f8fafc;border-radius:8px;border:1px solid var(--border)">Escolha a qual pedido essa receita lançada manualmente pertence. Dá pra vincular mais de uma receita ao mesmo pedido (ex.: entrada + parcela lançadas separadamente).</div>
+  <input class="fc no-upper" id="crv-busca" placeholder="Buscar por OS ou cliente..." oninput="_crmRenderListaPedidos(this.value)" style="margin-bottom:10px">
+  <div id="crv-lista" style="max-height:50vh;overflow-y:auto"></div>
+</div>
+</div>
+
 <!-- CONTA A PAGAR — IMPORTAR EXCEL (com tela de revisão antes de gravar; era PDF até 2026-08-04) -->
 <div class="mov" id="mo-cp-import" onclick="cio(event,'mo-cp-import')">
 <div class="mvmod" style="width:980px;max-width:98vw;max-height:92vh;display:flex;flex-direction:column">
@@ -3476,6 +3525,11 @@ window._fbRemoverContasPagarBatch=async(itens)=>{
 window._fbSaveContaReceberManual=(c)=>setDoc(doc(db,'contasReceberManual',String(c.id)),c);
 window._fbDeleteContaReceberManual=(id)=>deleteDoc(doc(db,'contasReceberManual',String(id)));
 window._fbWatchContasReceberManual=(cb)=>onSnapshot(collection(db,'contasReceberManual'),cb);
+// DRE Competência CONGELADO (2026-08-21, a pedido do usuário — ver bloco grande junto de
+// renderDreCongelado()). Coleção própria 'dreCongelado', 1 doc por período (chave 'YYYY-MM'),
+// nunca sobrescrito automaticamente depois de criado — não existe fluxo de "descongelar".
+window._fbSaveDreCongelado=(d)=>setDoc(doc(db,'dreCongelado',String(d.id)),d);
+window._fbWatchDreCongelado=(cb)=>onSnapshot(collection(db,'dreCongelado'),cb);
 // RH — Pontualidade e Assiduidade (2026-07-29). Coleção separada de cfg/pedidos porque o
 // volume de dias de ponto pode crescer bastante (1 doc por funcionário+mês, com merge por
 // dia — nunca sobrescreve o mês inteiro, só os dias que vieram no arquivo).
@@ -4938,6 +4992,15 @@ function setupContasReceberManualSync(){
     contasReceberManual=snapshot.docs.map(d=>d.data());
     const elFin=document.getElementById('sec-cat-FINANCEIRO');
     if(elFin&&elFin.style.display!=='none'&&typeof fcAplicarFiltros==='function')fcAplicarFiltros();
+  });
+}
+// Mesmo padrão — DRE Competência Congelado (2026-08-21, ver window._fbSaveDreCongelado).
+function setupDreCongeladoSync(){
+  if(!window._fbWatchDreCongelado)return;
+  window._fbWatchDreCongelado(function(snapshot){
+    dreCongeladoMeses=snapshot.docs.map(d=>d.data());
+    const elFin=document.getElementById('sec-cat-FINANCEIRO');
+    if(elFin&&elFin.style.display!=='none'&&typeof renderDreCongelado==='function')renderDreCongelado();
   });
 }
 // Mesmo padrão de setupContasPagarSync() — coleção própria (rhPonto), 1 doc por
@@ -10371,6 +10434,7 @@ function initAuth(tries){
         setupRealtimeSync();
         setupContasPagarSync();
         setupContasReceberManualSync();
+        setupDreCongeladoSync();
         setupRhPontoSync();
         setupLixeiraSync();
         setupProspSync();
@@ -13642,6 +13706,107 @@ async function salvarContaReceberManualForm(){
   if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// VINCULAR RECEITA MANUAL A UM PEDIDO (2026-08-21, a pedido do usuário: "quero que na
+// opção ali de lançar uma nova receita, depois tenha um botao na linha da receita lançada
+// ... um botao justamente para LINKAR A UM PEDIDO dai ela escolhe de qual pedido é aquela
+// receita. mas mostre na mesma linha pequeno se tiver faltando receita no pedido") — guarda
+// só o ID do pedido vinculado (c.pedidoId) na própria receita manual, sem tocar em nenhuma
+// função compartilhada (getParcelas/getComissaoItemsAll continuam do jeito que sempre
+// foram — alimentam Comissão/DRE/Contas a Receber normalmente, sem saber que esse vínculo
+// existe). O valor Bruto do pedido pra comparação reaproveita pedidoToVendaRow(p).br —
+// mesma fonte de verdade já usada em Vendas/Metas/Comissão (trata pedido reconciliado com
+// a planilha colada automaticamente).
+//
+// ALERTA DE POSSÍVEL DUPLICIDADE — o usuário levantou essa dúvida ao responder as perguntas
+// de esclarecimento: "se ela ja recebeu a entrada do pedido e lançou como receita nova e
+// depois vinculou a entrada deste pedido gerada pela emissao la no contas a receber precisa
+// ser removida dai, o sistema tem como ler isso automatico? ... um pedido x so pode ter uma
+// entrada, uma parcela 1 e uma parcela 2, assim por diante". Abordagem escolhida: AVISAR,
+// nunca remover/mutar nada sozinho — comparamos o valor da receita manual com o Bruto de
+// cada parcela de getParcelas(pedido) (mesma tolerância de R$0,05 já usada em outras
+// comparações de duplicidade no sistema, ver bug corrigido 2026-08-04 acima nesta mesma
+// função) e, se bater, mostramos um aviso pedindo pra conferir manualmente. Nunca oculta ou
+// exclui nada sozinho: getParcelas() alimenta a folha de comissão em outros lugares, e a
+// receita manual pode ser legítima mesmo com valor parecido (coincidência). Se o usuário
+// confirmar que é duplicidade, ele mesmo exclui a receita manual (🗑️) ou remove o vínculo.
+function _crmValorBrutoPedido(p){
+  if(!p)return 0;
+  try{return pedidoToVendaRow(p).br||0;}catch(e){return 0;}
+}
+function _crmPossivelDuplicata(c,pedido){
+  if(!pedido)return null;
+  try{
+    const parcelas=getParcelas(pedido);
+    const match=parcelas.find(pc=>Math.abs((pc.valorBruto||0)-(c.valor||0))<0.05);
+    return match?match.label:null;
+  }catch(e){return null;}
+}
+function _crmInfoVinculo(c){
+  if(!c.pedidoId)return '';
+  const pedido=(typeof pedidos!=='undefined'?pedidos:[]).find(p=>p.id===c.pedidoId);
+  if(!pedido)return '<div style="margin-top:4px;font-size:.68rem;color:#dc2626">🔗 Pedido vinculado não encontrado (pode ter sido excluído)</div>';
+  const totalBruto=_crmValorBrutoPedido(pedido);
+  const vinculadas=(contasReceberManual||[]).filter(x=>x.pedidoId===c.pedidoId);
+  const totalVinculado=vinculadas.reduce((s,x)=>s+(x.valor||0),0);
+  const falta=totalBruto-totalVinculado;
+  const dupLabel=_crmPossivelDuplicata(c,pedido);
+  let html=`<div style="margin-top:4px;font-size:.68rem;color:#0369a1">🔗 Pedido ${pedidoDisplay(pedido.os)||pedido.os||'—'}${pedido.cliente?' — '+pedido.cliente:''} · ${fmtR(totalBruto)}</div>`;
+  if(falta>0.005){
+    html+=`<div style="margin-top:2px;font-size:.68rem;font-weight:700;color:#d97706">⚠️ Faltam ${fmtR(falta)} de receita deste pedido</div>`;
+  }
+  if(dupLabel){
+    html+=`<div style="margin-top:2px;font-size:.68rem;font-weight:700;color:#dc2626">🚨 Valor parecido com "${dupLabel}" deste pedido — pode já estar contabilizado automaticamente em Contas a Receber. Confira se não é lançamento duplicado.</div>`;
+  }
+  return html;
+}
+function _crmAbrirVincularPedido(id){
+  const c=contasReceberManual.find(x=>x.id===id);if(!c){toast('Receita não encontrada','terr');return;}
+  window._crmVincAtualId=id;
+  const busca=document.getElementById('crv-busca');if(busca)busca.value='';
+  _crmRenderListaPedidos('');
+  openM('mo-vincular-pedido');
+}
+function _crmRenderListaPedidos(q){
+  const el=document.getElementById('crv-lista');if(!el)return;
+  const termo=(q||'').toLowerCase().trim();
+  const todos=(typeof pedidos!=='undefined'?pedidos:[]);
+  const lista=todos.filter(p=>{
+    if(!termo)return true;
+    return String(p.os||'').toLowerCase().includes(termo)||String(p.cliente||'').toLowerCase().includes(termo);
+  }).slice(0,60); // trava de performance — a base pode ter milhares de pedidos, a busca refina
+  if(!lista.length){el.innerHTML='<div style="padding:12px 4px;color:#94a3b8;font-size:.82rem">Nenhum pedido encontrado.</div>';return;}
+  el.innerHTML=lista.map(p=>{
+    const total=_crmValorBrutoPedido(p);
+    const vinculadas=(contasReceberManual||[]).filter(x=>x.pedidoId===p.id);
+    const totalVinculado=vinculadas.reduce((s,x)=>s+(x.valor||0),0);
+    const falta=total-totalVinculado;
+    return `<div onclick="_crmEscolherPedido('${p.id}')" style="cursor:pointer;padding:8px 10px;border-radius:8px;border:1px solid var(--border);margin-bottom:6px;display:flex;justify-content:space-between;gap:10px;align-items:center">
+      <div style="min-width:0">
+        <div style="font-weight:700;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${pedidoDisplay(p.os)||p.os||'—'} — ${(p.cliente||'—')}</div>
+        <div style="font-size:.7rem;color:#64748b">${fmtR(total)} total${falta>0.005?` · <span style="color:#d97706;font-weight:700">falta ${fmtR(falta)}</span>`:' · <span style="color:#16a34a;font-weight:700">completo</span>'}</div>
+      </div>
+      <div style="font-size:1rem;flex-shrink:0">→</div>
+    </div>`;
+  }).join('');
+}
+async function _crmEscolherPedido(pedidoId){
+  const id=window._crmVincAtualId;if(!id)return;
+  const c=contasReceberManual.find(x=>x.id===id);if(!c)return;
+  c.pedidoId=pedidoId;
+  await saveContaReceberManualFS(c);
+  closeM('mo-vincular-pedido');
+  toast('Receita vinculada ao pedido! ✅','tok');
+  if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();
+}
+async function _crmRemoverVinculo(id){
+  const c=contasReceberManual.find(x=>x.id===id);if(!c)return;
+  delete c.pedidoId;
+  await saveContaReceberManualFS(c);
+  toast('Vínculo removido','tok');
+  if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();
+}
+
 // ── UI: alterna entre Contas a Receber / Contas a Pagar dentro de Financeiro ──────────────
 // (2026-07-22) fin-sec-receber e fin-sec-pagar deixaram de ser abas próprias — viraram uma
 // lista só (fin-sec-contas, ver renderContasUnificado()). As duas continuam existindo no
@@ -13650,14 +13815,16 @@ async function salvarContaReceberManualForm(){
 function finMainSetTab(tab,btn){
   document.querySelectorAll('.fin-main-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  const sc=document.getElementById('fin-sec-contas'),sd=document.getElementById('fin-sec-dre'),sf=document.getElementById('fin-sec-fluxocx'),so=document.getElementById('fin-sec-opped');
+  const sc=document.getElementById('fin-sec-contas'),sd=document.getElementById('fin-sec-dre'),sf=document.getElementById('fin-sec-fluxocx'),so=document.getElementById('fin-sec-opped'),sg=document.getElementById('fin-sec-drecongelado');
   if(sc)sc.style.display=tab==='contas'?'':'none';
   if(sd)sd.style.display=tab==='dre'?'':'none';
   if(sf)sf.style.display=tab==='fluxocx'?'':'none';
   if(so)so.style.display=tab==='opped'?'':'none';
+  if(sg)sg.style.display=tab==='drecongelado'?'':'none';
   if(tab==='contas'){if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();}
   else if(tab==='fluxocx'){if(typeof renderFluxoCaixa==='function')renderFluxoCaixa();}
   else if(tab==='opped'){if(typeof renderOperacionaisPedidos==='function')renderOperacionaisPedidos();}
+  else if(tab==='drecongelado'){if(typeof renderDreCongelado==='function')renderDreCongelado();}
   else{if(typeof renderDRE==='function')renderDRE();}
 }
 let _cpItemsAtuais=[];
@@ -14404,6 +14571,11 @@ async function confirmarImportacaoContasPagar(){
   }
   closeM('mo-cp-import');
   toast(`✅ Sistema igualado à planilha: ${ok} novo(s), ${sync} atualizado(s)${rem?', '+rem+' removido(s)':''}`,'tok');
+  // DRE Competência CONGELADO (2026-08-21) — pergunta só na primeira importação de cada
+  // período (ver _dreProporCongelamentoPosImport()/_dreJaCongelado()), depois que a
+  // planilha já foi gravada normal no Contas a Pagar acima (nunca bloqueia/atrasa a
+  // importação em si — só pergunta depois que ela já terminou com sucesso).
+  if(ok||sync)await _dreProporCongelamentoPosImport(plano,lote);
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -14443,14 +14615,25 @@ async function confirmarImportacaoContasPagar(){
 let _dreMesAtual={y:new Date().getFullYear(),m:new Date().getMonth()+1};
 let _dreEmpresaFiltro='';
 let _dreRegimeAtual='competencia'; // 'competencia' | 'realizado'
+// dreMov agora cicla incluindo "Todos os meses" (m:null) entre Dezembro e Janeiro do ano
+// seguinte — ver _mesAnoNavCiclo() (2026-08-21, a pedido do usuário). "Todos os meses" no
+// DRE mostra o consolidado do ano inteiro (ver calcularDRE_ComTodos() mais abaixo).
 function dreMov(dir){
-  _dreMesAtual.m+=dir;
-  if(_dreMesAtual.m>12){_dreMesAtual.m=1;_dreMesAtual.y++;}
-  if(_dreMesAtual.m<1){_dreMesAtual.m=12;_dreMesAtual.y--;}
+  _dreMesAtual=_mesAnoNavCiclo(_dreMesAtual,dir);
+  renderDRE();
+}
+// Atalho direto pra "Todos os meses" (2026-08-21) — mesmo padrão do botão "Exibir Todos os
+// Meses" já usado em RH/Pontualidade, evitando ter que clicar ◀/▶ várias vezes só pra passar
+// por todos os meses até cair na parada "Todos os meses" do ciclo.
+function dreMesTodos(){
+  _dreMesAtual={y:_dreMesAtual.y,m:null};
   renderDRE();
 }
 function dreSetEmpresa(v){_dreEmpresaFiltro=v;renderDRE();}
 function dreSetRegime(v){_dreRegimeAtual=v;renderDRE();}
+// Label do período no topo do DRE — "Todos os meses" quando m é null (2026-08-21), senão o
+// mês por extenso de sempre.
+function _dreLabelPeriodo(y,m){return m?(MESES_PT[m]+' '+y):('Todos os meses — '+y);}
 // Mês/ano em que uma parcela de comissão CONFIRMADA foi efetivamente recebida — usado só pelo
 // regime Realizado. Prioridade: data real digitada em "Confirmar Recebimento"
 // (conf.dataRecebimentoReal, formato AAAA-MM-DD) > confirmedAt (timestamp de quando alguém deu
@@ -14579,6 +14762,36 @@ function calcularDRE(y,m,empresaFiltro,regime){
     porCategoria:Object.values(porCategoria).sort((a,b)=>b.total-a.total)
   };
 }
+// "Todos os meses" no DRE (2026-08-21, a pedido do usuário) — NÃO mexe em calcularDRE() (ver
+// [[feedback_escopo_restrito_alto_risco]]), só soma o resultado dela rodada pra cada um dos 12
+// meses do ano quando m vier null/''/undefined (mesmo padrão aditivo já usado em
+// calcularDreIndicadoresAcumulado() logo abaixo). m normal (1-12) cai direto em calcularDRE(),
+// sem nenhuma mudança de comportamento pro que já existia.
+function calcularDRE_ComTodos(y,m,empresaFiltro,regime){
+  if(m)return calcularDRE(y,m,empresaFiltro,regime);
+  const meses=[];
+  for(let mm=1;mm<=12;mm++)meses.push(calcularDRE(y,mm,empresaFiltro,regime));
+  const somar=campo=>meses.reduce((s,d)=>s+(d[campo]||0),0);
+  const porCategoriaMap={};
+  meses.forEach(d=>d.porCategoria.forEach(c=>{
+    const key=c.grupo+'::'+c.nome;
+    if(!porCategoriaMap[key])porCategoriaMap[key]={grupo:c.grupo,nome:c.nome,total:0};
+    porCategoriaMap[key].total+=c.total;
+  }));
+  return{
+    y,m:null,empresaFiltro,incluirReceita:meses[0]?meses[0].incluirReceita:false,regime,
+    receitaBruta:somar('receitaBruta'),custoProducaoInterno:somar('custoProducaoInterno'),
+    cmvExterno:somar('cmvExterno'),custoProducaoTotal:somar('custoProducaoTotal'),
+    lucroBruto:somar('lucroBruto'),
+    comissaoVendedores:somar('comissaoVendedores'),comissaoGerente:somar('comissaoGerente'),
+    totalComissoes:somar('totalComissoes'),
+    despOperacionais:somar('despOperacionais'),resultadoOperacional:somar('resultadoOperacional'),
+    despFinanceiras:somar('despFinanceiras'),impostos:somar('impostos'),imobilizado:somar('imobilizado'),
+    naoClassificado:somar('naoClassificado'),lucroLiquido:somar('lucroLiquido'),
+    foraPlanejadoTotal:somar('foraPlanejadoTotal'),qtdNaoClassificado:somar('qtdNaoClassificado'),
+    porCategoria:Object.values(porCategoriaMap).sort((a,b)=>b.total-a.total)
+  };
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 // INDICADORES POR CENTRO DE CUSTO — Fase extra do DRE (2026-08-21, a pedido do usuário: ele
@@ -14666,12 +14879,36 @@ function calcularDreIndicadoresAcumulado(y,mFinal,empresaFiltro,regime){
   }
   return{meses:mFinal,receita,residual};
 }
+// "Todos os meses" nos Indicadores por Centro de Custo (2026-08-21) — mesmo padrão aditivo de
+// calcularDRE_ComTodos() acima: soma calcularDreIndicadores() dos 12 meses do ano quando m vier
+// null/''/undefined, sem tocar em calcularDreIndicadores() nem em nada que já existia.
+function calcularDreIndicadores_ComTodos(y,m,empresaFiltro,regime){
+  if(m)return calcularDreIndicadores(y,m,empresaFiltro,regime);
+  const meses=[];
+  for(let mm=1;mm<=12;mm++)meses.push(calcularDreIndicadores(y,mm,empresaFiltro,regime));
+  const somarTemas=getter=>{
+    const base=getter(meses[0]).map(t=>({nome:t.nome,valor:0}));
+    meses.forEach(d=>getter(d).forEach((t,idx)=>{base[idx].valor+=t.valor;}));
+    return base;
+  };
+  return{
+    y,m:null,empresaFiltro,regime,
+    receita:meses.reduce((s,d)=>s+d.receita,0),
+    temasPreEbitda:somarTemas(d=>d.temasPreEbitda),
+    ebitda:meses.reduce((s,d)=>s+d.ebitda,0),
+    temasPreLucro:somarTemas(d=>d.temasPreLucro),
+    lucroLiquido:meses.reduce((s,d)=>s+d.lucroLiquido,0),
+    temasPreResidual:somarTemas(d=>d.temasPreResidual),
+    residual:meses.reduce((s,d)=>s+d.residual,0),
+    naoClassificado:meses.reduce((s,d)=>s+d.naoClassificado,0)
+  };
+}
 let dreIndCharts={};
 function renderDreIndicadores(){
   const el=document.getElementById('dre-indicadores');if(!el)return;
   const{y,m}=_dreMesAtual;
-  const d=calcularDreIndicadores(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
-  const acc=calcularDreIndicadoresAcumulado(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
+  const d=calcularDreIndicadores_ComTodos(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
+  const acc=calcularDreIndicadoresAcumulado(y,m||12,_dreEmpresaFiltro,_dreRegimeAtual);
   const pct=(v,base)=>base>0.005?(v/base*100).toFixed(2).replace('.',',')+'%':'—';
 
   const linhasChart=[
@@ -14733,6 +14970,141 @@ function renderDreIndicadores(){
     });
   }
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// DRE COMPETÊNCIA CONGELADO (2026-08-21, a pedido do usuário: "a primeira importação
+// pergunte pro usuario se ele quer lançar essas despesas no DRE COMPETENCIA. se ele clicar
+// sim alem de lançar o contas a pagar normal como é hoje vai lançar la no DRE COMPETENCIA e
+// dai vai congelar esse dre competencia e tudo que for feito como baixas de conta recebida
+// e baixa de conta paga vai ser movimentado no DRE REALIZADO") — retrato oficial e
+// definitivo do DRE Competência de um mês, tirado no momento em que a planilha de Contas a
+// Pagar daquele período é confirmada PELA PRIMEIRA VEZ (ver gancho em
+// confirmarImportacaoContasPagar() → _dreProporCongelamentoPosImport()). Uma vez congelado,
+// o período NUNCA muda mais — mesmo que o usuário reimporte a planilha depois, edite uma
+// despesa, ou o DRE dinâmico mude de resultado por qualquer motivo (não existe fluxo de
+// "descongelar" no sistema). Relatório NOVO E SEPARADO (confirmado com o usuário — "Relatório
+// novo e separado (recomendado)") — não mexe em calcularDRE()/renderDRE()/
+// calcularDreIndicadores() nem em mais nada do DRE dinâmico que já existia. O DRE Realizado
+// (regime de caixa, baseado em baixas reais) JÁ EXISTIA antes desta feature e continua 100%
+// dinâmico/vivo sem nenhuma mudança — é ele que "recebe" as baixas depois do congelamento,
+// exatamente como pedido, só que não precisou de código novo por já fazer isso.
+//
+// Escolhas de design feitas aqui (não confirmadas frase-a-frase com o usuário, documentadas
+// pra revisão): o congelamento roda por período (y,m) — confirmado ("Por período/mês
+// (recomendado)"), cada mês pode ser congelado na sua própria primeira importação,
+// independente dos outros já congelados ou não. O snapshot guarda calcularDRE(y,m,
+// empresaFiltro,'competencia') pra CADA empresa (inclusive consolidado ''), sempre regime
+// Competência.
+let dreCongeladoMeses=[];
+function _dreCongeladoKey(y,m){return y+'-'+String(m).padStart(2,'0');}
+function _dreJaCongelado(y,m){return (dreCongeladoMeses||[]).some(d=>d.id===_dreCongeladoKey(y,m));}
+async function _dreCongelarPeriodo(y,m,loteImportacao){
+  if(_dreJaCongelado(y,m))return; // trava extra — nunca sobrescreve um período já congelado
+  const key=_dreCongeladoKey(y,m);
+  const porEmpresa={'':calcularDRE(y,m,'','competencia')};
+  EMPRESAS_CONTAS_PAGAR.forEach(e=>{porEmpresa[e.id]=calcularDRE(y,m,e.id,'competencia');});
+  const docCongelado={id:key,y,m,congeladoEm:new Date().toISOString(),congeladoPor:usuarioLogado?.nomeExibicao||'',loteImportacao:loteImportacao||'',porEmpresa};
+  dreCongeladoMeses.push(docCongelado); // otimista — evita reperguntar se o onSnapshot demorar a voltar
+  if(window._fbSaveDreCongelado)await window._fbSaveDreCongelado(docCongelado);
+}
+// Gancho pós-importação de Contas a Pagar (ver confirmarImportacaoContasPagar()) — só
+// pergunta pelo(s) período(s) que a planilha recém-confirmada tocou (lançamento novo OU
+// atualizado) E que ainda não estavam congelados. Nunca pergunta de novo por um período já
+// congelado (nem oferece "descongelar" — não existe esse fluxo).
+async function _dreProporCongelamentoPosImport(plano,loteImportacao){
+  try{
+    const chaves=new Set();
+    (plano.novos||[]).forEach(r=>{if(r.vencimento)chaves.add(r.vencimento.slice(0,7));});
+    (plano.syncs||[]).forEach(({r})=>{if(r&&r.vencimento)chaves.add(r.vencimento.slice(0,7));});
+    const pendentes=[...chaves].filter(chave=>{
+      const partes=chave.split('-');const y=parseInt(partes[0],10),m=parseInt(partes[1],10);
+      return !_dreJaCongelado(y,m);
+    }).sort();
+    if(!pendentes.length)return;
+    const labels=pendentes.map(chave=>{
+      const partes=chave.split('-');const y=parseInt(partes[0],10),m=parseInt(partes[1],10);
+      return MESES_PT[m]+'/'+y;
+    });
+    const quer=confirm(`Essa planilha trouxe despesas de ${labels.length>1?'períodos':'um período'} ainda não congelado(s) no DRE Competência:\n\n${labels.join('\n')}\n\nQuer congelar o DRE Competência desse(s) período(s) agora? Uma vez congelado, o período fica travado pra sempre como retrato oficial daquele mês — as baixas de contas a pagar/receber feitas depois continuam contando normalmente no DRE Realizado (que já existia e continua 100% dinâmico), só não muda mais o congelado.\n\n(Pode congelar depois também, na próxima importação — só não dá pra descongelar.)`);
+    if(!quer)return;
+    for(const chave of pendentes){
+      const partes=chave.split('-');const y=parseInt(partes[0],10),m=parseInt(partes[1],10);
+      await _dreCongelarPeriodo(y,m,loteImportacao);
+    }
+    toast(`❄️ DRE Competência congelado: ${labels.join(', ')}`,'tok');
+    if(typeof renderDreCongelado==='function')renderDreCongelado();
+  }catch(e){console.error('Erro ao propor congelamento do DRE Competência',e);}
+}
+let _drecongExpandido={};
+function _drecongToggle(key){
+  _drecongExpandido[key]=!_drecongExpandido[key];
+  renderDreCongelado();
+}
+function renderDreCongelado(){
+  const el=document.getElementById('drecong-body');if(!el)return;
+  if(!_isFinanceiroUser()){
+    el.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700;font-size:.85rem">🔒 ACESSO NÃO PERMITIDO — apenas Financeiro ou Administrador podem ver o DRE Congelado.</div>';
+    return;
+  }
+  const selEmp=document.getElementById('drecong-fil-empresa');
+  if(selEmp&&selEmp.options.length<=1)selEmp.innerHTML='<option value="">🏢 Todas as empresas (consolidado)</option>'+EMPRESAS_CONTAS_PAGAR.filter(e=>e.id!=='OUTRA').map(e=>`<option value="${e.id}">${e.label}</option>`).join('');
+  const empresaFiltro=selEmp?selEmp.value:'';
+  const meses=[...(dreCongeladoMeses||[])].sort((a,b)=>String(b.id).localeCompare(String(a.id)));
+  if(!meses.length){
+    el.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhum período congelado ainda. O sistema pergunta automaticamente se quer congelar o DRE Competência de um mês na primeira vez que a planilha de Contas a Pagar daquele período é confirmada (📥 Importar Excel, dentro de Contas a Pagar/Receber).</div>';
+    return;
+  }
+  const pctOf=(v,base)=>base>0.005?(v/base*100).toFixed(1).replace('.',',')+'%':'—';
+  const pctCor=v=>v>=0?'#16a34a':'#dc2626';
+  const linha=(label,val,{bold,indent,cor,pct}={})=>`
+    <tr>
+      <td style="padding:${bold?'10px':'6px'} 4px ${bold?'10px':'6px'} ${indent?'22px':'4px'};font-weight:${bold?800:500};font-size:${bold?'.88rem':'.82rem'};color:${bold?'#1e293b':'#475569'};border-top:${bold?'1.5px solid var(--border)':'none'}">${label}</td>
+      <td style="padding:${bold?'10px':'6px'} 4px;text-align:right;font-weight:${bold?800:600};font-size:${bold?'.88rem':'.82rem'};color:${cor||(bold?'#1e293b':'#334155')};border-top:${bold?'1.5px solid var(--border)':'none'};white-space:nowrap">${fmtR(val)}</td>
+      <td style="padding:${bold?'10px':'6px'} 4px;text-align:right;font-size:.72rem;color:#94a3b8;border-top:${bold?'1.5px solid var(--border)':'none'};white-space:nowrap">${pct||''}</td>
+    </tr>`;
+  el.innerHTML=meses.map(docCong=>{
+    const d=(docCong.porEmpresa||{})[empresaFiltro||'']||calcularDRE(docCong.y,docCong.m,empresaFiltro,'competencia');
+    const catBlock=grupo=>(d.porCategoria||[]).filter(c=>c.grupo===grupo).map(c=>linha(c.nome,-c.total,{indent:true})).join('');
+    const aberto=!!_drecongExpandido[docCong.id];
+    const congeladoEmFmt=docCong.congeladoEm?new Date(docCong.congeladoEm).toLocaleString('pt-BR'):'—';
+    return `<div class="dash-card" style="margin-bottom:14px">
+      <div onclick="_drecongToggle('${docCong.id}')" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div>
+          <div style="font-weight:800;font-size:.95rem">❄️ ${MESES_PT[docCong.m]} ${docCong.y}</div>
+          <div style="font-size:.7rem;color:#94a3b8">Congelado em ${congeladoEmFmt}${docCong.congeladoPor?' por '+docCong.congeladoPor:''}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:800;font-size:1rem;color:${pctCor(d.lucroLiquido)}">${fmtR(d.lucroLiquido)}</div>
+          <div style="font-size:.68rem;color:#94a3b8">Lucro Líquido · margem ${pctOf(d.lucroLiquido,d.receitaBruta)} ${aberto?'▲':'▼'}</div>
+        </div>
+      </div>
+      ${aberto?`<table style="width:100%;border-collapse:collapse;margin-top:12px">
+        <tbody>
+          ${linha('RECEITA BRUTA',d.receitaBruta,{bold:true})}
+          ${linha('(–) Custo de Produção (CMV)',-d.custoProducaoTotal,{bold:true,cor:'#dc2626'})}
+          ${linha('Entrega/instalação por pedido',-d.custoProducaoInterno,{indent:true})}
+          ${catBlock('CMV')}
+          ${linha('= LUCRO BRUTO',d.lucroBruto,{bold:true,cor:pctCor(d.lucroBruto),pct:'margem '+pctOf(d.lucroBruto,d.receitaBruta)})}
+          ${linha('(–) Comissões',-d.totalComissoes,{bold:true,cor:'#dc2626'})}
+          ${linha('Vendedores',-d.comissaoVendedores,{indent:true})}
+          ${linha('Gerência (Clabonde)',-d.comissaoGerente,{indent:true})}
+          ${linha('(–) Despesas Operacionais',-d.despOperacionais,{bold:true,cor:'#dc2626'})}
+          ${catBlock('OPERACIONAL')}
+          ${linha('= RESULTADO OPERACIONAL (EBITDA)',d.resultadoOperacional,{bold:true,cor:pctCor(d.resultadoOperacional),pct:'margem '+pctOf(d.resultadoOperacional,d.receitaBruta)})}
+          ${linha('(–) Despesas Financeiras',-d.despFinanceiras,{bold:true,cor:'#dc2626'})}
+          ${catBlock('FINANCEIRA')}
+          ${linha('(–) Impostos',-d.impostos,{bold:true,cor:'#dc2626'})}
+          ${catBlock('IMPOSTOS')}
+          ${d.imobilizado>0.005?linha('(–) Imobilizado (Bem Financiado)',-d.imobilizado,{bold:true,cor:'#dc2626'}):''}
+          ${d.imobilizado>0.005?catBlock('IMOBILIZADO'):''}
+          ${d.naoClassificado>0.005?linha('(–) Não Classificado',-d.naoClassificado,{bold:true,cor:'#dc2626'}):''}
+          ${linha('= LUCRO LÍQUIDO',d.lucroLiquido,{bold:true,cor:pctCor(d.lucroLiquido),pct:'margem '+pctOf(d.lucroLiquido,d.receitaBruta)})}
+        </tbody>
+      </table>`:''}
+    </div>`;
+  }).join('');
+}
+
 function renderDRE(){
   const el=document.getElementById('dre-body');if(!el)return;
   const lbl=document.getElementById('dre-mes-lbl');
@@ -14753,8 +15125,8 @@ function renderDRE(){
   if(selEmp&&selEmp.options.length<=1)selEmp.innerHTML='<option value="">🏢 Todas as empresas (consolidado)</option>'+EMPRESAS_CONTAS_PAGAR.filter(e=>e.id!=='OUTRA').map(e=>`<option value="${e.id}">${e.label}</option>`).join('');
 
   const{y,m}=_dreMesAtual;
-  if(lbl)lbl.textContent=MESES_PT[m]+' '+y;
-  const d=calcularDRE(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
+  if(lbl)lbl.textContent=_dreLabelPeriodo(y,m);
+  const d=calcularDRE_ComTodos(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
   const pctOf=(v,base)=>base>0.005?(v/base*100).toFixed(1).replace('.',',')+'%':'—';
   const pctCor=v=>v>=0?'#16a34a':'#dc2626';
   // Alternador Competência/Realizado (2026-08-04, a pedido do usuário) — mesma célula de
@@ -14844,10 +15216,18 @@ function renderDRE(){
 // ════════════════════════════════════════════════════════════════════════════════════
 let _fcxMesAtual={y:new Date().getFullYear(),m:new Date().getMonth()+1};
 let _fcxCacheAtual={}; // porDia da última renderização — usado pelo modal de detalhe (_fcxVerDia)
+// fcxMov agora cicla incluindo "Todos os meses" (m:null) entre Dezembro e Janeiro do ano
+// seguinte — ver _mesAnoNavCiclo() (2026-08-21, a pedido do usuário). "Todos os meses" aqui
+// mostra um resumo mensal do ano inteiro em vez da grade dia a dia (que não caberia — ver
+// _fcxRenderAnual() dentro de renderFluxoCaixa()).
 function fcxMov(dir){
-  _fcxMesAtual.m+=dir;
-  if(_fcxMesAtual.m>12){_fcxMesAtual.m=1;_fcxMesAtual.y++;}
-  if(_fcxMesAtual.m<1){_fcxMesAtual.m=12;_fcxMesAtual.y--;}
+  _fcxMesAtual=_mesAnoNavCiclo(_fcxMesAtual,dir);
+  renderFluxoCaixa();
+}
+// Atalho direto pra "Todos os meses" (2026-08-21) — mesmo padrão do botão já usado em
+// RH/Pontualidade e agora também no DRE (dreMesTodos()).
+function fcxMesTodos(){
+  _fcxMesAtual={y:_fcxMesAtual.y,m:null};
   renderFluxoCaixa();
 }
 function fcxSetSaldoInicial(v){
@@ -14891,15 +15271,32 @@ function renderFluxoCaixa(){
     return;
   }
   const{y,m}=_fcxMesAtual;
-  const lbl=document.getElementById('fcx-mes-lbl');if(lbl)lbl.textContent=MESES_PT[m]+' '+y;
+  const lbl=document.getElementById('fcx-mes-lbl');if(lbl)lbl.textContent=m?(MESES_PT[m]+' '+y):('Todos os meses — '+y);
   const inpSaldo=document.getElementById('fcx-saldo-inicial');
   // Não sobrescreve o input enquanto o usuário está digitando nele (senão perde o
   // cursor/foco a cada re-render disparado por outro filtro).
   if(inpSaldo&&document.activeElement!==inpSaldo)inpSaldo.value=cfg.fluxoCaixaSaldoInicial?fmtR(cfg.fluxoCaixaSaldoInicial):'';
   const saldoInicial=cfg.fluxoCaixaSaldoInicial||0;
 
+  // "Todos os meses" (2026-08-21, a pedido do usuário) — a grade dia a dia não cabe pro ano
+  // inteiro (365+ linhas), então vira um resumo mensal (12 linhas, 1 por mês) com saldo
+  // acumulado ano a ano, clicável pra abrir aquele mês específico na grade normal de novo.
+  // Ver _fcxRenderAnual() — não mexe em nada do cálculo/grade diária que já existia (só
+  // reaproveita _fcxCalcularPorDia() 12 vezes, mesma fonte de dado, zero duplicação de regra).
+  if(!m){_fcxRenderAnual(y,saldoInicial);return;}
+
   const porDia=_fcxCalcularPorDia(y,m);
   _fcxCacheAtual=porDia;
+  // Achata o cache por-dia num único array de entradas/saídas do mês inteiro — usado
+  // pelos cards clicáveis do topo (2026-08-21, a pedido do usuário: "os botoes ali verde
+  // vermelho etc, quero que eles sejam clicaveis ao clicar aparece a lista do que ta
+  // considerando"). Não recalcula nada novo — só reorganiza o que _fcxCalcularPorDia()
+  // já tinha calculado.
+  _fcxItensEntradaMes=[];_fcxItensSaidaMes=[];
+  Object.values(porDia).forEach(d=>{
+    _fcxItensEntradaMes.push(...(d.itensEntrada||[]));
+    _fcxItensSaidaMes.push(...(d.itensSaida||[]));
+  });
 
   const pad=n=>String(n).padStart(2,'0');
   const ultimoDia=new Date(y,m,0).getDate();
@@ -14922,13 +15319,21 @@ function renderFluxoCaixa(){
   }
 
   const saldoFinalMes=saldoInicial+(totalEntradas-totalSaidas);
+  // Total de contas atrasadas do período filtrado — soma Contas a Receber vencidas/não
+  // confirmadas (statusCalc==='atrasado') com Contas a Pagar vencidas/não pagas
+  // (_cpAtrasada(c)) dentro do mês (2026-08-21, a pedido do usuário: novo card/botão
+  // clicável de "Contas Atrasadas" referente ao período filtrado).
+  const totalAtrasadas=_fcxItensEntradaMes.filter(i=>i.statusCalc==='atrasado').reduce((s,i)=>s+(i.valorBruto||0),0)
+    +_fcxItensSaidaMes.filter(c=>_cpAtrasada(c)).reduce((s,c)=>s+_cpValorAjustado(c),0);
   const cardsEl=document.getElementById('fcx-cards');
   if(cardsEl){
+    cardsEl.style.gridTemplateColumns='repeat(5,1fr)';
     cardsEl.innerHTML=`
-      <div style="background:#dcfce7;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#16a34a">Entradas previstas (mês)</div><div style="font-size:1.1rem;font-weight:800;color:#16a34a">${fmtR(totalEntradas)}</div></div>
-      <div style="background:#fee2e2;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#b91c1c">Saídas previstas (mês)</div><div style="font-size:1.1rem;font-weight:800;color:#b91c1c">${fmtR(totalSaidas)}</div></div>
-      <div style="background:#dbeafe;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#1e40af">Saldo líquido do mês</div><div style="font-size:1.1rem;font-weight:800;color:${(totalEntradas-totalSaidas)>=0?'#1e40af':'#b91c1c'}">${fmtRSigned(totalEntradas-totalSaidas)}</div></div>
-      <div style="background:#f1f5f9;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#475569">Saldo projetado em ${fmtD(y+'-'+pad(m)+'-'+pad(ultimoDia))}</div><div style="font-size:1.1rem;font-weight:800;color:${saldoFinalMes>=0?'#16a34a':'#dc2626'}">${fmtR(saldoFinalMes)}</div></div>`;
+      <div onclick="_fcxVerEntradas()" title="Ver o que compõe esse valor" style="cursor:pointer;background:#dcfce7;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#16a34a">Entradas previstas (mês)</div><div style="font-size:1.1rem;font-weight:800;color:#16a34a">${fmtR(totalEntradas)}</div></div>
+      <div onclick="_fcxVerSaidas()" title="Ver o que compõe esse valor" style="cursor:pointer;background:#fee2e2;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#b91c1c">Saídas previstas (mês)</div><div style="font-size:1.1rem;font-weight:800;color:#b91c1c">${fmtR(totalSaidas)}</div></div>
+      <div onclick="_fcxVerLiquido()" title="Ver o que compõe esse valor" style="cursor:pointer;background:#dbeafe;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#1e40af">Saldo líquido do mês</div><div style="font-size:1.1rem;font-weight:800;color:${(totalEntradas-totalSaidas)>=0?'#1e40af':'#b91c1c'}">${fmtRSigned(totalEntradas-totalSaidas)}</div></div>
+      <div onclick="_fcxVerProjetado()" title="Ver o que compõe esse valor" style="cursor:pointer;background:#f1f5f9;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#475569">Saldo projetado em ${fmtD(y+'-'+pad(m)+'-'+pad(ultimoDia))}</div><div style="font-size:1.1rem;font-weight:800;color:${saldoFinalMes>=0?'#16a34a':'#dc2626'}">${fmtR(saldoFinalMes)}</div></div>
+      <div onclick="_fcxVerAtrasadas()" title="Ver contas atrasadas do período" style="cursor:pointer;background:${totalAtrasadas>0.005?'#fecaca':'#f1f5f9'};border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${totalAtrasadas>0.005?'#991b1b':'#475569'}">⚠️ Contas Atrasadas</div><div style="font-size:1.1rem;font-weight:800;color:${totalAtrasadas>0.005?'#991b1b':'#475569'}">${fmtR(totalAtrasadas)}</div></div>`;
   }
 
   if(!linhas.length){body.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhum lançamento planejado (Contas a Pagar/Receber em aberto) nesse mês.</div>';return;}
@@ -14950,6 +15355,49 @@ function renderFluxoCaixa(){
     <tbody>${rows}</tbody>
   </table></div>
   ${saldoInicial===0?'<div style="font-size:.72rem;color:#d97706;margin-top:10px">⚠️ Nenhum saldo inicial informado — a coluna "Saldo projetado em caixa" acima está considerando caixa zerado hoje. Informe o saldo inicial real no campo acima pra ela refletir a expectativa de verdade.</div>':''}`;
+}
+// "Todos os meses" do Fluxo de Caixa (2026-08-21, a pedido do usuário) — resumo mensal do ano
+// inteiro (1 linha por mês) em vez da grade dia a dia, que não caberia pro ano todo. Reaproveita
+// _fcxCalcularPorDia() (mesma função que já alimenta a grade normal) rodada pra cada um dos 12
+// meses, somando os dias de cada mês — nenhuma regra de cálculo nova, só agregação. Clicar numa
+// linha abre aquele mês específico na grade dia a dia de sempre (fcxMov/renderFluxoCaixa).
+function _fcxRenderAnual(y,saldoInicial){
+  const cardsEl=document.getElementById('fcx-cards');
+  const body=document.getElementById('fcx-body');
+  const fmtRSigned=v=>(v>=0?'+':'')+fmtR(v);
+  let acumulado=saldoInicial;
+  let totalEntradasAno=0,totalSaidasAno=0;
+  const linhasMes=[];
+  for(let mm=1;mm<=12;mm++){
+    const porDia=_fcxCalcularPorDia(y,mm);
+    let entradasMes=0,saidasMes=0;
+    Object.values(porDia).forEach(d=>{entradasMes+=d.entradas;saidasMes+=d.saidas;});
+    acumulado+=(entradasMes-saidasMes);
+    totalEntradasAno+=entradasMes;totalSaidasAno+=saidasMes;
+    linhasMes.push({mm,entradasMes,saidasMes,saldoMes:entradasMes-saidasMes,acumulado});
+  }
+  const saldoFinalAno=saldoInicial+(totalEntradasAno-totalSaidasAno);
+  if(cardsEl){
+    cardsEl.style.gridTemplateColumns='repeat(4,1fr)';
+    cardsEl.innerHTML=`
+      <div style="background:#dcfce7;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#16a34a">Entradas previstas (ano)</div><div style="font-size:1.1rem;font-weight:800;color:#16a34a">${fmtR(totalEntradasAno)}</div></div>
+      <div style="background:#fee2e2;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#b91c1c">Saídas previstas (ano)</div><div style="font-size:1.1rem;font-weight:800;color:#b91c1c">${fmtR(totalSaidasAno)}</div></div>
+      <div style="background:#dbeafe;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#1e40af">Saldo líquido do ano</div><div style="font-size:1.1rem;font-weight:800;color:${(totalEntradasAno-totalSaidasAno)>=0?'#1e40af':'#b91c1c'}">${fmtRSigned(totalEntradasAno-totalSaidasAno)}</div></div>
+      <div style="background:#f1f5f9;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#475569">Saldo projetado em 31/12/${y}</div><div style="font-size:1.1rem;font-weight:800;color:${saldoFinalAno>=0?'#16a34a':'#dc2626'}">${fmtR(saldoFinalAno)}</div></div>`;
+  }
+  if(!body)return;
+  const rows=linhasMes.map(l=>`<tr style="cursor:pointer" onclick="_fcxMesAtual={y:${y},m:${l.mm}};renderFluxoCaixa()" title="Ver dia a dia deste mês">
+      <td style="white-space:nowrap;font-size:.78rem;font-weight:600">${MESES_PT[l.mm]}</td>
+      <td style="font-weight:700;color:#16a34a;white-space:nowrap">${l.entradasMes>0.005?fmtR(l.entradasMes):'—'}</td>
+      <td style="font-weight:700;color:#dc2626;white-space:nowrap">${l.saidasMes>0.005?fmtR(l.saidasMes):'—'}</td>
+      <td style="font-weight:700;white-space:nowrap;color:${l.saldoMes>=0?'#16a34a':'#dc2626'}">${fmtRSigned(l.saldoMes)}</td>
+      <td style="font-weight:800;white-space:nowrap;color:${l.acumulado>=0?'#1a1f36':'#dc2626'}">${fmtR(l.acumulado)}</td>
+    </tr>`).join('');
+  body.innerHTML=`<div style="overflow-x:auto"><table class="dash-table">
+    <thead><tr><th>Mês</th><th>📥 Entradas previstas</th><th>📤 Saídas previstas</th><th>Saldo do mês</th><th>Saldo projetado em caixa</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>
+  <div style="font-size:.72rem;color:#94a3b8;margin-top:10px">Clique num mês pra ver a projeção dia a dia dele.${saldoInicial===0?' ⚠️ Nenhum saldo inicial informado — considerando caixa zerado em 01/01.':''}</div>`;
 }
 // Modal de detalhe de um dia do Fluxo de Caixa — lista as parcelas de Contas a Receber e
 // os lançamentos de Contas a Pagar que compõem as entradas/saídas daquele dia (lê do
@@ -14987,6 +15435,106 @@ function _fcxVerDia(iso){
     ${linhasSaida?`<table class="dash-table"><thead><tr><th>Fornecedor</th><th>Categoria</th><th>Empresa</th><th>Valor</th></tr></thead><tbody>${linhasSaida}</tbody></table>`:'<div style="padding:8px 4px;color:#94a3b8;font-size:.82rem">Nenhuma saída prevista nesse dia.</div>'}
   </div>`;
   document.body.appendChild(modal);
+}
+
+// Cards clicáveis do topo do Fluxo de Caixa (2026-08-21, a pedido do usuário: "os botoes
+// ali verde vermelho etc, quero que eles sejam clicaveis ao clicar aparece a lista do que
+// ta considerando e tambem quero um botao novo clicavel com as contas atrasadas
+// referente ao periodo filtrado"). Reaproveita os arrays achatados _fcxItensEntradaMes/
+// _fcxItensSaidaMes (montados em renderFluxoCaixa() a partir do mesmo _fcxCalcularPorDia()
+// que já alimentava a grade diária e o modal por-dia _fcxVerDia() — nenhum cálculo novo,
+// só reorganização/exibição do que já existia) — só funcionam na visão de um mês
+// específico (não existem na visão "Todos os meses", que é um resumo anual à parte).
+let _fcxItensEntradaMes=[],_fcxItensSaidaMes=[];
+function _fcxMontarLinhasEntrada(itens){
+  return (itens||[]).map(i=>`<tr>
+    <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:130px">${i.cliente||'—'}</td>
+    <td>${i.nomeVend||'—'}</td>
+    <td style="font-size:.72rem">${i.label||''}</td>
+    <td style="font-size:.72rem;white-space:nowrap">${fmtD(i.dataAtiva)||'—'}</td>
+    <td>${i.statusCalc==='atrasado'?'<span style="background:#fee2e2;color:#dc2626;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">⚠️ Atrasado</span>':'<span style="background:#fef9c3;color:#92400e;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">⏳ Pendente</span>'}</td>
+    <td style="font-weight:700;color:#16a34a;white-space:nowrap">${fmtR(i.valorBruto||0)}</td>
+  </tr>`).join('');
+}
+function _fcxMontarLinhasSaida(itens){
+  return (itens||[]).map(c=>{
+    const cat=getCategoriaDespesa(c.categoria);
+    const atrasada=_cpAtrasada(c);
+    return`<tr>
+    <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:130px">${c.fornecedor||'—'}</td>
+    <td style="font-size:.72rem">${cat?cat.nome:'Não Classificado'}</td>
+    <td style="font-size:.72rem">${_capLabel(c.empresa)}</td>
+    <td style="font-size:.72rem;white-space:nowrap">${fmtD(c.vencimento)||'—'}</td>
+    <td>${atrasada?'<span style="background:#fee2e2;color:#dc2626;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">⚠️ Atrasado</span>':'<span style="background:#fef9c3;color:#92400e;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">⏳ Pendente</span>'}</td>
+    <td style="font-weight:700;color:#dc2626;white-space:nowrap">${fmtR(_cpValorAjustado(c))}</td>
+  </tr>`;
+  }).join('');
+}
+function _fcxAbrirModal(titulo,htmlCorpo){
+  document.getElementById('fcx-dia-modal')?.remove();
+  const modal=document.createElement('div');
+  modal.id='fcx-dia-modal';
+  modal.style.cssText='position:fixed;inset:0;z-index:9999;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:860px;width:92%;max-height:82vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:10px">
+      <div style="font-size:1rem;font-weight:800;color:#1a1f36">${titulo}</div>
+      <button onclick="document.getElementById('fcx-dia-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+    </div>
+    ${htmlCorpo}
+  </div>`;
+  document.body.appendChild(modal);
+}
+function _fcxVerEntradas(){
+  const{y,m}=_fcxMesAtual;if(!m)return;
+  const linhas=_fcxMontarLinhasEntrada(_fcxItensEntradaMes);
+  const corpo=linhas?`<table class="dash-table"><thead><tr><th>Cliente</th><th>Vendedor</th><th>Parcela</th><th>Data prev.</th><th>Status</th><th>Valor</th></tr></thead><tbody>${linhas}</tbody></table>`:'<div style="padding:16px 4px;color:#94a3b8;font-size:.85rem">Nenhuma entrada prevista nesse período.</div>';
+  _fcxAbrirModal(`📥 Entradas previstas — ${MESES_PT[m]} ${y}`,corpo);
+}
+function _fcxVerSaidas(){
+  const{y,m}=_fcxMesAtual;if(!m)return;
+  const linhas=_fcxMontarLinhasSaida(_fcxItensSaidaMes);
+  const corpo=linhas?`<table class="dash-table"><thead><tr><th>Fornecedor</th><th>Categoria</th><th>Empresa</th><th>Vencimento</th><th>Status</th><th>Valor</th></tr></thead><tbody>${linhas}</tbody></table>`:'<div style="padding:16px 4px;color:#94a3b8;font-size:.85rem">Nenhuma saída prevista nesse período.</div>';
+  _fcxAbrirModal(`📤 Saídas previstas — ${MESES_PT[m]} ${y}`,corpo);
+}
+// Corpo compartilhado por Saldo líquido e Saldo projetado — os dois mostram a mesma
+// composição (entradas+saídas do mês); só muda o título e se soma o saldo inicial ou não.
+function _fcxCorpoEntradasSaidas(){
+  const linhasE=_fcxMontarLinhasEntrada(_fcxItensEntradaMes);
+  const linhasS=_fcxMontarLinhasSaida(_fcxItensSaidaMes);
+  const totE=(_fcxItensEntradaMes||[]).reduce((s,i)=>s+(i.valorBruto||0),0);
+  const totS=(_fcxItensSaidaMes||[]).reduce((s,c)=>s+_cpValorAjustado(c),0);
+  const corpo=`<div style="font-size:.82rem;font-weight:700;color:#16a34a;margin-bottom:6px">📥 Entradas previstas — ${fmtR(totE)}</div>
+    ${linhasE?`<table class="dash-table" style="margin-bottom:16px"><thead><tr><th>Cliente</th><th>Vendedor</th><th>Parcela</th><th>Data prev.</th><th>Status</th><th>Valor</th></tr></thead><tbody>${linhasE}</tbody></table>`:'<div style="padding:8px 4px;color:#94a3b8;font-size:.82rem;margin-bottom:16px">Nenhuma entrada prevista nesse período.</div>'}
+    <div style="font-size:.82rem;font-weight:700;color:#dc2626;margin-bottom:6px">📤 Saídas previstas — ${fmtR(totS)}</div>
+    ${linhasS?`<table class="dash-table"><thead><tr><th>Fornecedor</th><th>Categoria</th><th>Empresa</th><th>Vencimento</th><th>Status</th><th>Valor</th></tr></thead><tbody>${linhasS}</tbody></table>`:'<div style="padding:8px 4px;color:#94a3b8;font-size:.82rem">Nenhuma saída prevista nesse período.</div>'}`;
+  return{corpo,totE,totS};
+}
+function _fcxVerLiquido(){
+  const{y,m}=_fcxMesAtual;if(!m)return;
+  const{corpo,totE,totS}=_fcxCorpoEntradasSaidas();
+  _fcxAbrirModal(`⚖️ Saldo líquido — ${MESES_PT[m]} ${y} (${fmtR(totE-totS)})`,corpo);
+}
+function _fcxVerProjetado(){
+  const{y,m}=_fcxMesAtual;if(!m)return;
+  const{corpo,totE,totS}=_fcxCorpoEntradasSaidas();
+  const saldoInicial=cfg.fluxoCaixaSaldoInicial||0;
+  const extra=`<div style="font-size:.78rem;color:#64748b;margin-bottom:10px;padding:8px 10px;background:#f8fafc;border-radius:8px">Saldo inicial informado: <strong>${fmtR(saldoInicial)}</strong> + Entradas previstas − Saídas previstas do período = <strong>${fmtR(saldoInicial+totE-totS)}</strong></div>`;
+  _fcxAbrirModal(`💰 Saldo projetado — ${MESES_PT[m]} ${y}`,extra+corpo);
+}
+function _fcxVerAtrasadas(){
+  const{y,m}=_fcxMesAtual;if(!m)return;
+  const itensE=(_fcxItensEntradaMes||[]).filter(i=>i.statusCalc==='atrasado');
+  const itensS=(_fcxItensSaidaMes||[]).filter(c=>_cpAtrasada(c));
+  const linhasE=_fcxMontarLinhasEntrada(itensE);
+  const linhasS=_fcxMontarLinhasSaida(itensS);
+  const totE=itensE.reduce((s,i)=>s+(i.valorBruto||0),0);
+  const totS=itensS.reduce((s,c)=>s+_cpValorAjustado(c),0);
+  const corpo=`<div style="font-size:.82rem;font-weight:700;color:#dc2626;margin-bottom:6px">📥 A Receber em atraso — ${fmtR(totE)}</div>
+    ${linhasE?`<table class="dash-table" style="margin-bottom:16px"><thead><tr><th>Cliente</th><th>Vendedor</th><th>Parcela</th><th>Data prev.</th><th>Status</th><th>Valor</th></tr></thead><tbody>${linhasE}</tbody></table>`:'<div style="padding:8px 4px;color:#94a3b8;font-size:.82rem;margin-bottom:16px">Nenhuma conta a receber em atraso nesse período.</div>'}
+    <div style="font-size:.82rem;font-weight:700;color:#dc2626;margin-bottom:6px">📤 A Pagar em atraso — ${fmtR(totS)}</div>
+    ${linhasS?`<table class="dash-table"><thead><tr><th>Fornecedor</th><th>Categoria</th><th>Empresa</th><th>Vencimento</th><th>Status</th><th>Valor</th></tr></thead><tbody>${linhasS}</tbody></table>`:'<div style="padding:8px 4px;color:#94a3b8;font-size:.82rem">Nenhuma conta a pagar em atraso nesse período.</div>'}`;
+  _fcxAbrirModal(`⚠️ Contas Atrasadas — ${MESES_PT[m]} ${y} (${fmtR(totE+totS)})`,corpo);
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════
@@ -15257,17 +15805,17 @@ function _dreLinhasExport(d){
 function exportarExcelDRE(){
   if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem exportar','terr');return;}
   const{y,m}=_dreMesAtual;
-  const d=calcularDRE(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
+  const d=calcularDRE_ComTodos(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
   const linhas=_dreLinhasExport(d);
   const headers=['DRE','Valor (R$)'];
   const rows=[
-    ['Período',MESES_PT[m]+' '+y],
+    ['Período',_dreLabelPeriodo(y,m)],
     ['Empresa',_dreEmpresaFiltro?_capLabel(_dreEmpresaFiltro):'Consolidado (todas)'],
     ['Regime',_dreRegimeAtual==='realizado'?'Realizado (caixa)':'Competência'],
     ['',''],
     ...linhas.map(l=>[(l.indent?'    ':'')+l.label,l.valor.toFixed(2).replace('.',',')])
   ];
-  _csvDownload(`dre_${_dreRegimeAtual}_${(_dreEmpresaFiltro||'consolidado').toLowerCase()}_${y}_${String(m).padStart(2,'0')}.csv`,headers,rows);
+  _csvDownload(`dre_${_dreRegimeAtual}_${(_dreEmpresaFiltro||'consolidado').toLowerCase()}_${y}_${m?String(m).padStart(2,'0'):'todos'}.csv`,headers,rows);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
 }
 async function gerarPDFDRE(){
@@ -15275,7 +15823,7 @@ async function gerarPDFDRE(){
   if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
   const{jsPDF}=window.jspdf;
   const{y,m}=_dreMesAtual;
-  const d=calcularDRE(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
+  const d=calcularDRE_ComTodos(y,m,_dreEmpresaFiltro,_dreRegimeAtual);
   const linhas=_dreLinhasExport(d);
   const empresaLbl=_dreEmpresaFiltro?_capLabel(_dreEmpresaFiltro):'Consolidado (todas as empresas)';
   const regimeLbl=_dreRegimeAtual==='realizado'?'regime realizado (caixa)':'regime de competência';
@@ -15299,7 +15847,7 @@ async function gerarPDFDRE(){
     doc.setTextColor(...GRAY);
     doc.setFont('helvetica','normal');
     doc.setFontSize(8.5);
-    doc.text('Período: '+MESES_PT[m]+' de '+y+'  ·  '+regimeLbl,pageW-14,26.5,{align:'right'});
+    doc.text('Período: '+_dreLabelPeriodo(y,m)+'  ·  '+regimeLbl,pageW-14,26.5,{align:'right'});
     doc.setDrawColor(...PINK);
     doc.setLineWidth(0.7);
     doc.line(14,30,pageW-14,30);
@@ -15492,6 +16040,27 @@ function _mesNavCiclo(atual,dir){
   if(idx===-1)idx=0;
   idx=(idx+dir+ordem.length)%ordem.length;
   return ordem[idx];
+}
+// Variante ANO+MÊS do ciclo acima (2026-08-21, a pedido do usuário: "o filtro ali do mes
+// quero que mude pra ficar melhor de selecionar o mes ou a opção todos os meses, igual ja
+// tem em outros menus") — usada pelos 3 navegadores de mês do Financeiro (Contas a Pagar/
+// Receber, DRE, Fluxo de Caixa) que são Ano+Mês de verdade (o dado atravessa vários anos),
+// diferente do ciclo mês-só acima (Planejamento/Finalização de Obra, onde o ano não importa
+// pro filtro). Recebe {y,m} — m pode ser null/''/undefined pra "Todos os meses" — e devolve
+// o próximo {y,m}. "Todos os meses" vira 1 parada por ano, entre Dezembro e Janeiro do ano
+// seguinte (nunca esconde nada por padrão — mesmo espírito do _mesNavCiclo original).
+function _mesAnoNavCiclo(atual,dir){
+  let{y,m}=atual;
+  if(!m){
+    // Saindo de "Todos os meses": ▶ vai pro Jan do ano seguinte à referência, ◀ pro Dez do
+    // ano anterior — `y` aqui é o ano de referência guardado por quem chamou (ver
+    // fcMesMov/dreMov/fcxMov), não o ano "true" de um mês específico.
+    return dir>0?{y:y+1,m:1}:{y:y-1,m:12};
+  }
+  m+=dir;
+  if(m>12)return{y,m:null}; // depois de Dezembro cai em "Todos os meses" (mesmo ano)
+  if(m<1)return{y,m:null}; // antes de Janeiro cai em "Todos os meses" (mesmo ano)
+  return{y,m};
 }
 // Mês selecionado no filtro de Finalização de Obra ('' = Todos os meses) — filtra pelo mesmo
 // Mês da Venda (_opMesVenda) já exibido na coluna da tabela.
@@ -24129,17 +24698,39 @@ function _fcAplicarFiltroMesVigentePadrao(){
 // de período pro 1º/último dia do mês anterior/seguinte, então continua mostrando tudo que
 // tem pra acontecer no mês (Pagar + Receber juntos, ou só um via filtro Tipo), sem duplicar
 // nenhuma lógica de filtragem nova.
+// Ano de referência usado só quando o filtro está em "Todos os meses" (datas De/Até vazias)
+// — guarda de qual ano se saiu, pra ciclar ▶/◀ a partir daí em vez de sempre cair no ano
+// vigente (2026-08-21, a pedido do usuário — ver _mesAnoNavCiclo()).
+let _fcTodosAnoRef=new Date().getFullYear();
 function fcMesMov(dir){
   const di=document.getElementById('fc-fil-data-ini'),df=document.getElementById('fc-fil-data-fim');
   if(!di||!df)return;
   const pad=n=>String(n).padStart(2,'0');
-  // Ponto de partida: o que já estiver em "De" (ou o mês vigente, se ainda estiver vazio).
-  const base=di.value?new Date(di.value+'T00:00:00'):new Date();
-  let y=base.getFullYear(),m=base.getMonth()+dir;
-  if(m>11){m=0;y++;} else if(m<0){m=11;y--;}
-  di.value=`${y}-${pad(m+1)}-01`;
-  df.value=`${y}-${pad(m+1)}-${pad(new Date(y,m+1,0).getDate())}`;
+  // Ciclo agora inclui "Todos os meses" (datas De/Até vazias) entre Dezembro e Janeiro do ano
+  // seguinte — mesmo padrão de dreMov()/fcxMov() (ver _mesAnoNavCiclo()).
+  const atualY=di.value?new Date(di.value+'T00:00:00').getFullYear():_fcTodosAnoRef;
+  const atualM=di.value?new Date(di.value+'T00:00:00').getMonth()+1:null;
+  const prox=_mesAnoNavCiclo({y:atualY,m:atualM},dir);
+  if(prox.m==null){
+    _fcTodosAnoRef=atualY;
+    di.value='';df.value='';
+  }else{
+    di.value=`${prox.y}-${pad(prox.m)}-01`;
+    df.value=`${prox.y}-${pad(prox.m)}-${pad(new Date(prox.y,prox.m,0).getDate())}`;
+  }
   _fcMesVigenteAplicado=true; // não deixa o default de "mês vigente" sobrescrever a navegação manual
+  fcAplicarFiltros();
+}
+// Atalho direto pra "Todos os meses" (2026-08-21, a pedido do usuário) — mesmo padrão do botão
+// já usado em RH/Pontualidade e agora também em DRE/Fluxo de Caixa. Aqui é literalmente limpar
+// o período De/Até — a lista (getContasReceber/contasPagar/_finPeriodoOk) já trata datas vazias
+// como "sem restrição de período" (comportamento que já existia, só não tinha atalho de botão).
+function fcMesTodos(){
+  const di=document.getElementById('fc-fil-data-ini'),df=document.getElementById('fc-fil-data-fim');
+  if(!di||!df)return;
+  _fcTodosAnoRef=di.value?new Date(di.value+'T00:00:00').getFullYear():new Date().getFullYear();
+  di.value='';df.value='';
+  _fcMesVigenteAplicado=true;
   fcAplicarFiltros();
 }
 // Atualiza o rótulo "◀ MÊS ANO ▶" a partir do que estiver em "De" — sempre chamado no fim de
@@ -24149,7 +24740,10 @@ function _fcAtualizarLabelMes(){
   if(!lbl)return;
   const di=document.getElementById('fc-fil-data-ini')?.value||'';
   const df=document.getElementById('fc-fil-data-fim')?.value||'';
-  if(!di){lbl.textContent='—';return;}
+  // "Todos os meses" (2026-08-21) — antes mostrava só "—" sem explicar o que isso significava;
+  // datas vazias sempre quiseram dizer "sem filtro de período" (ver _finPeriodoOk), só faltava
+  // deixar isso claro no rótulo.
+  if(!di){lbl.textContent='Todos os meses';return;}
   const d=new Date(di+'T00:00:00');
   // Se alguém editar "De"/"Até" na mão (os dois são <input type=date> livres) e os dois
   // acabarem em meses diferentes, o rótulo antes mostrava só o mês de "De" — parecendo que
@@ -24434,6 +25028,10 @@ function renderContasUnificado(){
         ?`<button onclick="marcarContaReceberManualRecebida('${c.id}',false)" title="Reabrir" style="background:#f1f5f9;color:#475569;border:none;border-radius:6px;padding:5px 9px;font-size:.7rem;font-weight:700;cursor:pointer">↩️</button>`
         :`<button onclick="marcarContaReceberManualRecebida('${c.id}',true)" title="Marcar como recebido" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:5px 9px;font-size:.7rem;font-weight:700;cursor:pointer">✅</button>`}
       <button onclick="abrirEditarContaReceberManual('${c.id}')" title="Editar" style="background:#fff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:6px;padding:5px 9px;font-size:.7rem;font-weight:700;cursor:pointer">✏️</button>
+      ${c.pedidoId
+        ?`<button onclick="_crmAbrirVincularPedido('${c.id}')" title="Trocar pedido vinculado" style="background:#fff;color:#0369a1;border:1.5px solid #bae6fd;border-radius:6px;padding:5px 9px;font-size:.7rem;font-weight:700;cursor:pointer">🔗</button>
+         <button onclick="_crmRemoverVinculo('${c.id}')" title="Remover vínculo com o pedido" style="background:#fff;color:#64748b;border:1.5px solid var(--border);border-radius:6px;padding:5px 9px;font-size:.7rem;font-weight:700;cursor:pointer">⛓️‍💥</button>`
+        :`<button onclick="_crmAbrirVincularPedido('${c.id}')" title="Vincular a um pedido" style="background:#fff;color:#0369a1;border:1.5px solid #bae6fd;border-radius:6px;padding:5px 9px;font-size:.7rem;font-weight:700;cursor:pointer">🔗 Vincular</button>`}
       <button onclick="excluirContaReceberManual('${c.id}')" title="Excluir" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:6px;padding:5px 9px;font-size:.7rem;font-weight:700;cursor:pointer">🗑️</button>`;
     return{
       iso,dataLabel:fmtD(c.dataPrevista)||'—',
@@ -24441,7 +25039,7 @@ function renderContasUnificado(){
       quem:c.cliente||'—',quemSub:_capLabel(c.empresa),
       prazoObra:'',prazoObraOrig:'',
       categoria:`<select onchange="_crmMudarCentroCusto('${c.id}',this.value)" style="font-size:.72rem;padding:3px 6px;border-radius:6px;border:1px solid ${c.centroCusto===CENTRO_CUSTO_NAO_RECONHECIDO?'#fecaca':'var(--border)'}">${getCentrosCusto().map(cc=>`<option value="${cc}" ${cc===c.centroCusto?'selected':''}>${cc}</option>`).join('')}</select>`,
-      detalhe:c.descricao?`<span title="${c.descricao.replace(/"/g,'&quot;')}" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block">${c.descricao}</span>`:'<span style="color:#94a3b8">—</span>',
+      detalhe:(c.descricao?`<span title="${c.descricao.replace(/"/g,'&quot;')}" style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block">${c.descricao}</span>`:'<span style="color:#94a3b8">—</span>')+_crmInfoVinculo(c),
       valor:c.valor||0,valorTitle:'',
       statusLbl,
       obsCol:diasAtraso>0?`<span style="font-weight:700;color:#dc2626">${diasAtraso} dia${diasAtraso>1?'s':''} de atraso</span>`:'—',
@@ -28180,6 +28778,92 @@ function renderDashGraficos(){
   else gcRenderVendPaineis();
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// VENDAS POR SEMANA (2026-08-21, a pedido do usuário: "quanto cada vendedor vendeu na semana
+// 1, semana 2, semana 3... referente ao mês filtrado, e embaixo uma soma da empresa geral por
+// semana também, pra acompanhar o desempenho por semana"). Quebra o mês em blocos de 7 dias
+// (Semana 1 = dias 1-7, Semana 2 = 8-14, Semana 3 = 15-21, Semana 4 = 22-28, Semana 5 = 29-31
+// quando o mês tiver) usando a data REAL de emissão do pedido (p.emissaoEm, "AAAA-MM-DD") —
+// só pedido emitido direto pelo sistema tem dia exato. Venda que existe só na planilha colada
+// (sem p.emissaoEm, ex.: a maior parte de antes de julho/2026) não tem como saber em que DIA
+// do mês aconteceu — fica de fora da quebra semanal (nunca inventa uma semana pra ela) e
+// aparece somada num aviso separado, sem sumir escondida; continua contando normal em
+// getVendasMes()/Metas/etc., que não são tocados aqui. Função nova e auto-contida — não mexe
+// em getVendaRowsMerged()/pedidoToVendaRow() nem em nenhum cálculo que já existia (ver
+// [[feedback_escopo_restrito_alto_risco]]).
+const GC_SEMANA_MAX=5;
+// Relatório só faz sentido a partir de Agosto/2026 pra frente (2026-08-21, a pedido do
+// usuário: "sim só considere o que foi emitido e quero esse relatório agora de agosto pra
+// frente") — meses anteriores são quase inteiramente vendas trazidas da planilha colada, sem
+// dia exato de emissão (ver aviso 🚨 dentro de gcRenderVendasPorSemana()), então mostrar o
+// gráfico/tabela vazios (ou quase) pra Jan-Jul só confundiria. Comparação por y*100+m pra
+// funcionar em qualquer ano futuro também.
+const GC_SEMANA_DESDE_CHAVE=2026*100+8;
+function gcVendasPorSemana(y,m,todos){
+  const porVendSemana={};
+  (todos||[]).forEach(v=>{porVendSemana[v]=Array(GC_SEMANA_MAX).fill(0);});
+  let semDataCount=0,semDataTotal=0;
+  getVendaRowsMerged().filter(r=>r.m===m).forEach(r=>{
+    const p=r._pid?pedidos.find(pp=>pp.id===r._pid):null;
+    const emissao=p&&p.emissaoEm;
+    const dia=emissao?parseInt(String(emissao).split('-')[2],10):0;
+    if(!dia||dia<1||dia>31){semDataCount++;semDataTotal+=(r.lq||0);return;}
+    const semanaIdx=Math.min(GC_SEMANA_MAX,Math.ceil(dia/7))-1;
+    // Casamento tolerante de nome (mesmo padrão de getVendasMes()/getVendasBrutoMes()) — nomes
+    // de vendedor podem variar entre planilha/cadastro (maiúsculas, sobrenome abreviado etc.);
+    // sem isso, a mesma pessoa apareceria em 2 linhas diferentes na tabela/gráfico.
+    let vend=(todos||[]).find(v=>vendedorMatch(r.v,v));
+    if(!vend)vend=r.v||'';
+    if(!porVendSemana[vend])porVendSemana[vend]=Array(GC_SEMANA_MAX).fill(0);
+    porVendSemana[vend][semanaIdx]+=(r.lq||0);
+  });
+  // Quantas semanas o mês navegado realmente tem (não mostra "Semana 5" fixo pra mês que nem
+  // chega no dia 29, ex. Fevereiro).
+  const ultimoDiaMes=new Date(y,m,0).getDate();
+  const semanasReais=Math.min(GC_SEMANA_MAX,Math.ceil(ultimoDiaMes/7));
+  const vendsComVenda=Object.keys(porVendSemana).filter(v=>porVendSemana[v].some(x=>x>0.005));
+  const totalPorSemana=Array(GC_SEMANA_MAX).fill(0);
+  vendsComVenda.forEach(v=>porVendSemana[v].forEach((val,i)=>{totalPorSemana[i]+=val;}));
+  return{semanasReais,porVendSemana,vendsComVenda,totalPorSemana,semDataCount,semDataTotal};
+}
+function gcRenderVendasPorSemana(y,m,todos){
+  const chartEl=document.getElementById('gc-cSemana');
+  const tabelaEl=document.getElementById('gc-semana-tabela');
+  const avisoEl=document.getElementById('gc-semana-aviso');
+  const subEl=document.getElementById('gc-semana-sub');
+  if(subEl)subEl.textContent='Por vendedor — '+MESES_PT[m]+' '+y;
+  // Disponível só de Agosto/2026 em diante (ver GC_SEMANA_DESDE_CHAVE acima) — mês anterior
+  // mostra um aviso simples em vez do gráfico/tabela vazios de dado sem dia exato.
+  if((y*100+m)<GC_SEMANA_DESDE_CHAVE){
+    if(avisoEl)avisoEl.innerHTML='';
+    if(tabelaEl)tabelaEl.innerHTML=`<div style="padding:12px 4px;color:#94a3b8;font-size:.82rem">📆 Este relatório fica disponível a partir de Agosto/2026 — antes disso as vendas vêm quase todas da planilha colada, sem data exata de emissão pra dividir por semana.</div>`;
+    return;
+  }
+  const d=gcVendasPorSemana(y,m,todos);
+  if(avisoEl)avisoEl.innerHTML=d.semDataCount>0
+    ?`<div style="font-size:.72rem;padding:8px 12px;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:8px;color:#9a3412">🚨 ${d.semDataCount} venda(s) deste mês somando ${fmtR(d.semDataTotal)} não têm data exata de emissão (vieram só da planilha antiga) — não entram na quebra por semana abaixo, mas continuam contando normalmente no total do mês em qualquer outro lugar do sistema.</div>`
+    :'';
+  const labels=[...Array(d.semanasReais)].map((_,i)=>'Semana '+(i+1));
+  if(chartEl){
+    gcCharts.semana=new Chart(chartEl,{type:'bar',data:{labels,datasets:d.vendsComVenda.map((v,i)=>({
+      label:v,data:d.porVendSemana[v].slice(0,d.semanasReais),backgroundColor:GC_CORES[i%GC_CORES.length],borderWidth:0,borderRadius:4
+    }))},options:gcChartOpts({legend:{display:true,position:'bottom',labels:{font:{size:10},color:'#888',boxWidth:10}}})});
+  }
+  if(tabelaEl){
+    if(!d.vendsComVenda.length){
+      tabelaEl.innerHTML='<div style="padding:12px 4px;color:#94a3b8;font-size:.82rem">Nenhuma venda com data exata de emissão neste mês.</div>';
+    }else{
+      tabelaEl.innerHTML=`<table class="dash-table">
+        <thead><tr><th>Vendedor</th>${labels.map(l=>`<th style="text-align:right">${l}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${d.vendsComVenda.map(v=>`<tr><td style="font-weight:600">${v}</td>${d.porVendSemana[v].slice(0,d.semanasReais).map(val=>`<td style="text-align:right;white-space:nowrap">${val>0.005?fmtR(val):'—'}</td>`).join('')}</tr>`).join('')}
+          <tr style="border-top:1.5px solid var(--border);font-weight:800"><td>TOTAL EMPRESA</td>${d.totalPorSemana.slice(0,d.semanasReais).map(val=>`<td style="text-align:right;white-space:nowrap;color:#1a2b5e">${fmtR(val)}</td>`).join('')}</tr>
+        </tbody>
+      </table>`;
+    }
+  }
+}
+
 function gcRenderGeralPaineis(y,m,todos){
   const lqMes=getVendasMes(y,m,null);
   const brMes=getVendasBrutoMes(y,m,null);
@@ -28325,6 +29009,7 @@ function gcRenderGeralPaineis(y,m,todos){
     gcCharts.comp=new Chart(compEl,{type:'bar',data:{labels:GC_MESES_S,datasets},options:{...gcChartOpts({legend:{labels:{font:{size:10},color:'#888'}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+fmtR(ctx.raw)}}})}});
   }
 
+  try{gcRenderVendasPorSemana(y,m,todos);}catch(e){console.error('Erro em Vendas por Semana',e);}
   try{renderComparativo2025();}catch(e){console.error('Erro no comparativo 2025×2026',e);}
   try{renderFaturamentoPorCliente();}catch(e){console.error('Erro no Faturamento por Cliente',e);}
 }
