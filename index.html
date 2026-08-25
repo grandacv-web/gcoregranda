@@ -4869,6 +4869,7 @@ let _atrasadosLpMigracaoFeita=false;
 let _reabrirProjetos27JulMigracaoFeita=false;
 let _centrosCustoExtraMigracaoFeita=false;
 let _centrosCustoExtra2RemocaoMigracaoFeita=false;
+let _centroFinanceiroSeedMigracaoFeita=false;
 let _restaurarUsuariosMigracaoFeita=false;
 let _baixaPDF0408MigracaoFeita=false;
 let _itensProducaoRetroativaMigracaoFeita=false;
@@ -4962,6 +4963,12 @@ function setupRealtimeSync(){
     if(!_centrosCustoExtra2RemocaoMigracaoFeita&&_getUserCat().isAdm){
       _centrosCustoExtra2RemocaoMigracaoFeita=true;
       _migrarRemoverCentrosCustoExtra2().catch(e=>{_centrosCustoExtra2RemocaoMigracaoFeita=false;console.error('Erro ao remover 2º lote de Centros de Custo extras',e);});
+    }
+    // Seed do tema "Custo Financeiro" no DRE Indicadores (2026-08-24, ver _migrarSeedCentroFinanceiro
+    // acima) — mesmo padrão de flag PERSISTIDO, só admin.
+    if(!_centroFinanceiroSeedMigracaoFeita&&_getUserCat().isAdm){
+      _centroFinanceiroSeedMigracaoFeita=true;
+      _migrarSeedCentroFinanceiro().catch(e=>{_centroFinanceiroSeedMigracaoFeita=false;console.error('Erro ao cadastrar Centro de Custo "Custo Financeiro"',e);});
     }
     // Restauração pontual (2026-08-08, a pedido do usuário) — recoloca Roberson/Isabela/Lucas
     // na lista de Usuários e devolve a categoria de cada um, ver _migrarRestaurarUsuariosSumidos20260808.
@@ -13391,6 +13398,25 @@ async function _migrarSeedCentrosCustoExtra(){
   if(typeof renderCentrosCusto==='function')renderCentrosCusto();
   if(adicionados)toast(`${adicionados} Centro(s) de Custo novo(s) cadastrado(s)`,'tok');
 }
+// Novo tema "Custo Financeiro" no DRE Indicadores (2026-08-24, a pedido do usuário) — a
+// migração _migrarSeedCentrosCustoExtra acima já rodou em produção (flag
+// cfg.migCentrosCustoExtraFeita), então só adicionar 'Custo Financeiro' no array
+// CENTROS_CUSTO_SEED_EXTRA não bastava pra ele aparecer pra quem já tinha essa flag true —
+// por isso migração nova, flag nova (cfg.migCentroFinanceiroSeedFeita), mesmo padrão de
+// idempotência/dedupe da migração original. Ver _dreIndClassificarTema() pra regra de
+// classificação deste tema.
+async function _migrarSeedCentroFinanceiro(){
+  if(cfg.migCentroFinanceiroSeedFeita)return;
+  if(!cfg.centrosCusto||!cfg.centrosCusto.length)cfg.centrosCusto=getCentrosCusto().filter(c=>c!==CENTRO_CUSTO_NAO_RECONHECIDO);
+  const norm=s=>_normSemAcento(s).trim();
+  let adicionados=0;
+  if(!cfg.centrosCusto.some(c=>norm(c)===norm('Custo Financeiro'))){cfg.centrosCusto.push('Custo Financeiro');adicionados++;}
+  cfg.migCentroFinanceiroSeedFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  if(typeof renderCentrosCusto==='function')renderCentrosCusto();
+  if(adicionados)toast(`${adicionados} Centro(s) de Custo novo(s) cadastrado(s)`,'tok');
+}
 // 2º lote de Centro de Custo extra (2026-08-07) — itens de Balanço Patrimonial/indicadores
 // gerais (Patrimônio Líquido, Passivo Circulante, Passivo Total, Ativo Circulante,
 // Disponibilidades, Lucro Operacional, Lucro Líquido, Receita Líquida). CANCELADO no mesmo dia,
@@ -14900,8 +14926,12 @@ function calcularDRE_ComTodos(y,m,empresaFiltro,regime){
 // ══════════════════════════════════════════════════════════════════════════
 // Ordem e agrupamento IDÊNTICOS ao print que o usuário mandou.
 const DRE_IND_TEMAS_PRE_EBITDA=['Custo Administrativo','Custo Comercial','Custo Produção','Custo Projetos','Salários','Comissões','Pró Labore','CMV','Operação'];
-const DRE_IND_TEMAS_PRE_LUCRO=['Impostos','Imobilizado','Juros'];
+// "Custo Financeiro" (2026-08-24, a pedido do usuário) — tema novo, agrupado junto de Juros/
+// Impostos/Imobilizado (abaixo do EBITDA, não afeta o EBITDA em si) por ser despesa financeira,
+// igual Juros já era — nunca foi um custo operacional. Ver _dreIndClassificarTema() pra regra.
+const DRE_IND_TEMAS_PRE_LUCRO=['Impostos','Imobilizado','Juros','Custo Financeiro'];
 const DRE_IND_TEMAS_PRE_RESIDUAL=['Distribuição Sócios','Empréstimos'];
+const DRE_IND_TODOS_TEMAS=[...DRE_IND_TEMAS_PRE_EBITDA,...DRE_IND_TEMAS_PRE_LUCRO,...DRE_IND_TEMAS_PRE_RESIDUAL];
 // Mesmo filtro de Contas a Pagar do mês usado dentro de calcularDRE() (cpMes) — duplicado aqui
 // de propósito, pequeno e auto-contido, pra não precisar tocar em calcularDRE() pra expor o
 // que ela já filtra internamente.
@@ -14935,41 +14965,49 @@ function _dreIndReceitaBruta(y,m,empresaFiltro,regime){
   }
   return getVendaRowsMerged().filter(r=>r.m===m).reduce((s,r)=>s+(r.br||0),0);
 }
-// Fallback de classificação (2026-08-24, a pedido do usuário: "corrija os custos ali não podem
-// ser 0, você deve puxar os custos corretos com base no que já tá alimentado no sistema") —
-// antes, um tema só somava Contas a Pagar cujo Centro de Custo batesse EXATAMENTE com um dos 14
-// nomes (Custo Administrativo, CMV, Operação etc.), escolhido manualmente linha a linha. Na
-// prática a maior parte dos lançamentos vem da importação de Excel, que já vem com um Centro de
-// Custo diferente (ex.: PRODUÇÃO/ADMINISTRATIVO/FINANCEIRO, coluna "Centro de custos" da
-// planilha — ver _centroCustoResolver()) — quase nunca bate com os 14 nomes deste relatório, daí
-// a maioria dos temas aparecia zerada mesmo com despesa real lançada no mês.
-// Todo lançamento de Contas a Pagar já ganha, por baixo dos panos e sem o usuário precisar fazer
-// nada, uma 2ª classificação — a `categoria` do plano de contas antigo (CMV/OPERACIONAL/
-// FINANCEIRA/IMPOSTOS/IMOBILIZADO, ver getPlanoContasDespesas()), preenchida sozinha na
-// importação por _classificarDespesaAuto() — é o MESMO dado que já alimenta corretamente o DRE
-// de baixo (calcularDRE()). Em vez de inventar uma divisão fina não confirmada com o usuário
-// (ex.: separar "Custo Administrativo" de "Custo Comercial" dentro do grupo OPERACIONAL é
-// ambíguo — arriscado em número financeiro), o fallback só cobre os 5 casos em que a
-// correspondência é direta, sem ambiguidade nenhuma:
-//   grupo CMV → tema "CMV" · grupo OPERACIONAL → tema "Operação" · grupo FINANCEIRA → tema
-//   "Juros" · grupo IMPOSTOS → tema "Impostos" · grupo IMOBILIZADO → tema "Imobilizado"
-// Um lançamento só entra pelo fallback se o Centro de Custo dele NÃO bateu com nenhum dos 14
-// nomes — nunca soma o mesmo lançamento duas vezes. Os outros 8 temas (Custo Administrativo/
-// Comercial/Produção/Projetos, Pró Labore, Distribuição Sócios, Empréstimos) continuam exigindo
-// Centro de Custo marcado manualmente com o nome exato — não existe hoje nenhum dado já
-// classificado no sistema que separe esses 8 com segurança.
+// Classificação por regras (2026-08-24, a pedido do usuário — mapeamento explícito: "pegar
+// custos administrativos tudo que tiver lançado no contas a pagar como administrativo. tudo que
+// for CMV é compras. instalação e logistica vc lança como operação. produção vai sair como
+// custo de produção mesmo. quando tiver no detalhe: pagamento colaborador voce lança como
+// salários. e adicionar mais uma categoria no DRE como custo financeiro... tarifas, taxas e
+// cesta de relacionamento") — substitui o fallback anterior de 2026-08-24 (só via
+// categoria/plano de contas, 5 casos) por um classificador único e ordenado por prioridade, que
+// decide UM tema por lançamento (nunca soma o mesmo lançamento duas vezes):
+//   1) Centro de Custo do lançamento bate EXATO com um dos temas deste relatório (classificação
+//      manual, feita direto na tela de Contas a Pagar) — sempre respeitada como está, nunca
+//      sobrescrita pelas regras automáticas abaixo.
+//   2) Detalhe do lançamento (despesaDesc) contém "pagamento colaborador" → Salários.
+//   3) Detalhe contém "tarifa", "taxa" ou "cesta de relacionamento" → Custo Financeiro (tema
+//      novo, pedido nesta mensagem — antes esses lançamentos caíam em "Juros" via categoria
+//      juros_tarifas/grupo FINANCEIRA).
+//   4) Centro de Custo BRUTO da importação (coluna "Centro de custos" do Excel, ver
+//      _centroCustoResolver()): ADMINISTRATIVO→Custo Administrativo · COMPRAS→CMV ·
+//      INSTALAÇÃO ou LOGÍSTICA→Operação · PRODUÇÃO→Custo Produção.
+//   5) Fallback antigo por categoria/plano de contas (grupo CMV→CMV, OPERACIONAL→Operação,
+//      FINANCEIRA→Juros, IMPOSTOS→Impostos, IMOBILIZADO→Imobilizado) — cobre o que sobrar sem
+//      nenhuma das correspondências acima.
+// DIRETORIA/FINANCEIRO/QUALIDADE (Centro de Custo bruto) não têm regra própria — não foram
+// citados nesta mensagem — seguem pro fallback do passo 5 ou caem em Não Classificado, igual
+// sempre foi. Custo Comercial/Custo Projetos/Pró Labore/Distribuição Sócios/Empréstimos também
+// continuam sem regra automática — só o passo 1 (Centro de Custo manual) cobre esses 5.
 const GRUPO_PARA_TEMA_DRE_IND={CMV:'CMV',OPERACIONAL:'Operação',FINANCEIRA:'Juros',IMPOSTOS:'Impostos',IMOBILIZADO:'Imobilizado'};
-function _dreIndSomaTema(cpMes,nomeTema,cobertoPorCentroCusto){
-  const alvo=_normSemAcento(nomeTema).trim();
-  let total=cpMes.filter(c=>_normSemAcento(c.centroCusto||'').trim()===alvo).reduce((s,c)=>s+_cpValorAjustado(c),0);
-  if(cobertoPorCentroCusto){
-    cpMes.forEach(c=>{
-      if(cobertoPorCentroCusto.has(c.id))return; // já contado por Centro de Custo exato, em QUALQUER tema
-      const cat=getCategoriaDespesa(c.categoria);
-      if(cat&&GRUPO_PARA_TEMA_DRE_IND[cat.grupo]===nomeTema)total+=_cpValorAjustado(c);
-    });
+const CENTRO_CUSTO_BRUTO_PARA_TEMA_DRE_IND={ADMINISTRATIVO:'Custo Administrativo',COMPRAS:'CMV',INSTALAÇÃO:'Operação',LOGÍSTICA:'Operação',PRODUÇÃO:'Custo Produção'};
+function _dreIndClassificarTema(c){
+  const ccNorm=_normSemAcento(c.centroCusto||'').trim();
+  const exato=DRE_IND_TODOS_TEMAS.find(nome=>_normSemAcento(nome).trim()===ccNorm);
+  if(exato)return exato;
+  const detalhe=_normSemAcento(c.despesaDesc||'');
+  if(detalhe.includes('PAGAMENTO COLABORADOR'))return'Salários';
+  if(detalhe.includes('TARIFA')||detalhe.includes('TAXA')||detalhe.includes('CESTA DE RELACIONAMENTO'))return'Custo Financeiro';
+  for(const bruto of Object.keys(CENTRO_CUSTO_BRUTO_PARA_TEMA_DRE_IND)){
+    if(_normSemAcento(bruto)===ccNorm)return CENTRO_CUSTO_BRUTO_PARA_TEMA_DRE_IND[bruto];
   }
-  return total;
+  const cat=getCategoriaDespesa(c.categoria);
+  if(cat&&GRUPO_PARA_TEMA_DRE_IND[cat.grupo])return GRUPO_PARA_TEMA_DRE_IND[cat.grupo];
+  return null;
+}
+function _dreIndSomaTema(classificado,cpMes,nomeTema){
+  return cpMes.filter(c=>classificado.get(c.id)===nomeTema).reduce((s,c)=>s+_cpValorAjustado(c),0);
 }
 // Comissões (2026-08-24) — comissão de vendedor/gerência neste sistema NUNCA é lançada como
 // Contas a Pagar (é calculada em cima da venda e só "quitada"/confirmada, ver
@@ -14999,27 +15037,21 @@ function calcularDreIndicadores(y,m,empresaFiltro,regime){
   regime=regime||'competencia';
   const receita=_dreIndReceitaBruta(y,m,empresaFiltro,regime);
   const cpMes=_dreIndCpMes(y,m,empresaFiltro,regime);
-  const nomesConhecidos=new Set([...DRE_IND_TEMAS_PRE_EBITDA,...DRE_IND_TEMAS_PRE_LUCRO,...DRE_IND_TEMAS_PRE_RESIDUAL].map(n=>_normSemAcento(n).trim()));
-  // Quem já bate por Centro de Custo EXATO com um dos 14 temas nunca entra no fallback de grupo
-  // (ver GRUPO_PARA_TEMA_DRE_IND acima) — evita contar o mesmo lançamento duas vezes.
-  const cobertoPorCentroCusto=new Set(cpMes.filter(c=>nomesConhecidos.has(_normSemAcento(c.centroCusto||'').trim())).map(c=>c.id));
-  const mapTemas=lista=>lista.map(nome=>({nome,valor:nome==='Comissões'?_dreIndComissoes(y,m,empresaFiltro,regime):_dreIndSomaTema(cpMes,nome,cobertoPorCentroCusto)}));
+  // Classifica cada lançamento do mês UMA vez só (ver _dreIndClassificarTema — ordem de
+  // prioridade documentada lá em cima) — nunca soma o mesmo lançamento duas vezes, já que cada
+  // um vira no máximo 1 entrada no Map (id→tema, ou id→null se não bateu com nenhuma regra).
+  const classificado=new Map(cpMes.map(c=>[c.id,_dreIndClassificarTema(c)]));
+  const mapTemas=lista=>lista.map(nome=>({nome,valor:nome==='Comissões'?_dreIndComissoes(y,m,empresaFiltro,regime):_dreIndSomaTema(classificado,cpMes,nome)}));
   const temasPreEbitda=mapTemas(DRE_IND_TEMAS_PRE_EBITDA);
   const ebitda=receita-temasPreEbitda.reduce((s,t)=>s+t.valor,0);
   const temasPreLucro=mapTemas(DRE_IND_TEMAS_PRE_LUCRO);
   const lucroLiquido=ebitda-temasPreLucro.reduce((s,t)=>s+t.valor,0);
   const temasPreResidual=mapTemas(DRE_IND_TEMAS_PRE_RESIDUAL);
   const residual=lucroLiquido-temasPreResidual.reduce((s,t)=>s+t.valor,0);
-  // Não Classificado: Contas a Pagar do mês cujo Centro de Custo não bate com NENHUM dos 14
-  // temas E cuja categoria/grupo também não tem correspondência direta no fallback acima —
+  // Não Classificado: Contas a Pagar do mês que não bateu com NENHUMA regra do classificador —
   // nunca deve sumir silenciosamente do relatório, mesmo padrão de transparência já usado no
   // resto do DRE (ver qtdNaoClassificado em calcularDRE()).
-  const naoClassificado=cpMes.filter(c=>{
-    if(nomesConhecidos.has(_normSemAcento(c.centroCusto||'').trim()))return false;
-    const cat=getCategoriaDespesa(c.categoria);
-    if(cat&&GRUPO_PARA_TEMA_DRE_IND[cat.grupo])return false;
-    return true;
-  }).reduce((s,c)=>s+_cpValorAjustado(c),0);
+  const naoClassificado=cpMes.filter(c=>!classificado.get(c.id)).reduce((s,c)=>s+_cpValorAjustado(c),0);
   return{y,m,empresaFiltro,regime,receita,temasPreEbitda,ebitda,temasPreLucro,lucroLiquido,temasPreResidual,residual,naoClassificado};
 }
 // Acumulado do ano (Jan até o mês selecionado) — soma a Receita e o saldo final (Lucro
@@ -15086,8 +15118,8 @@ function renderDreIndicadores(){
   el.innerHTML=`
     <div class="dash-card" style="margin-bottom:16px">
       <div class="dash-sec-title">📊 Indicadores por Centro de Custo — % sobre a Receita Bruta do mês</div>
-      <p style="font-size:.72rem;color:var(--ink4);margin:0 0 14px">Agrupa toda despesa do mês (Contas a Pagar) pelo Centro de Custo cadastrado em cada lançamento, nos mesmos 14 temas configuráveis em Configurações → Centro de Custo — e, quando o Centro de Custo não bate com nenhum dos 14 (ex.: veio da importação com PRODUÇÃO/ADMINISTRATIVO/etc.), usa a classificação já existente do lançamento (CMV/Operação/Juros/Impostos/Imobilizado) pra não aparecer zerado à toa. Comissões usa sempre o valor já calculado em cima da venda, igual ao DRE de baixo. Cada tema aparece como % da Receita Bruta do mês (${fmtR(d.receita)}) — mesmo regime (${_dreRegimeAtual==='realizado'?'Realizado':'Competência'}) e filtro de empresa da tela acima.</p>
-      ${d.naoClassificado>0.005?`<div style="font-size:.78rem;padding:8px 12px;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:8px;color:#9a3412;margin-bottom:12px">🚨 ${fmtR(d.naoClassificado)} em Contas a Pagar do mês com Centro de Custo que não bate com nenhum dos 14 temas deste relatório — reclassifique em Contas a Pagar pra entrar na conta.</div>`:''}
+      <p style="font-size:.72rem;color:var(--ink4);margin:0 0 14px">Agrupa toda despesa do mês (Contas a Pagar) nos 15 temas configuráveis em Configurações → Centro de Custo, classificando cada lançamento nesta ordem: (1) Centro de Custo bate exato com um dos 15 temas (manual); (2) detalhe do lançamento menciona "pagamento colaborador" → Salários, ou "tarifa/taxa/cesta de relacionamento" → Custo Financeiro; (3) Centro de Custo bruto da importação (Administrativo/Compras/Instalação/Logística/Produção); (4) categoria/plano de contas do lançamento (CMV/Operação/Juros/Impostos/Imobilizado) — pra não aparecer zerado à toa. Comissões usa sempre o valor já calculado em cima da venda, igual ao DRE de baixo. Cada tema aparece como % da Receita Bruta do mês (${fmtR(d.receita)}) — mesmo regime (${_dreRegimeAtual==='realizado'?'Realizado':'Competência'}) e filtro de empresa da tela acima.</p>
+      ${d.naoClassificado>0.005?`<div style="font-size:.78rem;padding:8px 12px;background:#fff7ed;border:1.5px solid #fed7aa;border-radius:8px;color:#9a3412;margin-bottom:12px">🚨 ${fmtR(d.naoClassificado)} em Contas a Pagar do mês sem nenhuma correspondência nas regras deste relatório — reclassifique em Contas a Pagar pra entrar na conta.</div>`:''}
       <div style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;align-items:start">
         <div style="height:${Math.max(280,linhasChart.length*30)}px;min-width:0"><canvas id="dre-ind-chart"></canvas></div>
         <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
