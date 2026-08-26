@@ -9,7 +9,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-26.10';</script>
+<script>const APP_BUILD_VERSION='2026-08-26.12';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -4971,44 +4971,38 @@ async function _migrarProjetosPrazoAte10Ago(){
   if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   if(marcados)toast(`${marcados} pedido(s) com Prazo Final de Finalização até 10/08 concluídos em Projetos (OS ${osMarcados.slice(0,8).join(', ')}${osMarcados.length>8?'...':''})`,'tok');
 }
-// Limpeza pontual (2026-08-03, a pedido do usuário: "remover tudo que tiver atrasado no
-// projetos e no compras e deixar o que tem pra fazer a partir de hoje apenas") — marca como
-// concluído (via checklist, mesma lógica de sempre) qualquer linha de Projetos (etapa
-// 'projeto') ou Compras (etapas compras/corteGalv/art/adesivo) cujo prazo já esteja no
-// passado (statusPedido==='atrasado'), pra sumir das 3 visões e só sobrar o que há pra fazer
-// de hoje em diante. Roda DEPOIS de _migrarProjetosPrazoAte10Ago (mesmo padrão de migração
-// 1x-por-sessão, idempotente — já concluído não entra de novo).
+// APOSENTADA (2026-08-26, a pedido do usuário: "revise pra mim que tem coisa dado baixa
+// automatica... ninguem mexeu... deixar que cada setor de sua baixa") — esta migração (2026-08-03,
+// "remover tudo que tiver atrasado no projetos e no compras e deixar o que tem pra fazer a
+// partir de hoje apenas") tinha um bug de design que o próprio comentário dela já chamava de
+// "por design": era guardada só por uma variável EM MEMÓRIA
+// (_atrasadosProjComprasMigracaoFeita, reseta a cada F5/login), então rodava de novo TODA
+// sessão, pra sempre — e sozinha, sem ninguém clicar em nada, ia marcando como concluído
+// (baixa automática) qualquer etapa de Projeto/Compras/Corte Galvanizado/ART/Adesivo que
+// estivesse atrasada NAQUELE momento, mesmo coisa que tivesse atrasado só no dia anterior. Foi
+// isso que o usuário viu na OS 270 (Chegada Compras/Corte Galvanizado/ART/Adesivo com "baixa
+// dada" sem ninguém do setor ter feito nada).
+//
+// Convertida agora pro MESMO padrão de flag persistida (cfg.migAtrasadosProjComprasFeita) que
+// toda outra migração do sistema já usa (ver _migrarProjetosPrazoAte10Ago/
+// _migrarReabrirProjetosPrazoDe27Jul/_migrarAtrasadosListaPedidosHoje logo abaixo, que já
+// documentava esse exato problema) — mas SEM rodar o lote de novo nem uma vez: o usuário não
+// pediu pra desfazer as baixas automáticas já dadas no passado (viram histórico, ficam como
+// estão), só pediu pra isso parar de acontecer de novo. Corpo original comentado abaixo só
+// como referência de como funcionava — nunca mais executa.
 async function _migrarAtrasadosProjetosComprasHoje(){
-  const hojeIso=new Date().toISOString().slice(0,10);
-  let marcados=0;
-  const osMarcados=[];
-  const infosProj=_lpPedidosElegiveis().map(p=>_projInfo(p,hojeIso)).filter(x=>x.ok);
-  for(const{p,statusPedido}of infosProj){
-    if(statusPedido!=='atrasado')continue;
-    const agora=new Date().toISOString();
-    p.projChecklist=p.projChecklist||{iniciadoEm:agora,itens:{}};
-    PROJ_CHECKLIST_ITENS.forEach(it=>{
-      const jaFeito=p.projChecklist.itens[it.key];
-      p.projChecklist.itens[it.key]=jaFeito&&jaFeito.feito?jaFeito:{feito:true,quando:agora,obs:(jaFeito&&jaFeito.obs)||'Marcado em lote — atrasado antes de hoje.'};
-    });
-    _projChecarConclusao(p);
-    await savePedidoFS(p);
-    marcados++;osMarcados.push(p.os||p.id);
-  }
-  const linhasCompras=_comprasLinhasInfo(hojeIso).filter(x=>x.statusPedido==='atrasado');
-  for(const{p,etapa}of linhasCompras){
-    const agora=new Date().toISOString();
-    p.comprasChecklist=p.comprasChecklist||{};
-    p.comprasChecklist[etapa.key]=p.comprasChecklist[etapa.key]||{iniciadoEm:agora,itens:{}};
-    COMPRAS_CHECKLIST_ITENS.forEach(it=>{
-      const jaFeito=p.comprasChecklist[etapa.key].itens[it.key];
-      p.comprasChecklist[etapa.key].itens[it.key]=jaFeito&&jaFeito.feito?jaFeito:{feito:true,quando:agora,obs:(jaFeito&&jaFeito.obs)||'Marcado em lote — atrasado antes de hoje.'};
-    });
-    _comprasChecarConclusao(p,etapa.key);
-    await savePedidoFS(p);
-    marcados++;osMarcados.push((p.os||p.id)+' ('+etapa.label+')');
-  }
-  if(marcados)toast(`${marcados} item(ns) atrasado(s) concluído(s) em Projetos/Compras (${osMarcados.slice(0,8).join(', ')}${osMarcados.length>8?'...':''})`,'tok');
+  if(cfg.migAtrasadosProjComprasFeita)return;
+  cfg.migAtrasadosProjComprasFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  // CORPO ORIGINAL (2026-08-03 a 2026-08-26, aposentado) — marcava como concluído (via
+  // checklist) qualquer linha de Projetos ('projeto') ou Compras (compras/corteGalv/art/
+  // adesivo) com statusPedido==='atrasado', toda sessão, pra sempre:
+  //   const infosProj=_lpPedidosElegiveis().map(p=>_projInfo(p,hojeIso)).filter(x=>x.ok);
+  //   for(const{p,statusPedido}of infosProj){ if(statusPedido!=='atrasado')continue; ...marca
+  //     PROJ_CHECKLIST_ITENS todos feitos, _projChecarConclusao(p), savePedidoFS(p); }
+  //   const linhasCompras=_comprasLinhasInfo(hojeIso).filter(x=>x.statusPedido==='atrasado');
+  //   for(const{p,etapa}of linhasCompras){ ...marca COMPRAS_CHECKLIST_ITENS todos feitos,
+  //     _comprasChecarConclusao(p,etapa.key), savePedidoFS(p); }
 }
 // Reabertura pontual (2026-08-10, a pedido do usuário) — a exigência de informar o CMV (%) ao
 // finalizar o checklist do Projeto é NOVA (ver _projChecarConclusao/projPedirCmvEFinalizar,
@@ -5242,9 +5236,12 @@ function setupRealtimeSync(){
       _projPrazo10AgoMigracaoFeita=true;
       _migrarProjetosPrazoAte10Ago().catch(e=>{_projPrazo10AgoMigracaoFeita=false;console.error('Erro ao concluir pedidos com Prazo Final até 10/08 em Projetos',e);});
     }
-    // Limpeza pontual (2026-08-03, a pedido do usuário) — some com tudo que estiver atrasado
-    // em Projetos e Compras, deixando só o que há pra fazer a partir de hoje (ver
-    // _migrarAtrasadosProjetosComprasHoje) — só 1x por sessão, só admin, idempotente.
+    // APOSENTADA (2026-08-26, a pedido do usuário — ver comentário completo em
+    // _migrarAtrasadosProjetosComprasHoje) — era a única migração do sistema sem flag
+    // persistida, rodando (e dando baixa automática sozinha) toda sessão pra sempre; agora só
+    // 1x pra sempre (flag persistida cfg.migAtrasadosProjComprasFeita, dentro da própria
+    // função) e sem fazer nada além de se aposentar — mantido o chamado aqui só por
+    // consistência com o padrão das outras migrações desta lista.
     if(!_atrasadosProjComprasMigracaoFeita&&_getUserCat().isAdm){
       _atrasadosProjComprasMigracaoFeita=true;
       _migrarAtrasadosProjetosComprasHoje().catch(e=>{_atrasadosProjComprasMigracaoFeita=false;console.error('Erro ao concluir itens atrasados em Projetos/Compras',e);});
@@ -18396,6 +18393,28 @@ function _lpCellTarefa(p,key,hojeIso){
   const tip=t.concluido?`Concluído em ${fmtD(t.data)} por ${t.por||'—'}${abreFornecedor?'':'. Clique pra desfazer.'}`:(abreFornecedor?`Clique pra abrir Fornecedores e registrar ${label}`:'Clique pra marcar como concluído');
   return `<td style="padding:8px 10px;white-space:nowrap"><span onclick="${onclick}" title="${tip}" style="cursor:pointer;background:${corInfo.bg};color:${corInfo.cor};padding:3px 8px;border-radius:6px;font-weight:700;font-size:.76rem;display:inline-block">${conteudo}</span></td>`;
 }
+// Célula de Embalagem em Planejamento (2026-08-26, a pedido do usuário: o pessoal do
+// planejamento precisa ter um lugar ali pra dizer se embalou ou nao, se cumpriu a data
+// acordada) — antes era só a data calculada, sem clique nenhum (_lpCell, read-only); agora
+// funciona igual às outras colunas de tarefa (_lpCellTarefa acima): clique dá/desfaz a baixa
+// de verdade (mesmo p.lpBaixas.embalagem de sempre, ver LP_ETAPAS_COM_BAIXA). Cumprir a data
+// acordada não precisa de campo à parte: já é exatamente o que toda etapa com baixa mostra
+// sozinha (cor por atraso, _lpCorPrazoTarefa) comparando a baixa com o prazo calculado.
+function _lpCellEmbalagem(p,calc,hojeIso,podeEditar){
+  if(!calc.ok)return `<td style="padding:8px 10px;color:var(--ink4)">—</td>`;
+  const etapa=calc.etapas.find(e=>e.key==='embalagem'&&e.aplicavel);
+  if(!etapa)return `<td style="padding:8px 10px;color:var(--ink4)" title="Etapa Embalagem removida em Configurações">—</td>`;
+  const baixa=p.lpBaixas&&p.lpBaixas.embalagem;
+  const status=_lpStatusEtapa(p,etapa,hojeIso);
+  const corInfo=_lpCorPrazoTarefa(etapa.iso,status==='ok',hojeIso);
+  const conteudo=baixa?`✅ ${fmtD(baixa.data)}`:fmtD(etapa.iso);
+  if(!podeEditar){
+    const tipVer=baixa?`Embalado em ${fmtD(baixa.data)} por ${baixa.por||'—'}`:'Aguardando baixa da Embalagem (só Planejamento/admin)';
+    return `<td style="padding:8px 10px;white-space:nowrap"><span title="${tipVer}" style="background:${corInfo.bg};color:${corInfo.cor};padding:3px 8px;border-radius:6px;font-weight:700;font-size:.76rem;display:inline-block">${conteudo}</span></td>`;
+  }
+  const tip=baixa?`Embalado em ${fmtD(baixa.data)} por ${baixa.por||'—'}. Clique pra desfazer.`:'Clique pra confirmar que a Embalagem foi concluída';
+  return `<td style="padding:8px 10px;white-space:nowrap"><span onclick="_lpTogglePlanejamentoEmbalagem('${p.id}',${baixa?'true':'false'})" title="${tip}" style="cursor:pointer;background:${corInfo.bg};color:${corInfo.cor};padding:3px 8px;border-radius:6px;font-weight:700;font-size:.76rem;display:inline-block">${conteudo}</span></td>`;
+}
 // Marca/desmarca uma tarefa SIMPLES (Recebimento ART/RAO) como concluída — mesmo padrão de
 // lpDarBaixa/lpDesfazerBaixa. Instalador/Frete/Elevação NÃO passam por aqui — são marcadas
 // automaticamente ao salvar um fornecedor em salvarFgLancamento().
@@ -18434,6 +18453,23 @@ async function _lpToggleTarefa(pedidoId,key){
   }
   await savePedidoFS(p);
   toast(atual.concluido?'Desfeito':'Marcado como concluído ✅','tok');
+  renderPlanejamentoObras();
+}
+// Dá/desfaz a baixa da etapa Embalagem direto da tela de Planejamento (2026-08-26, a pedido
+// do usuário — ver _lpCellEmbalagem acima). Reaproveita 100% o mecanismo de baixa por etapa já
+// usado em Projetos/Compras/Produção (lpDarBaixa/lpDesfazerBaixa — mesmo formato em
+// p.lpBaixas, mesmo rastro em p.lpBaixasDesfeitas ao desfazer), só que chamado por aqui (sem
+// menu de setor próprio pra Embalagem, por isso o setorKey fictício '__PLANEJAMENTO__' — não
+// bate com nenhum LP_SETORES de verdade, então renderSetorTarefas() dentro delas não faz nada;
+// quem atualiza a tela certa é o renderPlanejamentoObras() no final daqui).
+async function _lpTogglePlanejamentoEmbalagem(pedidoId,jaBaixado){
+  if(!_isPlanejamentoUser()){toast('Só Planejamento ou administrador pode dar baixa na Embalagem.','terr');return;}
+  if(jaBaixado){
+    if(!confirm('Desfazer a baixa de Embalagem deste pedido?'))return;
+    await lpDesfazerBaixa(pedidoId,'embalagem','__PLANEJAMENTO__');
+  } else {
+    await lpDarBaixa(pedidoId,'embalagem','__PLANEJAMENTO__');
+  }
   renderPlanejamentoObras();
 }
 // ===================== FIM TAREFAS DE PLANEJAMENTO & LOGÍSTICA =====================
@@ -18539,12 +18575,41 @@ function _lpCalcEtapas(p){
   // trabalho e o frete sai neste 2º dia"). Só entra em vigor se a etapa Embalagem estiver
   // ativa (não removida em Configurações → Etapas de Pedidos); sem Embalagem, Produção volta a
   // usar o % normal (LP_PCT_PADRAO.producao) como fallback.
+  // Prazo de PRODUÇÃO fica FIXO mesmo que o Prazo de Finalização seja adiado depois
+  // (2026-08-26, a pedido do usuário: "prazo de produção mantem o mesmo, mesmo que o
+  // planejamento adie a data de finalização de obra") — passa a calcular a data de Produção a
+  // partir do prazoOriginal (a primeira data combinada na Emissão, gravada 1x só e nunca
+  // sobrescrita — ver abrirAlterarPrazoObra/salvarAlteracaoPrazoObra) em vez do p.prazo atual,
+  // sempre que os dois divergirem (ou seja, sempre que o prazo já foi adiado/antecipado ao
+  // menos uma vez por lá). TODO o resto da timeline (Embalagem, Saída do Frete, Início/Final
+  // da Instalação, "Prazo Final" mostrado na Lista de Pedidos) continua acompanhando o p.prazo
+  // ATUAL normalmente, sem nenhuma mudança — só a fábrica fica travada no combinado original,
+  // pra não "ganhar" prazo extra por um motivo (cliente, instalação etc.) que não tem nada a
+  // ver com o ritmo dela. Sem prazoOriginal (pedido nunca teve o prazo alterado, o caso mais
+  // comum), o cálculo abaixo dá exatamente o mesmo resultado de antes — zero mudança de
+  // comportamento pra quem nunca usou "Alterar Prazo".
+  let _prazoIsoProducao=prazoIso,_coletaIsoProducao=coletaIso,_prazoInternoDiasProducao=prazoInternoDias;
+  const _prazoOrigIso=p.prazoOriginal?_normPrazoIso(p.prazoOriginal):'';
+  if(_prazoOrigIso&&_prazoOrigIso!==prazoIso){
+    const _coletaIsoRawOrig=_opAddDias(_prazoOrigIso,-(diasInst+diasFrete));
+    const _prazoInternoDiasOrig=_coletaIsoRawOrig?Math.round((new Date(_coletaIsoRawOrig+'T00:00:00')-new Date(emissaoIso+'T00:00:00'))/86400000):0;
+    if(_coletaIsoRawOrig&&_prazoInternoDiasOrig>0){
+      _prazoIsoProducao=_prazoOrigIso;
+      _coletaIsoProducao=_lpAjustaDiaUtil(_coletaIsoRawOrig);
+      _prazoInternoDiasProducao=_prazoInternoDiasOrig;
+    }
+  }
   const _etapasDefLp=_lpEtapasDefParaPedido(p);
   const _embalagemAtiva=_etapasDefLp.some(d=>d.key==='embalagem');
-  const _producaoBufferIso=_embalagemAtiva?_lpSubtraiDiasUteis(coletaIso,LP_DIAS_EMBALAGEM):null;
+  // Buffer/percentual de Produção usam SEMPRE as variáveis "_...Producao" acima — idênticas às
+  // originais (coletaIso/prazoInternoDias) quando não há prazoOriginal divergente, travadas no
+  // prazo combinado originalmente quando há.
+  const _producaoBufferIso=_embalagemAtiva?_lpSubtraiDiasUteis(_coletaIsoProducao,LP_DIAS_EMBALAGEM):null;
+  const _producaoDefLp=_etapasDefLp.find(d=>d.key==='producao');
+  const _producaoPctIso=_producaoDefLp?_lpAjustaDiaUtil(_opAddDias(emissaoIso,Math.round(_prazoInternoDiasProducao*_producaoDefLp.pct/100))):null;
   const etapas=_etapasDefLp.map(def=>{
     let iso;
-    if(def.key==='producao'&&_producaoBufferIso)iso=_producaoBufferIso;
+    if(def.key==='producao')iso=_producaoBufferIso||_producaoPctIso;
     else if(def.special==='chegada')iso=chegadaIso;
     else if(def.special==='final')iso=prazoIso;
     else iso=_lpAjustaDiaUtil(_opAddDias(emissaoIso,Math.round(prazoInternoDias*def.pct/100)));
@@ -18640,7 +18705,13 @@ const LP_SETORES={
 // 'art' não pertence a nenhum LP_SETORES (não é mais tarefa de nenhum menu de setor), mas
 // continua contando pra Assertividade/Kanban — incluído aqui manualmente porque quem dá baixa
 // nela agora é o Planejamento (_lpToggleTarefa), não um menu de setor com _lpTarefasSetor.
-const LP_ETAPAS_COM_BAIXA=['art',...Object.values(LP_SETORES).reduce((arr,s)=>arr.concat(s.stages),[])];
+// 'embalagem' entrou em 2026-08-26 (a pedido do usuário — ver _lpCellEmbalagem/
+// _lpTogglePlanejamentoEmbalagem em renderPlanejamentoObras) — antes ficava de fora
+// ("Embalagem/Frete/Instalação ficam de fora por enquanto... vamos avançar depois", comentário
+// original de 2026-07-31) só com estimativa por data, sem confirmação de verdade de ninguém.
+// Frete/Instalação continuam de fora por enquanto — Planejamento já tem seu controle próprio
+// via Finalização de Obra pra essas.
+const LP_ETAPAS_COM_BAIXA=['art','embalagem',...Object.values(LP_SETORES).reduce((arr,s)=>arr.concat(s.stages),[])];
 // ===================== CAPACIDADE DIÁRIA: PRODUÇÃO E INSTALAÇÃO (2026-08-03) =====================
 // A pedido do usuário: Produção não aguenta mais que um limite de valor LÍQUIDO finalizando no
 // mesmo dia (produtividade real de hoje, configurável em Configurações → Etapas de Pedidos,
@@ -20283,7 +20354,7 @@ function _prodFiltrosResumoTexto(){
   const filDataAte=document.getElementById('prod-fil-data-ate')?.value||'';
   const partes=[];
   if(busca)partes.push('Busca: "'+busca+'"');
-  if(filStatusEl)partes.push('Status: '+filStatusEl.options[filStatusEl.selectedIndex].textContent.replace(/[^\x00-\x7FÀ-ſ]/g,'').trim());
+  if(filStatusEl)partes.push('Status: '+_stripEmojiPdf(filStatusEl.options[filStatusEl.selectedIndex].textContent));
   if(filDataCampo&&(filDataDe||filDataAte)){
     const opt=document.querySelector('#prod-fil-data-campo option[value="'+filDataCampo+'"]');
     const rotulo=opt?opt.textContent.replace('📅 Filtrar por data: ',''):filDataCampo;
@@ -21612,13 +21683,23 @@ function _lpFiltrosResumoTexto(){
   const partes=[];
   if(busca)partes.push('Busca: "'+busca+'"');
   if(filEtapa){const opt=document.querySelector('#lp-fil-etapa option[value="'+filEtapa+'"]');partes.push('Etapa: '+(opt?opt.textContent:filEtapa));}
-  if(filStatus){const opt=document.querySelector('#lp-fil-status option[value="'+filStatus+'"]');partes.push('Status: '+(opt?opt.textContent:filStatus));}
+  if(filStatus){const opt=document.querySelector('#lp-fil-status option[value="'+filStatus+'"]');partes.push('Status: '+_stripEmojiPdf(opt?opt.textContent:filStatus));}
   if(filDataCampo&&(filDataDe||filDataAte)){
     const opt=document.querySelector('#lp-fil-data-campo option[value="'+filDataCampo+'"]');
     const rotulo=opt?opt.textContent.replace('📅 Filtrar por data: ',''):filDataCampo;
     partes.push(rotulo+': '+(filDataDe?fmtD(filDataDe):'início')+' até '+(filDataAte?fmtD(filDataAte):'hoje'));
   }
   return partes.length?partes.join('  ·  '):'Sem filtro (todos os pedidos elegíveis)';
+}
+// Tira emoji de um texto antes de mandar pro jsPDF (2026-08-26 — jsPDF/helvetica não sabe
+// desenhar emoji, vira caractere ilegível tipo "Ø=Ý5"). Usa \p{Extended_Pictographic} (só
+// emoji de verdade — nunca remove acento/cedilha/pontuação por engano, ao contrário de um
+// regex de faixa ASCII manual) + variation selector (️) + o espaço que sobra depois. Usado em
+// qualquer rótulo com emoji (filtro ativo, status, etc.) antes de virar texto de PDF — ver
+// _lpFiltrosResumoTexto/_projFiltrosResumoTexto/_prodFiltrosResumoTexto e as tabelas que usam
+// _projStatusLabel/i.label direto.
+function _stripEmojiPdf(txt){
+  return String(txt||'').replace(/\p{Extended_Pictographic}\uFE0F?\s*/gu,'').trim();
 }
 // Hex ('#7c3aed') -> [r,g,b], pra usar cor de etapa (_lpCorEtapa) nas exportações em PDF —
 // jsPDF só aceita RGB numérico em setFillColor/setTextColor, não string hex.
@@ -22168,7 +22249,7 @@ function _projFiltrosResumoTexto(){
   const filDataAte=document.getElementById('proj-fil-data-ate')?.value||'';
   const partes=[];
   if(busca)partes.push('Busca: "'+busca+'"');
-  if(filStatus){const opt=document.querySelector('#proj-fil-status option[value="'+filStatus+'"]');partes.push('Status: '+(opt?opt.textContent:filStatus));}
+  if(filStatus){const opt=document.querySelector('#proj-fil-status option[value="'+filStatus+'"]');partes.push('Status: '+_stripEmojiPdf(opt?opt.textContent:filStatus));}
   if(filDataCampo&&(filDataDe||filDataAte)){
     const opt=document.querySelector('#proj-fil-data-campo option[value="'+filDataCampo+'"]');
     const rotulo=opt?opt.textContent.replace('📅 Filtrar por data: ',''):filDataCampo;
@@ -22221,7 +22302,7 @@ async function projExportarListaPDF(){
   }
   const curY=drawHeader();
   const head=['OS','Cliente','JOB','Prazo do Projeto','Checklist','Status'];
-  const bodyPdf=infos.map(x=>[x.p.os||'—',x.p.cliente||'—',x.p.job||'—',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens,_projStatusLabel(x.statusPedido)]);
+  const bodyPdf=infos.map(x=>[x.p.os||'—',x.p.cliente||'—',x.p.job||'—',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens,_stripEmojiPdf(_projStatusLabel(x.statusPedido))]);
   doc.autoTable({
     startY:curY,head:[head],body:bodyPdf,theme:'grid',
     styles:{fontSize:7,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.8},
@@ -25305,7 +25386,7 @@ function renderPlanejamentoObras(){
       <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">Tipo</th>
       <th style="padding:8px 10px">Vendedor</th><th style="padding:8px 10px">Data da Venda</th><th style="padding:8px 10px">Prazo de Finalização</th>
       <th style="padding:8px 10px;white-space:nowrap" title="Prazo pra receber a ART do projeto">Recebimento ART</th>
-      <th style="padding:8px 10px;white-space:nowrap" title="Prazo Final de Embalagem">Prazo Embalagem</th>
+      <th style="padding:8px 10px;white-space:nowrap" title="Prazo Final de Embalagem — Planejamento/admin pode clicar pra confirmar que embalou">Prazo Embalagem</th>
       <th style="padding:8px 10px;white-space:nowrap" title="7 dias úteis antes do Início da Instalação — clique abre Fornecedores">Contratar Instalador</th>
       <th style="padding:8px 10px;white-space:nowrap" title="6 dias úteis antes do Início do Frete — clique abre Fornecedores">Contratar Frete</th>
       <th style="padding:8px 10px;white-space:nowrap" title="5 dias úteis antes do Início da Instalação — clique abre Fornecedores">Contratar Elevação</th>
@@ -25364,7 +25445,7 @@ function renderPlanejamentoObras(){
       // tarefa, ver PLAN_TAREFAS_REGRAS).
       const _lpArtHtml=_lpCellTarefa(p,'art',hojeISO);
       const _lpPrazosHtml=_lpc.ok
-        ?(_lpCell(_lpc.coletaIso)
+        ?(_lpCellEmbalagem(p,_lpc,hojeISO,podeEditarPrazo)
           +_lpCellTarefa(p,'instalador',hojeISO)
           +_lpCellTarefa(p,'frete',hojeISO)
           +_lpCellTarefa(p,'elevacao',hojeISO)
@@ -30230,7 +30311,7 @@ async function gerarPDFComissao(vend,quinzena){
       const pct=useClabPct?i.pctClab:i.pct;
       const com=i.valor*pct/100;
       subtotal+=com;
-      const row=[i.mesPedido,pedidoDisplay(i.pedidoOs)||'—',i.cliente,i.label||'—',fmtR(i.valorBruto),fmtR(i.valor),pct.toFixed(2).replace('.',',')+'%',fmtR(com)];
+      const row=[i.mesPedido,pedidoDisplay(i.pedidoOs)||'—',i.cliente,_stripEmojiPdf(i.label)||'—',fmtR(i.valorBruto),fmtR(i.valor),pct.toFixed(2).replace('.',',')+'%',fmtR(com)];
       if(showQCol)row.push(i._q);
       return row;
     });
