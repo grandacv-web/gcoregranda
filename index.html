@@ -1862,6 +1862,7 @@ select.fc{cursor:pointer}
     <div id="sec-cat-RH" style="display:none">
       <div class="dash-tabs" style="margin-bottom:14px" id="rh-main-tabs">
         <button class="dash-tab active rh-main-tab" onclick="rhSetMainTab('pontualidade',this)">Pontualidade e Assiduidade</button>
+        <button class="dash-tab rh-main-tab" onclick="rhSetMainTab('colaboradores',this)">Lista de Colaboradores</button>
       </div>
       <div id="rh-sec-pontualidade">
         <div style="font-size:.78rem;color:var(--ink4);margin-bottom:16px;padding:12px 16px;background:#fff;border-radius:10px;border:1px solid var(--border-lt);border-left:3px solid #101B3D;line-height:1.5">
@@ -1908,6 +1909,9 @@ select.fc{cursor:pointer}
           </select>
           <input id="rh-fil-busca" list="rh-lista-funcs" placeholder="Buscar colaborador..." oninput="renderRhPontualidade()" style="flex:1;min-width:200px;padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:.83rem;font-family:inherit">
           <datalist id="rh-lista-funcs"></datalist>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:.76rem;color:#475569;cursor:pointer;white-space:nowrap">
+            <input type="checkbox" id="rh-fil-mostrar-demitidos" onchange="renderRhPontualidade()">Mostrar demitidos
+          </label>
           <span title="Se esse número não mudar depois de subir o arquivo novo no GitHub, o navegador ainda está com a versão antiga em cache — precisa dar um hard refresh (Ctrl+F5)." style="font-size:.62rem;color:#9ca3af;white-space:nowrap;align-self:center">build RH-2026-07-30-v18</span>
         </div>
         <div id="rh-debug-linha" style="font-size:.7rem;color:#9ca3af;margin:-12px 0 18px 0;font-family:monospace"></div>
@@ -1952,6 +1956,27 @@ select.fc{cursor:pointer}
         </div>
         <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:0">
           <div id="rh-tabela-func" style="max-height:680px;overflow:auto"></div>
+        </div>
+      </div>
+      <!-- Lista de Colaboradores (2026-08-26, a pedido do usuário) — diretório simples pra
+           pesquisar qualquer colaborador (ativo ou demitido) por nome e abrir o perfil dele
+           (mesmo modal de abrirRhHistoricoFuncionario, com Demitir/Horários/Afastamento/
+           Atestado + os dados gerais de assiduidade/pontualidade). Não recalcula nada novo —
+           só lista cfg.rhFuncionarios e reaproveita o modal que já existe. -->
+      <div id="rh-sec-colaboradores" style="display:none">
+        <div style="font-size:.78rem;color:var(--ink4);margin-bottom:16px;padding:12px 16px;background:#fff;border-radius:10px;border:1px solid var(--border-lt);border-left:3px solid #101B3D;line-height:1.5">
+          Pesquise um colaborador (ativo ou demitido) pelo nome e clique nele pra abrir o perfil completo — histórico de ponto, assiduidade/pontualidade, e os botões de Demitir, Horários deste Colaborador, Afastamento/Férias e Apresentar Declaração/Atestado.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
+          <input id="rh-lc-busca" placeholder="Buscar colaborador por nome..." oninput="renderRhListaColaboradores()" style="flex:1;min-width:240px;padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:.83rem;font-family:inherit">
+          <select id="rh-lc-fil-status" onchange="renderRhListaColaboradores()" style="padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:.83rem;font-family:inherit;cursor:pointer;background:#fff">
+            <option value="">Todos</option>
+            <option value="ativos">Somente ativos</option>
+            <option value="demitidos">Somente demitidos</option>
+          </select>
+        </div>
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:0">
+          <div id="rh-lc-lista" style="max-height:680px;overflow:auto"></div>
         </div>
       </div>
     </div>
@@ -3668,6 +3693,16 @@ window._fbWatchRhPonto=(cb,errCb)=>onSnapshot(collection(db,'rhPonto'),cb,errCb|
 // Exclusão de registro de ponto — usada quando o usuário quer reprocessar um colaborador do
 // zero (ex.: testar upload de novo sem ficar acumulando dias antigos misturados com novos).
 window._fbDeleteRhPonto=(docId)=>deleteDoc(doc(db,'rhPonto',String(docId)));
+// RH — Anexos de Atestado/Declaração manual (2026-08-26, a pedido do usuário: "quero anexar
+// um pdf pra ficar registrado o atestado ou declaração"). Coleção PRÓPRIA, separada de
+// 'sistema/config' de propósito — cfg é UM documento único compartilhado por TODO o sistema
+// (pedidos, produtos, RH, financeiro...) com o limite de 1MB do Firestore; um PDF em base64
+// ali dentro arriscaria estourar esse limite e quebrar o SALVAMENTO DE TUDO, não só do RH
+// (mesmo motivo de rhPonto/lixeira/prospEmpresas serem coleções separadas, ver comentários
+// acima). 1 doc por atestado (funcionarioId+data), id próprio.
+window._fbSaveRhAtestadoAnexo=(id,payload)=>setDoc(doc(db,'rhAtestadosAnexos',String(id)),payload);
+window._fbDeleteRhAtestadoAnexo=(id)=>deleteDoc(doc(db,'rhAtestadosAnexos',String(id)));
+window._fbWatchRhAtestadosAnexos=(cb,errCb)=>onSnapshot(collection(db,'rhAtestadosAnexos'),cb,errCb||(e=>console.error('rhAtestadosAnexos watch error',e)));
 // Lixeira (recuperação) — 2026-07-31. Coleção própria (não dentro de cfg, que já tem limite de
 // 1MB e não pode inflar com snapshots) guardando uma cópia de qualquer item apagado de verdade
 // (pedido, conta a pagar, funcionário do RH) antes da exclusão definitiva, pra dar chance de
@@ -5283,6 +5318,21 @@ function setupRhPontoSync(){
     _rhPontoErro=(err&&err.message)||String(err);
     if(typeof renderRhPontualidade==='function')renderRhPontualidade();
     toast('Erro ao carregar dados de ponto do RH — veja o painel','terr');
+  });
+}
+// Mesmo padrão de setupRhPontoSync() acima — Atestados/Declarações manuais anexados pelo RH
+// (2026-08-26), coleção própria (rhAtestadosAnexos) por causa do PDF em base64 (ver motivo em
+// window._fbSaveRhAtestadoAnexo).
+let rhAtestadosAnexos=[];
+function setupRhAtestadosAnexosSync(){
+  if(!window._fbWatchRhAtestadosAnexos)return;
+  window._fbWatchRhAtestadosAnexos(function(snapshot){
+    rhAtestadosAnexos=snapshot.docs.map(d=>({id:d.id,...d.data()}));
+    if(document.getElementById('rh-hist-modal')&&typeof _rhRenderHistoricoModal==='function')_rhRenderHistoricoModal();
+    const elRh=document.getElementById('sec-cat-RH');
+    if(elRh&&elRh.style.display!=='none'&&typeof renderRhPontualidade==='function')renderRhPontualidade();
+  },function(err){
+    console.error('Erro ao sincronizar rhAtestadosAnexos:',err);
   });
 }
 async function saveContaPagarFS(c){
@@ -10736,6 +10786,7 @@ function initAuth(tries){
         setupContasReceberManualSync();
         setupDreCongeladoSync();
         setupRhPontoSync();
+        setupRhAtestadosAnexosSync();
         setupLixeiraSync();
         setupProspSync();
         setupSimReservasSync();
@@ -22991,6 +23042,58 @@ function _rhVoltaAlmocoPrevistaPadrao(){
   });
   return voltaMin;
 }
+// Calcula {previstoMin,entradaMin,voltaAlmocoMin} a partir de uma escala arbitrária (mesmo
+// formato de RH_HORARIO_PADRAO_EMPRESA: {seg:{entrada,saidaAlmoco,voltaAlmoco,saida}|null,...}).
+// Usado pro horário PERSONALIZADO de um colaborador (cfg.rhFuncionarios[].horarioPersonalizado,
+// 2026-08-26) — mesma conta de _rhPrevistoMinPadrao/_rhEntradaPrevistaPadrao/
+// _rhVoltaAlmocoPrevistaPadrao, só que reaproveitável pra qualquer escala, não só a oficial da
+// empresa. Função NOVA e isolada de propósito — não mexe nas 3 funções acima, que continuam
+// calculando só a partir de RH_HORARIO_PADRAO_EMPRESA exatamente como antes.
+function _rhHorarioDeEscala(escala){
+  const abrevMap={seg:1,ter:2,qua:3,qui:4,sex:5,sab:6,dom:0};
+  const previstoMin={0:0,1:0,2:0,3:0,4:0,5:0,6:0};
+  const entradaMin={0:null,1:null,2:null,3:null,4:null,5:null,6:null};
+  const voltaAlmocoMin={0:null,1:null,2:null,3:null,4:null,5:null,6:null};
+  Object.entries(escala||{}).forEach(([abr,h])=>{
+    const idx=abrevMap[abr];
+    if(idx===undefined||!h)return;
+    const a=_rhParseHoraHHMM(h.entrada),b=_rhParseHoraHHMM(h.saidaAlmoco),c=_rhParseHoraHHMM(h.voltaAlmoco),d=_rhParseHoraHHMM(h.saida);
+    let mins=0;
+    if(a!=null&&b!=null&&b>a)mins+=(b-a);
+    if(c!=null&&d!=null&&d>c)mins+=(d-c);
+    previstoMin[idx]=mins;
+    entradaMin[idx]=a;
+    voltaAlmocoMin[idx]=c;
+  });
+  return{previstoMin,entradaMin,voltaAlmocoMin};
+}
+// Recalcula previsto/atraso/incompleto de um dia JÁ SALVO usando um horário diferente do que
+// foi usado no momento do upload (2026-08-26) — necessário pro horário PERSONALIZADO valer
+// IMEDIATAMENTE pra todo o histórico já salvo, não só pros uploads feitos DEPOIS de configurar
+// o horário do colaborador (mesma exigência de "sempre atualizado" que já vale pra
+// Afastamento/Atestado manual, aplicados na leitura em _rhDiasDoFuncionario). trabalhadoMin
+// NUNCA muda aqui — ele vem só dos horários batidos de verdade (Ent/Sai), não depende de qual
+// horário de referência está sendo usado pra calcular o previsto, então o valor já salvo
+// continua correto sem precisar recalcular. Dias já neutralizados por status do próprio Hponto
+// (folga/feriado/férias/dsr) ou pelos overrides manuais (atestado/dispensa/afastamento/
+// desligamento) NUNCA são recalculados — só dias de expediente normal.
+function _rhRecalcularComHorarioPersonalizado(d,horario){
+  const statusLower=(d.status||'').toLowerCase();
+  const ehNaoUtilPorStatus=_RH_STATUS_NAO_UTIL.some(k=>statusLower.includes(k));
+  if(ehNaoUtilPorStatus||d.atestado||d.dispensaJustificada||d.afastamento||d.desligado)return d;
+  const diaSemana=d.diaSemana;
+  const previstoDiaMin=(horario.previstoMin&&horario.previstoMin[diaSemana])||0;
+  const entradaPrevDiaMin=horario.entradaMin?horario.entradaMin[diaSemana]:null;
+  const voltaAlmocoPrevDiaMin=horario.voltaAlmocoMin?horario.voltaAlmocoMin[diaSemana]:null;
+  const entradaRealMin=_rhParseHoraHHMM(d.entrada);
+  const voltaAlmocoRealMin=_rhParseHoraHHMM(d.voltaAlmoco);
+  let atrasoEntradaMin=0;
+  if(previstoDiaMin>0&&entradaRealMin!=null&&entradaPrevDiaMin!=null&&entradaRealMin>entradaPrevDiaMin)atrasoEntradaMin=entradaRealMin-entradaPrevDiaMin;
+  let atrasoAlmocoMin=0;
+  if(previstoDiaMin>0&&voltaAlmocoRealMin!=null&&voltaAlmocoPrevDiaMin!=null&&voltaAlmocoRealMin>voltaAlmocoPrevDiaMin)atrasoAlmocoMin=voltaAlmocoRealMin-voltaAlmocoPrevDiaMin;
+  const incompleto=previstoDiaMin>0&&(d.trabalhadoMin||0)===0&&entradaRealMin!=null;
+  return Object.assign({},d,{previstoMin:previstoDiaMin,atrasoEntradaMin,atrasoAlmocoMin,atrasoMin:atrasoEntradaMin+atrasoAlmocoMin,incompleto});
+}
 function _rhParseHorarioSemanal(root){
   const previstoMin={0:0,1:0,2:0,3:0,4:0,5:0,6:0}; // índice = Date.getDay() (0=dom..6=sab)
   const entradaMin={0:null,1:null,2:null,3:null,4:null,5:null,6:null};
@@ -23214,9 +23317,24 @@ async function _rhParseArquivo(file){
   const departamentoRaw=_rhValorPorRotulo(doc,['Depart.','Departamento','Depto','Depto.','Setor']);
   const departamento=(departamentoRaw||'SEM DEPARTAMENTO').toUpperCase();
   diag.push(`Função: "${funcao||'—'}" · Departamento: "${departamento}".`);
-  const horario=_rhParseHorarioSemanal(doc);
+  // Horário PERSONALIZADO deste colaborador (2026-08-26, botão "Horários deste Colaborador" no
+  // RH) — quando configurado manualmente, tem prioridade tanto sobre a tabela "Horário de
+  // Trabalho" de dentro do próprio arquivo quanto sobre o padrão oficial da empresa: é uma
+  // declaração explícita de que ESSE colaborador não segue nenhum dos dois. Procurado pelo
+  // cadastro já existente (por nome) porque nesse ponto do parse ainda não sabemos o id — o
+  // colaborador já deve ter sido cadastrado numa subida anterior pra ter um horário salvo.
+  const _funcJaCadastrado=_rhFuncionarioPorNome(nome);
+  let horario;
+  if(_funcJaCadastrado&&_funcJaCadastrado.horarioPersonalizado){
+    horario=_rhHorarioDeEscala(_funcJaCadastrado.horarioPersonalizado);
+    horario.fonte='colaborador';
+  }else{
+    horario=_rhParseHorarioSemanal(doc);
+  }
   const descEscala=_rhDescreverEscala(horario);
-  if(horario.fonte==='arquivo'){
+  if(horario.fonte==='colaborador'){
+    diag.push(`⚙️ Usando o horário PERSONALIZADO cadastrado no RH pra este colaborador (botão "Horários deste Colaborador"): ${descEscala.texto}.`);
+  }else if(horario.fonte==='arquivo'){
     diag.push(`Escala semanal (Horário de Trabalho) lida do arquivo: ${descEscala.texto}.`);
     if(descEscala.divergencias.length)diag.push(`⚠️ Escala do arquivo diferente da oficial da empresa (07:30–12:00 e 13:00–17:18) em: ${descEscala.divergencias.join('; ')}. Isso muda direto as "Horas Perdidas" calculadas pra este colaborador — confira se é isso mesmo ou se é erro de cadastro no Hponto.`);
   }else{
@@ -23398,6 +23516,20 @@ async function processarArquivosRhPonto(fileList){
 // que o chamador já deve passar como '' nesse caso (ver renderRhPontualidade).
 function _rhDiasDoFuncionario(funcionarioId,anoMesFiltro,dataDe,dataAte){
   const out=[];
+  // Overrides manuais do RH (2026-08-26): Afastamento/Férias (cfg.rhFuncionarios[].afastamentos)
+  // e Atestado/Declaração com anexo (coleção rhAtestadosAnexos) — aplicados aqui, na LEITURA dos
+  // dias, nunca gravados por cima do dia original vindo do Hponto (rhPontoMeses continua exatamente
+  // o que veio do arquivo, intacto, pra nunca perder o dado bruto). Também corta os dias depois da
+  // data de desligamento de um colaborador demitido — não faz sentido continuar avaliando
+  // falta/atraso de quem não trabalha mais na empresa.
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  const afastamentos=(f&&f.afastamentos)||[];
+  const dataDesligamento=(f&&f.status==='demitido'&&f.demissao&&f.demissao.data)||null;
+  // Horário PERSONALIZADO (2026-08-26) — calculado 1x por chamada (não por dia) e aplicado a
+  // cada dia antes dos overrides abaixo, pra sempre cruzar o ponto batido com o horário deste
+  // colaborador específico, mesmo em dias já salvos antes do horário ter sido configurado/
+  // alterado (ver _rhRecalcularComHorarioPersonalizado).
+  const horarioPersonalizadoCalc=(f&&f.horarioPersonalizado)?_rhHorarioDeEscala(f.horarioPersonalizado):null;
   rhPontoMeses.forEach(doc=>{
     if(doc.funcionarioId!==funcionarioId)return;
     if(anoMesFiltro&&doc.anoMes!==anoMesFiltro)return;
@@ -23405,13 +23537,31 @@ function _rhDiasDoFuncionario(funcionarioId,anoMesFiltro,dataDe,dataAte){
     Object.keys(diasMap).forEach(data=>{
       if(dataDe&&data<dataDe)return;
       if(dataAte&&data>dataAte)return;
-      out.push({data,...diasMap[data]});
+      let d={data,...diasMap[data]};
+      if(horarioPersonalizadoCalc)d=_rhRecalcularComHorarioPersonalizado(d,horarioPersonalizadoCalc);
+      if(dataDesligamento&&data>dataDesligamento){
+        d=Object.assign({},d,{previstoMin:0,desligado:true,status:'Desligado'});
+      }else{
+        const atestadoManual=(typeof rhAtestadosAnexos!=='undefined'?rhAtestadosAnexos:[]).find(a=>a.funcionarioId===funcionarioId&&a.data===data);
+        if(atestadoManual){
+          const previstoOriginal=d.previstoMin||0;
+          d=Object.assign({},d,{previstoMin:0,trabalhadoMin:previstoOriginal,atestado:true,manualAtestado:true,
+            previstoOriginalMin:previstoOriginal,status:'Atestado/Declaração (anexado)',obs:atestadoManual.motivo||d.obs||''});
+        }else{
+          const periodo=afastamentos.find(pr=>data>=pr.dataInicio&&data<=(pr.dataFim||pr.dataInicio));
+          if(periodo){
+            d=Object.assign({},d,{previstoMin:0,afastamento:true,afastamentoTipo:periodo.tipo,
+              status:periodo.tipo+' (RH)',obs:periodo.motivo||d.obs||''});
+          }
+        }
+      }
+      out.push(d);
     });
   });
   return out;
 }
 function _rhStats(diasArr){
-  let previstoMin=0,trabalhadoMin=0,faltasDias=0,diasParciais=0,diasUteis=0,atrasoMin=0,diasComAtraso=0,diasIncompletos=0,perdidoMin=0,perdidoParcialMin=0,diasAtestado=0,minutosAtestado=0;
+  let previstoMin=0,trabalhadoMin=0,faltasDias=0,diasParciais=0,diasUteis=0,atrasoMin=0,diasComAtraso=0,diasIncompletos=0,perdidoMin=0,perdidoParcialMin=0,diasAtestado=0,minutosAtestado=0,diasAfastamento=0;
   diasArr.forEach(d=>{
     // Atestado/Declaração (2026-07-30) — contado À PARTE, nunca entra em previstoMin/perdidoMin/
     // faltasDias/diasUteis (o parser já zera d.previstoMin nesses dias, ver _rhParseDiasTable),
@@ -23421,6 +23571,10 @@ function _rhStats(diasArr){
     // nesses dias (ver _rhParseDiasTable), a diferença previstoOriginal-trabalhado sempre daria
     // 0, o que deixaria essa métrica sem sentido.
     if(d.atestado){diasAtestado++;minutosAtestado+=(d.previstoOriginalMin||0);}
+    // Afastamento/Férias registrado manualmente pelo RH (2026-08-26) — contado à parte, mesmo
+    // espírito do atestado acima: não é falta, não entra em previstoMin/perdidoMin (o override
+    // em _rhDiasDoFuncionario já zera d.previstoMin nesses dias).
+    if(d.afastamento)diasAfastamento++;
     const prev=d.previstoMin||0,trab=d.trabalhadoMin||0;
     previstoMin+=prev;
     trabalhadoMin+=trab;
@@ -23463,7 +23617,7 @@ function _rhStats(diasArr){
   });
   const pctPerdida=previstoMin>0?(perdidoMin/previstoMin*100):0;
   const diasAvaliaveis=diasUteis-diasIncompletos; // base pras taxas — exclui dias sem dado suficiente
-  return{previstoMin,trabalhadoMin,perdidoMin,perdidoParcialMin,pctPerdida,faltasDias,diasParciais,diasUteis,atrasoMin,diasComAtraso,diasIncompletos,diasAvaliaveis,diasAtestado,minutosAtestado};
+  return{previstoMin,trabalhadoMin,perdidoMin,perdidoParcialMin,pctPerdida,faltasDias,diasParciais,diasUteis,atrasoMin,diasComAtraso,diasIncompletos,diasAvaliaveis,diasAtestado,minutosAtestado,diasAfastamento};
 }
 // Índice geral (0-100): parte de 100 e desconta % de horas perdidas + taxa de faltas (peso
 // 1.5x, porque falta integral pesa mais que atraso pontual pra saúde operacional). Usado só
@@ -23569,11 +23723,12 @@ function _rhLimparPeriodo(){
 function rhSetMainTab(tab,btn){
   document.querySelectorAll('.rh-main-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  ['pontualidade'].forEach(t=>{
+  ['pontualidade','colaboradores'].forEach(t=>{
     const el=document.getElementById('rh-sec-'+t);
     if(el)el.style.display=t===tab?'':'none';
   });
   if(tab==='pontualidade')renderRhPontualidade();
+  if(tab==='colaboradores')renderRhListaColaboradores();
 }
 // Anel/gauge SVG do índice de pontualidade (0-100) — substitui o texto puro "87/100 —
 // Saudável" por um indicador visual, a pedido do usuário ("muito texto... quero algo mais
@@ -23897,7 +24052,12 @@ function renderRhPontualidade(){
   }
   const deptoFiltro=document.getElementById('rh-fil-depto')?.value||'';
   const busca=(document.getElementById('rh-fil-busca')?.value||'').toUpperCase().trim();
-  let funcsFiltrados=funcs;
+  // Demitidos ficam escondidos da lista/indicadores por padrão (2026-08-26) — não faz sentido
+  // misturar quem não trabalha mais na empresa com os indicadores dos colaboradores ativos.
+  // Checkbox "Mostrar demitidos" deixa ver quando precisar (histórico continua acessível
+  // normalmente clicando na linha).
+  const mostrarDemitidos=!!document.getElementById('rh-fil-mostrar-demitidos')?.checked;
+  let funcsFiltrados=mostrarDemitidos?funcs:funcs.filter(f=>f.status!=='demitido');
   if(deptoFiltro)funcsFiltrados=funcsFiltrados.filter(f=>f.departamento===deptoFiltro);
   if(busca)funcsFiltrados=funcsFiltrados.filter(f=>f.nome.includes(busca));
   const _rhUsaPeriodo=!!(_rhDataDe||_rhDataAte);
@@ -24067,9 +24227,9 @@ function renderRhPontualidade(){
         <th style="${_rhThStyleF};text-align:right">Atraso</th>
         <th style="${_rhThStyleF}"></th>
       </tr></thead>
-      <tbody>${funcRows.map(x=>`<tr onclick="abrirRhHistoricoFuncionario('${x.f.id}')" title="Ver histórico de ${String(x.f.nome).replace(/"/g,'&quot;')}" style="cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+      <tbody>${funcRows.map(x=>`<tr onclick="abrirRhHistoricoFuncionario('${x.f.id}')" title="Ver histórico de ${String(x.f.nome).replace(/"/g,'&quot;')}" style="cursor:pointer${x.f.status==='demitido'?';opacity:.6':''}" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
         <td style="${_rhTdStyleF}font-weight:700;color:#101B3D;max-width:220px;overflow:hidden;text-overflow:ellipsis" title="${String(x.f.nome).replace(/"/g,'&quot;')}">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:.62rem;font-weight:800;margin-right:8px;vertical-align:middle">${_rhIniciais(x.f.nome)}</span>${x.f.nome}
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:.62rem;font-weight:800;margin-right:8px;vertical-align:middle">${_rhIniciais(x.f.nome)}</span>${x.f.nome}${x.f.status==='demitido'?' <span style="background:#fee2e2;color:#991b1b;border-radius:999px;padding:1px 8px;font-size:.6rem;font-weight:800;vertical-align:middle">DEMITIDO</span>':''}
         </td>
         <td style="${_rhTdStyleF}color:#64748b;max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${String(x.f.departamento||'').replace(/"/g,'&quot;')}">${x.f.departamento||'—'}</td>
         <td style="${_rhTdStyleF}text-align:right;font-weight:700;color:${x.indiceA.cor}">${x.indiceA.score==null?'—':x.indiceA.score+'%'}</td>
@@ -24133,6 +24293,9 @@ function _rhHistMesMov(dir){
 // ainda não fechou no export) ganhou selo próprio — 2026-07-30 — pra não ser confundido com
 // falta de verdade (ver _rhParseDiasTable).
 function _rhBadgeDentroFora(d){
+  if(d.desligado)return'<span style="background:#e2e8f0;color:#475569;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:700">🚪 Desligado</span>';
+  if(d.afastamento)return`<span style="background:#e0f2fe;color:#075985;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:700">🏖️ ${d.afastamentoTipo||'Afastamento'}</span>`;
+  if(d.manualAtestado)return'<span style="background:#f0f9ff;color:#0369a1;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:700">📎 Atestado (anexo)</span>';
   if(!d.previstoMin)return'<span style="color:var(--ink4);font-size:.72rem">Sem expediente</span>';
   if(d.incompleto)return'<span style="background:#e0e7ff;color:#3730a3;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:700" title="Só a entrada foi batida — ponto do dia provavelmente ainda não fechou quando o arquivo foi exportado">❔ Incompleto</span>';
   if(d.trabalhadoMin<=0)return'<span style="background:#fee2e2;color:#dc2626;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:700">🚫 Falta</span>';
@@ -24190,10 +24353,38 @@ function _rhRenderHistoricoModal(){
         <td style="padding:6px 8px"><span style="background:${imP.cor}22;color:${imP.cor};border-radius:999px;padding:2px 8px;font-size:.7rem;font-weight:700">${imP.score==null?'—':imP.score+'%'}</span></td>
       </tr>`;
     }).join('')}</tbody></table>`:'';
+  // ── Botões novos do RH (2026-08-26): Demitir/Reativar, Horários deste Colaborador,
+  // Afastamento/Férias, Apresentar Declaração/Atestado — ver funções logo antes de
+  // "FIM RH — PONTUALIDADE E ASSIDUIDADE" no final desta seção.
+  const statusBadge=f.status==='demitido'?`<span style="background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 10px;font-size:.68rem;font-weight:800;margin-left:8px;vertical-align:middle">DEMITIDO</span>`:'';
+  const bannerDemitido=f.status==='demitido'?`<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:.8rem;color:#991b1b;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+    <span>🚪 Desligado em <b>${fmtD(f.demissao?.data||'')}</b>${f.demissao?.motivo?' — '+String(f.demissao.motivo).replace(/</g,'&lt;'):''}${f.demissao?.por?` <span style="opacity:.7">(por ${String(f.demissao.por).replace(/</g,'&lt;')})</span>`:''}</span>
+    <button type="button" onclick="rhReativarFuncionario('${f.id}')" class="dash-btn-conf" style="background:#16a34a;font-size:.72rem;padding:6px 12px">↩️ Reativar colaborador</button>
+  </div>`:'';
+  const horarioAtivoTxt=f.horarioPersonalizado?_rhDescreverEscala(_rhHorarioDeEscala(f.horarioPersonalizado)).texto:_rhHorarioPadraoTexto();
+  const horarioAtivoLbl=f.horarioPersonalizado?'Horário deste colaborador (personalizado)':'Horário padrão da empresa';
+  const afastamentosHtml=(f.afastamentos||[]).length?`<div style="margin-bottom:14px">
+    <div style="font-size:.72rem;font-weight:700;color:#475569;margin-bottom:6px">🏖️ Afastamentos/Férias registrados</div>
+    ${(f.afastamentos||[]).slice().sort((a,b)=>b.dataInicio.localeCompare(a.dataInicio)).map(pr=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:.78rem">
+      <span><b>${pr.tipo}</b> · ${fmtD(pr.dataInicio)}${pr.dataFim&&pr.dataFim!==pr.dataInicio?' até '+fmtD(pr.dataFim):''}${pr.motivo?' — '+String(pr.motivo).replace(/</g,'&lt;'):''}</span>
+      <button type="button" onclick="rhRemoverAfastamento('${f.id}','${pr.id}')" title="Remover" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.9rem;padding:2px 4px">🗑️</button>
+    </div>`).join('')}
+  </div>`:'';
+  const atestadosManuaisDoColab=(typeof rhAtestadosAnexos!=='undefined'?rhAtestadosAnexos:[]).filter(a=>a.funcionarioId===f.id).sort((a,b)=>b.data.localeCompare(a.data));
+  const atestadosManuaisHtml=atestadosManuaisDoColab.length?`<div style="margin-bottom:14px">
+    <div style="font-size:.72rem;font-weight:700;color:#475569;margin-bottom:6px">📎 Atestados/Declarações anexados</div>
+    ${atestadosManuaisDoColab.map(a=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:.78rem">
+      <span><b>${fmtD(a.data)}</b>${a.motivo?' — '+String(a.motivo).replace(/</g,'&lt;'):''}</span>
+      <span style="display:flex;gap:10px;align-items:center;flex-shrink:0">
+        ${a.arquivoBase64?`<a href="${a.arquivoBase64}" download="${String(a.arquivoNome||'atestado.pdf').replace(/"/g,'')}" style="color:#0369a1;font-weight:700;text-decoration:none">📄 Ver anexo</a>`:''}
+        <button type="button" onclick="rhRemoverAtestadoManual('${a.id}')" title="Remover" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.9rem;padding:2px 4px">🗑️</button>
+      </span>
+    </div>`).join('')}
+  </div>`:'';
   modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:820px;width:95%;max-height:88vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:10px">
       <div>
-        <div style="font-size:1.05rem;font-weight:800;color:#1a1f36">👤 ${f.nome}</div>
+        <div style="font-size:1.05rem;font-weight:800;color:#1a1f36">👤 ${f.nome}${statusBadge}</div>
         <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${f.funcao||'—'} · ${f.departamento||'—'}</div>
       </div>
       <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">
@@ -24201,7 +24392,16 @@ function _rhRenderHistoricoModal(){
         <button onclick="document.getElementById('rh-hist-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
       </div>
     </div>
-    <div style="font-size:.74rem;color:#3730a3;background:#eef2ff;border-radius:8px;padding:6px 10px;display:inline-block;margin-bottom:14px">🕒 Horário padrão: ${_rhHorarioPadraoTexto()}</div>
+    ${bannerDemitido}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      ${f.status!=='demitido'?`<button type="button" onclick="rhAbrirModalDemitir('${f.id}')" class="dash-btn-conf" style="background:#b91c1c;font-size:.74rem;padding:7px 12px">🚪 Demitir</button>`:''}
+      <button type="button" onclick="rhAbrirModalHorario('${f.id}')" class="dash-btn-conf" style="background:#101B3D;font-size:.74rem;padding:7px 12px">🕒 Horários deste Colaborador</button>
+      <button type="button" onclick="rhAbrirModalAfastamento('${f.id}')" class="dash-btn-conf" style="background:#0891b2;font-size:.74rem;padding:7px 12px">🏖️ Afastamento/Férias</button>
+      <button type="button" onclick="rhAbrirModalAtestadoManual('${f.id}')" class="dash-btn-conf" style="background:#16a34a;font-size:.74rem;padding:7px 12px">📎 Apresentar Declaração/Atestado</button>
+    </div>
+    <div style="font-size:.74rem;color:#3730a3;background:#eef2ff;border-radius:8px;padding:6px 10px;display:inline-block;margin-bottom:14px">🕒 ${horarioAtivoLbl}: ${horarioAtivoTxt}</div>
+    ${afastamentosHtml}
+    ${atestadosManuaisHtml}
     ${mesesDisponiveis.length?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
       <div class="dash-mes-nav" style="margin:0">
         <button onclick="_rhHistMesMov(-1)" type="button">◀</button>
@@ -24229,6 +24429,344 @@ function _rhRenderHistoricoModal(){
     :'<div style="text-align:center;padding:30px;color:var(--ink4);font-size:.85rem">Nenhum registro de ponto ainda pra este colaborador — suba o Cartão Ponto dele pra começar.</div>'}
   </div>`;
   document.body.appendChild(modal);
+}
+// ── DEMITIR colaborador (2026-08-26, a pedido do usuário) ──────────────────────────────
+// Diferente de rhExcluirFuncionario (que APAGA o cadastro e todo o histórico de ponto pra
+// sempre, sem desfazer) — Demitir só marca o colaborador como desligado numa data, escondendo
+// ele da lista/indicadores de ativos por padrão (checkbox "Mostrar demitidos" ainda deixa ver)
+// e faz a análise de ponto parar de contar falta/atraso depois da data de desligamento (ver
+// _rhDiasDoFuncionario). Todo o histórico de ponto anterior ao desligamento continua intacto e
+// consultável. Reversível a qualquer momento via "Reativar colaborador".
+function rhAbrirModalDemitir(funcionarioId){
+  if(!_isRhUser()){toast('Só RH/Administrador pode fazer isso','terr');return;}
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f){toast('Colaborador não encontrado','terr');return;}
+  const old=document.getElementById('rh-demitir-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='rh-demitir-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  const hoje=fmtISOLocal(new Date());
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 24px;max-width:440px;width:92%">
+    <div style="font-size:1rem;font-weight:800;color:#101B3D;margin-bottom:4px">🚪 Demitir — ${String(f.nome).replace(/</g,'&lt;')}</div>
+    <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">O colaborador sai da lista de ativos e para de gerar falta/atraso a partir da data abaixo. Todo o histórico de ponto continua salvo — dá pra reverter a qualquer momento em "Reativar colaborador".</div>
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Data do desligamento</label>
+    <input type="date" id="rh-demitir-data" value="${hoje}" max="${hoje}" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;margin-bottom:12px">
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Motivo (opcional)</label>
+    <textarea id="rh-demitir-motivo" placeholder="Ex.: pedido de demissão, término de contrato..." style="width:100%;min-height:60px;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;resize:vertical"></textarea>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button onclick="document.getElementById('rh-demitir-modal').remove()" class="dash-btn-conf" style="background:#94a3b8;flex:1" type="button">Cancelar</button>
+      <button onclick="rhConfirmarDemitir('${f.id}')" class="dash-btn-conf" style="background:#b91c1c;flex:1" type="button">Confirmar Demissão</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+async function rhConfirmarDemitir(funcionarioId){
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f)return;
+  const data=document.getElementById('rh-demitir-data')?.value||fmtISOLocal(new Date());
+  const motivo=(document.getElementById('rh-demitir-motivo')?.value||'').trim();
+  if(!confirm(`Confirma demitir "${f.nome}" com desligamento em ${fmtD(data)}?`))return;
+  f.status='demitido';
+  f.demissao={data,motivo,por:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),em:new Date().toISOString()};
+  try{
+    await _rhSalvarCfg();
+    toast(`"${f.nome}" marcado como demitido`,'tok');
+    const m=document.getElementById('rh-demitir-modal');if(m)m.remove();
+    _rhRenderHistoricoModal();
+    renderRhPontualidade();
+  }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+}
+async function rhReativarFuncionario(funcionarioId){
+  if(!_isRhUser()){toast('Só RH/Administrador pode fazer isso','terr');return;}
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f)return;
+  if(!confirm(`Reativar "${f.nome}"? Ele volta a aparecer na lista de ativos e a análise de ponto volta a valer normalmente.`))return;
+  f.status='ativo';
+  delete f.demissao;
+  try{
+    await _rhSalvarCfg();
+    toast(`"${f.nome}" reativado`,'tok');
+    _rhRenderHistoricoModal();
+    renderRhPontualidade();
+  }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+}
+// ── HORÁRIOS DESTE COLABORADOR (2026-08-26, a pedido do usuário) ───────────────────────
+// Escala semanal PERSONALIZADA de um colaborador específico — usada na análise de ponto no
+// lugar do padrão da empresa (e no lugar da tabela "Horário de Trabalho" de dentro do próprio
+// arquivo Hponto, que pode estar errada/desatualizada — ver _rhParseArquivo) sempre que
+// estiver preenchida. Pré-carrega com o horário oficial da empresa pra o usuário só mudar o(s)
+// dia(s) realmente diferente(s), em vez de digitar a semana inteira do zero.
+const _RH_DIAS_SEMANA_ORDEM=[['seg','Segunda'],['ter','Terça'],['qua','Quarta'],['qui','Quinta'],['sex','Sexta'],['sab','Sábado'],['dom','Domingo']];
+function rhAbrirModalHorario(funcionarioId){
+  if(!_isRhUser()){toast('Só RH/Administrador pode fazer isso','terr');return;}
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f){toast('Colaborador não encontrado','terr');return;}
+  const base=f.horarioPersonalizado||RH_HORARIO_PADRAO_EMPRESA;
+  const old=document.getElementById('rh-horario-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='rh-horario-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  const linhaHtml=([abr,label])=>{
+    const h=base[abr]||null;
+    const semExp=!h;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f1f5f9">
+      <label style="width:88px;font-size:.78rem;font-weight:700;color:#334155;flex-shrink:0"><input type="checkbox" id="rh-h-${abr}-off" onchange="_rhHorarioToggleDia('${abr}')" ${semExp?'checked':''} style="margin-right:5px;vertical-align:middle">${label}</label>
+      <div id="rh-h-${abr}-campos" style="display:${semExp?'none':'flex'};gap:6px;flex:1;flex-wrap:wrap">
+        <input type="time" id="rh-h-${abr}-entrada" value="${h&&h.entrada||'07:30'}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 7px;font-size:.76rem;font-family:inherit">
+        <input type="time" id="rh-h-${abr}-saidaAlmoco" value="${h&&h.saidaAlmoco||'12:00'}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 7px;font-size:.76rem;font-family:inherit">
+        <input type="time" id="rh-h-${abr}-voltaAlmoco" value="${h&&h.voltaAlmoco||'13:00'}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 7px;font-size:.76rem;font-family:inherit">
+        <input type="time" id="rh-h-${abr}-saida" value="${h&&h.saida||'17:18'}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 7px;font-size:.76rem;font-family:inherit">
+      </div>
+      ${semExp?'<span style="font-size:.72rem;color:#94a3b8;flex:1">Sem expediente</span>':''}
+    </div>`;
+  };
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 24px;max-width:560px;width:95%;max-height:88vh;overflow:auto">
+    <div style="font-size:1rem;font-weight:800;color:#101B3D;margin-bottom:4px">🕒 Horários deste Colaborador — ${String(f.nome).replace(/</g,'&lt;')}</div>
+    <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">Quando salvo, este horário passa a valer pra análise do ponto deste colaborador NO LUGAR do horário padrão da empresa. Se nenhum dia for diferente do padrão, pode usar "Remover personalização" pra voltar a usar o padrão da empresa.</div>
+    <div style="font-size:.68rem;color:#94a3b8;margin-bottom:4px">Campos de cada linha: Entrada · Saída Almoço · Volta Almoço · Saída</div>
+    ${_RH_DIAS_SEMANA_ORDEM.map(linhaHtml).join('')}
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button onclick="document.getElementById('rh-horario-modal').remove()" class="dash-btn-conf" style="background:#94a3b8" type="button">Cancelar</button>
+      ${f.horarioPersonalizado?`<button onclick="rhRemoverHorarioPersonalizado('${f.id}')" class="dash-btn-conf" style="background:#94a3b8" type="button" title="Volta a usar o horário padrão da empresa">Remover personalização</button>`:''}
+      <button onclick="rhSalvarHorarioPersonalizado('${f.id}')" class="dash-btn-conf" style="background:#16a34a;flex:1" type="button">Salvar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+function _rhHorarioToggleDia(abr){
+  const off=document.getElementById('rh-h-'+abr+'-off')?.checked;
+  const campos=document.getElementById('rh-h-'+abr+'-campos');
+  if(campos)campos.style.display=off?'none':'flex';
+}
+async function rhSalvarHorarioPersonalizado(funcionarioId){
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f)return;
+  const escala={};
+  _RH_DIAS_SEMANA_ORDEM.forEach(([abr])=>{
+    const off=document.getElementById('rh-h-'+abr+'-off')?.checked;
+    if(off){escala[abr]=null;return;}
+    escala[abr]={
+      entrada:document.getElementById('rh-h-'+abr+'-entrada')?.value||'',
+      saidaAlmoco:document.getElementById('rh-h-'+abr+'-saidaAlmoco')?.value||'',
+      voltaAlmoco:document.getElementById('rh-h-'+abr+'-voltaAlmoco')?.value||'',
+      saida:document.getElementById('rh-h-'+abr+'-saida')?.value||''
+    };
+  });
+  f.horarioPersonalizado=escala;
+  try{
+    await _rhSalvarCfg();
+    toast('Horário personalizado salvo ✅','tok');
+    const m=document.getElementById('rh-horario-modal');if(m)m.remove();
+    _rhRenderHistoricoModal();
+  }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+}
+async function rhRemoverHorarioPersonalizado(funcionarioId){
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f)return;
+  if(!confirm(`Remover o horário personalizado de "${f.nome}" e voltar a usar o padrão da empresa?`))return;
+  delete f.horarioPersonalizado;
+  try{
+    await _rhSalvarCfg();
+    toast('Horário personalizado removido — usando o padrão da empresa','tok');
+    const m=document.getElementById('rh-horario-modal');if(m)m.remove();
+    _rhRenderHistoricoModal();
+  }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+}
+// ── AFASTAMENTO/FÉRIAS (2026-08-26, a pedido do usuário) ───────────────────────────────
+// Período em que o colaborador está de férias/afastado/licenciado etc. — dias dentro do
+// período não geram falta mesmo que o Hponto mostre "Falta" (ele não bateu ponto porque não
+// estava trabalhando, não porque faltou). Aplicado na LEITURA (_rhDiasDoFuncionario), nunca
+// altera o dado bruto do Hponto.
+const _RH_TIPOS_AFASTAMENTO=['Férias','Afastamento','Licença Médica','Licença Maternidade/Paternidade','Outro'];
+function rhAbrirModalAfastamento(funcionarioId){
+  if(!_isRhUser()){toast('Só RH/Administrador pode fazer isso','terr');return;}
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f){toast('Colaborador não encontrado','terr');return;}
+  const old=document.getElementById('rh-afastamento-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='rh-afastamento-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  const hoje=fmtISOLocal(new Date());
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 24px;max-width:440px;width:92%">
+    <div style="font-size:1rem;font-weight:800;color:#101B3D;margin-bottom:4px">🏖️ Registrar Afastamento/Férias — ${String(f.nome).replace(/</g,'&lt;')}</div>
+    <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">Nos dias deste período o sistema não vai contar falta pra este colaborador, mesmo que o Cartão Ponto mostre que ele não bateu o ponto.</div>
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Tipo</label>
+    <select id="rh-afast-tipo" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;margin-bottom:12px">
+      ${_RH_TIPOS_AFASTAMENTO.map(t=>`<option value="${t}">${t}</option>`).join('')}
+    </select>
+    <div style="display:flex;gap:10px;margin-bottom:12px">
+      <div style="flex:1">
+        <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">De</label>
+        <input type="date" id="rh-afast-de" value="${hoje}" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box">
+      </div>
+      <div style="flex:1">
+        <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Até</label>
+        <input type="date" id="rh-afast-ate" value="${hoje}" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box">
+      </div>
+    </div>
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Observação (opcional)</label>
+    <textarea id="rh-afast-motivo" style="width:100%;min-height:56px;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;resize:vertical"></textarea>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button onclick="document.getElementById('rh-afastamento-modal').remove()" class="dash-btn-conf" style="background:#94a3b8;flex:1" type="button">Cancelar</button>
+      <button onclick="rhSalvarAfastamento('${f.id}')" class="dash-btn-conf" style="background:#0891b2;flex:1" type="button">Registrar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  setTimeout(()=>document.getElementById('rh-afast-de')?.focus(),50);
+}
+async function rhSalvarAfastamento(funcionarioId){
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f)return;
+  const tipo=document.getElementById('rh-afast-tipo')?.value||'Afastamento';
+  const dataInicio=document.getElementById('rh-afast-de')?.value||'';
+  const dataFim=document.getElementById('rh-afast-ate')?.value||dataInicio;
+  const motivo=(document.getElementById('rh-afast-motivo')?.value||'').trim();
+  if(!dataInicio){toast('Preencha a data de início','terr');return;}
+  if(dataFim<dataInicio){toast('A data final não pode ser antes da data inicial','terr');return;}
+  f.afastamentos=f.afastamentos||[];
+  f.afastamentos.push({id:uid(),tipo,dataInicio,dataFim,motivo,por:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),em:new Date().toISOString()});
+  try{
+    await _rhSalvarCfg();
+    toast('Afastamento registrado ✅','tok');
+    const m=document.getElementById('rh-afastamento-modal');if(m)m.remove();
+    _rhRenderHistoricoModal();
+  }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+}
+async function rhRemoverAfastamento(funcionarioId,afastamentoId){
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f)return;
+  if(!confirm('Remover este registro de afastamento/férias?'))return;
+  f.afastamentos=(f.afastamentos||[]).filter(pr=>pr.id!==afastamentoId);
+  try{
+    await _rhSalvarCfg();
+    toast('Afastamento removido','tok');
+    _rhRenderHistoricoModal();
+  }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+}
+// ── APRESENTAR DECLARAÇÃO/ATESTADO com anexo (2026-08-26, a pedido do usuário) ─────────
+// Diferente do atestado que já vem marcado DENTRO do próprio arquivo Hponto (_RH_STATUS_ATESTADO)
+// — aqui o RH declara manualmente que o colaborador apresentou atestado/declaração num dia
+// específico, com o PDF anexado como comprovante. O dia passa a contar como atestado (não
+// falta) na análise, igual ao atestado vindo do arquivo (ver _rhDiasDoFuncionario). Guardado em
+// coleção própria (rhAtestadosAnexos), NUNCA dentro de cfg (ver window._fbSaveRhAtestadoAnexo).
+const _RH_ATESTADO_MAX_BYTES=700*1024; // Firestore tem limite de 1MB por documento; base64 aumenta ~33% o tamanho — 700KB de PDF cru dá folga suficiente.
+function rhAbrirModalAtestadoManual(funcionarioId){
+  if(!_isRhUser()){toast('Só RH/Administrador pode fazer isso','terr');return;}
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f){toast('Colaborador não encontrado','terr');return;}
+  const old=document.getElementById('rh-atestado-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='rh-atestado-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  const hoje=fmtISOLocal(new Date());
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 24px;max-width:440px;width:92%">
+    <div style="font-size:1rem;font-weight:800;color:#101B3D;margin-bottom:4px">📎 Apresentar Declaração/Atestado — ${String(f.nome).replace(/</g,'&lt;')}</div>
+    <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">O dia informado passa a contar como Atestado/Declaração na análise do ponto (não conta falta), com o PDF anexado aqui pra ficar registrado.</div>
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Data</label>
+    <input type="date" id="rh-atest-data" value="${hoje}" max="${hoje}" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;margin-bottom:12px">
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Motivo (opcional)</label>
+    <textarea id="rh-atest-motivo" placeholder="Ex.: consulta médica, exame..." style="width:100%;min-height:56px;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;resize:vertical;margin-bottom:12px"></textarea>
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">PDF do atestado/declaração</label>
+    <input type="file" id="rh-atest-arquivo" accept=".pdf,application/pdf" style="width:100%;font-size:.8rem;margin-bottom:4px">
+    <div style="font-size:.68rem;color:#94a3b8;margin-bottom:12px">Tamanho máximo: 700KB.</div>
+    <div id="rh-atest-erro" style="font-size:.76rem;color:#dc2626;margin-bottom:8px"></div>
+    <div style="display:flex;gap:8px">
+      <button onclick="document.getElementById('rh-atestado-modal').remove()" class="dash-btn-conf" style="background:#94a3b8;flex:1" type="button">Cancelar</button>
+      <button onclick="rhSalvarAtestadoManual('${f.id}')" class="dash-btn-conf" style="background:#16a34a;flex:1" type="button">Salvar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+async function rhSalvarAtestadoManual(funcionarioId){
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f)return;
+  const data=document.getElementById('rh-atest-data')?.value||'';
+  const motivo=(document.getElementById('rh-atest-motivo')?.value||'').trim();
+  const inputArq=document.getElementById('rh-atest-arquivo');
+  const arquivo=inputArq&&inputArq.files&&inputArq.files[0];
+  const erroEl=document.getElementById('rh-atest-erro');
+  if(erroEl)erroEl.textContent='';
+  if(!data){toast('Preencha a data','terr');return;}
+  if(!arquivo){if(erroEl)erroEl.textContent='Selecione o PDF do atestado/declaração.';return;}
+  if(arquivo.type&&arquivo.type!=='application/pdf'&&!arquivo.name.toLowerCase().endsWith('.pdf')){
+    if(erroEl)erroEl.textContent='O arquivo precisa ser um PDF.';return;
+  }
+  if(arquivo.size>_RH_ATESTADO_MAX_BYTES){
+    if(erroEl)erroEl.textContent=`Arquivo muito grande (${(arquivo.size/1024).toFixed(0)}KB) — o máximo é 700KB. Tente escanear em resolução menor.`;
+    return;
+  }
+  if(!window._fbSaveRhAtestadoAnexo){toast('Conexão com o Firestore indisponível no momento — tente recarregar a página','terr');return;}
+  try{
+    const arquivoBase64=await new Promise((resolve,reject)=>{
+      const r=new FileReader();
+      r.onload=()=>resolve(r.result);
+      r.onerror=reject;
+      r.readAsDataURL(arquivo);
+    });
+    const id=uid();
+    const payload={id,funcionarioId,data,motivo,arquivoNome:arquivo.name,arquivoBase64,tamanhoBytes:arquivo.size,
+      por:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),em:new Date().toISOString()};
+    await window._fbSaveRhAtestadoAnexo(id,payload);
+    toast('Atestado/Declaração anexado ✅','tok');
+    const m=document.getElementById('rh-atestado-modal');if(m)m.remove();
+    _rhRenderHistoricoModal();
+    renderRhPontualidade();
+  }catch(e){toast('Erro ao salvar anexo: '+(e.message||e),'terr');}
+}
+async function rhRemoverAtestadoManual(id){
+  if(!_isRhUser()){toast('Só RH/Administrador pode fazer isso','terr');return;}
+  if(!confirm('Remover este atestado/declaração anexado? O dia volta a ser avaliado normalmente pelo Cartão Ponto.'))return;
+  try{
+    if(window._fbDeleteRhAtestadoAnexo)await window._fbDeleteRhAtestadoAnexo(id);
+    toast('Atestado removido','tok');
+    _rhRenderHistoricoModal();
+    renderRhPontualidade();
+  }catch(e){toast('Erro ao remover: '+(e.message||e),'terr');}
+}
+// ── LISTA DE COLABORADORES (2026-08-26, a pedido do usuário) ───────────────────────────
+// Diretório simples — pesquisa por nome (e filtro de status), lista TODOS os colaboradores
+// (ativos e demitidos, ao contrário da tabela de Pontualidade/Assiduidade que esconde
+// demitidos por padrão — aqui o objetivo é achar qualquer um pra abrir o perfil, inclusive
+// pra reativar um demitido ou consultar histórico antigo). Clicar na linha abre o MESMO modal
+// de sempre (abrirRhHistoricoFuncionario) — nenhum dado novo é calculado aqui.
+function renderRhListaColaboradores(){
+  if(!_isRhUser())return;
+  const el=document.getElementById('rh-lc-lista');
+  if(!el)return;
+  const funcs=cfg.rhFuncionarios||[];
+  const busca=(document.getElementById('rh-lc-busca')?.value||'').toUpperCase().trim();
+  const filtroStatus=document.getElementById('rh-lc-fil-status')?.value||'';
+  let lista=funcs;
+  if(filtroStatus==='ativos')lista=lista.filter(f=>f.status!=='demitido');
+  else if(filtroStatus==='demitidos')lista=lista.filter(f=>f.status==='demitido');
+  if(busca)lista=lista.filter(f=>f.nome.toUpperCase().includes(busca));
+  lista=[...lista].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));
+  if(!lista.length){
+    el.innerHTML=`<div style="padding:30px;text-align:center;color:var(--ink4);font-size:.85rem">${funcs.length?'Nenhum colaborador encontrado com esse filtro.':'Nenhum colaborador cadastrado ainda — suba um arquivo de Cartão Ponto na aba Pontualidade e Assiduidade pra começar.'}</div>`;
+    return;
+  }
+  const thStyle='text-align:left;font-size:.66rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;padding:11px 12px;border-bottom:1px solid #e2e8f0;white-space:nowrap;position:sticky;top:0;background:#fff';
+  const tdStyle='padding:10px 12px;font-size:.8rem;color:#1e293b;border-bottom:1px solid #f1f5f9;white-space:nowrap';
+  el.innerHTML=`<table style="width:100%;border-collapse:collapse">
+    <thead><tr>
+      <th style="${thStyle}">Colaborador</th>
+      <th style="${thStyle}">Função</th>
+      <th style="${thStyle}">Departamento</th>
+      <th style="${thStyle}">Status</th>
+    </tr></thead>
+    <tbody>${lista.map(f=>`<tr onclick="abrirRhHistoricoFuncionario('${f.id}')" title="Ver perfil de ${String(f.nome).replace(/"/g,'&quot;')}" style="cursor:pointer${f.status==='demitido'?';opacity:.6':''}" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+      <td style="${tdStyle}font-weight:700;color:#101B3D;max-width:240px;overflow:hidden;text-overflow:ellipsis" title="${String(f.nome).replace(/"/g,'&quot;')}">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:#f1f5f9;color:#475569;font-size:.62rem;font-weight:800;margin-right:8px;vertical-align:middle">${_rhIniciais(f.nome)}</span>${f.nome}
+      </td>
+      <td style="${tdStyle}color:#64748b;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${String(f.funcao||'').replace(/"/g,'&quot;')}">${f.funcao||'—'}</td>
+      <td style="${tdStyle}color:#64748b;max-width:180px;overflow:hidden;text-overflow:ellipsis" title="${String(f.departamento||'').replace(/"/g,'&quot;')}">${f.departamento||'—'}</td>
+      <td style="${tdStyle}">${f.status==='demitido'?'<span style="background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 9px;font-size:.68rem;font-weight:800">DEMITIDO</span>':'<span style="background:#dcfce7;color:#166534;border-radius:999px;padding:2px 9px;font-size:.68rem;font-weight:800">ATIVO</span>'}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
 }
 // ===================== FIM RH — PONTUALIDADE E ASSIDUIDADE =====================
 
