@@ -9,7 +9,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-26.7';</script>
+<script>const APP_BUILD_VERSION='2026-08-26.9';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -2071,6 +2071,19 @@ select.fc{cursor:pointer}
         </div>
       </div>
       <div id="prosp-sec-tarefas" style="display:none">
+        <!-- Seletor de visão das tarefas (2026-08-26, a pedido do usuário: "quero uma gestao
+             delas que o usuario escolha como trabalhar, por data, o que tem pra hoje, por
+             calendario, por kanban ou por lista se ele preferir"). Ver
+             prospTarefasSetView()/_prospTarefasViewAtiva e as funções
+             _prospRenderTarefasLista/Hoje/PorData/Calendario/Kanban logo antes de
+             renderProspTarefas() virar um dispatcher. -->
+        <div class="dash-tabs" style="margin-bottom:10px;max-width:620px;flex-wrap:wrap" id="prosp-tarefas-view-tabs">
+          <button class="dash-tab active" id="prosp-tv-tab-lista" onclick="prospTarefasSetView('lista',this)">📋 Lista</button>
+          <button class="dash-tab" id="prosp-tv-tab-hoje" onclick="prospTarefasSetView('hoje',this)">🌅 Hoje</button>
+          <button class="dash-tab" id="prosp-tv-tab-data" onclick="prospTarefasSetView('data',this)">📅 Por Data</button>
+          <button class="dash-tab" id="prosp-tv-tab-cal" onclick="prospTarefasSetView('calendario',this)">🗓️ Calendário</button>
+          <button class="dash-tab" id="prosp-tv-tab-kanban" onclick="prospTarefasSetView('kanban',this)">🗃️ Kanban</button>
+        </div>
         <div class="dash-tabs" style="margin-bottom:14px;max-width:360px" id="prosp-tarefas-subtabs">
           <button class="dash-tab active" id="prosp-tf-tab-pend" onclick="prospTarefasTab('pendentes',this)">⏳ Pendentes</button>
           <button class="dash-tab" id="prosp-tf-tab-conc" onclick="prospTarefasTab('concluidas',this)">✅ Concluídas</button>
@@ -31809,6 +31822,8 @@ function gcRenderVendPaineis(){
 let prospEmpresas=[];
 let _prospTabAtiva='kanban';
 let _prospTarefasTabAtiva='pendentes';
+let _prospTarefasViewAtiva='lista';
+let _prospCalRef=new Date();
 let _prospCardAtualId=null;
 
 function setupProspSync(){
@@ -32233,10 +32248,56 @@ function prospTarefasTab(tab,btn){
   if(btn)btn.classList.add('active');
   renderProspTarefas();
 }
+// Seletor de visão das tarefas — Lista/Hoje/Por Data/Calendário/Kanban (2026-08-26, a pedido
+// do usuário). Só a visão Lista usa o toggle Pendentes/Concluídas (as outras são sempre sobre
+// tarefas em aberto — uma agenda/kanban de concluídas não faz muito sentido; concluídas seguem
+// acessíveis pela Lista).
+function prospTarefasSetView(view,btn){
+  _prospTarefasViewAtiva=view;
+  document.querySelectorAll('#prosp-tarefas-view-tabs .dash-tab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  const subtabs=document.getElementById('prosp-tarefas-subtabs');
+  if(subtabs)subtabs.style.display=view==='lista'?'':'none';
+  renderProspTarefas();
+}
+function prospCalNav(delta){
+  _prospCalRef=new Date(_prospCalRef.getFullYear(),_prospCalRef.getMonth()+delta,1);
+  renderProspTarefas();
+}
+function prospCalHoje(){
+  _prospCalRef=new Date();
+  renderProspTarefas();
+}
 function renderProspTarefas(){
   const wrap=document.getElementById('prosp-tarefas-body');
   if(!wrap)return;
   if(!_temAcessoProspeccao()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  if(_prospTarefasViewAtiva==='hoje')return _prospRenderTarefasHoje(wrap);
+  if(_prospTarefasViewAtiva==='data')return _prospRenderTarefasPorData(wrap);
+  if(_prospTarefasViewAtiva==='calendario')return _prospRenderTarefasCalendario(wrap);
+  if(_prospTarefasViewAtiva==='kanban')return _prospRenderTarefasKanban(wrap);
+  return _prospRenderTarefasLista(wrap);
+}
+// Cartão de tarefa compartilhado pelas visões Lista/Hoje/Por Data — mesmo visual de sempre.
+function _prospTarefaCardHtml(t,hojeIso){
+  const atrasada=!t.feita&&t.data&&t.data<hojeIso;
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid ${atrasada?'#fecaca':'var(--border-lt)'};border-radius:10px;margin-bottom:8px;background:#fff">
+      <div onclick="prospAbrirCard('${t.empresaId}')" style="min-width:0;flex:1;cursor:pointer">
+        <div style="font-weight:700;font-size:.82rem;color:#1e293b;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span>${_PROSP_TIPO_ICONE[t.tipo]||'📌'} ${t.empresaNome||'—'}</span>
+          ${t.data?`<span style="background:${atrasada?'#fee2e2':'#f1f5f9'};color:${atrasada?'#dc2626':'#64748b'};border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">📅 ${fmtD(t.data)}</span>`:''}
+        </div>
+        <div style="font-size:.74rem;color:#64748b;margin-top:3px">${t.titulo||''}${t.decisorNome?' · 👤 '+t.decisorNome:''}</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">
+        ${!t.feita?`<button onclick="prospConcluirTarefa('${t.empresaId}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 12px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap">✅ Concluir</button>`
+          :`<button onclick="prospConcluirTarefa('${t.empresaId}','${t.id}',false)" style="background:#f1f5f9;color:#475569;border:none;border-radius:7px;padding:7px 12px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap">↩️ Reabrir</button>`}
+      </div>
+    </div>`;
+}
+// Visão Lista (a original) — Pendentes agrupadas em Atrasadas/Hoje/Próximas (mais atrasada
+// primeiro), ou Concluídas por data de conclusão (mais recente primeiro).
+function _prospRenderTarefasLista(wrap){
   const pendente=_prospTarefasTabAtiva==='pendentes';
   let lista=_prospTodasTarefas().filter(t=>pendente?!t.feita:t.feita);
   lista.sort((a,b)=>pendente?(a.data||'').localeCompare(b.data||''):(b.concluidaEm||'').localeCompare(a.concluidaEm||''));
@@ -32253,22 +32314,138 @@ function renderProspTarefas(){
         html+=`<div style="font-size:.72rem;font-weight:800;color:${cor};text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px">${grupo}</div>`;
       }
     }
-    const atrasada=pendente&&t.data&&t.data<hojeIso;
-    html+=`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid ${atrasada?'#fecaca':'var(--border-lt)'};border-radius:10px;margin-bottom:8px;background:#fff">
-      <div onclick="prospAbrirCard('${t.empresaId}')" style="min-width:0;flex:1;cursor:pointer">
-        <div style="font-weight:700;font-size:.82rem;color:#1e293b;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          <span>${_PROSP_TIPO_ICONE[t.tipo]||'📌'} ${t.empresaNome||'—'}</span>
-          ${t.data?`<span style="background:${atrasada?'#fee2e2':'#f1f5f9'};color:${atrasada?'#dc2626':'#64748b'};border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">📅 ${fmtD(t.data)}</span>`:''}
-        </div>
-        <div style="font-size:.74rem;color:#64748b;margin-top:3px">${t.titulo||''}${t.decisorNome?' · 👤 '+t.decisorNome:''}</div>
-      </div>
-      <div style="display:flex;gap:6px;flex-shrink:0" onclick="event.stopPropagation()">
-        ${pendente?`<button onclick="prospConcluirTarefa('${t.empresaId}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 12px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap">✅ Concluir</button>`
-          :`<button onclick="prospConcluirTarefa('${t.empresaId}','${t.id}',false)" style="background:#f1f5f9;color:#475569;border:none;border-radius:7px;padding:7px 12px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap">↩️ Reabrir</button>`}
-      </div>
-    </div>`;
+    html+=_prospTarefaCardHtml(t,hojeIso);
   });
   wrap.innerHTML=html;
+}
+// Visão Hoje — "o que tem pra hoje" (2026-08-26, a pedido do usuário): atrasadas + as de hoje,
+// mais atrasada primeiro, pra começar o dia. Ignora tarefas futuras e concluídas de propósito.
+function _prospRenderTarefasHoje(wrap){
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const lista=_prospTodasTarefas().filter(t=>!t.feita&&t.data&&t.data<=hojeIso);
+  lista.sort((a,b)=>(a.data||'').localeCompare(b.data||''));
+  if(!lista.length){wrap.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nada pendente pra hoje. 🎉</div>';return;}
+  let grupoAtual='';
+  let html='';
+  lista.forEach(t=>{
+    const grupo=t.data<hojeIso?'Atrasadas':'Hoje';
+    if(grupo!==grupoAtual){
+      grupoAtual=grupo;
+      const cor=grupo==='Atrasadas'?'#dc2626':'#0369a1';
+      html+=`<div style="font-size:.72rem;font-weight:800;color:${cor};text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px">${grupo}</div>`;
+    }
+    html+=_prospTarefaCardHtml(t,hojeIso);
+  });
+  wrap.innerHTML=html;
+}
+function _prospFmtDataLonga(iso){
+  try{
+    const[y,m,d]=iso.split('-').map(Number);
+    const dt=new Date(y,m-1,d);
+    const dias=['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];
+    return `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')} — ${dias[dt.getDay()]}`;
+  }catch(err){return fmtD(iso);}
+}
+// Visão Por Data — agenda com todas as pendentes agrupadas por dia exato, em ordem
+// cronológica (mais atrasada primeiro), sem data por último (2026-08-26, a pedido do usuário).
+function _prospRenderTarefasPorData(wrap){
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const lista=_prospTodasTarefas().filter(t=>!t.feita);
+  if(!lista.length){wrap.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhuma tarefa pendente. 🎉</div>';return;}
+  const comData=lista.filter(t=>t.data).sort((a,b)=>a.data.localeCompare(b.data));
+  const semData=lista.filter(t=>!t.data);
+  let grupoAtual='';
+  let html='';
+  comData.forEach(t=>{
+    if(t.data!==grupoAtual){
+      grupoAtual=t.data;
+      const atrasado=t.data<hojeIso;
+      const rotulo=t.data===hojeIso?'Hoje':_prospFmtDataLonga(t.data);
+      html+=`<div style="font-size:.72rem;font-weight:800;color:${atrasado?'#dc2626':t.data===hojeIso?'#0369a1':'#334155'};text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px">${rotulo}${atrasado?' ⚠️':''}</div>`;
+    }
+    html+=_prospTarefaCardHtml(t,hojeIso);
+  });
+  if(semData.length){
+    html+=`<div style="font-size:.72rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px">Sem data</div>`;
+    semData.forEach(t=>{html+=_prospTarefaCardHtml(t,hojeIso);});
+  }
+  wrap.innerHTML=html;
+}
+// Visão Calendário — grade do mês com navegação (2026-08-26, a pedido do usuário). Cada dia
+// mostra até 3 tarefas (empresa + tipo), com "+N mais" quando passa disso; clique numa tarefa
+// abre o card da empresa (prospAbrirCard). Ver _prospCalRef/prospCalNav()/prospCalHoje().
+function _prospRenderTarefasCalendario(wrap){
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const ano=_prospCalRef.getFullYear(), mes=_prospCalRef.getMonth();
+  const nomesMes=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const primeiroDia=new Date(ano,mes,1);
+  const inicioGrid=new Date(ano,mes,1-primeiroDia.getDay());
+  const tarefasPorDia={};
+  _prospTodasTarefas().filter(t=>!t.feita&&t.data).forEach(t=>{
+    (tarefasPorDia[t.data]=tarefasPorDia[t.data]||[]).push(t);
+  });
+  let cells='';
+  for(let i=0;i<42;i++){
+    const d=new Date(inicioGrid.getFullYear(),inicioGrid.getMonth(),inicioGrid.getDate()+i);
+    const iso=d.toISOString().slice(0,10);
+    const foraDoMes=d.getMonth()!==mes;
+    const ehHoje=iso===hojeIso;
+    const tarefasDia=(tarefasPorDia[iso]||[]).slice().sort((a,b)=>(a.empresaNome||'').localeCompare(b.empresaNome||''));
+    const chips=tarefasDia.slice(0,3).map(t=>`<div onclick="event.stopPropagation();prospAbrirCard('${t.empresaId}')" title="${(t.titulo||'').replace(/"/g,'&quot;')}" style="background:${iso<hojeIso?'#fee2e2':'#e0f2fe'};color:${iso<hojeIso?'#dc2626':'#0369a1'};border-radius:5px;padding:1px 5px;font-size:.62rem;font-weight:700;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer">${_PROSP_TIPO_ICONE[t.tipo]||'📌'} ${t.empresaNome||'—'}</div>`).join('');
+    const extra=tarefasDia.length>3?`<div style="font-size:.6rem;color:#94a3b8;margin-top:1px">+${tarefasDia.length-3} mais</div>`:'';
+    cells+=`<div style="min-height:76px;border:1px solid var(--border-lt);border-radius:6px;padding:4px;background:${foraDoMes?'#f8fafc':'#fff'};${ehHoje?'box-shadow:inset 0 0 0 2px var(--brand)':''}">
+      <div style="font-size:.68rem;font-weight:700;color:${foraDoMes?'#cbd5e1':ehHoje?'var(--brand)':'#334155'}">${d.getDate()}</div>
+      ${chips}${extra}
+    </div>`;
+  }
+  const diasSemana=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  wrap.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <button onclick="prospCalNav(-1)" style="background:#f1f5f9;border:none;border-radius:7px;padding:6px 12px;font-size:.8rem;font-weight:700;cursor:pointer">◀</button>
+      <div style="font-weight:800;font-size:.9rem;color:#1e293b;display:flex;align-items:center;gap:10px">${nomesMes[mes]} de ${ano} <button onclick="prospCalHoje()" style="background:none;border:1px solid var(--border-lt);border-radius:6px;padding:3px 9px;font-size:.68rem;font-weight:700;color:#64748b;cursor:pointer">Hoje</button></div>
+      <button onclick="prospCalNav(1)" style="background:#f1f5f9;border:none;border-radius:7px;padding:6px 12px;font-size:.8rem;font-weight:700;cursor:pointer">▶</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px">
+      ${diasSemana.map(d=>`<div style="text-align:center;font-size:.66rem;font-weight:800;color:#94a3b8;text-transform:uppercase">${d}</div>`).join('')}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${cells}</div>
+  `;
+}
+function _prospTarefaKanbanCardHtml(t,concluida){
+  return `<div style="background:#fff;border:1px solid var(--border-lt);border-radius:8px;padding:8px;margin-bottom:7px;cursor:pointer" onclick="prospAbrirCard('${t.empresaId}')">
+    <div style="font-weight:700;font-size:.74rem;color:#1e293b">${_PROSP_TIPO_ICONE[t.tipo]||'📌'} ${t.empresaNome||'—'}</div>
+    <div style="font-size:.68rem;color:#64748b;margin-top:2px">${t.titulo||''}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px" onclick="event.stopPropagation()">
+      <span style="font-size:.62rem;color:#94a3b8">${t.data?fmtD(t.data):'sem data'}</span>
+      ${!concluida?`<button onclick="prospConcluirTarefa('${t.empresaId}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 7px;font-size:.64rem;font-weight:700;cursor:pointer">✅</button>`
+        :`<button onclick="prospConcluirTarefa('${t.empresaId}','${t.id}',false)" style="background:#f1f5f9;color:#475569;border:none;border-radius:5px;padding:3px 7px;font-size:.64rem;font-weight:700;cursor:pointer">↩️</button>`}
+    </div>
+  </div>`;
+}
+// Visão Kanban — colunas por prazo (2026-08-26, a pedido do usuário, resposta à pergunta de
+// esclarecimento: "por prazo" — Atrasadas/Hoje/Esta semana/Futuras/Concluídas). Concluídas
+// mostra só as 30 mais recentes pra não pesar a coluna.
+function _prospRenderTarefasKanban(wrap){
+  const hoje=new Date();
+  const hojeIso=hoje.toISOString().slice(0,10);
+  const fimSemana=new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate()+6).toISOString().slice(0,10);
+  const todas=_prospTodasTarefas();
+  const pendentes=todas.filter(t=>!t.feita);
+  const colunas=[
+    {key:'atrasadas',label:'⚠️ Atrasadas',cor:'#dc2626',itens:pendentes.filter(t=>t.data&&t.data<hojeIso)},
+    {key:'hoje',label:'🌅 Hoje',cor:'#0369a1',itens:pendentes.filter(t=>t.data===hojeIso)},
+    {key:'semana',label:'📅 Esta semana',cor:'#7c3aed',itens:pendentes.filter(t=>t.data&&t.data>hojeIso&&t.data<=fimSemana)},
+    {key:'futuras',label:'🔭 Futuras',cor:'#64748b',itens:pendentes.filter(t=>(!t.data)||t.data>fimSemana)},
+    {key:'concluidas',label:'✅ Concluídas',cor:'#16a34a',itens:todas.filter(t=>t.feita).sort((a,b)=>(b.concluidaEm||'').localeCompare(a.concluidaEm||'')).slice(0,30)}
+  ];
+  colunas.forEach(c=>{if(c.key!=='concluidas')c.itens.sort((a,b)=>(a.data||'').localeCompare(b.data||''));});
+  wrap.innerHTML=`<div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px">${colunas.map(c=>`
+    <div style="flex:0 0 240px;background:#f8fafc;border-radius:10px;padding:10px">
+      <div style="font-weight:800;font-size:.76rem;color:${c.cor};margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+        <span>${c.label}</span><span style="background:#fff;border-radius:20px;padding:1px 8px;font-size:.68rem">${c.itens.length}</span>
+      </div>
+      ${c.itens.length?c.itens.map(t=>_prospTarefaKanbanCardHtml(t,c.key==='concluidas')).join(''):'<div style="font-size:.72rem;color:#cbd5e1;padding:8px 0;text-align:center">—</div>'}
+    </div>`).join('')}</div>`;
 }
 
 // ── DETALHE DO CARD (empresa) — linha do tempo + tarefas ───────────────────────────
@@ -32404,6 +32581,10 @@ function _prospRenderCard(e){
       <div style="font-weight:800;font-size:.8rem;color:${saude.cor}">${saude.emoji} ${saude.label}${saude.dias>0?' — '+saude.dias+' dia'+(saude.dias===1?'':'s')+' sem interação':' — interação hoje'}</div>
       <div style="font-size:.7rem;color:var(--ink3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(ultInt.desc||'').replace(/"/g,'&quot;')}">Última: ${_fmtDataHora(ultInt.em)}${ultInt.desc?' — '+ultInt.desc:''}</div>
     </div>
+    <div style="display:flex;justify-content:flex-end;gap:16px;margin-bottom:10px">
+      <button type="button" onclick="prospAbrirEditarEmpresa('${e.id}')" style="background:none;border:none;color:var(--ink4);opacity:.75;cursor:pointer;font-size:.72rem;font-weight:600;padding:2px 4px;display:inline-flex;align-items:center;gap:4px" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.75">✏️ Editar empresa</button>
+      ${_getUserCat().isAdm?`<button type="button" onclick="prospExcluirEmpresa('${e.id}')" style="background:none;border:none;color:#dc2626;opacity:.65;cursor:pointer;font-size:.72rem;font-weight:600;padding:2px 4px;display:inline-flex;align-items:center;gap:4px" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.65">🗑️ Excluir empresa</button>`:''}
+    </div>
     <div class="fg">
       <label>Etapa atual</label>
       <div style="display:flex;gap:8px">
@@ -32422,10 +32603,6 @@ function _prospRenderCard(e){
         <button type="button" onclick="prospAbrirAdicionarDecisor('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">+ Adicionar Decisor</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px">${decisoresHtml}</div>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:8px;margin:16px 0">
-      <button onclick="prospAbrirEditarEmpresa('${e.id}')" style="width:100%;background:#f1f5f9;color:#475569;border:none;border-radius:9px;padding:10px;font-size:.8rem;font-weight:700;cursor:pointer">✏️ EDITAR EMPRESA</button>
-      ${_getUserCat().isAdm?`<button onclick="prospExcluirEmpresa('${e.id}')" style="width:100%;background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:10px;font-size:.8rem;font-weight:700;cursor:pointer">🗑️ EXCLUIR EMPRESA</button>`:''}
     </div>
     <div style="border-top:1px solid var(--border-lt);margin:16px 0;padding-top:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
