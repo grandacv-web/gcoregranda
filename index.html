@@ -1974,6 +1974,7 @@ select.fc{cursor:pointer}
             <option value="ativos">Somente ativos</option>
             <option value="demitidos">Somente demitidos</option>
           </select>
+          <button type="button" onclick="rhAbrirModalInserirFuncionario()" class="dash-btn-conf" style="background:#16a34a;font-size:.8rem;padding:9px 14px;white-space:nowrap">➕ Inserir Funcionário</button>
         </div>
         <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:0">
           <div id="rh-lc-lista" style="max-height:680px;overflow:auto"></div>
@@ -24359,7 +24360,7 @@ function _rhRenderHistoricoModal(){
   const statusBadge=f.status==='demitido'?`<span style="background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 10px;font-size:.68rem;font-weight:800;margin-left:8px;vertical-align:middle">DEMITIDO</span>`:'';
   const bannerDemitido=f.status==='demitido'?`<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:.8rem;color:#991b1b;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
     <span>🚪 Desligado em <b>${fmtD(f.demissao?.data||'')}</b>${f.demissao?.motivo?' — '+String(f.demissao.motivo).replace(/</g,'&lt;'):''}${f.demissao?.por?` <span style="opacity:.7">(por ${String(f.demissao.por).replace(/</g,'&lt;')})</span>`:''}</span>
-    <button type="button" onclick="rhReativarFuncionario('${f.id}')" class="dash-btn-conf" style="background:#16a34a;font-size:.72rem;padding:6px 12px">↩️ Reativar colaborador</button>
+    <button type="button" onclick="rhReativarFuncionario('${f.id}')" class="dash-btn-conf" style="background:#16a34a;font-size:.72rem;padding:6px 12px">↩️ Readmitir colaborador</button>
   </div>`:'';
   const horarioAtivoTxt=f.horarioPersonalizado?_rhDescreverEscala(_rhHorarioDeEscala(f.horarioPersonalizado)).texto:_rhHorarioPadraoTexto();
   const horarioAtivoLbl=f.horarioPersonalizado?'Horário deste colaborador (personalizado)':'Horário padrão da empresa';
@@ -24449,7 +24450,7 @@ function rhAbrirModalDemitir(funcionarioId){
   const hoje=fmtISOLocal(new Date());
   modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 24px;max-width:440px;width:92%">
     <div style="font-size:1rem;font-weight:800;color:#101B3D;margin-bottom:4px">🚪 Demitir — ${String(f.nome).replace(/</g,'&lt;')}</div>
-    <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">O colaborador sai da lista de ativos e para de gerar falta/atraso a partir da data abaixo. Todo o histórico de ponto continua salvo — dá pra reverter a qualquer momento em "Reativar colaborador".</div>
+    <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">O colaborador sai da lista de ativos e para de gerar falta/atraso a partir da data abaixo. Todo o histórico de ponto continua salvo — dá pra reverter a qualquer momento em "Readmitir colaborador".</div>
     <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Data do desligamento</label>
     <input type="date" id="rh-demitir-data" value="${hoje}" max="${hoje}" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;margin-bottom:12px">
     <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Motivo (opcional)</label>
@@ -24477,19 +24478,25 @@ async function rhConfirmarDemitir(funcionarioId){
     renderRhPontualidade();
   }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
 }
-async function rhReativarFuncionario(funcionarioId){
-  if(!_isRhUser()){toast('Só RH/Administrador pode fazer isso','terr');return;}
+async function _rhReadmitirSemConfirmar(funcionarioId){
   const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
   if(!f)return;
-  if(!confirm(`Reativar "${f.nome}"? Ele volta a aparecer na lista de ativos e a análise de ponto volta a valer normalmente.`))return;
   f.status='ativo';
   delete f.demissao;
   try{
     await _rhSalvarCfg();
-    toast(`"${f.nome}" reativado`,'tok');
-    _rhRenderHistoricoModal();
+    toast(`"${f.nome}" readmitido ✅`,'tok');
+    if(document.getElementById('rh-hist-modal'))_rhRenderHistoricoModal();
     renderRhPontualidade();
+    if(document.getElementById('rh-lc-lista'))renderRhListaColaboradores();
   }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+}
+async function rhReativarFuncionario(funcionarioId){
+  if(!_isRhUser()){toast('Só RH/Administrador pode fazer isso','terr');return;}
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f)return;
+  if(!confirm(`Readmitir "${f.nome}"? Ele volta a aparecer na lista de ativos e a análise de ponto volta a valer normalmente.`))return;
+  await _rhReadmitirSemConfirmar(funcionarioId);
 }
 // ── HORÁRIOS DESTE COLABORADOR (2026-08-26, a pedido do usuário) ───────────────────────
 // Escala semanal PERSONALIZADA de um colaborador específico — usada na análise de ponto no
@@ -24767,6 +24774,97 @@ function renderRhListaColaboradores(){
       <td style="${tdStyle}">${f.status==='demitido'?'<span style="background:#fee2e2;color:#991b1b;border-radius:999px;padding:2px 9px;font-size:.68rem;font-weight:800">DEMITIDO</span>':'<span style="background:#dcfce7;color:#166534;border-radius:999px;padding:2px 9px;font-size:.68rem;font-weight:800">ATIVO</span>'}</td>
     </tr>`).join('')}</tbody>
   </table>`;
+}
+// ── INSERIR FUNCIONÁRIO manualmente (2026-08-26, a pedido do usuário) ──────────────────
+// Cadastra um colaborador ANTES de subir o Cartão Ponto dele (ex.: acabou de ser admitido e
+// o ponto só vai ser exportado no fim do mês). Reaproveita _rhGarantirFuncionario — a MESMA
+// função que já roda a cada upload de Hponto pra achar-ou-criar pelo nome — então quando o
+// ponto desse colaborador for enviado depois, o sistema casa pelo nome com o cadastro manual
+// (não duplica, só passa a preencher os indicadores). Nome é normalizado pra maiúsculas antes
+// de comparar/salvar, igual o parser do Hponto já faz (_rhParseArquivo), pra garantir que os
+// dois caminhos batem no mesmo registro.
+function rhAbrirModalInserirFuncionario(){
+  if(!_isRhUser()){toast('Só RH/Administrador pode fazer isso','terr');return;}
+  const old=document.getElementById('rh-inserir-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='rh-inserir-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 24px;max-width:440px;width:92%">
+    <div style="font-size:1rem;font-weight:800;color:#101B3D;margin-bottom:4px">➕ Inserir Funcionário</div>
+    <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">Cadastra o colaborador mesmo sem ter subido o Cartão Ponto dele ainda. Quando o ponto for enviado depois, o sistema reconhece pelo nome automaticamente e usa este mesmo cadastro — não duplica.</div>
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Nome completo</label>
+    <input type="text" id="rh-ins-nome" placeholder="Nome do colaborador" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;margin-bottom:12px">
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Função (opcional)</label>
+    <input type="text" id="rh-ins-funcao" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;margin-bottom:12px">
+    <label style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px">Departamento (opcional)</label>
+    <input type="text" id="rh-ins-depto" style="width:100%;border:1.5px solid #e5e7eb;border-radius:8px;padding:9px 12px;font-size:.85rem;font-family:inherit;box-sizing:border-box;margin-bottom:8px">
+    <div id="rh-ins-erro" style="font-size:.76rem;color:#dc2626;margin-bottom:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button onclick="document.getElementById('rh-inserir-modal').remove()" class="dash-btn-conf" style="background:#94a3b8;flex:1" type="button">Cancelar</button>
+      <button onclick="rhConfirmarInserirFuncionario()" class="dash-btn-conf" style="background:#16a34a;flex:1" type="button">Cadastrar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  setTimeout(()=>document.getElementById('rh-ins-nome')?.focus(),50);
+}
+async function rhConfirmarInserirFuncionario(){
+  const nomeRaw=(document.getElementById('rh-ins-nome')?.value||'').trim();
+  const funcao=(document.getElementById('rh-ins-funcao')?.value||'').trim();
+  const departamento=(document.getElementById('rh-ins-depto')?.value||'').trim();
+  const erroEl=document.getElementById('rh-ins-erro');
+  if(erroEl)erroEl.textContent='';
+  if(!nomeRaw){if(erroEl)erroEl.textContent='Preencha o nome do colaborador.';return;}
+  const nome=nomeRaw.toUpperCase();
+  const existente=_rhFuncionarioPorNome(nome);
+  if(existente){
+    // Já existe alguém com esse nome — nunca cria um 2º cadastro (o casamento com o Hponto é
+    // por nome exato; duplicar quebraria isso). Se o existente foi demitido, é bem provável
+    // que seja a mesma pessoa voltando — pergunta se quer readmitir em vez de barrar seco.
+    if(existente.status==='demitido'){
+      const m=document.getElementById('rh-inserir-modal');if(m)m.remove();
+      rhAbrirAvisoJaExisteDemitido(existente.id);
+      return;
+    }
+    if(erroEl)erroEl.textContent=`Já existe um colaborador ATIVO cadastrado com esse nome ("${existente.nome}"). Abra o perfil dele na Lista de Colaboradores em vez de cadastrar de novo.`;
+    return;
+  }
+  const f=_rhGarantirFuncionario(nome,funcao,departamento);
+  try{
+    await _rhSalvarCfg();
+    toast(`"${f.nome}" cadastrado ✅`,'tok');
+    const m=document.getElementById('rh-inserir-modal');if(m)m.remove();
+    renderRhListaColaboradores();
+    abrirRhHistoricoFuncionario(f.id);
+  }catch(e){toast('Erro ao cadastrar: '+(e.message||e),'terr');}
+}
+// Aviso de "já existe, demitido, quer readmitir?" (2026-08-26, a pedido do usuário: "ao tentar
+// admitir um funcionário que já tenha sido demitido ele identificar e dar um aviso... deseja
+// readmitir ele?"). Botão "Sim, readmitir" chama o mesmo _rhReadmitirSemConfirmar usado pelo
+// botão de dentro do perfil — sem confirm() nativo em cima, porque este modal JÁ É a pergunta.
+function rhAbrirAvisoJaExisteDemitido(funcionarioId){
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId);
+  if(!f)return;
+  const old=document.getElementById('rh-jaexiste-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='rh-jaexiste-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.onclick=e=>{if(e.target===modal)modal.remove();};
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:22px 24px;max-width:440px;width:92%">
+    <div style="font-size:1rem;font-weight:800;color:#101B3D;margin-bottom:4px">⚠️ Colaborador já existe na base</div>
+    <div style="font-size:.82rem;color:#334155;margin-bottom:14px;line-height:1.5">
+      <b>${String(f.nome).replace(/</g,'&lt;')}</b> já está cadastrado e foi demitido em <b>${fmtD(f.demissao&&f.demissao.data||'')}</b>${f.demissao&&f.demissao.motivo?' — '+String(f.demissao.motivo).replace(/</g,'&lt;'):''}.<br><br>
+      Deseja readmitir esse colaborador em vez de cadastrar um novo?
+    </div>
+    <div style="display:flex;gap:8px">
+      <button onclick="document.getElementById('rh-jaexiste-modal').remove()" class="dash-btn-conf" style="background:#94a3b8;flex:1" type="button">Cancelar</button>
+      <button onclick="_rhReadmitirSemConfirmar('${f.id}');document.getElementById('rh-jaexiste-modal').remove()" class="dash-btn-conf" style="background:#16a34a;flex:1" type="button">✅ Sim, readmitir</button>
+    </div>
+    <div style="margin-top:10px;text-align:center">
+      <button onclick="document.getElementById('rh-jaexiste-modal').remove();abrirRhHistoricoFuncionario('${f.id}')" style="background:none;border:none;color:#64748b;font-size:.76rem;text-decoration:underline;cursor:pointer" type="button">Ver perfil dele antes de decidir</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
 }
 // ===================== FIM RH — PONTUALIDADE E ASSIDUIDADE =====================
 
