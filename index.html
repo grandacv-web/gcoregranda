@@ -1994,7 +1994,7 @@ select.fc{cursor:pointer}
     <div id="sec-cat-PROSPECCAO_CLIENTES" style="display:none">
       <div class="dash-tabs" style="margin-bottom:14px" id="prosp-main-tabs">
         <button class="dash-tab active prosp-main-tab" onclick="prospSetTab('kanban',this)">🗂️ Funil</button>
-        <button class="dash-tab prosp-main-tab" onclick="prospSetTab('empresas',this)">🏢 Empresas</button>
+        <button class="dash-tab prosp-main-tab" onclick="prospSetTab('empresas',this)">🧑‍💼 Contatos</button>
         <button class="dash-tab prosp-main-tab" onclick="prospSetTab('tarefas',this)">🗓️ Tarefas<span id="prosp-tarefas-badge" style="margin-left:6px;background:#dc2626;color:#fff;border-radius:20px;padding:1px 7px;font-size:.62rem;font-weight:700;display:none"></span></button>
         <button class="dash-tab prosp-main-tab" onclick="prospSetTab('indicadores',this)">📊 Indicadores<span id="prosp-ind-badge" style="margin-left:6px;background:#dc2626;color:#fff;border-radius:20px;padding:1px 7px;font-size:.62rem;font-weight:700;display:none"></span></button>
       </div>
@@ -2009,11 +2009,35 @@ select.fc{cursor:pointer}
         <div id="prosp-kanban-body" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px"></div>
       </div>
       <div id="prosp-sec-empresas" style="display:none">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-          <input id="prosp-emp-lista-busca" placeholder="🔍 Buscar por nome, segmento ou cidade..." oninput="renderProspEmpresasLista()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
-          <button onclick="prospAbrirNovaEmpresa()" class="dash-btn-conf" style="background:#00bac7" type="button">+ Nova Empresa</button>
+        <!-- Sub-abas Empresas/Contatos (2026-08-26, a pedido do usuário: menu "Contatos" com
+             submenus Empresas e Contatos — contatos são os decisores já cadastrados dentro de
+             cada empresa, listados aqui de forma agregada e pesquisável; nada de coleção nova
+             no Firestore, só uma visão que percorre prospEmpresas[].decisores). -->
+        <div class="dash-tabs" style="margin-bottom:14px;max-width:360px" id="prosp-contatos-subtabs">
+          <button class="dash-tab active prosp-contatos-subtab" id="prosp-ct-tab-emp" onclick="prospContatosSubTab('empresas',this)">🏢 Empresas</button>
+          <button class="dash-tab prosp-contatos-subtab" id="prosp-ct-tab-cont" onclick="prospContatosSubTab('contatos',this)">🧑‍💼 Contatos</button>
         </div>
-        <div id="prosp-emp-lista-body"></div>
+        <div id="prosp-sub-empresas">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <input id="prosp-emp-lista-busca" placeholder="🔍 Buscar por nome, segmento ou cidade..." oninput="renderProspEmpresasLista()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button onclick="prospExportarEmpresas()" class="dash-btn-conf" style="background:#64748b" type="button">⬇️ Exportar Empresas</button>
+              <button onclick="prospAbrirNovaEmpresa()" class="dash-btn-conf" style="background:#00bac7" type="button">+ Nova Empresa</button>
+            </div>
+          </div>
+          <div id="prosp-emp-lista-body"></div>
+        </div>
+        <div id="prosp-sub-contatos" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <input id="prosp-ct-busca" placeholder="🔍 Buscar por nome, cargo ou empresa..." oninput="renderProspContatosLista()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button onclick="prospExportarContatos('completo')" class="dash-btn-conf" style="background:#64748b" type="button">⬇️ Completo</button>
+              <button onclick="prospExportarContatos('email')" class="dash-btn-conf" style="background:#64748b" type="button">✉️ Só E-mails</button>
+              <button onclick="prospExportarContatos('telefone')" class="dash-btn-conf" style="background:#64748b" type="button">📞 Só Telefones</button>
+            </div>
+          </div>
+          <div id="prosp-contatos-lista-body"></div>
+        </div>
       </div>
       <div id="prosp-sec-tarefas" style="display:none">
         <div class="dash-tabs" style="margin-bottom:14px;max-width:360px" id="prosp-tarefas-subtabs">
@@ -31556,7 +31580,7 @@ function setupProspSync(){
     const el=document.getElementById('sec-cat-PROSPECCAO_CLIENTES');
     if(el&&el.style.display!=='none'){
       if(_prospTabAtiva==='kanban')renderProspKanban();
-      else if(_prospTabAtiva==='empresas')renderProspEmpresasLista();
+      else if(_prospTabAtiva==='empresas')_prospRenderContatosSubtab();
       else if(_prospTabAtiva==='tarefas')renderProspTarefas();
       else if(_prospTabAtiva==='indicadores')renderProspIndicadores();
     }
@@ -31669,9 +31693,27 @@ function prospSetTab(tab,btn){
   if(st)st.style.display=tab==='tarefas'?'':'none';
   if(si)si.style.display=tab==='indicadores'?'':'none';
   if(tab==='kanban')renderProspKanban();
-  else if(tab==='empresas')renderProspEmpresasLista();
+  else if(tab==='empresas')_prospRenderContatosSubtab();
   else if(tab==='tarefas')renderProspTarefas();
   else if(tab==='indicadores')renderProspIndicadores();
+}
+// Sub-abas dentro do menu "Contatos" (Empresas / Contatos, 2026-08-26) — mesma ideia de
+// prospTarefasTab, só alternando 2 divs internas. Contatos é uma visão agregada e SOMENTE
+// LEITURA de prospEmpresas[].decisores (nenhuma coleção nova) — editar um contato continua
+// sendo feito abrindo a empresa dele (ver renderProspContatosLista, onclick=prospAbrirCard).
+let _prospContatosSubTabAtiva='empresas';
+function prospContatosSubTab(tab,btn){
+  _prospContatosSubTabAtiva=tab;
+  document.querySelectorAll('#prosp-contatos-subtabs .prosp-contatos-subtab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  const se=document.getElementById('prosp-sub-empresas'),sc=document.getElementById('prosp-sub-contatos');
+  if(se)se.style.display=tab==='empresas'?'':'none';
+  if(sc)sc.style.display=tab==='contatos'?'':'none';
+  _prospRenderContatosSubtab();
+}
+function _prospRenderContatosSubtab(){
+  if(_prospContatosSubTabAtiva==='contatos')renderProspContatosLista();
+  else renderProspEmpresasLista();
 }
 
 // ── FUNIL (KANBAN) ──────────────────────────────────────────────────────────────────
@@ -31745,7 +31787,7 @@ function _prospCardHtml(e){
     </div>
     ${e.segmento?`<div style="font-size:.7rem;color:var(--ink3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.segmento}</div>`:''}
     ${(e.sedeCidade||e.sedeUf)?`<div style="font-size:.66rem;color:var(--ink4);margin-top:3px">📍 ${[e.sedeCidade,e.sedeUf].filter(Boolean).join('/')}</div>`:''}
-    ${decisorPrincipal?`<div style="font-size:.66rem;color:var(--ink4);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">👤 ${decisorPrincipal.nome||'—'}</div>`:''}
+    ${decisorPrincipal?`<div style="font-size:.66rem;color:var(--ink4);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">👤 ${decisorPrincipal.nome||'—'}${decisorPrincipal.cargo?' — '+decisorPrincipal.cargo:''}</div>`:''}
     ${e.responsavel?`<div style="font-size:.66rem;color:var(--ink4);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🧑‍💼 ${e.responsavel}</div>`:''}
     ${Number(e.unidadesAbrir)>0?`<span class="prosp-chip" style="margin-top:5px;pointer-events:none">+${e.unidadesAbrir} unid. planejada${Number(e.unidadesAbrir)>1?'s':''}</span>`:''}
     <div style="font-size:.64rem;color:${saude.cor};font-weight:700;margin-top:5px">${saude.dias===0?'Interação hoje':saude.dias+'d sem interação'}</div>
@@ -31824,7 +31866,7 @@ function renderProspEmpresasLista(){
           <span>${saude.emoji} ${e.nome||'—'}</span>
           <span style="background:var(--brand-lt);color:var(--brand-d);border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">${etapaLabel[e.etapa]||'—'}</span>
         </div>
-        <div style="font-size:.72rem;color:#64748b;margin-top:3px">${[e.segmento,[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'),decisorPrincipal?decisorPrincipal.nome:'',e.responsavel?'🧑‍💼 '+e.responsavel:''].filter(Boolean).join(' · ')||'—'}</div>
+        <div style="font-size:.72rem;color:#64748b;margin-top:3px">${[e.segmento,[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'),decisorPrincipal?(decisorPrincipal.nome+(decisorPrincipal.cargo?' ('+decisorPrincipal.cargo+')':'')):'',e.responsavel?'🧑‍💼 '+e.responsavel:''].filter(Boolean).join(' · ')||'—'}</div>
       </div>
       <div style="font-size:.68rem;color:var(--ink4);text-align:right;flex-shrink:0;white-space:nowrap">
         <div style="color:${saude.cor};font-weight:700">${saude.dias}d sem interação</div>
@@ -31832,6 +31874,101 @@ function renderProspEmpresasLista(){
       </div>
     </div>`;
   }).join('');
+}
+
+// ── ABA CONTATOS (agregada dos decisores de todas as empresas, 2026-08-26 — a pedido do
+// usuário: "no lugar do menu empresas... menu chamado CONTATOS... nos contatos as pessoas
+// linkadas com as empresas conforme cadastro"). Visão 100% derivada de
+// prospEmpresas[].decisores — sem coleção nova, sem duplicar dado. Editar um contato é
+// editar a empresa dele (prospAbrirCard abre o card da empresa de onde ele veio).
+function _prospTodosContatos(){
+  const out=[];
+  prospEmpresas.forEach(e=>{
+    (e.decisores||[]).forEach(d=>{
+      if((d.nome||'').trim())out.push(Object.assign({},d,{empresaId:e.id,empresaNome:e.nome||'—'}));
+    });
+  });
+  return out;
+}
+function _prospContatosFiltrados(busca){
+  const q=(busca||'').trim().toUpperCase();
+  const lista=_prospTodosContatos();
+  if(!q)return lista;
+  return lista.filter(c=>
+    (c.nome||'').toUpperCase().includes(q)||
+    (c.cargo||'').toUpperCase().includes(q)||
+    (c.empresaNome||'').toUpperCase().includes(q)||
+    (c.telefone||'').toUpperCase().includes(q)||
+    (c.email||'').toUpperCase().includes(q)
+  );
+}
+function renderProspContatosLista(){
+  const wrap=document.getElementById('prosp-contatos-lista-body');
+  if(!wrap)return;
+  if(!_temAcessoProspeccao()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const busca=document.getElementById('prosp-ct-busca')?.value||'';
+  const lista=_prospContatosFiltrados(busca).sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  if(!lista.length){wrap.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhum contato cadastrado ainda — contatos aparecem aqui assim que forem adicionados como decisor dentro de uma empresa.</div>';return;}
+  wrap.innerHTML=lista.map(c=>`<div onclick="prospAbrirCard('${c.empresaId}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+      <div style="min-width:0;flex:1">
+        <div style="font-weight:700;font-size:.82rem;color:#1e293b;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span>👤 ${c.nome||'—'}</span>
+          ${c.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700">${c.cargo}</span>`:''}
+        </div>
+        <div style="font-size:.72rem;color:#64748b;margin-top:3px">${['🏢 '+(c.empresaNome||'—'),c.telefone,c.email].filter(Boolean).join(' · ')}</div>
+      </div>
+      ${c.linkedin?`<a href="${c.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="flex-shrink:0;display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:.66rem;font-weight:700;text-decoration:none;white-space:nowrap">🔗 LinkedIn ↗</a>`:''}
+    </div>`).join('');
+}
+// ── EXPORTAÇÃO (Empresas e Contatos, 2026-08-26 — a pedido do usuário: "exportar empresas e
+// exportar contatos... lista com dados completos ou só email ou só telefone pra mailing").
+// Reaproveita o mesmo _csvDownload()/_csvEscape() usado em todo o resto do sistema (ver
+// exportarExcelVendas etc.) — nada de lib nova. Respeita a busca digitada na tela (mesma
+// lógica de _vndFilteredRows: exporta o que está sendo visto, não a base inteira).
+function prospExportarEmpresas(){
+  const busca=document.getElementById('prosp-emp-lista-busca')?.value||'';
+  const etapas=_prospEtapas();
+  const etapaLabel=Object.fromEntries(etapas.map(x=>[x.key,x.label]));
+  const lista=[..._prospEmpresasFiltradas(busca)].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  if(!lista.length){toast('Nenhuma empresa encontrada para exportar','terr');return;}
+  const headers=['Nome','Segmento','Etapa','Responsável','Cidade','UF','Regiões','Unidades Existentes','Unidades a Abrir','Decisores (Nome — Cargo)'];
+  const body=lista.map(e=>[
+    e.nome||'',
+    e.segmento||'',
+    etapaLabel[e.etapa]||e.etapa||'',
+    e.responsavel||'',
+    e.sedeCidade||'',
+    e.sedeUf||'',
+    (e.regioes||[]).join(', '),
+    e.unidadesExistentes!=null?String(e.unidadesExistentes):'',
+    e.unidadesAbrir!=null?String(e.unidadesAbrir):'',
+    (e.decisores||[]).map(d=>d.nome+(d.cargo?' — '+d.cargo:'')).join('; ')
+  ]);
+  _csvDownload(`prospeccao_empresas_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+function prospExportarContatos(modo){
+  const busca=document.getElementById('prosp-ct-busca')?.value||'';
+  let lista=[..._prospContatosFiltrados(busca)].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  let headers,body,sufixo;
+  if(modo==='email'){
+    lista=lista.filter(c=>c.email);
+    headers=['Nome','Cargo','E-mail','Empresa'];
+    body=lista.map(c=>[c.nome||'',c.cargo||'',c.email||'',c.empresaNome||'']);
+    sufixo='emails';
+  }else if(modo==='telefone'){
+    lista=lista.filter(c=>c.telefone);
+    headers=['Nome','Cargo','Telefone','Empresa'];
+    body=lista.map(c=>[c.nome||'',c.cargo||'',c.telefone||'',c.empresaNome||'']);
+    sufixo='telefones';
+  }else{
+    headers=['Nome','Cargo','Empresa','Telefone','E-mail','LinkedIn'];
+    body=lista.map(c=>[c.nome||'',c.cargo||'',c.empresaNome||'',c.telefone||'',c.email||'',c.linkedin||'']);
+    sufixo='completo';
+  }
+  if(!lista.length){toast(modo==='email'?'Nenhum contato com e-mail cadastrado':modo==='telefone'?'Nenhum contato com telefone cadastrado':'Nenhum contato encontrado para exportar','terr');return;}
+  _csvDownload(`prospeccao_contatos_${sufixo}_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
 }
 
 // ── ABA TAREFAS (agregada de todas as empresas, organizada por data) ───────────────
@@ -31922,6 +32059,7 @@ function _prospRenderCard(e){
   const decisoresHtml=(e.decisores||[]).length?e.decisores.map(d=>`<div style="border:1px solid var(--border-lt);border-radius:8px;padding:8px 10px;font-size:.78rem">
       <div style="font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span>👤 ${d.nome||'—'}</span>
+        ${d.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700">${d.cargo}</span>`:''}
         ${d.linkedin?`<a href="${d.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700;text-decoration:none">🔗 LinkedIn ↗</a>`:''}
       </div>
       <div style="color:var(--ink3);margin-top:2px">${[d.telefone,d.email].filter(Boolean).join(' · ')||'—'}</div>
@@ -32026,7 +32164,7 @@ function prospAbrirNovaTarefa(empresaId){
   document.getElementById('prosp-tarefa-id').value='';
   document.getElementById('prosp-tarefa-tipo').value='ligar';
   const selDec=document.getElementById('prosp-tarefa-decisor');
-  selDec.innerHTML='<option value="">Sem decisor específico</option>'+(e.decisores||[]).map(d=>`<option value="${(d.nome||'').replace(/"/g,'&quot;')}">${d.nome||'—'}</option>`).join('');
+  selDec.innerHTML='<option value="">Sem decisor específico</option>'+(e.decisores||[]).map(d=>`<option value="${(d.nome||'').replace(/"/g,'&quot;')}">${d.nome||'—'}${d.cargo?' — '+d.cargo:''}</option>`).join('');
   document.getElementById('prosp-tarefa-titulo').value='';
   document.getElementById('prosp-tarefa-data').value=new Date().toISOString().slice(0,10);
   openM('mo-prosp-tarefa');
@@ -32103,6 +32241,7 @@ function prospAddDecisorRow(d){
   row.style.cssText='border:1px solid var(--border-lt);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;position:relative';
   row.innerHTML='<button type="button" onclick="this.closest(\'.prosp-decisor-row\').remove()" style="position:absolute;top:6px;right:6px;background:#fce4ec;color:#c62828;border:none;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:.75rem">✕</button>'
     +'<input class="fc prosp-dec-nome" placeholder="Nome do decisor/comprador" value="'+((d&&d.nome)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem;padding-right:30px">'
+    +'<input class="fc prosp-dec-cargo" placeholder="Cargo (obrigatório) — ex.: Comprador, Gerente, Sócio..." value="'+((d&&d.cargo)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem">'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
     +'<input class="fc no-upper prosp-dec-tel" placeholder="Telefone" value="'+((d&&d.telefone)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem">'
     +'<input class="fc no-upper prosp-dec-email" placeholder="E-mail" value="'+((d&&d.email)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem;text-transform:none">'
@@ -32121,6 +32260,7 @@ function _prospNormalizarLinkedin(v){
 function _prospDecisoresDoForm(){
   return[...document.querySelectorAll('#prosp-emp-decisores-l .prosp-decisor-row')].map(row=>({
     nome:(row.querySelector('.prosp-dec-nome')&&row.querySelector('.prosp-dec-nome').value.trim())||'',
+    cargo:(row.querySelector('.prosp-dec-cargo')&&row.querySelector('.prosp-dec-cargo').value.trim())||'',
     telefone:(row.querySelector('.prosp-dec-tel')&&row.querySelector('.prosp-dec-tel').value.trim())||'',
     email:(row.querySelector('.prosp-dec-email')&&row.querySelector('.prosp-dec-email').value.trim())||'',
     linkedin:_prospNormalizarLinkedin(row.querySelector('.prosp-dec-linkedin')&&row.querySelector('.prosp-dec-linkedin').value)
@@ -32170,6 +32310,13 @@ async function prospSalvarEmpresa(){
   const id=document.getElementById('prosp-emp-id').value;
   const nome=(document.getElementById('prosp-emp-nome').value||'').trim();
   if(!nome){toast('Preencha o nome da empresa!','terr');return;}
+  // Cargo é imprescindível pra todo decisor com nome preenchido (2026-08-26, a pedido do
+  // usuário) — validado ANTES de mexer no objeto "e" (que pra empresa já existente é a
+  // referência viva dentro de prospEmpresas[]), pra não deixar o card com dado parcial na
+  // tela se a validação falhar.
+  const decisoresForm=_prospDecisoresDoForm();
+  const semCargo=decisoresForm.filter(d=>d.nome&&!d.cargo);
+  if(semCargo.length){toast('Informe o cargo de: '+semCargo.map(d=>d.nome).join(', '),'terr');return;}
   const isNova=!id;
   const etapas=_prospEtapas();
   const e=isNova?{
@@ -32189,13 +32336,13 @@ async function prospSalvarEmpresa(){
   e.regioes=_prospRegioesSelecionadas();
   e.sedeCidade=(document.getElementById('prosp-emp-cidade').value||'').trim();
   e.sedeUf=document.getElementById('prosp-emp-uf').value||'';
-  e.decisores=_prospDecisoresDoForm();
+  e.decisores=decisoresForm;
   e.atualizadoEm=new Date().toISOString();
   try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
   closeM('mo-prosp-empresa');
   toast(isNova?'Empresa cadastrada!':'Empresa atualizada!','tok');
   if(_prospTabAtiva==='kanban')renderProspKanban();
-  else if(_prospTabAtiva==='empresas')renderProspEmpresasLista();
+  else if(_prospTabAtiva==='empresas')_prospRenderContatosSubtab();
   if(_prospCardAtualId===e.id)_prospRenderCard(e);
 }
 async function prospExcluirEmpresa(id){
@@ -32214,7 +32361,7 @@ async function prospExcluirEmpresa(id){
   closeM('mo-prosp-card');
   toast('Empresa removida da prospecção','tok');
   if(_prospTabAtiva==='kanban')renderProspKanban();
-  else if(_prospTabAtiva==='empresas')renderProspEmpresasLista();
+  else if(_prospTabAtiva==='empresas')_prospRenderContatosSubtab();
   _prospAtualizarBadgeTarefas();
 }
 
@@ -32277,7 +32424,7 @@ async function _prospSalvarLimiaresForm(){
   toast('Limiares de saúde atualizados!','tok');
   renderProspIndicadores();
   if(_prospTabAtiva==='kanban')renderProspKanban();
-  else if(_prospTabAtiva==='empresas')renderProspEmpresasLista();
+  else if(_prospTabAtiva==='empresas')_prospRenderContatosSubtab();
 }
 function _prospRenderCharts(d){
   if(typeof Chart==='undefined')return;
