@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GCORE - Sistema Granda — Painel de Pedidos</title>
+<!-- Versão de build do sistema (2026-08-26) — BUMP ESTE VALOR TODA VEZ QUE PUBLICAR UMA
+     ATUALIZAÇÃO do index.html (qualquer patch, por menor que seja). Fica bem no topo do
+     arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
+     primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
+     este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
+<script>const APP_BUILD_VERSION='2026-08-26.2';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -307,6 +313,17 @@ body{font-family:'Inter',system-ui,sans-serif;background:#f4f6f8;color:var(--ink
 .meta-semana-banner .msb-txt b{font-weight:800}
 .meta-semana-banner .msb-x{background:rgba(255,255,255,.2);border:none;color:#fff;width:24px;height:24px;border-radius:50%;cursor:pointer;font-size:.85rem;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .meta-semana-banner .msb-x:hover{background:rgba(255,255,255,.35)}
+/* Banner de nova versão disponível (2026-08-26) — ver _checarNovaVersaoSistema() mais abaixo.
+   Mesmo padrão visual do meta-semana-banner acima, mas cor de marca (não é comemoração) e
+   NUNCA some sozinho: só quando o usuário clica em "Atualizar agora" ou no X — e mesmo assim
+   volta a aparecer no próximo ciclo de checagem se ainda estiver desatualizado, de propósito
+   (o medo aqui é alguém passar o dia inteiro numa versão velha sem perceber). */
+.sys-update-banner{display:none;position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:340;background:linear-gradient(135deg,#00bac7,#0099a8);color:#fff;padding:14px 18px;border-radius:12px;box-shadow:0 10px 30px rgba(0,153,168,.35);max-width:460px;align-items:center;gap:12px}
+.sys-update-banner.open{display:flex}
+.sys-update-banner .sub-txt{font-size:.85rem;font-weight:600;line-height:1.4}
+.sys-update-banner .sub-btn{background:#fff;color:#0099a8;border:none;border-radius:8px;padding:7px 14px;font-size:.78rem;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.sys-update-banner .sub-x{background:rgba(255,255,255,.2);border:none;color:#fff;width:24px;height:24px;border-radius:50%;cursor:pointer;font-size:.85rem;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.sys-update-banner .sub-x:hover{background:rgba(255,255,255,.35)}
 .meta-win-modal{text-align:center;background:linear-gradient(160deg,#1a2b5e,#0f1b3d);color:#fff;border-radius:20px;padding:40px 32px;max-width:440px;width:100%;position:relative;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.5)}
 .meta-win-modal .mwm-emoji{font-size:3rem;margin-bottom:10px;position:relative;z-index:2}
 .meta-win-modal h2{font-size:1.25rem;font-weight:800;margin-bottom:8px;letter-spacing:-.3px;position:relative;z-index:2}
@@ -3179,6 +3196,18 @@ select.fc{cursor:pointer}
 <div class="meta-semana-banner" id="meta-semana-banner">
   <div class="msb-txt" id="msb-texto"></div>
   <button class="msb-x" onclick="document.getElementById('meta-semana-banner').classList.remove('open')" title="Fechar">✕</button>
+</div>
+<!-- Banner de nova versão do sistema disponível (2026-08-26, a pedido do usuário — medo real
+     de alguém ficar com o navegador aberto o dia inteiro e perder o que não salvou quando uma
+     atualização é publicada). Ver _checarNovaVersaoSistema()/_tentarAutoAtualizar() —
+     ATUALIZA SOZINHO assim que detecta que é seguro (nenhum modal aberto, nenhum campo em
+     edição), sem precisar de clique nenhum. Esse banner serve pra: (1) avisar enquanto espera
+     a hora segura de atualizar sozinho, e (2) dar a opção de forçar a atualização na hora, se
+     a pessoa não se importar de perder o que estiver digitando. -->
+<div class="sys-update-banner" id="sys-update-banner">
+  <div class="sub-txt">🔄 Nova versão disponível. Atualiza sozinho assim que você terminar o que estiver fazendo — ou clique para atualizar agora.</div>
+  <button class="sub-btn" onclick="_aplicarNovaVersaoSistema()">Atualizar agora</button>
+  <button class="sub-x" onclick="document.getElementById('sys-update-banner').classList.remove('open')" title="Fechar">✕</button>
 </div>
 <div class="mov" id="mo-meta-win">
   <div class="meta-win-modal">
@@ -10899,6 +10928,91 @@ function initAuth(tries){
   }
 }
 initAuth();
+
+// ══════════════════════════════════════════════
+//  CHECAGEM DE NOVA VERSÃO (2026-08-26, a pedido do usuário — medo real: alguém abre o
+//  sistema de manhã, fica com o navegador aberto o dia todo, e no meio do dia é publicada
+//  uma atualização (upload manual no GitHub Pages) — sem isso, essa pessoa continuaria
+//  rodando o JS antigo até fechar/recarregar a aba por conta própria, e qualquer correção
+//  feita nesse meio tempo simplesmente não valeria pra ela.
+//
+//  Como funciona: a versão publicada fica marcada em APP_BUILD_VERSION (<head>, bem no topo
+//  do arquivo — ATUALIZAR ESSE VALOR TODA VEZ QUE PUBLICAR UMA MUDANÇA NO index.html). De
+//  tempos em tempos o navegador baixa o próprio index.html de novo (fetch com
+//  cache:'no-store', ignorando cache do navegador) e compara a versão de lá com a que está
+//  rodando agora. Só lê os primeiros KB do arquivo — aborta o download assim que encontra o
+//  valor — porque o arquivo é grande (2MB+) e essa checagem roda em loop o dia todo pra cada
+//  usuário conectado; baixar o arquivo inteiro a cada ciclo seria desperdício de banda.
+//
+//  ATUALIZA SOZINHO — 2026-08-26 (2ª versão, a pedido do usuário: "não é melhor carregar
+//  sozinho se identificar que o usuário tá com versão antiga?"). Mas só quando é SEGURO:
+//  _sistemaEstaSeguroPraRecarregar() checa se tem algum modal aberto (.mov.open — é assim que
+//  TODO cadastro/edição do sistema abre, ver openM/closeM) ou algum campo de texto com foco
+//  (INPUT/TEXTAREA/SELECT/contentEditable) — ou seja, qualquer sinal de que a pessoa está no
+//  meio de preencher algo que ainda não foi salvo. Se estiver seguro, recarrega sozinho (com
+//  um toast de aviso de alguns segundos antes, pra não sumir do nada). Se não estiver, mostra
+//  o banner e fica checando de novo a cada 15s até ficar seguro — sem travar nada, sem pedir
+//  confirmação, só esperando o momento certo. O botão "Atualizar agora" do banner continua
+//  existindo pra quem quiser forçar na hora, ignorando essa checagem por conta própria.
+let _ultimaChecagemVersaoSistema=0;
+function _sistemaEstaSeguroPraRecarregar(){
+  if(document.querySelector('.mov.open'))return false;
+  const ae=document.activeElement;
+  if(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'||ae.isContentEditable))return false;
+  return true;
+}
+let _watcherAutoAtualizar=null;
+function _dispararAtualizacaoAutomatica(){
+  toast('🔄 Nova versão do sistema — atualizando...','tok');
+  setTimeout(_aplicarNovaVersaoSistema,4000);
+}
+function _tentarAutoAtualizar(){
+  const b=document.getElementById('sys-update-banner');
+  if(b)b.classList.add('open');
+  if(_sistemaEstaSeguroPraRecarregar()){
+    if(_watcherAutoAtualizar){clearInterval(_watcherAutoAtualizar);_watcherAutoAtualizar=null;}
+    _dispararAtualizacaoAutomatica();
+    return;
+  }
+  if(_watcherAutoAtualizar)return; // já tem uma checagem esperando o momento seguro
+  _watcherAutoAtualizar=setInterval(()=>{
+    if(_sistemaEstaSeguroPraRecarregar()){
+      clearInterval(_watcherAutoAtualizar);
+      _watcherAutoAtualizar=null;
+      _dispararAtualizacaoAutomatica();
+    }
+  },15000);
+}
+async function _checarNovaVersaoSistema(){
+  _ultimaChecagemVersaoSistema=Date.now();
+  try{
+    const resp=await fetch(location.pathname+'?_v='+Date.now(),{cache:'no-store'});
+    if(!resp.ok||!resp.body)return;
+    const reader=resp.body.getReader();
+    const decoder=new TextDecoder('utf-8');
+    let acumulado='';
+    let versaoRemota=null;
+    while(true){
+      const{done,value}=await reader.read();
+      if(done)break;
+      acumulado+=decoder.decode(value,{stream:true});
+      const m=acumulado.match(/APP_BUILD_VERSION\s*=\s*['"]([^'"]+)['"]/);
+      if(m){versaoRemota=m[1];try{await reader.cancel();}catch(e){}break;}
+      if(acumulado.length>200000)break; // segurança — a versão sempre fica bem no início do <head>
+    }
+    if(versaoRemota&&typeof APP_BUILD_VERSION!=='undefined'&&versaoRemota!==APP_BUILD_VERSION){
+      _tentarAutoAtualizar();
+    }
+  }catch(e){/* falha de rede na checagem não deve incomodar ninguém — tenta de novo no próximo ciclo */}
+}
+function _aplicarNovaVersaoSistema(){
+  location.replace(location.pathname+'?_v='+Date.now());
+}
+setTimeout(_checarNovaVersaoSistema,60000);
+setInterval(_checarNovaVersaoSistema,5*60*1000);
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&Date.now()-_ultimaChecagemVersaoSistema>60000)_checarNovaVersaoSistema();
+});
 
 // ══════════════════════════════════════════════
 //  DASHBOARD COMERCIAL
