@@ -9,7 +9,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-26.9';</script>
+<script>const APP_BUILD_VERSION='2026-08-26.10';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -9470,7 +9470,7 @@ function _extrairItensProducaoPdf(texto){
     const achados=[...chunk.matchAll(reNum)];
     const nome=(achados.length?chunk.slice(achados[achados.length-1].index+achados[achados.length-1][0].length):chunk).trim();
     const valor=moneyToNum(m[3]);
-    if(nome&&valor>0){
+    if(nome){
       itens.push({id:'itp'+esperado+'_'+Math.random().toString(36).slice(2,8),numero:esperado,nome:nome.slice(0,300),qtd:m[1]||'',valorUnit:moneyToNum(m[2]),valor,percentual:0});
     }
     pos=m.index+m[0].length;
@@ -19802,8 +19802,9 @@ const PROD_CHECKLIST_ITENS=[
 // _buildPedidoBaseDoEd/ratioLiqSubmit), então pesar pelo Bruto de cada item já reflete
 // corretamente a fatia de líquido de cada um sem precisar duplicar essa conta aqui.
 function _prodProgressoItens(p){
-  const itens=(p&&p.itensProducao)||[];
-  if(!itens.length)return{itens:[],temItens:false,totalValor:0,valorConcluido:0,progresso:0,completo:false};
+  const todos=(p&&p.itensProducao)||[];
+  const itens=todos.filter(i=>!i.foraEscopo);
+  if(!itens.length)return{itens,todos,temItens:false,totalValor:0,valorConcluido:0,progresso:0,completo:false};
   const pctOf=i=>Math.min(100,Math.max(0,Number(i.percentual)||0));
   const totalValor=itens.reduce((s,i)=>s+(Number(i.valor)||0),0);
   const valorConcluido=itens.reduce((s,i)=>s+(Number(i.valor)||0)*(pctOf(i)/100),0);
@@ -19811,7 +19812,7 @@ function _prodProgressoItens(p){
     ?Math.round(valorConcluido/totalValor*1000)/10
     :Math.round(itens.reduce((s,i)=>s+pctOf(i),0)/itens.length*10)/10;
   const completo=itens.every(i=>pctOf(i)>=100);
-  return{itens,temItens:true,totalValor,valorConcluido,progresso,completo};
+  return{itens,todos,temItens:true,totalValor,valorConcluido,progresso,completo};
 }
 // Info consolidada de UM pedido pro menu PRODUÇÃO. "Início sugerido"/"estourou" vêm de
 // _lpProdAlocCache (populado por _lpMapaProducaoPorDia(), ver bloco CAPACIDADE DIÁRIA lá em
@@ -19981,9 +19982,20 @@ function prodAbrirChecklist(pedidoId){
 // "Substitui só a fase 'Produção'".
 function _prodRenderLinhaItens(pedidoId,s,idx,progItens){
   const pct=Math.round(progItens.progresso);
-  const itensHtml=progItens.itens.map(it=>{
-    const p100=(Number(it.percentual)||0)>=100;
+  const excluidos=progItens.todos.length-progItens.itens.length;
+  const itensHtml=progItens.todos.map(it=>{
     const nomeEsc=String(it.nome||'').replace(/"/g,'&quot;');
+    if(it.foraEscopo){
+      return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px dashed var(--border-lt);opacity:.55">
+        <span style="font-size:.9rem;flex-shrink:0" title="Fora do escopo da Produção">🚫</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.76rem;font-weight:600;color:var(--ink);text-decoration:line-through;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical" title="${nomeEsc}">${it.nome||'—'}</div>
+          <div style="font-size:.66rem;color:var(--ink4)">${fmtR(it.valor||0)} · fora do escopo da Produção</div>
+        </div>
+        <button onclick="prodItemToggleEscopo('${pedidoId}','${it.id}',false)" style="background:none;border:1px solid var(--border-lt);border-radius:6px;padding:3px 8px;font-size:.66rem;font-weight:700;color:var(--ink3);cursor:pointer;white-space:nowrap;flex-shrink:0" type="button" title="Voltar a contar este item na Produção">↩️ Reincluir</button>
+      </div>`;
+    }
+    const p100=(Number(it.percentual)||0)>=100;
     return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px dashed var(--border-lt)">
       <input type="checkbox" ${p100?'checked':''} onchange="prodItemToggle('${pedidoId}','${it.id}',this.checked)" style="width:16px;height:16px;flex-shrink:0;accent-color:#16a34a" title="Marcar 100% concluído">
       <div style="flex:1;min-width:0">
@@ -19992,13 +20004,15 @@ function _prodRenderLinhaItens(pedidoId,s,idx,progItens){
       </div>
       <input type="number" min="0" max="100" step="5" value="${Math.round(Number(it.percentual)||0)}" onchange="prodItemSetPercentual('${pedidoId}','${it.id}',this.value)" style="width:52px;padding:3px 4px;border:1px solid var(--border-lt);border-radius:6px;font-size:.74rem;text-align:center" title="% concluído deste item">
       <span style="font-size:.7rem;color:var(--ink4);width:14px">%</span>
+      <button onclick="prodItemToggleEscopo('${pedidoId}','${it.id}',true)" style="background:none;border:none;color:var(--ink4);opacity:.55;cursor:pointer;font-size:.8rem;padding:2px 3px;flex-shrink:0" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55" type="button" title="Este item não é da Produção (ex.: pintura de tubo feita na obra pela instalação) — tirar da lista">🚫</button>
     </div>`;
   }).join('');
   return `<div style="border:1px solid ${progItens.completo?'#bbf7d0':'var(--border-lt)'};background:${progItens.completo?'#f0fdf4':'#fff'};border-radius:10px;padding:12px;margin-bottom:8px">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
-      <div style="font-size:.84rem;font-weight:700;color:var(--ink)">${idx+1}. ${s.label} — por item (${progItens.itens.length})</div>
+      <div style="font-size:.84rem;font-weight:700;color:var(--ink)">${idx+1}. ${s.label} — por item (${progItens.itens.length}${excluidos?' de '+progItens.todos.length:''})</div>
       <span style="background:${progItens.completo?'#16a34a':'#0284c7'}1a;color:${progItens.completo?'#16a34a':'#0284c7'};font-weight:800;font-size:.72rem;padding:2px 9px;border-radius:20px;white-space:nowrap">${progItens.completo?'✅ Concluído':pct+'% concluído'}</span>
     </div>
+    ${excluidos?`<div style="font-size:.68rem;color:var(--ink4);margin-bottom:4px">🚫 ${excluidos} ite${excluidos>1?'ns':'m'} fora do escopo da Produção — não conta${excluidos>1?'m':''} no progresso.</div>`:''}
     <div style="background:#e2e8f0;border-radius:20px;height:6px;overflow:hidden;margin-bottom:8px"><div style="background:${progItens.completo?'#16a34a':'#00bac7'};height:100%;width:${pct}%"></div></div>
     <div style="max-height:260px;overflow-y:auto">${itensHtml}</div>
     <div style="margin-top:8px"><button onclick="prodAbrirEditorItens('${pedidoId}')" class="dash-btn-conf" style="background:#64748b;padding:5px 10px;font-size:.7rem" type="button">✏️ Editar Itens</button></div>
@@ -20040,6 +20054,21 @@ async function _prodSyncBaixaProducao(p){
 // Checkbox de 1 item = 100% (ou volta a 0% se desmarcado) — pra parcial o usuário usa o campo de
 // % ao lado (prodItemSetPercentual), a pedido do usuário: "Checkbox = 100%, com campo de % pra
 // parcial".
+// Marca/desmarca 1 item como "fora do escopo da Produção" (2026-08-26, a pedido do usuário —
+// ver botão 🚫/↩️ em _prodRenderLinhaItens). Reversível — nunca apaga o item de p.itensProducao,
+// só tira ele do cálculo de progresso (ver _prodProgressoItens) enquanto marcado.
+async function prodItemToggleEscopo(pedidoId,itemId,foraEscopo){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const item=(p.itensProducao||[]).find(i=>i.id===itemId);
+  if(!item)return;
+  item.foraEscopo=foraEscopo;
+  await _prodSyncBaixaProducao(p);
+  await savePedidoFS(p);
+  toast(foraEscopo?'Item marcado como fora do escopo da Produção 🚫':'Item reincluído na Produção ↩️','tok');
+  prodAbrirChecklist(pedidoId);
+  if(typeof prodRenderAtivo==='function')prodRenderAtivo();
+}
 async function prodItemToggle(pedidoId,itemId,checked){
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
@@ -20218,20 +20247,19 @@ function renderProdLista(){
   body.innerHTML=`<div style="overflow-x:auto"><table class="tbl-acoes-fixa" style="width:100%;border-collapse:collapse;font-size:.82rem">
     <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
       <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">JOB</th>
-      <th style="padding:8px 10px">Prazo Produção</th><th style="padding:8px 10px">Início sugerido</th><th style="padding:8px 10px">Checklist</th><th style="padding:8px 10px">Status</th><th style="padding:8px 10px"></th>
+      <th style="padding:8px 10px">Prazo Produção</th><th style="padding:8px 10px">Prazo Final</th><th style="padding:8px 10px">Checklist</th><th style="padding:8px 10px">Status</th><th style="padding:8px 10px"></th>
     </tr></thead><tbody>
     ${infos.map(x=>{
-      const{p,etapa,feitos,totalItens,statusPedido,inicioSugeridoIso,estourou}=x;
+      const{p,etapa,feitos,totalItens,statusPedido}=x;
       const corLinha=statusPedido==='atrasado'?'color:#dc2626':'';
       const pct=Math.round(feitos/totalItens*100);
       const acaoLbl=statusPedido==='concluido'?'👁️ Ver Checklist':feitos>0?'🔄 Continuar':'🚀 Iniciar Produção';
-      const inicioTxt=inicioSugeridoIso?(fmtD(inicioSugeridoIso)+(estourou?' ⚠️':'')):'—';
       return `<tr onclick="prodIniciarOuAbrirChecklist('${p.id}')" style="border-bottom:1px solid var(--border-lt);cursor:pointer;${corLinha}">
         <td style="padding:8px 10px;font-weight:700;${corLinha}">${p.os||'—'}</td>
         <td style="padding:8px 10px;${corLinha}" title="${(p.cliente||'').replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.cliente||'—'}</div></td>
         <td style="padding:8px 10px;${corLinha}">${p.job||'—'}</td>
         <td style="padding:8px 10px;${corLinha}">${fmtD(etapa.iso)}</td>
-        <td style="padding:8px 10px;${estourou?'color:#b45309;font-weight:700':''}">${inicioTxt}</td>
+        <td style="padding:8px 10px;${corLinha}">${p.prazo?fmtD(p.prazo):'—'}</td>
         <td style="padding:8px 10px"><div style="background:#e2e8f0;border-radius:20px;height:7px;width:90px;overflow:hidden"><div style="background:${statusPedido==='atrasado'?'#dc2626':'#00bac7'};height:100%;width:${pct}%"></div></div><div style="font-size:.68rem;color:var(--ink4);margin-top:2px">${feitos.toFixed(1).replace(/\.0$/,'')}/${totalItens}</div></td>
         <td style="padding:8px 10px;font-weight:700;color:${_projStatusCor(statusPedido)}">${_projStatusLabel(statusPedido)}</td>
         <td style="padding:8px 10px;text-align:right"><button onclick="event.stopPropagation();prodIniciarOuAbrirChecklist('${p.id}')" class="dash-btn-conf" style="background:#0891b2;white-space:nowrap">${acaoLbl}</button></td>
@@ -20300,11 +20328,10 @@ async function prodExportarListaPDF(){
   }
   const curY=drawHeader();
   const statusTxtMap={nao_iniciado:'Não iniciado',andamento:'Em andamento',atrasado:'Atrasado',concluido:'Concluído'};
-  const head=['OS','Cliente','JOB','Prazo Produção','Início sugerido','Checklist','Status'];
+  const head=['OS','Cliente','JOB','Prazo Produção','Prazo Final','Checklist','Status'];
   const bodyPdf=infos.map(x=>{
-    const{p,etapa,feitos,totalItens,statusPedido,inicioSugeridoIso,estourou}=x;
-    const inicioTxt=inicioSugeridoIso?(fmtD(inicioSugeridoIso)+(estourou?' (atenção)':'')):'—';
-    return[p.os||'—',p.cliente||'—',p.job||'—',fmtD(etapa.iso),inicioTxt,feitos.toFixed(1).replace(/\.0$/,'')+'/'+totalItens,statusTxtMap[statusPedido]||statusPedido];
+    const{p,etapa,feitos,totalItens,statusPedido}=x;
+    return[p.os||'—',p.cliente||'—',p.job||'—',fmtD(etapa.iso),p.prazo?fmtD(p.prazo):'—',feitos.toFixed(1).replace(/\.0$/,'')+'/'+totalItens,statusTxtMap[statusPedido]||statusPedido];
   });
   doc.autoTable({
     startY:curY,head:[head],body:bodyPdf,theme:'grid',
@@ -21346,8 +21373,14 @@ function renderListaPedidosKanban(){
     const itens=(porEtapa[def.key]||[]).sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso));
     const cor=_lpCorEtapa(def.key);
     return `<div style="flex:0 0 240px;background:#f8fafc;border-radius:12px;border:1px solid var(--border-lt);display:flex;flex-direction:column;max-height:70vh">
-      <div style="padding:10px 12px;border-bottom:2px solid ${cor};font-size:.75rem;font-weight:800;color:${cor};display:flex;justify-content:space-between;align-items:center">
-        <span>${def.label}</span><span style="background:${cor};color:#fff;border-radius:20px;padding:1px 8px;font-size:.68rem">${itens.length}</span>
+      <div style="padding:10px 12px;border-bottom:2px solid ${cor};font-size:.75rem;font-weight:800;color:${cor}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>${def.label}</span><span style="background:${cor};color:#fff;border-radius:20px;padding:1px 8px;font-size:.68rem">${itens.length}</span>
+        </div>
+        <div style="display:flex;gap:5px;margin-top:5px">
+          <button type="button" onclick="event.stopPropagation();lpExportarEtapaExcel('${def.key}')" title="Exportar só esta etapa (Excel)" style="background:none;border:1px solid ${cor};border-radius:6px;padding:1px 6px;font-size:.6rem;font-weight:700;color:${cor};cursor:pointer;opacity:.75" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.75">📊 Excel</button>
+          <button type="button" onclick="event.stopPropagation();lpExportarEtapaPDF('${def.key}')" title="Exportar só esta etapa (PDF)" style="background:none;border:1px solid ${cor};border-radius:6px;padding:1px 6px;font-size:.6rem;font-weight:700;color:${cor};cursor:pointer;opacity:.75" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.75">📄 PDF</button>
+        </div>
       </div>
       <div style="padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px">
         ${itens.length?itens.map(it=>{
@@ -21672,6 +21705,86 @@ async function lpExportarListaPDF(){
 // Kanban exporta AGRUPADO por etapa/coluna (não por pedido) — cada linha é um evento
 // (pedido+etapa), igual o que aparece nos cards. Excel: 1 planilha só, coluna "Etapa" pra
 // filtrar/agrupar; PDF: uma seção por etapa (cor da coluna), igual escolhido pelo usuário.
+// Exportação de UMA ETAPA só do Kanban (2026-08-26, a pedido do usuário — ver botões
+// "📊 Excel"/"📄 PDF" no cabeçalho de cada coluna em renderListaPedidosKanban). Mesmo cabeçalho/
+// rodapé/marca de lpExportarKanbanPDF, só que sem o loop por etapa — desenha 1 tabela só.
+function lpExportarEtapaExcel(key){
+  const eventos=_lpEventosFiltrados().filter(ev=>ev.etapa.key===key);
+  if(!eventos.length){toast('Nenhum pedido nesta etapa com os filtros atuais para exportar','terr');return;}
+  const label=eventos[0].etapa.label;
+  const ordenados=eventos.slice().sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso));
+  const headers=['OS','Cliente','JOB','Prazo desta Etapa','Status'];
+  const body=ordenados.map(ev=>[
+    ev.p.os||'',ev.p.cliente||'',ev.p.job||'',fmtD(ev.etapa.iso),
+    ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada'
+  ]);
+  const slug=label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  _csvDownload(`kanban_${slug}_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+async function lpExportarEtapaPDF(key){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const eventos=_lpEventosFiltrados().filter(ev=>ev.etapa.key===key);
+  if(!eventos.length){toast('Nenhum pedido nesta etapa com os filtros atuais para gerar o PDF.','terr');return;}
+  const label=eventos[0].etapa.label;
+  const itensOrdenados=eventos.slice().sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso));
+  const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const filtrosLbl=_lpFiltrosResumoTexto();
+  const drawnFooterPages=new Set();
+  function drawHeader(){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+    doc.text(('LISTA DE PEDIDOS — '+label).toUpperCase(),pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    const lines=doc.splitTextToSize('Filtros: '+filtrosLbl,pageW-28);
+    doc.text(lines,pageW-14,26.5,{align:'right'});
+    const lineY=27.5+(lines.length-1)*3.2;
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,lineY,pageW-14,lineY);
+    doc.setFont('helvetica','normal');
+    return lineY+6;
+  }
+  function drawFooter(pageNum){
+    if(drawnFooterPages.has(pageNum))return;
+    drawnFooterPages.add(pageNum);
+    doc.setPage(pageNum);
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
+  }
+  const curY=drawHeader();
+  const head=[['OS','Cliente','JOB','Prazo desta Etapa','Status']];
+  const bodyPdf=itensOrdenados.map(ev=>[
+    ev.p.os||'—',ev.p.cliente||'—',ev.p.job||'—',fmtD(ev.etapa.iso),
+    ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada'
+  ]);
+  doc.autoTable({
+    startY:curY,head,body:bodyPdf,theme:'grid',
+    styles:{fontSize:7,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.8},
+    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:7.5},
+    alternateRowStyles:{fillColor:LIGHT},
+    didParseCell:(data)=>{
+      if(data.section==='body'&&data.column.index===4){
+        const st=itensOrdenados[data.row.index]?.statusEtapa;
+        data.cell.styles.fontStyle='bold';
+        data.cell.styles.textColor=st==='ok'?[22,163,74]:st==='atrasado'?[220,38,38]:[100,116,139];
+      }
+    },
+    margin:{top:32,left:14,right:14,bottom:20},
+    didDrawPage:()=>{drawFooter(doc.internal.getNumberOfPages());}
+  });
+  drawFooter(doc.internal.getNumberOfPages());
+  const slug=label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  doc.save(`kanban_${slug}_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('PDF gerado!','tok');
+}
 function lpExportarKanbanExcel(){
   const eventos=_lpEventosFiltrados();
   if(!eventos.length){toast('Nenhuma etapa encontrada com esses filtros para exportar','terr');return;}
