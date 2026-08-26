@@ -9,7 +9,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-26.5';</script>
+<script>const APP_BUILD_VERSION='2026-08-26.7';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -2728,15 +2728,18 @@ select.fc{cursor:pointer}
 </div>
 </div>
 
-<!-- DETALHE DO CARD (empresa) — linha do tempo + tarefas -->
-<div class="mov" id="mo-prosp-card" onclick="cio(event,'mo-prosp-card')">
+<!-- DETALHE DO CARD (empresa) — linha do tempo + tarefas. NÃO fecha ao clicar fora
+     (2026-08-26, a pedido do usuário — mesmo padrão do mo-ev/mo-em de 2026-08-04): sem
+     onclick="cio(...)" aqui de propósito. Fecha só pelo X ou Esc, ver o
+     document.addEventListener('keydown',...) logo depois de cio()/openM()/closeM(). -->
+<div class="mov" id="mo-prosp-card">
 <div class="mvmod" style="width:660px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px;gap:10px;flex-shrink:0">
     <div style="min-width:0">
       <h3 style="margin-bottom:3px" id="prosp-card-nome">—</h3>
       <div id="prosp-card-badges" style="display:flex;gap:6px;flex-wrap:wrap"></div>
     </div>
-    <button onclick="closeM('mo-prosp-card')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
+    <button onclick="prospTentarFecharCard()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
   </div>
   <div style="overflow-y:auto;flex:1;padding-right:4px;margin-top:10px" id="prosp-card-body"></div>
 </div>
@@ -2796,6 +2799,7 @@ select.fc{cursor:pointer}
   </div>
   <input type="hidden" id="prosp-atividade-empresa-id">
   <input type="hidden" id="prosp-atividade-tipo">
+  <input type="hidden" id="prosp-atividade-status">
   <div class="fg"><label>Com quem foi</label>
     <select class="fc" id="prosp-atividade-decisor" onchange="_prospAtividadeToggleOutraPessoa()">
       <option value="">Selecione um decisor cadastrado...</option>
@@ -2805,8 +2809,59 @@ select.fc{cursor:pointer}
     <label>Nome da pessoa</label>
     <input class="fc" id="prosp-atividade-outra-nome" placeholder="Nome de quem não está cadastrado como decisor">
   </div>
-  <div class="fg"><label>Relato <span class="r">*</span></label><textarea class="fc" id="prosp-atividade-relato" rows="3" placeholder="Com quem falou e o que foi conversado..." style="text-transform:none"></textarea></div>
+  <div class="fg" id="prosp-atividade-status-wrap" style="display:none">
+    <label>Atendeu?</label>
+    <div style="display:flex;gap:8px">
+      <button type="button" id="prosp-atividade-btn-atendeu" onclick="_prospAtividadeSetStatus('atendeu')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer">✅ Atendeu</button>
+      <button type="button" id="prosp-atividade-btn-nao-atendeu" onclick="_prospAtividadeSetStatus('nao-atendeu')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer">❌ Não Atendeu</button>
+    </div>
+  </div>
+  <div class="fg" id="prosp-atividade-relato-wrap"><label>Relato <span class="r">*</span></label><textarea class="fc" id="prosp-atividade-relato" rows="3" placeholder="Com quem falou e o que foi conversado..." style="text-transform:none"></textarea></div>
   <button onclick="prospSalvarAtividade()" style="width:100%;background:#00bac7;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Salvar Atividade</button>
+</div>
+</div>
+
+<!-- ADICIONAR DECISOR RÁPIDO (2026-08-26, a pedido do usuário: "ter um botao ADICIONAR
+     DECISOR, pra nao precisar a pessoa editar a empresa inteira pra add um decisor").
+     Mesmos campos de prospAddDecisorRow()/_prospDecisoresDoForm() (nome, cargo obrigatório,
+     telefone, email, linkedin), só que direto num decisor só, sem abrir o form inteiro da
+     empresa. Ver prospAbrirAdicionarDecisor()/prospSalvarDecisorRapido(). -->
+<div class="mov" id="mo-prosp-decisor-add" onclick="cio(event,'mo-prosp-decisor-add')">
+<div class="mvmod" style="width:420px;max-width:96vw">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <h3 style="margin-bottom:0">➕ Adicionar Decisor</h3>
+    <button onclick="closeM('mo-prosp-decisor-add')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <input type="hidden" id="prosp-decisor-add-empresa-id">
+  <div class="fg"><label>Nome <span class="r">*</span></label><input class="fc" id="prosp-decisor-add-nome" placeholder="Nome do decisor/comprador"></div>
+  <div class="fg"><label>Cargo <span class="r">*</span></label><input class="fc" id="prosp-decisor-add-cargo" placeholder="Ex.: Comprador, Gerente, Sócio..."></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <div class="fg"><label>Telefone</label><input class="fc no-upper" id="prosp-decisor-add-tel"></div>
+    <div class="fg"><label>E-mail</label><input class="fc no-upper" id="prosp-decisor-add-email" style="text-transform:none"></div>
+  </div>
+  <div class="fg"><label>LinkedIn</label><input class="fc no-upper" id="prosp-decisor-add-linkedin" placeholder="Link do perfil no LinkedIn" style="text-transform:none"></div>
+  <button onclick="prospSalvarDecisorRapido()" style="width:100%;background:#00bac7;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Adicionar Decisor</button>
+</div>
+</div>
+
+<!-- AVISO "SEM TAREFA FUTURA" ao fechar o card (2026-08-26, a pedido do usuário: "quando eu
+     abrir o card de uma empresa e fechar ja quero que o sistema analise se esse card está
+     sem uma tarefa futura pra ser executada... ele nao deixa eu fechar sem sugerir que eu
+     crie uma tarefa para o negocio nao ficar parado"). Ver
+     prospTentarFecharCard()/_prospTemTarefaFutura()/prospCriarTarefaDoAviso()/
+     prospFecharCardMesmoAssim() logo depois de prospAbrirCard(). -->
+<div class="mov" id="mo-prosp-sem-tarefa-aviso" onclick="cio(event,'mo-prosp-sem-tarefa-aviso')">
+<div class="mvmod" style="width:400px;max-width:96vw">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <h3 style="margin-bottom:0">⚠️ Sem tarefa agendada</h3>
+    <button onclick="closeM('mo-prosp-sem-tarefa-aviso')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <input type="hidden" id="prosp-sem-tarefa-empresa-id">
+  <div style="font-size:.82rem;color:var(--ink3);margin-bottom:16px;line-height:1.5">Essa empresa não tem nenhuma tarefa futura agendada — sem uma próxima ação marcada, o contato corre o risco de ficar parado. Quer criar uma tarefa agora?</div>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <button onclick="prospCriarTarefaDoAviso()" style="width:100%;background:var(--brand);color:#fff;border:none;border-radius:9px;padding:11px;font-size:.82rem;font-weight:700;cursor:pointer">🗓️ Criar Tarefa Agora</button>
+    <button onclick="prospFecharCardMesmoAssim()" style="width:100%;background:#f1f5f9;color:#475569;border:none;border-radius:9px;padding:11px;font-size:.82rem;font-weight:700;cursor:pointer">Fechar mesmo assim</button>
+  </div>
 </div>
 </div>
 
@@ -7635,6 +7690,19 @@ document.addEventListener('keydown',function(e){
   if(ev&&ev.classList.contains('open')){closeM('mo-ev');return;}
   const em=document.getElementById('mo-em');
   if(em&&em.classList.contains('open'))closeEM();
+});
+// ESC fecha o card de empresa da Prospecção (mo-prosp-card) — 2026-08-26, a pedido do
+// usuário ("nao deve fechar caso eu clique fora do card, so vai fechar se eu clicar em
+// fechar ou apertar esc"). Mesmo padrão do mo-ev/mo-em acima. Se tiver outro modal .mov.open
+// por cima (tarefa/atividade/adicionar decisor/editar empresa), deixa ele fechar primeiro em
+// vez de fechar os dois de uma vez.
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Escape')return;
+  const mo=document.getElementById('mo-prosp-card');
+  if(!mo||!mo.classList.contains('open'))return;
+  const outros=[...document.querySelectorAll('.mov.open')].filter(m=>m.id!=='mo-prosp-card');
+  if(outros.length)return;
+  prospTentarFecharCard();
 });
 
 function saveSt(){
@@ -32211,6 +32279,71 @@ function prospAbrirCard(id){
   _prospRenderCard(e);
   openM('mo-prosp-card');
 }
+// Aviso "sem tarefa futura" ao tentar fechar o card (2026-08-26, a pedido do usuário: "quando
+// eu abrir o card de uma empresa e fechar ja quero que o sistema analise se esse card está
+// sem uma tarefa futura pra ser executada... entao neste caso ele nao deixa eu fechar sem
+// sugerir que eu crie uma tarefa para o negocio nao ficar parado"). "Futura" aqui inclui hoje
+// (t.data>=hojeIso) — o que importa é que ainda não passou e não foi concluída, mesmo padrão
+// de "atrasada" usado em tarefasHtml logo abaixo em _prospRenderCard. Só entra em ação pelo X
+// e pelo Esc do card (ver onclick do botão ✕ e o document.addEventListener('keydown',...)
+// mais acima) — fechar o card por causa de excluir/editar a empresa (prospExcluirEmpresa,
+// prospAbrirEditarEmpresa) continua chamando closeM('mo-prosp-card') direto, sem esse aviso.
+function _prospTemTarefaFutura(e){
+  const hojeIso=new Date().toISOString().slice(0,10);
+  return(e.tarefas||[]).some(t=>!t.feita&&t.data&&t.data>=hojeIso);
+}
+function prospTentarFecharCard(){
+  const id=_prospCardAtualId;
+  const e=id&&prospEmpresas.find(x=>x.id===id);
+  if(!e||_prospTemTarefaFutura(e)){closeM('mo-prosp-card');return;}
+  document.getElementById('prosp-sem-tarefa-empresa-id').value=id;
+  openM('mo-prosp-sem-tarefa-aviso');
+}
+function prospFecharCardMesmoAssim(){
+  closeM('mo-prosp-sem-tarefa-aviso');
+  closeM('mo-prosp-card');
+}
+function prospCriarTarefaDoAviso(){
+  const id=document.getElementById('prosp-sem-tarefa-empresa-id').value;
+  closeM('mo-prosp-sem-tarefa-aviso');
+  prospAbrirNovaTarefa(id);
+}
+// Botão discreto de copiar telefone/e-mail dos decisores pro clipboard (2026-08-26, a
+// pedido do usuário — ver decisoresHtml logo abaixo em _prospRenderCard). Guarda o valor em
+// data-copy (não no onclick) pra não ter que escapar aspas/apóstrofo de telefone/e-mail.
+// Fallback com textarea+execCommand pro caso (raro) de navigator.clipboard não estar
+// disponível (contexto não-seguro/não-https, navegador antigo etc.).
+function _prospBtnCopiar(valor,titulo){
+  if(!valor)return'';
+  return `<button type="button" onclick="event.stopPropagation();_prospCopiarValor(this)" data-copy="${valor.replace(/"/g,'&quot;')}" title="${titulo}" aria-label="${titulo}" style="background:none;border:none;cursor:pointer;color:var(--ink4);opacity:.55;font-size:.72rem;padding:0 2px;line-height:1;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📋</button>`;
+}
+function _prospContatoComCopiar(d){
+  const partes=[];
+  if(d.telefone)partes.push(`<span style="display:inline-flex;align-items:center;gap:2px">${d.telefone}${_prospBtnCopiar(d.telefone,'Copiar telefone')}</span>`);
+  if(d.email)partes.push(`<span style="display:inline-flex;align-items:center;gap:2px">${d.email}${_prospBtnCopiar(d.email,'Copiar e-mail')}</span>`);
+  return partes.length?partes.join(' &nbsp;·&nbsp; '):'—';
+}
+function _prospCopiarValor(btn){
+  const valor=(btn&&btn.dataset&&btn.dataset.copy)||'';
+  if(!valor)return;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(valor).then(()=>toast('Copiado!','tok')).catch(()=>_prospCopiarFallback(valor));
+  }else{
+    _prospCopiarFallback(valor);
+  }
+}
+function _prospCopiarFallback(valor){
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=valor;
+    ta.style.position='fixed';ta.style.opacity='0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('Copiado!','tok');
+  }catch(err){toast('Não foi possível copiar','terr');}
+}
 function _prospRenderCard(e){
   const etapas=_prospEtapas();
   const etapaAtual=etapas.find(x=>x.key===e.etapa)||etapas[0];
@@ -32234,7 +32367,7 @@ function _prospRenderCard(e){
         ${d.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700">${d.cargo}</span>`:''}
         ${d.linkedin?`<a href="${d.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700;text-decoration:none">🔗 LinkedIn ↗</a>`:''}
       </div>
-      <div style="color:var(--ink3);margin-top:2px">${[d.telefone,d.email].filter(Boolean).join(' · ')||'—'}</div>
+      <div style="color:var(--ink3);margin-top:2px">${_prospContatoComCopiar(d)}</div>
     </div>`).join(''):'<div style="font-size:.78rem;color:var(--ink4)">Nenhum decisor cadastrado ainda.</div>';
 
   const timeline=(e.timeline||[]).slice().sort((a,b)=>(b.em||'').localeCompare(a.em||''));
@@ -32284,12 +32417,15 @@ function _prospRenderCard(e){
     </div>
     <div class="fg"><label>Regiões de interesse</label>${regioesHtml}</div>
     <div class="fg">
-      <label>Decisores / Compradores</label>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+        <label style="margin-bottom:0">Decisores / Compradores</label>
+        <button type="button" onclick="prospAbrirAdicionarDecisor('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">+ Adicionar Decisor</button>
+      </div>
       <div style="display:flex;flex-direction:column;gap:6px">${decisoresHtml}</div>
     </div>
-    <div style="display:flex;gap:8px;margin:16px 0">
-      <button onclick="prospAbrirEditarEmpresa('${e.id}')" style="flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:9px;padding:10px;font-size:.8rem;font-weight:700;cursor:pointer">✏️ Editar Empresa</button>
-      ${_getUserCat().isAdm?`<button onclick="prospExcluirEmpresa('${e.id}')" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:10px 14px;font-size:.8rem;font-weight:700;cursor:pointer">🗑️ Excluir</button>`:''}
+    <div style="display:flex;flex-direction:column;gap:8px;margin:16px 0">
+      <button onclick="prospAbrirEditarEmpresa('${e.id}')" style="width:100%;background:#f1f5f9;color:#475569;border:none;border-radius:9px;padding:10px;font-size:.8rem;font-weight:700;cursor:pointer">✏️ EDITAR EMPRESA</button>
+      ${_getUserCat().isAdm?`<button onclick="prospExcluirEmpresa('${e.id}')" style="width:100%;background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:10px;font-size:.8rem;font-weight:700;cursor:pointer">🗑️ EXCLUIR EMPRESA</button>`:''}
     </div>
     <div style="border-top:1px solid var(--border-lt);margin:16px 0;padding-top:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -32341,7 +32477,52 @@ async function prospAdicionarComentario(empresaId){
 // cadastrada, que foi só uma ponte... aparece no histórico com data e horário"). Reaproveita
 // a mesma timeline de e.timeline (sem "sistema:true" — é relato manual, mesmo peso de um
 // comentário normal), só que com o ícone/rótulo do tipo de atividade prefixado no texto.
+// ── ADICIONAR DECISOR RÁPIDO (2026-08-26, a pedido do usuário: "ter um botao ADICIONAR
+// DECISOR, pra nao precisar a pessoa editar a empresa inteira pra add um decisor"). Reusa
+// _prospNormalizarLinkedin() (mesma normalização de link usada no form completo) e
+// _prospDecisorDadosTexto() (já criada pro diff de _prospLogDiffDecisores) pra manter o
+// mesmo texto de histórico "➕ Decisor adicionado: ..." usado quando o decisor é incluído
+// pela tela de editar empresa.
+function prospAbrirAdicionarDecisor(empresaId){
+  const e=prospEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  document.getElementById('prosp-decisor-add-empresa-id').value=empresaId;
+  document.getElementById('prosp-decisor-add-nome').value='';
+  document.getElementById('prosp-decisor-add-cargo').value='';
+  document.getElementById('prosp-decisor-add-tel').value='';
+  document.getElementById('prosp-decisor-add-email').value='';
+  document.getElementById('prosp-decisor-add-linkedin').value='';
+  openM('mo-prosp-decisor-add');
+}
+async function prospSalvarDecisorRapido(){
+  const empresaId=document.getElementById('prosp-decisor-add-empresa-id').value;
+  const e=prospEmpresas.find(x=>x.id===empresaId);
+  if(!e){toast('Empresa não encontrada','terr');return;}
+  const nome=(document.getElementById('prosp-decisor-add-nome').value||'').trim();
+  const cargo=(document.getElementById('prosp-decisor-add-cargo').value||'').trim();
+  if(!nome){toast('Preencha o nome do decisor','terr');return;}
+  if(!cargo){toast('Informe o cargo do decisor','terr');return;}
+  const d={
+    nome,cargo,
+    telefone:(document.getElementById('prosp-decisor-add-tel').value||'').trim(),
+    email:(document.getElementById('prosp-decisor-add-email').value||'').trim(),
+    linkedin:_prospNormalizarLinkedin(document.getElementById('prosp-decisor-add-linkedin').value)
+  };
+  if(!e.decisores)e.decisores=[];
+  e.decisores.push(d);
+  if(!e.timeline)e.timeline=[];
+  const dados=_prospDecisorDadosTexto(d);
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'➕ Decisor adicionado: '+d.nome+(dados?' — '+dados:''),autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString(),sistema:true});
+  e.atualizadoEm=new Date().toISOString();
+  try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
+  closeM('mo-prosp-decisor-add');
+  toast('Decisor adicionado!','tok');
+  if(_prospCardAtualId===empresaId)_prospRenderCard(e);
+  if(_prospTabAtiva==='kanban')renderProspKanban();
+  else if(_prospTabAtiva==='empresas')_prospRenderContatosSubtab();
+}
 const _PROSP_TIPO_ATIVIDADE={ligacao:{icone:'📞',label:'Ligação'},mensagem:{icone:'💬',label:'Mensagem'},email:{icone:'✉️',label:'E-mail'}};
+let _prospAtividadeStatusAtual='';
 function prospAbrirModalAtividade(tipo,empresaId){
   const e=prospEmpresas.find(x=>x.id===empresaId);
   if(!e)return;
@@ -32355,8 +32536,27 @@ function prospAbrirModalAtividade(tipo,empresaId){
     +'<option value="__outra__">➕ Outra pessoa (não cadastrada)</option>';
   document.getElementById('prosp-atividade-outra-nome').value='';
   document.getElementById('prosp-atividade-relato').value='';
+  document.getElementById('prosp-atividade-status-wrap').style.display=tipo==='ligacao'?'':'none';
+  _prospAtividadeSetStatus('');
   _prospAtividadeToggleOutraPessoa();
   openM('mo-prosp-atividade');
+}
+// Botões "Atendeu"/"Não Atendeu" (2026-08-26, a pedido do usuário: "ja ter um botao ali pra
+// clicar ATENDEU e outro NÃO ATENDEU, se atendeu escrever o que foi conversado, se nao
+// atendeu dai nao precisa o usuario escrever nada mas vai registrar a atividade no
+// historico") — só aparece pra tipo 'ligacao' (não faz sentido "atender" uma mensagem/
+// e-mail, ver o display:none condicional em prospAbrirModalAtividade acima). Marcando "Não
+// Atendeu" o relato vira opcional (some da tela); "Atendeu" volta a exigir relato, igual a
+// como já funcionava antes pra todos os tipos.
+function _prospAtividadeSetStatus(status){
+  _prospAtividadeStatusAtual=status;
+  document.getElementById('prosp-atividade-status').value=status;
+  const btnA=document.getElementById('prosp-atividade-btn-atendeu');
+  const btnN=document.getElementById('prosp-atividade-btn-nao-atendeu');
+  if(btnA){btnA.style.background=status==='atendeu'?'#16a34a':'#f1f5f9';btnA.style.color=status==='atendeu'?'#fff':'#334155';}
+  if(btnN){btnN.style.background=status==='nao-atendeu'?'#dc2626':'#f1f5f9';btnN.style.color=status==='nao-atendeu'?'#fff':'#334155';}
+  const relatoWrap=document.getElementById('prosp-atividade-relato-wrap');
+  if(relatoWrap)relatoWrap.style.display=status==='nao-atendeu'?'none':'';
 }
 function _prospAtividadeToggleOutraPessoa(){
   const sel=document.getElementById('prosp-atividade-decisor');
@@ -32375,9 +32575,14 @@ async function prospSalvarAtividade(){
   const contato=selVal==='__outra__'?outraNome:selVal;
   const relato=(document.getElementById('prosp-atividade-relato').value||'').trim();
   if(selVal==='__outra__'&&!outraNome){toast('Informe o nome da pessoa','terr');return;}
-  if(!relato){toast('Escreva um breve relato da atividade','terr');return;}
+  const ehLigacao=tipo==='ligacao';
+  const naoAtendeu=ehLigacao&&_prospAtividadeStatusAtual==='nao-atendeu';
+  if(ehLigacao&&!_prospAtividadeStatusAtual){toast('Marque se atendeu ou não','terr');return;}
+  if(!naoAtendeu&&!relato){toast('Escreva um breve relato da atividade','terr');return;}
   if(!e.timeline)e.timeline=[];
-  const texto=info.icone+' '+info.label+' com '+(contato||'—')+': '+relato;
+  const texto=naoAtendeu
+    ?info.icone+' Ligação com '+(contato||'—')+': não atendeu'
+    :info.icone+' '+info.label+' com '+(contato||'—')+(ehLigacao?' (atendeu)':'')+': '+relato;
   e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString()});
   e.atualizadoEm=new Date().toISOString();
   try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
