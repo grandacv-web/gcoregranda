@@ -9,7 +9,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-26.2';</script>
+<script>const APP_BUILD_VERSION='2026-08-26.3';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -497,6 +497,8 @@ select.fc{cursor:pointer}
 .login-btn{width:100%;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,var(--brand),#0284c7);color:#fff;font-size:.9rem;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s;box-shadow:0 4px 14px rgba(0,186,199,.4);margin-top:4px}
 .login-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,186,199,.5)}
 .login-err{color:var(--danger);font-size:.78rem;font-weight:600;text-align:center;margin-top:12px;display:none}
+.login-loading-spinner{width:40px;height:40px;border:3px solid rgba(255,255,255,.25);border-top-color:#00bac7;border-radius:50%;margin:0 auto;animation:login-loading-spin .8s linear infinite}
+@keyframes login-loading-spin{to{transform:rotate(360deg)}}
 /* ── TOAST ── */
 .toast{position:fixed;bottom:24px;right:24px;z-index:999;padding:13px 22px;border-radius:12px;font-size:.82rem;font-weight:600;opacity:0;transition:all .3s;pointer-events:none;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.2);backdrop-filter:blur(8px);display:flex;align-items:center;gap:8px}
 .toast.show{opacity:1;transform:translateY(-2px)}
@@ -507,7 +509,19 @@ select.fc{cursor:pointer}
 
 <!-- LOGIN SCREEN -->
 <div id="login-screen">
-  <div class="login-box">
+  <!-- Loading neutro enquanto verifica se tem sessão ativa (2026-08-26, a pedido do usuário —
+       "travadona" no F5: antes o login-screen sumia assim que o Firebase confirmava o login,
+       revelando a tela por trás ainda vazia/sem menu enquanto os dados carregavam do
+       Firestore e a última página era restaurada — por isso parecia travar/piscar. Agora o
+       login-screen só some de vez quando TUDO estiver pronto (ver initAuth() mais abaixo,
+       .finally() no load()) — e mostra este spinner neutro em vez do formulário de login
+       enquanto ainda não se sabe se a sessão é válida, pra quem já tá logado nunca ver os
+       campos de e-mail/senha piscarem à toa num F5. -->
+  <div id="login-loading" style="text-align:center;color:#fff">
+    <div class="login-loading-spinner"></div>
+    <div style="margin-top:16px;font-size:.85rem;font-weight:600;opacity:.85">Carregando...</div>
+  </div>
+  <div class="login-box" style="display:none">
     <div class="login-logo"><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAdUAAACMCAMAAAAdkcNOAAAAwFBMVEXx9fcBFk/+RWqnqK3p6ezS1dqztbjFyc+vt8UADUkPJFrd4edmdJb+PWQ4SnbW2+K8ws79V3gnOmr8Z4VaaY2Ml7D1xtH2uMb3p7hKWoL7d5L4l6ukrsKZo7n009zz3ON4haJCU30ZLWEdMWOBjan6g5z5i6I+UHpygJ79YH/2sL9gbpL3rsAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABvFYw0AAAAQHRSTlP///////////////////////////////////////////////////////////8AAAAAAAAAAAAAAAAAAAAAAAAAFPfcwQAAFC1JREFUeNrtXWmborgWdgmETUAEQdxQq+zumfn/v++yQ/YES8u6nfNhnmklocybs5+czGaaNGnSpEmTpncgcD5t02xfUrYFejn+HwDd7vPNer3oaJPqRfnZdN5m+YBnR3u9MD+YS7f7zWK1WpCU6cX5qZiWXEqFtKT1Sa/PjxS9WcmmCybtca7WJtQP4NP9mofpYpFjz6+1CfX+snezENAGYKiuFvlWr9wb0zZfLJRRrcXyWS/e+wrflRhVQgJrT/a9GVUC08XijtlWDaqrxV5bTW9I6VoK1AWmQ7eDaNY+z/tJ34Uc4cGl0bi1lsJvBuqnHKMuclzOImI701L4nQIPEip1tVot1oTyPG90mPhN6bThglqi+WeT5/k921K0MSagNbf+BFDXmxLM0xmURBu7x4dqWN9E/LLDSevP9MRF6aRzdW9qKLF06jrPhBGj/Urn6t4S1DsLU4lkDIVVS9IOzrcTw0/9TCX0I8MfWutg/zdTSo/g/yNl82SsBMC0WD9wAwNCaASuxuUh2lJF6P38wOCa01UNYRAcvYsfRbfr9XaLIn9XWO4UYxqAAB4/vJKKxDLkpijHWEmhNubnWUqygT+O7axkMQF49HxnjtP18vtgKP2awPqIxxM50a5YGkDw7t+7CBlz8ZKQMwZ6PPpdJEuL+UqQxJ48/evBaahmFFA3kloRcL1c6Ui/a3kkoj2ynhXI7o0wiWhTOJwpAiumv3u3ZO6ng838a+e2XX/pxElIfafrcwaTs82taeEHigjNz49zKpmF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" alt="GCORE - Sistema Granda"></div>
     <div class="login-title">GCORE - Sistema Granda</div>
     <div class="login-sub">Faça login para continuar</div>
@@ -10540,6 +10554,11 @@ async function doLogout(){
   try{await window._fbSignOut();}catch(e){}
   const ls=document.getElementById('login-screen');
   if(ls)ls.style.display='flex';
+  // Garante o formulário de login (não o spinner de carregamento) — defensivo, o listener de
+  // _fbOnAuth (ver initAuth()) já faz essa troca sozinho quando o Firebase confirma o logout.
+  const ll=document.getElementById('login-loading'),lb=document.querySelector('#login-screen .login-box');
+  if(ll)ll.style.display='none';
+  if(lb)lb.style.display='';
 }
 
 // CONFIGURAÇÕES
@@ -10834,7 +10853,9 @@ function initAuth(tries){
       const ls=document.getElementById('login-screen');
       if(user){
         usuarioLogado=user;
-        if(ls)ls.style.display='none';
+        // NÃO esconde o login-screen ainda — ver comentário no HTML dele. Só some quando
+        // load()+restauração da última página terminarem (.finally() logo abaixo), pra nunca
+        // revelar a tela por trás ainda vazia/sem menu (era isso que parecia "travar" no F5).
         setupRealtimeSync();
         setupContasPagarSync();
         setupContasReceberManualSync();
@@ -10917,10 +10938,17 @@ function initAuth(tries){
           }
         }).catch(()=>{
           usuarioLogado.nomeExibicao=user.email.split('@')[0].replace(/[._]/g,' ').toUpperCase();
+        }).finally(()=>{
+          if(ls)ls.style.display='none';
         });
       } else {
         usuarioLogado=null;
         if(ls)ls.style.display='flex';
+        // Troca do spinner neutro pro formulário de login de verdade — só chega aqui quando
+        // dá pra confirmar que NÃO tem sessão ativa (ver comentário no HTML do login-screen).
+        const ll=document.getElementById('login-loading'),lb=document.querySelector('#login-screen .login-box');
+        if(ll)ll.style.display='none';
+        if(lb)lb.style.display='';
       }
     });
   } else if((tries||0)<50){
