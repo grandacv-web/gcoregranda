@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-26.22';</script>
+<script>const APP_BUILD_VERSION='2026-08-26.23';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -3405,7 +3405,7 @@ select.fc{cursor:pointer}
   </div>
   <div id="mp-produto-info" style="font-size:.84rem;font-weight:700;color:var(--ink2);margin-bottom:8px"></div>
   <div style="font-size:.78rem;color:var(--ink4);margin-bottom:12px;padding:8px 12px;background:#f8fafc;border-radius:8px;border:1px solid var(--border)">
-    Envie uma planilha (.xlsx) com as matérias-primas que compõem este produto. Colunas aceitas: <strong>Material/Item</strong> (nome) e <strong>Preço/Custo/Valor</strong> (o custo já pronto daquela matéria-prima) — ou, se preferir, <strong>Quantidade</strong> + <strong>Preço Unitário</strong> juntas, que o sistema multiplica sozinho. O total de todas as linhas vira automaticamente o CMV deste produto.
+    Envie uma planilha (.xlsx) com as matérias-primas que compõem este produto. Colunas aceitas: <strong>Material/Item</strong> (nome), <strong>Qtd/Un</strong> (quantidade e unidade, opcional) e <strong>Preço/Custo/Valor/Total</strong> (o custo já pronto daquela linha) — ou <strong>Unitário</strong>, que junto com a Quantidade o sistema multiplica sozinho. O total de todas as linhas vira automaticamente o CMV deste produto.
   </div>
   <input type="hidden" id="mp-produto-idx">
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
@@ -12235,10 +12235,10 @@ function _escJs(s){return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"
 // apesar do nome) — zero biblioteca nova, zero peso extra.
 const _MP_COLS={
   nome:['Material','Item','Matéria-Prima','Materia-Prima','Matéria Prima','Materia Prima','Insumo','Nome','Descrição','Descricao'],
-  custo:['Custo','Preço','Preco','Valor','Custo Total','Valor Total','Preço Total','Preco Total'],
+  custo:['Custo','Preço','Preco','Valor','Custo Total','Valor Total','Preço Total','Preco Total','Total','Total Geral','Valor Final'],
   qtd:['Quantidade','Qtd','Qtde','Qtd.'],
   unidade:['Unidade','Unid','Unid.','Un','Un.'],
-  precoUnit:['Preço Unitário','Preco Unitario','Valor Unitário','Valor Unitario','Custo Unitário','Custo Unitario','Preço Unit','Preco Unit']
+  precoUnit:['Preço Unitário','Preco Unitario','Valor Unitário','Valor Unitario','Custo Unitário','Custo Unitario','Preço Unit','Preco Unit','Unitário','Unitario','Unit','Unit.','Vl Unit','Vl. Unit']
 };
 // 2026-08-27: a planilha real do usuário tem VÁRIOS produtos num arquivo só — uma linha-título
 // por produto (ex.: "SUPORTE TOTENS AUTOATENDIMENTO (6 TOTENS) - O.S 84"), as matérias-primas
@@ -12273,7 +12273,11 @@ async function parseMateriaisMultiXLSX(arrayBuffer){
     return isNaN(n)?null:n;
   };
   const normUp=v=>String(v||'').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  const nomesCabecalhoNorm=new Set([..._MP_COLS.nome,..._MP_COLS.custo,..._MP_COLS.qtd,..._MP_COLS.unidade,..._MP_COLS.precoUnit].map(normUp));
+  // Só a coluna do NOME do material entra nessa lista (pra detectar cabeçalho reimpresso no
+  // meio da planilha) — de propósito NÃO inclui os apelidos de custo/quantidade/etc., porque
+  // agora "TOTAL" é um apelido válido de coluna de custo e não pode ser confundido com uma
+  // linha de cabeçalho repetida.
+  const nomesColunaMaterialNorm=new Set(_MP_COLS.nome.map(normUp));
   const secoes=[];
   let atual=null;
   const fechar=()=>{ if(atual&&atual.linhas.length)secoes.push(atual); atual=null; };
@@ -12282,12 +12286,13 @@ async function parseMateriaisMultiXLSX(arrayBuffer){
     if(row.every(c=>String(c||'').trim()===''))continue; // linha totalmente em branco
     const nomeRaw=String(row[colNome]||'').trim();
     const nomeNorm=normUp(nomeRaw);
-    // linha de cabeçalho repetida no meio da planilha (algumas planilhas reimprimem o
-    // cabeçalho a cada produto) — ignora, não fecha nem abre seção.
-    if(nomeNorm&&nomesCabecalhoNorm.has(nomeNorm)){continue;}
-    // linha "TOTAL" fecha a seção do produto atual.
+    // linha "TOTAL" fecha a seção do produto atual — a palavra pode estar em QUALQUER coluna
+    // da linha (ex.: planilha com a coluna A vazia e "TOTAL" só na coluna do valor unitário).
     const ehLinhaTotal=nomeNorm.startsWith('TOTAL')||row.some(c=>normUp(c).startsWith('TOTAL'));
     if(ehLinhaTotal){fechar();continue;}
+    // linha de cabeçalho repetida no meio da planilha (algumas planilhas reimprimem o
+    // cabeçalho a cada produto) — ignora, não fecha nem abre seção.
+    if(nomeNorm&&nomesColunaMaterialNorm.has(nomeNorm)){continue;}
     if(!nomeRaw)continue;
     const qtdRaw=colQtd!==-1?parseNum(row[colQtd]):null;
     const precoUnitRaw=colPrecoUnit!==-1?parseNum(row[colPrecoUnit]):null;
