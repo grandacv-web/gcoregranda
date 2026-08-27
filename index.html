@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-26.16';</script>
+<script>const APP_BUILD_VERSION='2026-08-26.17';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -2985,6 +2985,29 @@ select.fc{cursor:pointer}
   </div>
   <div id="pz-historico" style="font-size:.74rem;color:var(--ink4);margin-bottom:12px;max-height:160px;overflow-y:auto"></div>
   <button onclick="salvarAlteracaoPrazoObra()" style="width:100%;background:#1d4ed8;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Salvar Alteração</button>
+</div>
+</div>
+
+<!-- COMENTÁRIO EM CARD DO KANBAN (2026-08-27, a pedido do usuário: "qualquer usuario possa
+     fazer um comentario sobre o card, seja em qualquer etapa" — ver renderListaPedidosKanban(),
+     _lpComentarioCardHtml() e lpSalvarComentarioEtapa(). Fica salvo em
+     p.lpComentarios[etapaKey], compartilhado entre todos os cards daquela etapa do pedido
+     (inclusive as várias "fatias" de data que a Produção pode ter). -->
+<div class="mov" id="mo-comentario-etapa" onclick="cio(event,'mo-comentario-etapa')">
+<div class="mvmod" style="width:480px;max-width:96vw;max-height:90vh;overflow-y:auto">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <h3 style="margin-bottom:0">💬 Comentário</h3>
+    <button onclick="closeM('mo-comentario-etapa')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div id="lpc-info" style="font-size:.8rem;color:var(--ink3);margin-bottom:14px"></div>
+  <input type="hidden" id="lpc-pedido-id">
+  <input type="hidden" id="lpc-etapa-key">
+  <div class="fg">
+    <label>Novo comentário <span class="r">*</span></label>
+    <textarea id="lpc-texto" class="fc" rows="3" placeholder="Escreva o comentário..." style="text-transform:none"></textarea>
+  </div>
+  <div id="lpc-historico" style="font-size:.74rem;color:var(--ink4);margin-bottom:12px;max-height:200px;overflow-y:auto"></div>
+  <button onclick="lpSalvarComentarioEtapa()" style="width:100%;background:#1d4ed8;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Salvar Comentário</button>
 </div>
 </div>
 
@@ -21608,11 +21631,86 @@ function renderListaPedidosKanban(){
             ${chunkHtml}
             <div style="font-size:.68rem;font-weight:700;margin-top:2px;color:${statusCor}">${statusTxt}</div>
             ${atrasadoPedido?'<div style="font-size:.66rem;color:#dc2626;font-weight:700;margin-top:2px">🔴 Pedido atrasado (entrega final)</div>':concluidoPedido?'<div style="font-size:.66rem;color:var(--success);font-weight:700;margin-top:2px">✅ Pedido concluído</div>':''}
+            ${_lpComentarioCardHtml(p,etapa.key)}
           </div>`;
         }).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.72rem">—</div>'}
       </div>
     </div>`;
   }).join('');
+}
+// COMENTÁRIOS NO KANBAN (2026-08-27, a pedido do usuário: "qualquer usuario possa fazer um
+// comentario sobre o card, seja em qualquer etapa" — botão discreto no card, mostra
+// data/hora/usuário, corta texto longo com "ver mais" (clica pra expandir), e sai nos
+// relatórios PDF/Excel do Kanban (célula/coluna só aparece preenchida quando tem comentário).
+// Guardado em p.lpComentarios[etapaKey] = [{texto,por,dataHora}] — um "mural" por etapa,
+// compartilhado por todos os cards daquela etapa do mesmo pedido (inclusive as várias
+// "fatias" de data diferentes que a Produção pode ter, ver valorChunk acima).
+function _lpComentariosDaEtapa(p,etapaKey){
+  return (p.lpComentarios&&p.lpComentarios[etapaKey])||[];
+}
+function _lpComentarioCardHtml(p,etapaKey){
+  const lista=_lpComentariosDaEtapa(p,etapaKey);
+  const itensHtml=lista.map(c=>{
+    const dt=c.dataHora?new Date(c.dataHora):null;
+    const dataHoraTxt=dt?dt.toLocaleDateString('pt-BR')+' '+dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
+    const textoEsc=String(c.texto||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const longo=textoEsc.length>70;
+    const resumo=longo?textoEsc.slice(0,70)+'…':textoEsc;
+    return `<div onclick="event.stopPropagation()" style="background:#f1f5f9;border-radius:6px;padding:4px 6px;margin-top:3px">
+      <div style="font-size:.6rem;font-weight:700;color:var(--ink3)">👤 ${(c.por||'—').replace(/</g,'&lt;')} · ${dataHoraTxt}</div>
+      ${longo?`<details style="margin-top:1px"><summary style="font-size:.62rem;color:var(--ink2);cursor:pointer">${resumo} <span style="color:var(--brand-d);font-weight:700">ver mais</span></summary><div style="font-size:.62rem;color:var(--ink2);white-space:pre-wrap;margin-top:2px">${textoEsc}</div></details>`:`<div style="font-size:.62rem;color:var(--ink2);white-space:pre-wrap">${textoEsc}</div>`}
+    </div>`;
+  }).join('');
+  return `<div style="margin-top:4px" onclick="event.stopPropagation()">
+    ${itensHtml}
+    <button type="button" onclick="event.stopPropagation();lpAbrirComentarioEtapa('${p.id}','${etapaKey}')" style="margin-top:4px;width:100%;background:none;border:1px dashed var(--border);border-radius:6px;padding:3px 4px;font-size:.6rem;font-weight:700;color:var(--ink4);cursor:pointer">💬 Fazer Comentário${lista.length?' ('+lista.length+')':''}</button>
+  </div>`;
+}
+function lpAbrirComentarioEtapa(pedidoId,etapaKey){
+  if(!_isPlanejamentoUser()){toast('Só Planejamento ou administrador pode comentar aqui.','terr');return;}
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const def=_lpEtapasDefParaPedido(p).find(d=>d.key===etapaKey);
+  document.getElementById('lpc-pedido-id').value=pedidoId;
+  document.getElementById('lpc-etapa-key').value=etapaKey;
+  const infoEl=document.getElementById('lpc-info');
+  if(infoEl)infoEl.innerHTML=`OS Nº <strong>${p.os||'—'}</strong> · ${p.cliente||'—'}<br>Etapa: <strong>${(def&&def.label)||etapaKey}</strong>`;
+  const txtEl=document.getElementById('lpc-texto');if(txtEl)txtEl.value='';
+  const listaExistente=_lpComentariosDaEtapa(p,etapaKey);
+  const histEl=document.getElementById('lpc-historico');
+  if(histEl){
+    histEl.innerHTML=listaExistente.length?'<div style="font-weight:700;color:var(--ink3);margin-bottom:4px">Comentários anteriores</div>'+listaExistente.slice().reverse().map(c=>{
+      const dt=c.dataHora?new Date(c.dataHora).toLocaleString('pt-BR'):'';
+      return `<div style="padding:6px 0;border-top:1px solid var(--border-lt)"><strong>${(c.por||'—').replace(/</g,'&lt;')}</strong> · <span style="color:var(--ink4)">${dt}</span><div style="margin-top:2px;white-space:pre-wrap">${String(c.texto||'').replace(/</g,'&lt;')}</div></div>`;
+    }).join(''):'';
+  }
+  openM('mo-comentario-etapa');
+}
+async function lpSalvarComentarioEtapa(){
+  if(!_isPlanejamentoUser()){toast('Só Planejamento ou administrador pode comentar aqui.','terr');return;}
+  const pedidoId=document.getElementById('lpc-pedido-id')?.value;
+  const etapaKey=document.getElementById('lpc-etapa-key')?.value;
+  const texto=(document.getElementById('lpc-texto')?.value||'').trim();
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  if(!texto){toast('Escreva o comentário','terr');return;}
+  p.lpComentarios=p.lpComentarios||{};
+  if(!p.lpComentarios[etapaKey])p.lpComentarios[etapaKey]=[];
+  p.lpComentarios[etapaKey].push({texto,por:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),dataHora:new Date().toISOString()});
+  await savePedidoFS(p);
+  toast('Comentário adicionado ✅','tok');
+  closeM('mo-comentario-etapa');
+  renderListaPedidosKanban();
+}
+// Texto plano (usado nos exports Excel/PDF do Kanban) — junta todos os comentários daquela
+// etapa num campo só, um por linha; fica vazio se não tiver comentário nenhum.
+function _lpComentariosTexto(p,etapaKey){
+  const lista=_lpComentariosDaEtapa(p,etapaKey);
+  if(!lista.length)return '';
+  return lista.map(c=>{
+    const dt=c.dataHora?new Date(c.dataHora).toLocaleString('pt-BR'):'';
+    return `${c.por||'—'} (${dt}): ${c.texto||''}`;
+  }).join('\n');
 }
 let _lpCalMes={y:new Date().getFullYear(),m:new Date().getMonth()+1};
 function lpCalMov(dir){
@@ -21929,10 +22027,11 @@ function lpExportarEtapaExcel(key){
   if(!eventos.length){toast('Nenhum pedido nesta etapa com os filtros atuais para exportar','terr');return;}
   const label=eventos[0].etapa.label;
   const ordenados=eventos.slice().sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso));
-  const headers=['OS','Cliente','JOB','Prazo desta Etapa','Status'];
+  const headers=['OS','Cliente','JOB','Prazo desta Etapa','Status','Comentários'];
   const body=ordenados.map(ev=>[
     ev.p.os||'',ev.p.cliente||'',ev.p.job||'',fmtD(ev.etapa.iso),
-    ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada'
+    ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada',
+    _lpComentariosTexto(ev.p,key)
   ]);
   const slug=label.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
   _csvDownload(`kanban_${slug}_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
@@ -21976,10 +22075,11 @@ async function lpExportarEtapaPDF(key){
     doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
   }
   const curY=drawHeader();
-  const head=[['OS','Cliente','JOB','Prazo desta Etapa','Status']];
+  const head=[['OS','Cliente','JOB','Prazo desta Etapa','Status','Comentários']];
   const bodyPdf=itensOrdenados.map(ev=>[
     ev.p.os||'—',ev.p.cliente||'—',ev.p.job||'—',fmtD(ev.etapa.iso),
-    ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada'
+    ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada',
+    _lpComentariosTexto(ev.p,key)||'—'
   ]);
   doc.autoTable({
     startY:curY,head,body:bodyPdf,theme:'grid',
@@ -22005,10 +22105,11 @@ function lpExportarKanbanExcel(){
   const eventos=_lpEventosFiltrados();
   if(!eventos.length){toast('Nenhuma etapa encontrada com esses filtros para exportar','terr');return;}
   const ordenados=eventos.slice().sort((a,b)=>a.etapa.label.localeCompare(b.etapa.label,'pt-BR')||a.etapa.iso.localeCompare(b.etapa.iso));
-  const headers=['Etapa','OS','Cliente','JOB','Prazo desta Etapa','Status'];
+  const headers=['Etapa','OS','Cliente','JOB','Prazo desta Etapa','Status','Comentários'];
   const body=ordenados.map(ev=>[
     ev.etapa.label,ev.p.os||'',ev.p.cliente||'',ev.p.job||'',fmtD(ev.etapa.iso),
-    ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada'
+    ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada',
+    _lpComentariosTexto(ev.p,ev.etapa.key)
   ]);
   _csvDownload(`kanban_pedidos_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
@@ -22069,11 +22170,12 @@ async function lpExportarKanbanPDF(){
     doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8.5);
     doc.text(grupo.label.toUpperCase()+' ('+grupo.itens.length+')',18,curY+5);
     curY+=10;
-    const head=[['OS','Cliente','JOB','Prazo desta Etapa','Status']];
+    const head=[['OS','Cliente','JOB','Prazo desta Etapa','Status','Comentários']];
     const itensOrdenados=grupo.itens.slice().sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso));
     const body=itensOrdenados.map(ev=>[
       ev.p.os||'—',ev.p.cliente||'—',ev.p.job||'—',fmtD(ev.etapa.iso),
-      ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada'
+      ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada',
+      _lpComentariosTexto(ev.p,key)||'—'
     ]);
     doc.autoTable({
       startY:curY,head,body,theme:'grid',
