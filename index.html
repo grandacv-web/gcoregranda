@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-26.25';</script>
+<script>const APP_BUILD_VERSION='2026-08-26.26';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -3439,6 +3439,25 @@ select.fc{cursor:pointer}
   <div id="mpm-import-status" style="font-size:.8rem;color:var(--ink3);margin-bottom:10px"></div>
   <div id="mpm-import-body" style="overflow-y:auto;flex:1"></div>
   <button id="mpm-import-confirmar-btn" onclick="confirmarImportacaoMateriaisMassa()" style="display:none;margin-top:12px;width:100%;background:#16a34a;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">💾 Salvar Todos os Produtos</button>
+</div>
+</div>
+
+<!-- FICHA TÉCNICA DO PRODUTO (2026-08-27) — a pedido do usuário: "cada produto ser clicavel
+     e ao clicar vai abrir ele ali... foto de como ele é, um campo pra eu anexar o projeto
+     executivo dele... a lista de materia prima que compoe ele, o valor do custo, etc" —
+     clique numa linha da lista em Comercial → Produtos (ver linhaHtml() dentro de
+     renderComercialProdutos()) chama abrirFichaProduto(i), que monta este modal. Foto e PDF
+     do projeto executivo sobem pro MESMO Cloudinary já usado pros anexos de pedido (ver
+     uploadFotoProduto()/uploadProjetoProduto(), pasta "gcore_produtos" pra não misturar com
+     "gcore_pedidos"). Matérias-primas reaproveita _mpPreviewHtml() (mesma tabela do modal de
+     matérias-primas). -->
+<div class="mov" id="mo-produto-ficha" onclick="cio(event,'mo-produto-ficha')">
+<div class="mvmod" style="width:760px;max-width:98vw;max-height:92vh;overflow-y:auto">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <h3 id="pf-titulo" style="margin-bottom:0">📋 Ficha Técnica</h3>
+    <button onclick="closeM('mo-produto-ficha')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div id="pf-corpo"></div>
 </div>
 </div>
 
@@ -12567,6 +12586,161 @@ async function confirmarImportacaoMateriaisMassa(){
   renderComercialProdutos();
   if(typeof renderProdutos==='function')renderProdutos();
 }
+// FICHA TÉCNICA DO PRODUTO (2026-08-27) — ver comentário no modal mo-produto-ficha (HTML).
+// _pfClassificacao() é a mesma faixa de cor já usada em corMargem() dentro de
+// renderComercialProdutos(), só que devolvendo rótulo+cores prontos pra badge (reaproveitada
+// tanto na coluna "Classificação" da lista quanto na ficha).
+function _pfClassificacao(margemPct){
+  if(margemPct==null)return{label:'Sem CMV/preço',cor:'#64748b',bg:'#f1f5f9'};
+  if(margemPct>=40)return{label:'✅ Saudável',cor:'#059669',bg:'#d1fae5'};
+  if(margemPct>=20)return{label:'⚠️ Atenção',cor:'#b45309',bg:'#fef3c7'};
+  return{label:'🔴 Crítico',cor:'#dc2626',bg:'#fee2e2'};
+}
+function abrirFichaProduto(i){
+  const p=getProdutos()[i];
+  if(!p){toast('Produto não encontrado','terr');return;}
+  const isAdm=_getUserCat().isAdm;
+  const tituloEl=document.getElementById('pf-titulo');
+  if(tituloEl)tituloEl.textContent='📋 '+(p.nome||'Produto');
+  const preco=p.precoFinal||0,cmv=p.custo||0;
+  const margemRS=preco-cmv;
+  const margemPct=preco>0.005?(margemRS/preco*100):null;
+  const cmvPct=(preco>0.005&&p.custo!=null)?(cmv/preco*100):null;
+  const markupPct=(cmv>0.005)?(margemRS/cmv*100):null;
+  let dre=null;
+  try{const hoje=new Date();dre=calcularDRE(hoje.getFullYear(),hoje.getMonth()+1,null,'competencia');}catch(e){console.error('Erro ao calcular DRE pra referência da ficha',e);}
+  const despOp=dre?(dre.despOperacionais||0):0;
+  const qtdeEquilibrio=(margemRS>0.005&&despOp>0.005)?Math.ceil(despOp/margemRS):null;
+  const classificacao=_pfClassificacao(margemPct);
+  const corMargem=pct=>pct==null?'#94a3b8':pct>=40?'#059669':pct>=20?'#d97706':'#dc2626';
+  const fmtPct=pct=>pct.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1})+'%';
+
+  const fotoHtml=p.fotoUrl
+    ? `<div style="position:relative"><img src="${p.fotoUrl}" style="width:100%;max-height:240px;object-fit:contain;border-radius:10px;border:1px solid var(--border);background:#f8fafc;display:block">${isAdm?`<button onclick="removerFotoProduto(${i})" style="position:absolute;top:6px;right:6px;background:#fff;border:1px solid #fecaca;color:#dc2626;border-radius:6px;padding:3px 8px;font-size:.68rem;cursor:pointer;font-weight:700">🗑️ Remover</button>`:''}</div>`
+    : (isAdm?`<div class="upload-zone" id="pf-foto-zone" onclick="document.getElementById('pf-foto-file').click()" style="padding:16px 10px;min-height:90px">
+        <span class="uz-icon" style="font-size:1.6rem;margin-bottom:4px">🖼️</span>
+        <div class="uz-title" style="font-size:.78rem">Adicionar foto</div>
+        <div class="uz-sub">JPG, PNG...</div>
+        <input type="file" id="pf-foto-file" accept="image/*" onchange="uploadFotoProduto(${i},this)">
+      </div><div id="pf-foto-status" style="font-size:.68rem;color:var(--ink4);margin-top:4px;text-align:center"></div>`
+      : `<div style="padding:20px 10px;text-align:center;color:var(--ink4);font-size:.76rem;border:1px dashed var(--border);border-radius:10px">Sem foto</div>`);
+
+  const projetoHtml=p.projetoExecutivoUrl
+    ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;flex-wrap:wrap">
+        <span style="font-size:.8rem">📄 ${(p.projetoExecutivoNome||'projeto-executivo.pdf').replace(/</g,'&lt;')}</span>
+        <div style="display:flex;gap:12px">
+          <a href="${cldDownload(p.projetoExecutivoUrl)}" target="_blank" style="font-size:.76rem;color:var(--brand);font-weight:700;text-decoration:none">⬇️ Baixar</a>
+          ${isAdm?`<button onclick="removerProjetoProduto(${i})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.76rem;font-weight:700">🗑️ Remover</button>`:''}
+        </div>
+      </div>`
+    : (isAdm?`<div class="upload-zone" id="pf-projeto-zone" onclick="document.getElementById('pf-projeto-file').click()" style="padding:12px;min-height:auto">
+        <span class="uz-icon" style="font-size:1.3rem;margin-bottom:2px">📎</span>
+        <div class="uz-title" style="font-size:.78rem">Anexar projeto executivo (PDF)</div>
+        <input type="file" id="pf-projeto-file" accept=".pdf,application/pdf" onchange="uploadProjetoProduto(${i},this)">
+      </div><div id="pf-projeto-status" style="font-size:.68rem;color:var(--ink4);margin-top:4px"></div>`
+      : `<div style="padding:10px;text-align:center;color:var(--ink4);font-size:.76rem">Nenhum projeto executivo anexado</div>`);
+
+  const materiaisHtml=(p.materiasPrimas&&p.materiasPrimas.length)?_mpPreviewHtml(p.materiasPrimas):`<div style="padding:14px;text-align:center;color:var(--ink4);font-size:.78rem;border:1px dashed var(--border);border-radius:8px">Nenhuma matéria-prima cadastrada ainda.</div>`;
+
+  const corpoEl=document.getElementById('pf-corpo');
+  if(!corpoEl)return;
+  corpoEl.innerHTML=`
+    <div style="display:grid;grid-template-columns:200px 1fr;gap:16px;margin-bottom:16px">
+      <div>${fotoHtml}</div>
+      <div>
+        <div style="font-size:.74rem;color:var(--ink4);margin-bottom:6px">${(p.categoria||'SEM CLIENTE').replace(/</g,'&lt;')} · ${(p.tipoProduto||'SEM TIPO').replace(/</g,'&lt;')}${p.medida?' · '+p.medida.replace(/</g,'&lt;'):''}</div>
+        <div style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:.72rem;font-weight:700;background:${classificacao.bg};color:${classificacao.cor};margin-bottom:10px">${classificacao.label}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px 16px;font-size:.82rem">
+          <div><div style="color:var(--ink4);font-size:.66rem;text-transform:uppercase">Preço Final</div><div style="font-weight:700">${preco>0.005?fmtR(preco):'—'}</div></div>
+          <div><div style="color:var(--ink4);font-size:.66rem;text-transform:uppercase">CMV</div><div style="font-weight:700">${p.custo!=null?fmtR(cmv):'sem CMV'}</div></div>
+          <div><div style="color:var(--ink4);font-size:.66rem;text-transform:uppercase">% CMV sobre o preço</div><div style="font-weight:700">${cmvPct==null?'—':fmtPct(cmvPct)}</div></div>
+          <div><div style="color:var(--ink4);font-size:.66rem;text-transform:uppercase">Markup sobre o custo</div><div style="font-weight:700">${markupPct==null?'—':fmtPct(markupPct)}</div></div>
+          <div><div style="color:var(--ink4);font-size:.66rem;text-transform:uppercase">Margem R$</div><div style="font-weight:700;color:${corMargem(margemPct)}">${fmtR(margemRS)}</div></div>
+          <div><div style="color:var(--ink4);font-size:.66rem;text-transform:uppercase">Margem %</div><div style="font-weight:700;color:${corMargem(margemPct)}">${margemPct==null?'—':fmtPct(margemPct)}</div></div>
+          <div style="grid-column:1/-1"><div style="color:var(--ink4);font-size:.66rem;text-transform:uppercase">Un/mês pra este produto sozinho cobrir o custo fixo da empresa</div><div style="font-weight:700">${qtdeEquilibrio==null?'—':qtdeEquilibrio+' un/mês'}</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="dash-sec-title" style="font-size:.8rem;margin-bottom:6px">📎 Projeto Executivo</div>
+    ${projetoHtml}
+    <div class="dash-sec-title" style="font-size:.8rem;margin:16px 0 6px">🧾 Matérias-Primas${p.custoMateriaisEm?` <span style="font-weight:400;font-size:.66rem;color:var(--ink4)">(atualizado em ${new Date(p.custoMateriaisEm).toLocaleDateString('pt-BR')})</span>`:''}</div>
+    ${materiaisHtml}
+    ${isAdm?`<div style="text-align:right;margin-top:10px"><button onclick="closeM('mo-produto-ficha');abrirMateriaisProduto(${i})" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:8px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer">🧾 Gerenciar Matérias-Primas</button></div>`:''}
+  `;
+  openM('mo-produto-ficha');
+}
+async function uploadFotoProduto(i,input){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem editar produtos.','terr');return;}
+  const f=input.files[0];if(!f)return;
+  const p=getProdutos()[i];if(!p){toast('Produto não encontrado','terr');return;}
+  const statusEl=document.getElementById('pf-foto-status');
+  if(statusEl)statusEl.textContent='⏳ Enviando imagem...';
+  try{
+    if(!cfg.cld_cloud||!cfg.cld_preset)throw new Error('Cloudinary não configurado (Configurações → Integrações).');
+    const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_produtos');
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/image/upload`,{method:'POST',body:fd});
+    const d=await r.json();
+    const url=d.secure_url||'';
+    if(!url)throw new Error('Falha no upload.');
+    if(typeof _cldRegistrarUpload==='function')_cldRegistrarUpload(f.size);
+    p.fotoUrl=url;
+    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+    localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+    toast('Imagem salva.','tok');
+    abrirFichaProduto(i);
+    renderComercialProdutos();
+  }catch(e){
+    console.error(e);
+    if(statusEl)statusEl.textContent='';
+    toast('Erro ao enviar imagem: '+e.message,'terr');
+  }
+}
+async function removerFotoProduto(i){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem editar produtos.','terr');return;}
+  const p=getProdutos()[i];if(!p){toast('Produto não encontrado','terr');return;}
+  if(!confirm('Remover a imagem deste produto?'))return;
+  delete p.fotoUrl;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  abrirFichaProduto(i);
+  renderComercialProdutos();
+}
+async function uploadProjetoProduto(i,input){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem editar produtos.','terr');return;}
+  const f=input.files[0];if(!f)return;
+  const p=getProdutos()[i];if(!p){toast('Produto não encontrado','terr');return;}
+  const statusEl=document.getElementById('pf-projeto-status');
+  if(statusEl)statusEl.textContent='⏳ Enviando arquivo...';
+  try{
+    if(!cfg.cld_cloud||!cfg.cld_preset)throw new Error('Cloudinary não configurado (Configurações → Integrações).');
+    const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_produtos');
+    const isRaw=f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf');
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/${isRaw?'raw':'image'}/upload`,{method:'POST',body:fd});
+    const d=await r.json();
+    const url=d.secure_url||'';
+    if(!url)throw new Error('Falha no upload.');
+    if(typeof _cldRegistrarUpload==='function')_cldRegistrarUpload(f.size);
+    p.projetoExecutivoUrl=url;
+    p.projetoExecutivoNome=f.name;
+    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+    localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+    toast('Projeto executivo salvo.','tok');
+    abrirFichaProduto(i);
+  }catch(e){
+    console.error(e);
+    if(statusEl)statusEl.textContent='';
+    toast('Erro ao enviar arquivo: '+e.message,'terr');
+  }
+}
+async function removerProjetoProduto(i){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem editar produtos.','terr');return;}
+  const p=getProdutos()[i];if(!p){toast('Produto não encontrado','terr');return;}
+  if(!confirm('Remover o projeto executivo deste produto?'))return;
+  delete p.projetoExecutivoUrl;delete p.projetoExecutivoNome;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  abrirFichaProduto(i);
+}
 function renderComercialProdutos(){
   const el=document.getElementById('comprod-body');if(!el)return;
   const produtos=getProdutos();
@@ -12579,8 +12753,11 @@ function renderComercialProdutos(){
     const preco=p.precoFinal||0,cmv=p.custo||0;
     const margemRS=preco-cmv;
     const margemPct=preco>0.005?(margemRS/preco*100):null;
+    const cmvPct=(preco>0.005&&p.custo!=null)?(cmv/preco*100):null;
+    const markupPct=(cmv>0.005)?(margemRS/cmv*100):null;
     const qtdeEquilibrio=(margemRS>0.005&&despOp>0.005)?Math.ceil(despOp/margemRS):null;
-    return{p,i,preco,cmv,margemRS,margemPct,qtdeEquilibrio};
+    const classificacao=_pfClassificacao(margemPct);
+    return{p,i,preco,cmv,margemRS,margemPct,cmvPct,markupPct,qtdeEquilibrio,classificacao};
   });
 
   // Cards SEMPRE refletem o total cadastrado, não o resultado filtrado pela busca — são
@@ -12601,6 +12778,18 @@ function renderComercialProdutos(){
       <div class="dash-card"><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">📊 Margem de Contribuição Média</div><div style="font-size:1.35rem;font-weight:800;margin-top:4px;color:${corMargem(margemMediaPct)}">${fmtPct(margemMediaPct)}</div></div>
       <div class="dash-card"><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">🏭 Despesa Operacional do Mês</div><div style="font-size:1.35rem;font-weight:800;margin-top:4px">${fmtR(despOp)}</div><div style="font-size:.65rem;color:var(--ink4);margin-top:2px">referência do DRE (mês atual) — custo fixo a cobrir</div></div>
       <div class="dash-card"><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">⚠️ Sem CMV Cadastrado</div><div style="font-size:1.35rem;font-weight:800;margin-top:4px;color:${semCmv>0?'#d97706':'#059669'}">${semCmv}</div><div style="font-size:.65rem;color:var(--ink4);margin-top:2px">produto(s) sem custo — margem/lucro só calcula depois de preencher</div></div>
+    </div>`;
+
+  // Resumo executivo por classificação (2026-08-27) — quantos produtos estão em cada faixa
+  // de margem de contribuição, pra responder de cara "o que tá dando lucro e o que não tá".
+  const qtdSaudavel=comPreco.filter(l=>(l.margemPct||0)>=40).length;
+  const qtdAtencao=comPreco.filter(l=>l.margemPct!=null&&l.margemPct>=20&&l.margemPct<40).length;
+  const qtdCritico=comPreco.filter(l=>l.margemPct!=null&&l.margemPct<20).length;
+  const resumoClassif=`
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">
+      <div class="dash-card" style="border-left:4px solid #059669"><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">✅ Saudáveis (margem ≥ 40%)</div><div style="font-size:1.35rem;font-weight:800;margin-top:4px;color:#059669">${qtdSaudavel}</div><div style="font-size:.65rem;color:var(--ink4);margin-top:2px">produto(s) — bons pra empurrar em vendas</div></div>
+      <div class="dash-card" style="border-left:4px solid #d97706"><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">⚠️ Atenção (margem 20% a 40%)</div><div style="font-size:1.35rem;font-weight:800;margin-top:4px;color:#d97706">${qtdAtencao}</div><div style="font-size:.65rem;color:var(--ink4);margin-top:2px">produto(s) — ok, mas vale revisar preço/custo</div></div>
+      <div class="dash-card" style="border-left:4px solid #dc2626"><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">🔴 Críticos (margem &lt; 20%)</div><div style="font-size:1.35rem;font-weight:800;margin-top:4px;color:#dc2626">${qtdCritico}</div><div style="font-size:.65rem;color:var(--ink4);margin-top:2px">produto(s) — precisam de preço maior ou custo menor</div></div>
     </div>`;
 
   const isAdm=_getUserCat().isAdm;
@@ -12644,30 +12833,40 @@ function renderComercialProdutos(){
   });
   const clientesOrdenados=[...porCliente.keys()].sort((a,b)=>a.localeCompare(b,'pt-BR'));
 
+  const fotoMiniHtml=p=>p.fotoUrl
+    ? `<img src="${p.fotoUrl}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;border:1px solid var(--border)">`
+    : `<div style="width:36px;height:36px;border-radius:6px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:.8rem">—</div>`;
+  const classifMiniHtml=c=>`<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:.68rem;font-weight:700;background:${c.bg};color:${c.cor};white-space:nowrap">${c.label}</span>`;
   const linhaHtml=l=>{
-    const{p,i,preco,cmv,margemRS,margemPct,qtdeEquilibrio}=l;
+    const{p,i,preco,cmv,margemRS,margemPct,cmvPct,qtdeEquilibrio,classificacao}=l;
     const editando=isAdm&&_comProdutoEditIds.has(p.id);
     if(editando){
       return `<tr>
+      <td>${fotoMiniHtml(p)}</td>
       <td><input class="fc" value="${(p.nome||'').replace(/"/g,'&quot;')}" style="text-transform:uppercase;min-width:140px" onchange="atualizaProdutoEComercial(${i},'nome',this.value)"></td>
       <td><input class="fc" value="${(p.medida||'').replace(/"/g,'&quot;')}" style="min-width:90px" placeholder="—" onchange="atualizaProdutoEComercial(${i},'medida',this.value)"></td>
       <td><input class="fc" type="number" min="0" step="0.01" value="${p.precoFinal!=null?p.precoFinal:''}" style="min-width:100px" placeholder="0,00" onchange="atualizaProdutoEComercial(${i},'precoFinal',this.value)"></td>
-      <td><input class="fc" type="number" min="0" step="0.01" value="${p.custo!=null?p.custo:''}" style="min-width:100px" placeholder="0,00" onchange="atualizaProdutoEComercial(${i},'custo',this.value)"> ${isAdm?`<button type="button" onclick="abrirMateriaisProduto(${i})" title="${p.materiasPrimas&&p.materiasPrimas.length?'Ver/atualizar matérias-primas ('+p.materiasPrimas.length+' itens)':'Calcular CMV a partir de uma planilha de matérias-primas'}" style="background:none;border:none;cursor:pointer;color:${p.materiasPrimas&&p.materiasPrimas.length?'#059669':'#94a3b8'};font-size:.78rem">🧾</button>`:''}</td>
+      <td><input class="fc" type="number" min="0" step="0.01" value="${p.custo!=null?p.custo:''}" style="min-width:100px" placeholder="0,00" onchange="atualizaProdutoEComercial(${i},'custo',this.value)"> ${isAdm?`<button type="button" onclick="event.stopPropagation();abrirMateriaisProduto(${i})" title="${p.materiasPrimas&&p.materiasPrimas.length?'Ver/atualizar matérias-primas ('+p.materiasPrimas.length+' itens)':'Calcular CMV a partir de uma planilha de matérias-primas'}" style="background:none;border:none;cursor:pointer;color:${p.materiasPrimas&&p.materiasPrimas.length?'#059669':'#94a3b8'};font-size:.78rem">🧾</button>`:''}</td>
+      <td style="font-size:.76rem;color:var(--ink3)">${cmvPct==null?'—':fmtPct(cmvPct)}</td>
       <td style="font-weight:700;color:${corMargem(margemPct)}">${fmtR(margemRS)}</td>
       <td style="font-weight:700;color:${corMargem(margemPct)}">${margemPct==null?'—':fmtPct(margemPct)}</td>
+      <td>${classifMiniHtml(classificacao)}</td>
       <td style="font-size:.72rem;color:var(--ink3)">${qtdeEquilibrio==null?'—':qtdeEquilibrio+' un/mês'}</td>
-      <td><div style="display:flex;gap:6px"><button onclick="_toggleComProdutoEdit('${p.id}')" style="background:none;border:none;color:#059669;cursor:pointer;font-size:1rem" title="Concluir edição">✓</button><button onclick="removerProdutoEComercial(${i})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.9rem" title="Remover">🗑</button></div></td>
+      <td><div style="display:flex;gap:6px"><button onclick="event.stopPropagation();_toggleComProdutoEdit('${p.id}')" style="background:none;border:none;color:#059669;cursor:pointer;font-size:1rem" title="Concluir edição">✓</button><button onclick="event.stopPropagation();removerProdutoEComercial(${i})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.9rem" title="Remover">🗑</button></div></td>
     </tr>`;
     }
-    return `<tr>
+    return `<tr onclick="abrirFichaProduto(${i})" style="cursor:pointer" title="Clique para abrir a ficha técnica">
+      <td>${fotoMiniHtml(p)}</td>
       <td style="max-width:320px;word-break:break-word;font-weight:600">${(p.nome||'—').replace(/</g,'&lt;')}</td>
       <td style="max-width:110px;word-break:break-word;color:var(--ink3)">${(p.medida||'—').replace(/</g,'&lt;')}</td>
       <td style="font-weight:600">${preco>0.005?fmtR(preco):'—'}</td>
-      <td style="color:${p.custo!=null?'var(--ink3)':'#d97706'}">${p.custo!=null?fmtR(cmv):'sem CMV'} ${isAdm?`<button type="button" onclick="abrirMateriaisProduto(${i})" title="${p.materiasPrimas&&p.materiasPrimas.length?'Ver/atualizar matérias-primas ('+p.materiasPrimas.length+' itens)':'Calcular CMV a partir de uma planilha de matérias-primas'}" style="background:none;border:none;cursor:pointer;color:${p.materiasPrimas&&p.materiasPrimas.length?'#059669':'#94a3b8'};font-size:.72rem">🧾${p.materiasPrimas&&p.materiasPrimas.length?' '+p.materiasPrimas.length:''}</button>`:''}</td>
+      <td style="color:${p.custo!=null?'var(--ink3)':'#d97706'}">${p.custo!=null?fmtR(cmv):'sem CMV'} ${isAdm?`<button type="button" onclick="event.stopPropagation();abrirMateriaisProduto(${i})" title="${p.materiasPrimas&&p.materiasPrimas.length?'Ver/atualizar matérias-primas ('+p.materiasPrimas.length+' itens)':'Calcular CMV a partir de uma planilha de matérias-primas'}" style="background:none;border:none;cursor:pointer;color:${p.materiasPrimas&&p.materiasPrimas.length?'#059669':'#94a3b8'};font-size:.72rem">🧾${p.materiasPrimas&&p.materiasPrimas.length?' '+p.materiasPrimas.length:''}</button>`:''}</td>
+      <td style="font-size:.76rem;color:var(--ink3)">${cmvPct==null?'—':fmtPct(cmvPct)}</td>
       <td style="font-weight:700;color:${corMargem(margemPct)}">${fmtR(margemRS)}</td>
       <td style="font-weight:700;color:${corMargem(margemPct)}">${margemPct==null?'—':fmtPct(margemPct)}</td>
+      <td>${classifMiniHtml(classificacao)}</td>
       <td style="font-size:.72rem;color:var(--ink3)">${qtdeEquilibrio==null?'—':qtdeEquilibrio+' un/mês'}</td>
-      <td><div style="display:flex;gap:6px">${isAdm?`<button onclick="_toggleComProdutoEdit('${p.id}')" style="background:none;border:none;color:#2563eb;cursor:pointer;font-size:.9rem" title="Editar">✏️</button>`:''}${isAdm?`<button onclick="removerProdutoEComercial(${i})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.9rem" title="Remover">🗑</button>`:''}</div></td>
+      <td><div style="display:flex;gap:6px">${isAdm?`<button onclick="event.stopPropagation();_toggleComProdutoEdit('${p.id}')" style="background:none;border:none;color:#2563eb;cursor:pointer;font-size:.9rem" title="Editar">✏️</button>`:''}${isAdm?`<button onclick="event.stopPropagation();removerProdutoEComercial(${i})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.9rem" title="Remover">🗑</button>`:''}</div></td>
     </tr>`;
   };
 
@@ -12688,7 +12887,7 @@ function renderComercialProdutos(){
         <div onclick="_toggleComTipo('${_escJs(chave)}')" style="display:flex;justify-content:space-between;align-items:center;padding:9px 12px;background:#f1f5f9;cursor:pointer;font-size:.78rem;font-weight:700;color:var(--ink2)">
           <span>${expandido?'▾':'▸'} ${tipo.replace(/</g,'&lt;')} <span style="font-weight:400;color:var(--ink4)">(${itens.length})</span></span>
         </div>
-        ${expandido?`<div style="overflow-x:auto"><table class="dash-table"><thead><tr><th>Nome</th><th>Medida</th><th>Preço Final</th><th>CMV</th><th>Margem R$</th><th>Margem %</th><th>Un/mês p/ cobrir custo fixo</th><th></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`:''}
+        ${expandido?`<div style="overflow-x:auto"><table class="dash-table"><thead><tr><th>Foto</th><th>Nome</th><th>Medida</th><th>Preço Final</th><th>CMV</th><th>% CMV</th><th>Margem R$</th><th>Margem %</th><th>Classificação</th><th>Un/mês p/ cobrir custo fixo</th><th></th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`:''}
       </div>`;
     }).join('');
     return `
@@ -12699,10 +12898,10 @@ function renderComercialProdutos(){
   }).join('');
 
   const tabela=`
-    <div style="margin-bottom:4px;font-size:.72rem;color:var(--ink4)">Agrupado por Cliente → Tipo de Produto (clique no tipo pra abrir/fechar). Dentro de cada tipo, ordenado da maior pra menor margem. Margem de Contribuição = Preço Final − CMV. Produto com margem alta tem mais espaço pra desconto sem perder o negócio; margem baixa (ou negativa) é sinal pra evitar desconto nele. "Un/mês p/ cobrir custo fixo" é quantas unidades SÓ desse produto seriam necessárias pra cobrir sozinho a Despesa Operacional do mês (referência do DRE). Ainda não há rateio de custo fixo por unidade real (sem dado de volume vendido por produto) — números conservadores, não um "lucro líquido" inventado. Pra mudar o Cliente ou Tipo de um produto, edite em Configurações → 📦 Produtos.</div>
+    <div style="margin-bottom:4px;font-size:.72rem;color:var(--ink4)">Clique num produto pra abrir a ficha técnica dele (foto, projeto executivo, matérias-primas). Agrupado por Cliente → Tipo de Produto (clique no tipo pra abrir/fechar); dentro de cada tipo, ordenado da maior pra menor margem. <strong>Margem de Contribuição</strong> = Preço Final − CMV — quanto sobra de cada venda pra ajudar a pagar o custo fixo da empresa e depois virar lucro. <strong>% CMV</strong> é quanto do preço de venda já é consumido pelo custo do material (quanto menor, melhor). <strong>Classificação</strong> resume a saúde da margem: Saudável (≥40%) tem folga pra descontos e é bom pra empurrar em vendas; Atenção (20% a 40%) está ok mas vale revisar preço/custo; Crítico (&lt;20%) está perto de não cobrir o custo fixo da empresa e merece prioridade de revisão. "Un/mês p/ cobrir custo fixo" é quantas unidades SÓ desse produto seriam necessárias pra cobrir sozinho a Despesa Operacional do mês (referência real do DRE, puxada do Contas a Pagar). Isso ainda não é um rateio de custo fixo por unidade vendida de verdade, porque hoje as vendas não ficam vinculadas a um produto específico do catálogo — é uma leitura estrutural (preço vs. custo vs. custo fixo total da empresa), não um "lucro líquido por produto" inventado. Pra mudar o Cliente ou Tipo de um produto, edite em Configurações → 📦 Produtos.</div>
     ${gruposHtml}`;
 
-  el.innerHTML=cards+tabela+_comprodImportBlock();
+  el.innerHTML=cards+resumoClassif+tabela+_comprodImportBlock();
 }
 function _comprodImportBlock(){
   return `
