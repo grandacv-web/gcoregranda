@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-26.17';</script>
+<script>const APP_BUILD_VERSION='2026-08-26.20';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -2996,18 +2996,37 @@ select.fc{cursor:pointer}
 <div class="mov" id="mo-comentario-etapa" onclick="cio(event,'mo-comentario-etapa')">
 <div class="mvmod" style="width:480px;max-width:96vw;max-height:90vh;overflow-y:auto">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-    <h3 style="margin-bottom:0">💬 Comentário</h3>
+    <h3 id="lpc-titulo" style="margin-bottom:0">💬 Comentário</h3>
     <button onclick="closeM('mo-comentario-etapa')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
   </div>
   <div id="lpc-info" style="font-size:.8rem;color:var(--ink3);margin-bottom:14px"></div>
   <input type="hidden" id="lpc-pedido-id">
   <input type="hidden" id="lpc-etapa-key">
+  <input type="hidden" id="lpc-editar-idx">
   <div class="fg">
-    <label>Novo comentário <span class="r">*</span></label>
+    <label id="lpc-label-texto">Novo comentário <span class="r">*</span></label>
     <textarea id="lpc-texto" class="fc" rows="3" placeholder="Escreva o comentário..." style="text-transform:none"></textarea>
   </div>
   <div id="lpc-historico" style="font-size:.74rem;color:var(--ink4);margin-bottom:12px;max-height:200px;overflow-y:auto"></div>
-  <button onclick="lpSalvarComentarioEtapa()" style="width:100%;background:#1d4ed8;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Salvar Comentário</button>
+  <button id="lpc-btn-salvar" onclick="lpSalvarComentarioEtapa()" style="width:100%;background:#1d4ed8;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Salvar Comentário</button>
+</div>
+</div>
+
+<!-- DETALHE DE KPI DE VENDAS (2026-08-27, a pedido do usuário: "torne estes 3 botoes nos
+     indicadores de vendas como clicaveis, ao clicar aparece o que compoe essa lista" — Vendas
+     Brutas do Mês / Vendas Líquidas do Mês / Faturado Confirmado, tanto no painel Geral quanto
+     no painel de cada vendedor em Gráficos. Ver _gcAbrirModalKpi() e as 3 funções
+     gcAbrirDetalhe*() logo depois de getFaturadoMes(). -->
+<div class="mov" id="mo-kpi-detalhe" onclick="cio(event,'mo-kpi-detalhe')">
+<div class="mvmod" style="width:760px;max-width:96vw;max-height:88vh;overflow-y:auto">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+    <h3 id="kpid-titulo" style="margin-bottom:0">Detalhe</h3>
+    <button onclick="closeM('mo-kpi-detalhe')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div id="kpid-sub" style="font-size:.8rem;color:var(--ink3);margin-bottom:14px"></div>
+  <div style="overflow-x:auto">
+    <table class="dash-table" id="kpid-tabela"></table>
+  </div>
 </div>
 </div>
 
@@ -6480,6 +6499,19 @@ function viewP(id){
     return`<div class="vm-sec"><h4>${t}</h4><div class="vm-gr">${ent.map(([k,v])=>`<div class="vf"><div class="l">${k}</div><div class="v">${v}</div></div>`).join('')}</div></div>`;
   };
   const v=p.valores||{},pg=_ordenarPagamento(p.pagamento||{}),inst=p.instalacao||{},fr=p.frete||{};
+  // Documentos anexados — nossa Ordem de Serviço (p.arq_os_url) e a Ordem de Compra do
+  // cliente (2026-08-27, a pedido do usuário: "no contas a receber... eu quero que apareça
+  // o que tem de OS e pedido de compra linkada com este pedido pra que o financeiro possa
+  // baixar"). A OC tem 2 origens possíveis — anexada já na Emissão (p.arq_oc_url) ou
+  // anexada/trocada depois em "Editar Valores" na Lista de Vendas (p.ocUrl, pro caso comum
+  // do cliente só conseguir mandar a OC depois) — usa a mais recente (ocUrl) com fallback
+  // pra a da emissão, sem precisar de nenhuma leitura extra (os campos já vêm carregados
+  // junto com o pedido, então isso não pesa nada a mais).
+  const _vpOcUrl=p.ocUrl||p.arq_oc_url||'';
+  const docsHtml=(p.arq_os_url||_vpOcUrl)?`<div class="vm-sec"><h4>📎 Documentos</h4><div class="vm-gr">
+      ${p.arq_os_url?`<div class="vf"><div class="l">Nossa Ordem de Serviço</div><div class="v"><a href="${cldDownload(p.arq_os_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">⬇️ Baixar OS GRANDA</a></div></div>`:`<div class="vf"><div class="l">Nossa Ordem de Serviço</div><div class="v" style="color:var(--ink4)">Não anexada</div></div>`}
+      ${_vpOcUrl?`<div class="vf"><div class="l">Ordem de Compra do Cliente</div><div class="v"><a href="${cldDownload(_vpOcUrl)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">⬇️ Baixar OC${p.numOC?' Nº '+p.numOC:''}</a></div></div>`:`<div class="vf"><div class="l">Ordem de Compra do Cliente</div><div class="v" style="color:var(--ink4)">Ainda não anexada</div></div>`}
+    </div></div>`:`<div class="vm-sec"><h4>📎 Documentos</h4><div style="font-size:.78rem;color:var(--ink4)">Nenhum documento anexado ainda — nem nossa Ordem de Serviço, nem a Ordem de Compra do cliente.</div></div>`;
   document.getElementById('vp-bd').innerHTML=`
     <div class="vm-sec"><h4>Dados Gerais</h4><div class="vm-gr">
       <div class="vf"><div class="l">Tipo</div><div class="v">${p.tipo}</div></div>
@@ -6493,6 +6525,7 @@ function viewP(id){
       ${p.email_financeiro?`<div class="vf" style="grid-column:span 2;display:flex;align-items:center;gap:8px"><div class="l" style="margin:0;white-space:nowrap">E-mail Financeiro (NF's)</div><div class="v" style="margin:0">${p.email_financeiro}</div></div>`:''}
       ${p.obs?`<div class="vf" style="grid-column:span 2"><div class="l">Observações</div><div class="v">${p.obs}</div></div>`:''}
     </div></div>
+    ${docsHtml}
     ${sec('Valores',v)}${sec('Pagamento',pg)}${sec('Instalação',inst)}${sec('Frete',fr)}
     ${p.bases?`<div class="vm-sec"><h4>Bases e Fundações</h4><div class="vm-gr"><div class="vf" style="grid-column:span 2"><div class="l">Bases/Fundações</div><div class="v">${p.bases}</div></div></div></div>`:''}
   `;
@@ -21648,16 +21681,27 @@ function renderListaPedidosKanban(){
 function _lpComentariosDaEtapa(p,etapaKey){
   return (p.lpComentarios&&p.lpComentarios[etapaKey])||[];
 }
+// Nome do usuário logado, no MESMO formato salvo em c.por — usado tanto pra gravar o autor
+// de um comentário novo quanto pra decidir se o comentário atual pertence a quem está vendo
+// (só o autor pode editar/apagar, ver lpEditarComentarioEtapa/lpApagarComentarioEtapa,
+// 2026-08-27 a pedido do usuário: "permita que o usuario que fez o comentario possa editar
+// ou apagar o mesmo").
+function _lpMeuNomeComentario(){
+  return usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
+}
 function _lpComentarioCardHtml(p,etapaKey){
   const lista=_lpComentariosDaEtapa(p,etapaKey);
-  const itensHtml=lista.map(c=>{
+  const meuNome=_lpMeuNomeComentario();
+  const itensHtml=lista.map((c,idx)=>{
     const dt=c.dataHora?new Date(c.dataHora):null;
     const dataHoraTxt=dt?dt.toLocaleDateString('pt-BR')+' '+dt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}):'';
     const textoEsc=String(c.texto||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const longo=textoEsc.length>70;
     const resumo=longo?textoEsc.slice(0,70)+'…':textoEsc;
+    const ehMeu=(c.por||'—')===meuNome;
+    const acoesHtml=ehMeu?`<span style="margin-left:auto;white-space:nowrap"><button type="button" onclick="event.stopPropagation();lpEditarComentarioEtapa('${p.id}','${etapaKey}',${idx})" title="Editar" style="background:none;border:none;cursor:pointer;color:var(--ink4);font-size:.66rem;padding:0 3px">✏️</button><button type="button" onclick="event.stopPropagation();lpApagarComentarioEtapa('${p.id}','${etapaKey}',${idx})" title="Apagar" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.66rem;padding:0 3px">🗑️</button></span>`:'';
     return `<div onclick="event.stopPropagation()" style="background:#f1f5f9;border-radius:6px;padding:4px 6px;margin-top:3px">
-      <div style="font-size:.6rem;font-weight:700;color:var(--ink3)">👤 ${(c.por||'—').replace(/</g,'&lt;')} · ${dataHoraTxt}</div>
+      <div style="font-size:.6rem;font-weight:700;color:var(--ink3);display:flex;align-items:center">👤 ${(c.por||'—').replace(/</g,'&lt;')} · ${dataHoraTxt}${c.editadoEm?' <span style="font-weight:600;color:var(--ink4)">(editado)</span>':''}${acoesHtml}</div>
       ${longo?`<details style="margin-top:1px"><summary style="font-size:.62rem;color:var(--ink2);cursor:pointer">${resumo} <span style="color:var(--brand-d);font-weight:700">ver mais</span></summary><div style="font-size:.62rem;color:var(--ink2);white-space:pre-wrap;margin-top:2px">${textoEsc}</div></details>`:`<div style="font-size:.62rem;color:var(--ink2);white-space:pre-wrap">${textoEsc}</div>`}
     </div>`;
   }).join('');
@@ -21673,6 +21717,10 @@ function lpAbrirComentarioEtapa(pedidoId,etapaKey){
   const def=_lpEtapasDefParaPedido(p).find(d=>d.key===etapaKey);
   document.getElementById('lpc-pedido-id').value=pedidoId;
   document.getElementById('lpc-etapa-key').value=etapaKey;
+  document.getElementById('lpc-editar-idx').value='';
+  const tEl=document.getElementById('lpc-titulo');if(tEl)tEl.textContent='💬 Comentário';
+  const lEl=document.getElementById('lpc-label-texto');if(lEl)lEl.innerHTML='Novo comentário <span class="r">*</span>';
+  const bEl=document.getElementById('lpc-btn-salvar');if(bEl)bEl.textContent='💾 Salvar Comentário';
   const infoEl=document.getElementById('lpc-info');
   if(infoEl)infoEl.innerHTML=`OS Nº <strong>${p.os||'—'}</strong> · ${p.cliente||'—'}<br>Etapa: <strong>${(def&&def.label)||etapaKey}</strong>`;
   const txtEl=document.getElementById('lpc-texto');if(txtEl)txtEl.value='';
@@ -21681,24 +21729,77 @@ function lpAbrirComentarioEtapa(pedidoId,etapaKey){
   if(histEl){
     histEl.innerHTML=listaExistente.length?'<div style="font-weight:700;color:var(--ink3);margin-bottom:4px">Comentários anteriores</div>'+listaExistente.slice().reverse().map(c=>{
       const dt=c.dataHora?new Date(c.dataHora).toLocaleString('pt-BR'):'';
-      return `<div style="padding:6px 0;border-top:1px solid var(--border-lt)"><strong>${(c.por||'—').replace(/</g,'&lt;')}</strong> · <span style="color:var(--ink4)">${dt}</span><div style="margin-top:2px;white-space:pre-wrap">${String(c.texto||'').replace(/</g,'&lt;')}</div></div>`;
+      return `<div style="padding:6px 0;border-top:1px solid var(--border-lt)"><strong>${(c.por||'—').replace(/</g,'&lt;')}</strong> · <span style="color:var(--ink4)">${dt}</span>${c.editadoEm?' <span style="color:var(--ink4)">(editado)</span>':''}<div style="margin-top:2px;white-space:pre-wrap">${String(c.texto||'').replace(/</g,'&lt;')}</div></div>`;
     }).join(''):'';
   }
   openM('mo-comentario-etapa');
+}
+// Edição/exclusão do próprio comentário (2026-08-27, a pedido do usuário: "permita que o
+// usuario que fez o comentario possa editar ou apagar o mesmo") — reaproveita o mesmo modal
+// de criar comentário (mo-comentario-etapa), só troca o texto/título e guarda o índice sendo
+// editado em #lpc-editar-idx pra lpSalvarComentarioEtapa() saber se é edição ou comentário
+// novo. Só o autor (comparando com o nome salvo em c.por) pode editar/apagar — mesma
+// checagem tanto aqui (esconde os botões pra quem não é o autor) quanto dentro das próprias
+// funções (defesa contra chamar a função direto sem passar pelo botão).
+function lpEditarComentarioEtapa(pedidoId,etapaKey,idx){
+  if(!_isPlanejamentoUser()){toast('Só Planejamento ou administrador pode comentar aqui.','terr');return;}
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const lista=_lpComentariosDaEtapa(p,etapaKey);
+  const c=lista[idx];
+  if(!c){toast('Comentário não encontrado','terr');return;}
+  if(c.por!==_lpMeuNomeComentario()){toast('Só quem fez o comentário pode editá-lo.','terr');return;}
+  const def=_lpEtapasDefParaPedido(p).find(d=>d.key===etapaKey);
+  document.getElementById('lpc-pedido-id').value=pedidoId;
+  document.getElementById('lpc-etapa-key').value=etapaKey;
+  document.getElementById('lpc-editar-idx').value=String(idx);
+  const tEl=document.getElementById('lpc-titulo');if(tEl)tEl.textContent='✏️ Editar Comentário';
+  const lEl=document.getElementById('lpc-label-texto');if(lEl)lEl.innerHTML='Comentário <span class="r">*</span>';
+  const bEl=document.getElementById('lpc-btn-salvar');if(bEl)bEl.textContent='💾 Salvar Alteração';
+  const infoEl=document.getElementById('lpc-info');
+  if(infoEl)infoEl.innerHTML=`OS Nº <strong>${p.os||'—'}</strong> · ${p.cliente||'—'}<br>Etapa: <strong>${(def&&def.label)||etapaKey}</strong>`;
+  const txtEl=document.getElementById('lpc-texto');if(txtEl)txtEl.value=c.texto||'';
+  const histEl=document.getElementById('lpc-historico');if(histEl)histEl.innerHTML='';
+  openM('mo-comentario-etapa');
+}
+async function lpApagarComentarioEtapa(pedidoId,etapaKey,idx){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const lista=_lpComentariosDaEtapa(p,etapaKey);
+  const c=lista[idx];
+  if(!c){toast('Comentário não encontrado','terr');return;}
+  if(c.por!==_lpMeuNomeComentario()){toast('Só quem fez o comentário pode apagá-lo.','terr');return;}
+  if(!confirm('Apagar este comentário? Essa ação não pode ser desfeita.'))return;
+  p.lpComentarios[etapaKey].splice(idx,1);
+  await savePedidoFS(p);
+  toast('Comentário apagado','twar');
+  renderListaPedidosKanban();
 }
 async function lpSalvarComentarioEtapa(){
   if(!_isPlanejamentoUser()){toast('Só Planejamento ou administrador pode comentar aqui.','terr');return;}
   const pedidoId=document.getElementById('lpc-pedido-id')?.value;
   const etapaKey=document.getElementById('lpc-etapa-key')?.value;
+  const editarIdx=document.getElementById('lpc-editar-idx')?.value;
   const texto=(document.getElementById('lpc-texto')?.value||'').trim();
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
   if(!texto){toast('Escreva o comentário','terr');return;}
   p.lpComentarios=p.lpComentarios||{};
   if(!p.lpComentarios[etapaKey])p.lpComentarios[etapaKey]=[];
-  p.lpComentarios[etapaKey].push({texto,por:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),dataHora:new Date().toISOString()});
-  await savePedidoFS(p);
-  toast('Comentário adicionado ✅','tok');
+  if(editarIdx!==''&&editarIdx!=null){
+    const idx=parseInt(editarIdx,10);
+    const c=p.lpComentarios[etapaKey][idx];
+    if(!c){toast('Comentário não encontrado','terr');return;}
+    if(c.por!==_lpMeuNomeComentario()){toast('Só quem fez o comentário pode editá-lo.','terr');return;}
+    c.texto=texto;
+    c.editadoEm=new Date().toISOString();
+    await savePedidoFS(p);
+    toast('Comentário atualizado ✅','tok');
+  }else{
+    p.lpComentarios[etapaKey].push({texto,por:_lpMeuNomeComentario(),dataHora:new Date().toISOString()});
+    await savePedidoFS(p);
+    toast('Comentário adicionado ✅','tok');
+  }
   closeM('mo-comentario-etapa');
   renderListaPedidosKanban();
 }
@@ -31655,6 +31756,52 @@ function getFaturadoMes(y,m,vendedor){
     .reduce((s,i)=>s+(i.valor||0),0);
 }
 
+// DETALHE DOS 3 KPIS DE VENDAS (2026-08-27, a pedido do usuário: "torne estes 3 botoes nos
+// indicadores de vendas como clicaveis, ao clicar aparece o que compoe essa lista de cada um
+// pro usuario ver, com nome do cliente, numero do pedido, valor, job etc etc") — clique nos
+// cards "Vendas Brutas do Mês"/"Vendas Líquidas do Mês"/"Faturado Confirmado" (painel Geral e
+// painel de cada vendedor, em Gráficos) abre a lista de itens que soma aquele número. Usa
+// exatamente a MESMA fonte/filtro de cada getXxxMes() acima, então o total da lista sempre
+// bate com o valor mostrado no card.
+function _gcAbrirModalKpi(titulo,subtitulo,headers,linhas,totalTxt){
+  const tEl=document.getElementById('kpid-titulo');if(tEl)tEl.textContent=titulo;
+  const sEl=document.getElementById('kpid-sub');if(sEl)sEl.textContent=subtitulo;
+  const tabEl=document.getElementById('kpid-tabela');
+  if(tabEl){
+    if(!linhas.length){
+      tabEl.innerHTML='<tr><td style="text-align:center;padding:20px;color:var(--ink4)">Nenhum item encontrado.</td></tr>';
+    }else{
+      tabEl.innerHTML=`<thead><tr>${headers.map(h=>`<th${h.num?' style="text-align:right"':''}>${h.l}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${linhas.map(r=>`<tr>${headers.map(h=>`<td${h.num?' style="text-align:right;white-space:nowrap"':''}>${(r[h.k]!=null&&r[h.k]!=='')?r[h.k]:'—'}</td>`).join('')}</tr>`).join('')}
+          <tr style="border-top:1.5px solid var(--border);font-weight:800"><td colspan="${headers.length-1}">TOTAL (${linhas.length} ${linhas.length===1?'item':'itens'})</td><td style="text-align:right;white-space:nowrap;color:#1a2b5e">${totalTxt}</td></tr>
+        </tbody>`;
+    }
+  }
+  openM('mo-kpi-detalhe');
+}
+function gcAbrirDetalheVendasBrutas(y,m,vendedor){
+  const rows=getVendaRowsMerged().filter(r=>r.m===m&&vendedorMatch(r.v,vendedor)).sort((a,b)=>(b.br||0)-(a.br||0));
+  const total=rows.reduce((s,r)=>s+(r.br||0),0);
+  const headers=vendedor?[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'valor',l:'Valor Bruto',num:true}]:[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'vendedor',l:'Vendedor'},{k:'valor',l:'Valor Bruto',num:true}];
+  const linhas=rows.map(r=>({os:r.p||'—',cliente:r.cl||'—',job:r.job||'—',vendedor:r.v||'—',valor:fmtR(r.br||0)}));
+  _gcAbrirModalKpi('💰 Vendas Brutas do Mês',(MESES_PT[m]||'')+'/'+y+(vendedor?' · '+vendedor:''),headers,linhas,fmtR(total));
+}
+function gcAbrirDetalheVendasLiquidas(y,m,vendedor){
+  const rows=getVendaRowsMerged().filter(r=>r.m===m&&vendedorMatch(r.v,vendedor)).sort((a,b)=>(b.lq||0)-(a.lq||0));
+  const total=rows.reduce((s,r)=>s+(r.lq||0),0);
+  const headers=vendedor?[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'valor',l:'Valor Líquido',num:true}]:[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'vendedor',l:'Vendedor'},{k:'valor',l:'Valor Líquido',num:true}];
+  const linhas=rows.map(r=>({os:r.p||'—',cliente:r.cl||'—',job:r.job||'—',vendedor:r.v||'—',valor:fmtR(r.lq||0)}));
+  _gcAbrirModalKpi('📈 Vendas Líquidas do Mês',(MESES_PT[m]||'')+'/'+y+(vendedor?' · '+vendedor:''),headers,linhas,fmtR(total));
+}
+function gcAbrirDetalheFaturado(y,m,vendedor){
+  const rows=getComissaoItemsAll().filter(i=>i.qy===y&&i.qm===m&&i.status==='confirmado'&&(!vendedor||vendedorMatch(i.nomeVend,vendedor))).sort((a,b)=>(b.valor||0)-(a.valor||0));
+  const total=rows.reduce((s,r)=>s+(r.valor||0),0);
+  const headers=vendedor?[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'parcela',l:'Parcela'},{k:'data',l:'Data'},{k:'valor',l:'Valor',num:true}]:[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'vendedor',l:'Vendedor'},{k:'parcela',l:'Parcela'},{k:'data',l:'Data'},{k:'valor',l:'Valor',num:true}];
+  const linhas=rows.map(r=>({os:r.pedidoOs||'—',cliente:r.cliente||'—',job:r.job||'—',vendedor:r.nomeVend||'—',parcela:r.label||'—',data:r.dataAtiva||'—',valor:fmtR(r.valor||0)}));
+  _gcAbrirModalKpi('✅ Faturado Confirmado',(MESES_PT[m]||'')+'/'+y+(vendedor?' · '+vendedor:''),headers,linhas,fmtR(total));
+}
+
 function gcDestroyAll(){
   Object.values(gcCharts).forEach(ch=>{try{ch.destroy();}catch(e){}});
   gcCharts={};
@@ -31944,13 +32091,13 @@ function gcRenderGeralPaineis(y,m,todos){
   // KPIs topo (6 cards)
   const kTop=document.getElementById('gc-kpis-top');
   if(kTop)kTop.innerHTML=[
-    {cls:'az',l:'Vendas Brutas do Mês',v:fmtR(brMes),s:''},
-    {cls:'ro',l:'Vendas Líquidas do Mês',v:fmtR(lqMes),s:metaMes>0?'Meta: '+fmtR(metaMes):'Meta não definida'},
-    {cls:'vd',l:'Faturado Confirmado',v:fmtR(ftMes),s:'Parcelas confirmadas'},
+    {cls:'az',l:'Vendas Brutas do Mês',v:fmtR(brMes),s:'',click:`gcAbrirDetalheVendasBrutas(${y},${m},null)`},
+    {cls:'ro',l:'Vendas Líquidas do Mês',v:fmtR(lqMes),s:metaMes>0?'Meta: '+fmtR(metaMes):'Meta não definida',click:`gcAbrirDetalheVendasLiquidas(${y},${m},null)`},
+    {cls:'vd',l:'Faturado Confirmado',v:fmtR(ftMes),s:'Parcelas confirmadas',click:`gcAbrirDetalheFaturado(${y},${m},null)`},
     {cls:'wn',l:'Meta do Mês',v:metaMes>0?fmtR(metaMes):'—',s:'Soma das metas individuais'},
     {cls:'dk',l:'Orçamentos em Aberto',v:fmtR(orcAbertoMes),s:'Soma do pipeline de todos os vendedores'},
     {cls:'la',l:'Falta Vender por Dia Útil',v:!fpdMes.isMesAtual?'—':(metaMes<=0?'—':(faltaMes<=0?'✅ Meta batida':fmtR(fpdMes.porDia))),s:!fpdMes.isMesAtual?'Só disponível no mês corrente':(faltaMes<=0?'':fpdMes.dias+' dia'+(fpdMes.dias===1?'':'s')+' útil'+(fpdMes.dias===1?'':'eis')+' restante'+(fpdMes.dias===1?'':'s'))},
-  ].map(k=>`<div class="gc-kp ${k.cls}"><div class="gc-kl">${k.l}</div><div class="gc-kv">${k.v}</div><div class="gc-ks">${k.s}</div></div>`).join('');
+  ].map(k=>`<div class="gc-kp ${k.cls}"${k.click?` onclick="${k.click}" style="cursor:pointer" title="Clique para ver o detalhamento"`:''}><div class="gc-kl">${k.l}</div><div class="gc-kv">${k.v}</div><div class="gc-ks">${k.s}</div></div>`).join('');
 
   // KPIs bot (3 cards)
   const kBot=document.getElementById('gc-kpis-bot');
@@ -32164,13 +32311,14 @@ function gcRenderVendPaineis(){
 
   // KPIs top
   const kTopV=document.getElementById('gc-vend-kpis-top');
+  const vEscKpi=_escJs(v);
   if(kTopV)kTopV.innerHTML=[
-    {cls:'az',l:'Vendas Brutas do Mês',v:fmtR(brMes),s:''},
-    {cls:'ro',l:'Vendas Líquidas do Mês',v:fmtR(lqMes),s:metaMes>0?'Meta: '+fmtR(metaMes):'Sem meta'},
-    {cls:'vd',l:'Faturado Confirmado',v:fmtR(ftMes),s:'Parcelas confirmadas'},
+    {cls:'az',l:'Vendas Brutas do Mês',v:fmtR(brMes),s:'',click:`gcAbrirDetalheVendasBrutas(${y},${m},'${vEscKpi}')`},
+    {cls:'ro',l:'Vendas Líquidas do Mês',v:fmtR(lqMes),s:metaMes>0?'Meta: '+fmtR(metaMes):'Sem meta',click:`gcAbrirDetalheVendasLiquidas(${y},${m},'${vEscKpi}')`},
+    {cls:'vd',l:'Faturado Confirmado',v:fmtR(ftMes),s:'Parcelas confirmadas',click:`gcAbrirDetalheFaturado(${y},${m},'${vEscKpi}')`},
     {cls:'la',l:'Falta Vender por Dia Útil',v:!fpdVend.isMesAtual?'—':(metaMes<=0?'—':(faltaMes<=0?'✅ Meta batida':fmtR(fpdVend.porDia))),s:!fpdVend.isMesAtual?'Só disponível no mês corrente':(faltaMes<=0?'':fpdVend.dias+' dia'+(fpdVend.dias===1?'':'s')+' útil'+(fpdVend.dias===1?'':'eis')+' restante'+(fpdVend.dias===1?'':'s'))},
     {cls:'wn',l:'Pedidos no Mês',v:String(nPeds),s:'pedidos emitidos'},
-  ].map(k=>`<div class="gc-kp ${k.cls}"><div class="gc-kl">${k.l}</div><div class="gc-kv">${k.v}</div><div class="gc-ks">${k.s}</div></div>`).join('');
+  ].map(k=>`<div class="gc-kp ${k.cls}"${k.click?` onclick="${k.click}" style="cursor:pointer" title="Clique para ver o detalhamento"`:''}><div class="gc-kl">${k.l}</div><div class="gc-kv">${k.v}</div><div class="gc-ks">${k.s}</div></div>`).join('');
 
   // KPIs bot
   const kBotV=document.getElementById('gc-vend-kpis-bot');
