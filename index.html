@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-28.4';</script>
+<script>const APP_BUILD_VERSION='2026-08-28.12';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -845,6 +845,7 @@ select.fc{cursor:pointer}
               <button id="gc-fatcli-btn-lq" class="gc-comp25-btn" onclick="setFatClienteModo('lq')">Ordenar por Líquido</button>
             </div>
           </div>
+          <div id="gc-fatcli-zamp-alerta"></div>
           <div style="height:280px;margin-top:10px"><canvas id="gc-cFatCli"></canvas></div>
           <div style="overflow-x:auto;margin-top:14px"><table class="dash-table" id="gc-fatcli-table"></table></div>
         </div>
@@ -1618,18 +1619,25 @@ select.fc{cursor:pointer}
       </div>
       <div id="lp-sec-calendario" style="display:none">
         <div id="lp-cal-atencao"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-          <div class="dash-mes-nav" style="margin:0">
-            <button onclick="lpCalMov(-1)" type="button">◀</button>
-            <div class="dash-mes-label" id="lp-cal-lbl" style="min-width:150px"></div>
-            <button onclick="lpCalMov(1)" type="button">▶</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+          <div class="dash-mes-nav" style="margin:0;overflow-x:visible;flex:1;min-width:260px">
+            <button onclick="lpDiasNav(-1)" type="button">◀</button>
+            <div class="dash-mes-label" id="lp-cal-lbl" style="flex:1;min-width:130px"></div>
+            <button onclick="lpDiasNav(1)" type="button">▶</button>
+            <button onclick="lpDiasHoje()" type="button" class="dash-btn-conf" style="background:#94a3b8;margin-left:6px">Hoje</button>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button onclick="lpExportarCalendarioExcel()" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Exportar Excel</button>
             <button onclick="lpExportarCalendarioPDF()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
           </div>
+          <div style="flex-basis:100%;height:0"></div>
+          <select id="lp-cal-periodo" onchange="lpDiasSetPeriodo(this.value)" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+            <option value="dia">Dia</option>
+            <option value="semana" selected>Semana</option>
+            <option value="mes">Mês</option>
+          </select>
         </div>
-        <div id="lp-cal-body"></div>
+        <div id="lp-cal-body" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px"></div>
       </div>
       <!-- SIMULADOR DE PEDIDOS (2026-08-03, a pedido do usuário) — só CONSULTA, não cria/salva
            pedido nenhum. Reusa o mesmo motor de cálculo de etapas da Lista de Pedidos real
@@ -2889,18 +2897,24 @@ select.fc{cursor:pointer}
 </div>
 </div>
 
-<!-- ADICIONAR DECISOR RÁPIDO (2026-08-26, a pedido do usuário: "ter um botao ADICIONAR
-     DECISOR, pra nao precisar a pessoa editar a empresa inteira pra add um decisor").
-     Mesmos campos de prospAddDecisorRow()/_prospDecisoresDoForm() (nome, cargo obrigatório,
-     telefone, email, linkedin), só que direto num decisor só, sem abrir o form inteiro da
-     empresa. Ver prospAbrirAdicionarDecisor()/prospSalvarDecisorRapido(). -->
-<div class="mov" id="mo-prosp-decisor-add" onclick="cio(event,'mo-prosp-decisor-add')">
+<!-- ADICIONAR/EDITAR DECISOR (2026-08-26, a pedido do usuário: "ter um botao ADICIONAR
+     DECISOR, pra nao precisar a pessoa editar a empresa inteira pra add um decisor"; e
+     2026-08-28, a pedido do usuário: "preciso poder editar ou excluir um decisor" — mesmo
+     modal virou dual-uso, ver prosp-decisor-add-idx: '-1' = adicionando, índice >=0 =
+     editando esse decisor de e.decisores). Mesmos campos de
+     prospAddDecisorRow()/_prospDecisoresDoForm() (nome, cargo obrigatório, telefone, email,
+     linkedin), só que direto num decisor só, sem abrir o form inteiro da empresa. Ver
+     prospAbrirAdicionarDecisor()/prospAbrirEditarDecisor()/prospSalvarDecisorRapido().
+     NÃO fecha ao clicar fora (2026-08-28, a pedido do usuário) — só o X ou Esc (ver listener
+     de Escape perto do de mo-prosp-card). -->
+<div class="mov" id="mo-prosp-decisor-add">
 <div class="mvmod" style="width:420px;max-width:96vw">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-    <h3 style="margin-bottom:0">➕ Adicionar Decisor</h3>
+    <h3 id="prosp-decisor-add-titulo" style="margin-bottom:0">➕ Adicionar Decisor</h3>
     <button onclick="closeM('mo-prosp-decisor-add')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
   </div>
   <input type="hidden" id="prosp-decisor-add-empresa-id">
+  <input type="hidden" id="prosp-decisor-add-idx" value="-1">
   <div class="fg"><label>Nome <span class="r">*</span></label><input class="fc" id="prosp-decisor-add-nome" placeholder="Nome do decisor/comprador"></div>
   <div class="fg"><label>Cargo <span class="r">*</span></label><input class="fc" id="prosp-decisor-add-cargo" placeholder="Ex.: Comprador, Gerente, Sócio..."></div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -2908,7 +2922,7 @@ select.fc{cursor:pointer}
     <div class="fg"><label>E-mail</label><input class="fc no-upper" id="prosp-decisor-add-email" style="text-transform:none"></div>
   </div>
   <div class="fg"><label>LinkedIn</label><input class="fc no-upper" id="prosp-decisor-add-linkedin" placeholder="Link do perfil no LinkedIn" style="text-transform:none"></div>
-  <button onclick="prospSalvarDecisorRapido()" style="width:100%;background:#00bac7;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Adicionar Decisor</button>
+  <button onclick="prospSalvarDecisorRapido()" style="width:100%;background:#00bac7;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Salvar</button>
 </div>
 </div>
 
@@ -3944,6 +3958,22 @@ window._fbReauth=(pass)=>reauthenticateWithCredential(auth.currentUser,EmailAuth
 // Firestore
 window._db=db;
 window._fbSavePedido=(p)=>setDoc(doc(db,'pedidos',String(p.id)),p);
+// Transação (lê o documento FRESCO do servidor, aplica um patch, grava) — usada pelas ações
+// de Tarefas Comerciais (ver _salvarTarefaComercialFS/_excluirTarefaComercialFS mais abaixo)
+// pra nunca depender da cópia de `pedidos` que porventura esteja desatualizada na memória
+// local (2026-08-28, bug relatado pelo usuário: tarefa marcada como concluída "voltava"
+// sozinha — causa: savePedidoFS(p) sempre regrava o PEDIDO INTEIRO com o que estivesse na
+// memória local naquele instante; se outra aba/pessoa tivesse essa mesma venda aberta desde
+// antes da conclusão e salvasse qualquer OUTRA coisa nela depois, sua cópia antiga de
+// tarefasComerciais reescrevia por cima da conclusão recém-feita). mutatorFn recebe os dados
+// atuais do servidor e devolve só o patch a gravar (ou null/undefined pra não gravar nada).
+window._fbTx=(pedidoId,mutatorFn)=>runTransaction(db,async(tx)=>{
+  const ref=doc(db,'pedidos',pedidoId);
+  const snap=await tx.get(ref);
+  if(!snap.exists())throw new Error('Pedido não encontrado no servidor (id '+pedidoId+')');
+  const patch=mutatorFn(snap.data());
+  if(patch)tx.update(ref,patch);
+});
 window._fbDeletePedido=(id)=>deleteDoc(doc(db,'pedidos',String(id)));
 window._fbLoadPedidos=()=>getDocs(collection(db,'pedidos'));
 window._fbWatchPedidos=(cb)=>onSnapshot(collection(db,'pedidos'),cb);
@@ -4421,15 +4451,21 @@ async function marcarTarefaComercial(pedidoId,tarefaId,concluida){
   // fazia o caminho inverso: resolver a pendência conclui a tarefa). Enviar pra aprovação
   // ainda NÃO resolve a pendência — só quando o admin aprovar de verdade (ver
   // aprovarTarefaComercial()) — por isso só mexe aqui se o status final for concluida/pendente.
+  let pendPatch=null;
   if(t.origemConselho&&p.conselhoPendencias&&t.status!=='aguardando_aprovacao'){
+    pendPatch={
+      resolvida:t.status==='concluida',
+      resolvidaEm:t.status==='concluida'?new Date().toISOString():null,
+      resolvidaPor:t.status==='concluida'?(usuarioLogado?.nomeExibicao||''):''
+    };
     const pend=p.conselhoPendencias.find(x=>x.tarefaId===t.id);
-    if(pend){
-      pend.resolvida=t.status==='concluida';
-      pend.resolvidaEm=t.status==='concluida'?new Date().toISOString():null;
-      pend.resolvidaPor=t.status==='concluida'?(usuarioLogado?.nomeExibicao||''):'';
-    }
+    if(pend)Object.assign(pend,pendPatch);
   }
-  await savePedidoFS(p);
+  // Grava só tarefasComerciais/conselhoPendencias, lendo o pedido FRESCO do servidor na hora
+  // de gravar (ver _salvarTarefaComercialFS) — nunca reescreve o pedido inteiro com a cópia
+  // local, que pode estar desatualizada se outra aba tiver essa mesma venda aberta há um
+  // tempo (2026-08-28, bug relatado: tarefa concluída "voltava" sozinha no dia seguinte).
+  if(!await _salvarTarefaComercialFS(p,t,pendPatch))return;
   renderTarefasComerciais();
   renderAll();
   _refreshTarefasBadge();
@@ -4475,7 +4511,7 @@ async function solicitarAdiamentoTarefa(pedidoId,tarefaId,novoPrazo,justificativ
   const t=p.tarefasComerciais.find(x=>x.id===tarefaId);
   if(!t)return;
   if(!_aplicarSolicitacaoAdiamento(t,novoPrazo,justificativa))return;
-  await savePedidoFS(p);
+  if(!await _salvarTarefaComercialFS(p,t,null))return;
   renderTarefasComerciais();
   closeM('mo-tarefa-adiar');closeM('mo-tarefa-detalhe');
   _refreshTarefasBadge();
@@ -4523,7 +4559,7 @@ async function decidirAdiamentoTarefa(pedidoId,tarefaId,aprovado){
   const t=p.tarefasComerciais.find(x=>x.id===tarefaId);
   if(!t)return;
   if(!_aplicarDecisaoAdiamento(t,aprovado))return;
-  await savePedidoFS(p);
+  if(!await _salvarTarefaComercialFS(p,t,null))return;
   renderTarefasComerciais();
   closeM('mo-tarefa-detalhe');
   _refreshTarefasBadge();
@@ -4662,7 +4698,7 @@ async function excluirTarefaComercial(pedidoId,tarefaId){
   if(!_podeExcluirTarefa(t.criadoPor)){toast('Só quem lançou a tarefa (ou um administrador) pode excluí-la','terr');return;}
   if(!confirm('Excluir esta tarefa? Essa ação não pode ser desfeita.'))return;
   p.tarefasComerciais=p.tarefasComerciais.filter(x=>x.id!==tarefaId);
-  await savePedidoFS(p);
+  if(!await _excluirTarefaComercialFS(pedidoId,tarefaId))return;
   renderTarefasComerciais();
   _refreshTarefasBadge();
   toast('Tarefa excluída','tok');
@@ -4850,11 +4886,13 @@ async function aprovarTarefaComercial(pedidoId,tarefaId){
   if(!_aplicarAprovacaoTarefa(t,true))return;
   // Mesma sincronização de Conselho de marcarTarefaComercial() — só agora, na aprovação
   // de verdade, é que a pendência vinculada pode ser dada como resolvida.
+  let pendPatch=null;
   if(t.origemConselho&&p.conselhoPendencias){
+    pendPatch={resolvida:true,resolvidaEm:new Date().toISOString(),resolvidaPor:usuarioLogado?.nomeExibicao||''};
     const pend=p.conselhoPendencias.find(x=>x.tarefaId===t.id);
-    if(pend){pend.resolvida=true;pend.resolvidaEm=new Date().toISOString();pend.resolvidaPor=usuarioLogado?.nomeExibicao||'';}
+    if(pend)Object.assign(pend,pendPatch);
   }
-  await savePedidoFS(p);
+  if(!await _salvarTarefaComercialFS(p,t,pendPatch))return;
   renderTarefasComerciais();
   renderAll();
   _refreshTarefasBadge();
@@ -4879,11 +4917,13 @@ async function devolverTarefaComercial(pedidoId,tarefaId,novoPrazo,motivo){
   const t=p.tarefasComerciais.find(x=>x.id===tarefaId);
   if(!t)return;
   if(!_aplicarAprovacaoTarefa(t,false,novoPrazo,motivo))return;
+  let pendPatch=null;
   if(t.origemConselho&&p.conselhoPendencias){
+    pendPatch={resolvida:false,resolvidaEm:null,resolvidaPor:''};
     const pend=p.conselhoPendencias.find(x=>x.tarefaId===t.id);
-    if(pend){pend.resolvida=false;pend.resolvidaEm=null;pend.resolvidaPor='';}
+    if(pend)Object.assign(pend,pendPatch);
   }
-  await savePedidoFS(p);
+  if(!await _salvarTarefaComercialFS(p,t,pendPatch))return;
   renderTarefasComerciais();
   closeM('mo-tarefa-devolver');closeM('mo-tarefa-detalhe');
   _refreshTarefasBadge();
@@ -5284,6 +5324,49 @@ async function savePedidoFS(p){
   if(!window._fbSavePedido){console.warn('Firestore não disponível');return;}
   try{await window._fbSavePedido(p);}
   catch(e){toast('Erro ao salvar no servidor: '+e.message,'terr');console.error(e);}
+}
+// Grava só o campo tarefasComerciais (e, se a tarefa tiver origemConselho, o item
+// correspondente em conselhoPendencias) de UM pedido — via window._fbTx (transação sobre o
+// documento FRESCO do servidor), em vez de savePedidoFS(p) (reescreve o pedido INTEIRO com a
+// cópia local, que pode estar desatualizada — ver comentário em window._fbTx). Reaproveitada
+// por toda ação de Tarefas Comerciais vinculada a pedido (concluir/reabrir, adiar, aprovar/
+// devolver adiamento, aprovar/devolver conclusão); exclusão usa _excluirTarefaComercialFS
+// logo abaixo (mesma ideia, removendo em vez de atualizar). Devolve true/false — chamador
+// já mostra o toast de erro (vindo daqui) e deve parar (return) se vier false, senão a tela
+// segue mostrando a mudança como se tivesse sido salva sem ter sido de verdade.
+async function _salvarTarefaComercialFS(p,tarefaAtualizada,pendPatch){
+  if(!window._fbTx){toast('Firestore não disponível','terr');return false;}
+  try{
+    await window._fbTx(String(p.id),serverData=>{
+      const tarefas=(serverData.tarefasComerciais||[]).slice();
+      const idx=tarefas.findIndex(x=>x.id===tarefaAtualizada.id);
+      if(idx>=0)tarefas[idx]=tarefaAtualizada;else tarefas.push(tarefaAtualizada);
+      const patch={tarefasComerciais:tarefas};
+      if(pendPatch){
+        const pends=(serverData.conselhoPendencias||[]).slice();
+        const pidx=pends.findIndex(x=>x.tarefaId===tarefaAtualizada.id);
+        if(pidx>=0){pends[pidx]={...pends[pidx],...pendPatch};patch.conselhoPendencias=pends;}
+      }
+      return patch;
+    });
+    return true;
+  }catch(e){
+    toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a alteração NÃO foi salva, tente de novo.','terr');
+    console.error(e);
+    return false;
+  }
+}
+// Mesma ideia acima, mas removendo a tarefa em vez de atualizá-la (ver excluirTarefaComercial()).
+async function _excluirTarefaComercialFS(pedidoId,tarefaId){
+  if(!window._fbTx){toast('Firestore não disponível','terr');return false;}
+  try{
+    await window._fbTx(String(pedidoId),serverData=>({tarefasComerciais:(serverData.tarefasComerciais||[]).filter(x=>x.id!==tarefaId)}));
+    return true;
+  }catch(e){
+    toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a exclusão NÃO foi salva, tente de novo.','terr');
+    console.error(e);
+    return false;
+  }
 }
 
 // Trava pra _migrarLancarGcoreSemResponsavel() rodar só 1x por sessão, mesmo o listener de
@@ -7916,6 +7999,18 @@ document.addEventListener('keydown',function(e){
   if(outros.length)return;
   prospTentarFecharCard();
 });
+// ESC fecha "Adicionar/Editar Decisor" (mo-prosp-decisor-add) — 2026-08-28, a pedido do
+// usuário ("nao pode fechar a janela se eu clicar fora, somente se eu fechar ou apertar
+// esc"). Já não fecha mais clicando no fundo escuro (ver onclick removido do <div class="mov">
+// no HTML). Registrado DEPOIS do listener do mo-prosp-card acima de propósito: nesta mesma
+// tecla Esc, o listener do card roda primeiro e vê este modal ainda aberto (outros.length>0)
+// e não faz nada; só then este listener fecha o modal de decisor — o card por trás continua
+// aberto, sem fechar os dois de uma vez.
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Escape')return;
+  const mo=document.getElementById('mo-prosp-decisor-add');
+  if(mo&&mo.classList.contains('open'))closeM('mo-prosp-decisor-add');
+});
 
 function saveSt(){
   const id=getTabs()[step].id;
@@ -9970,7 +10065,20 @@ function _buildPedidoBaseDoEd(){
   // NÃO passa por essa validação — um rascunho pode ficar com os:'' até ser completado.
   const p={id:editing||uid(),os:ed.os,tipo:ed.tipo,tipoPedido:ed.tipoPedido||'',responsavel:ed.resp,
     cliente:ed.cli,emails:[ed.email_comprador,ed.email_engenheiro].filter(Boolean),email_comprador:ed.email_comprador||'',email_engenheiro:ed.email_engenheiro||'',email_financeiro:ed.email_financeiro||'',job:ed.job,prazo:ed.prazo,
-    emissaoEm:_emissaoExistente||new Date().toISOString().slice(0,10),
+    // emissaoEm (2026-08-28, a pedido do usuário: "a emissao so é considerada no dia e
+    // hora que apertou o botao emitir este pedido") — antes era carimbado já na 1ª vez
+    // que _buildPedidoBaseDoEd() rodava, inclusive pelo Autosave Contínuo (salva um
+    // rascunho do Conselho assim que o vendedor ABRE a tela de Emissão, bem antes de
+    // emitir de verdade — ver comentário de itensProducao acima), então a data de
+    // Emissão podia ficar igual ou até ANTES da data do Conselho (preenchida manualmente,
+    // pode ser uma data futura combinada com o cliente). Agora fica em branco pra
+    // qualquer rascunho — só submit() carimba de verdade, no momento real do clique em
+    // "Emitir Pedido" (ver _jaEmitidoAntes lá). emissaoEmHora (2026-08-28) guarda o
+    // instante ISO completo (data+hora), só pra exibição precisa — emissaoEm continua
+    // sendo só a DATA (mesmo formato AAAA-MM-DD de sempre), porque é isso que toda conta
+    // de prazo (Lista de Pedidos/Planejamento) espera.
+    emissaoEm:_emissaoExistente||'',
+    emissaoEmHora:(_pedidoExistente&&_pedidoExistente.emissaoEmHora)||'',
     obs:ed.obs,valores:val,pagamento:pag,
     instalacao:inst,frete:fr,bases:ed.bases||'',
     elevacoes:ed.elevs||[],remocoes:ed.remocoes||[],elevBloqVia:ed.elevBloqVia||'',
@@ -10340,6 +10448,15 @@ async function submit(){
   // antes) — só nesse caso é uma edição de verdade (sem reenviar e-mail nem recriar tarefas).
   const _jaEmitidoAntes=!!(_pedidoExistente&&_pedidoExistente.origemComercial);
   p.origemComercial=true;
+  // Só carimba a data/hora REAL de emissão na 1ª emissão de verdade — nunca numa edição
+  // de pedido já emitido antes (_jaEmitidoAntes), senão reabrir/salvar um pedido antigo
+  // mudaria a data de Emissão dele pra hoje. Ver comentário completo em
+  // _buildPedidoBaseDoEd() (emissaoEm/emissaoEmHora).
+  if(!_jaEmitidoAntes){
+    const _agoraEmissao=new Date();
+    p.emissaoEm=_agoraEmissao.toISOString().slice(0,10);
+    p.emissaoEmHora=_agoraEmissao.toISOString();
+  }
   // Reserva de Data do Simulador (2026-08-18) — só na 1ª emissão de verdade (nunca numa edição
   // de pedido já emitido, senão reabrir/salvar um pedido antigo poderia "roubar" a reserva de
   // outro cliente com nome parecido por coincidência). Se o nome do cliente bater com alguma
@@ -21699,7 +21816,7 @@ function lpSetTab(tab,btn){
 }
 function lpRenderAtivo(){
   if(_lpTabAtiva==='kanban')renderListaPedidosKanban();
-  else if(_lpTabAtiva==='calendario')renderListaPedidosCalendario();
+  else if(_lpTabAtiva==='calendario')renderListaPedidosDias();
   else if(_lpTabAtiva==='simulador'){
     // O resultado/calendário da simulação em si só popula quando o usuário clica "Simular" —
     // mas o painel de Reservas Ativas é dado independente da simulação atual (outra pessoa
@@ -21712,6 +21829,60 @@ function _lpMiniBarraHtml(progresso,atrasado,concluido){
   const cor=concluido?'#16a34a':atrasado?'#dc2626':'#00bac7';
   return `<div style="background:#e2e8f0;border-radius:20px;height:7px;width:100px;overflow:hidden"><div style="background:${cor};height:100%;width:${progresso}%"></div></div>`;
 }
+// ===================== COLUNAS DE ETAPA NA LISTA (2026-08-28, a pedido do usuário) =========
+// "na lista de pedidos em lista mesmo eu quero as colunas com a data que era pra fazer cada
+// etapa... a data original que era pra finalizar e a data que foi de fato finalizado embaixo,
+// se finalizou na data aparece verde, senao vermelho". Reaproveita os MESMOS dados já usados
+// no modal "👁️ Ver Etapas" (lpAbrirDetalhe) — p.lpBaixas pras etapas com baixa de setor
+// (LP_ETAPAS_COM_BAIXA) e p.finalizacao.dataFinalizacao pra Final da Instalação — só que
+// direto na própria linha da lista, sem precisar abrir o modal pra ver cada etapa uma por uma.
+// Etapa não aplicável a este pedido (ex.: sem Frete/Instalação/ART/Medição) mostra só "—".
+// Etapas sem nenhum controle de baixa (Medição, Saída do Frete, Início da Instalação, e
+// etapas extras personalizadas em Configurações) não têm uma "data real" registrada em lugar
+// nenhum do sistema — mostram só se a data prevista já passou (estimado), igual o modal já
+// fazia, nunca em vermelho (não existe como saber que "atrasou" sem um controle de baixa).
+// IMPORTANTE: esta cor verde/vermelho por etapa é um indicador NOVO, à parte — não mexe em
+// nada da Assertividade Geral/barra de cada pedido (_lpStatusEtapa/_lpAssertividadeDeCalc),
+// que continua exatamente com a mesma regra de sempre (baixa dada = ok, não importa a data,
+// ver comentário de 2026-08-08 acima de _lpStatusEtapa). São dois sinais complementares: a
+// Assertividade mede "resolveu, eventualmente"; esta coluna mostra "resolveu NO PRAZO".
+function _lpColunasEtapasParaInfos(infos){
+  const base=_lpEtapasDefParaPedido(null);
+  const chavesBase=new Set(base.map(d=>d.key));
+  const vistos={};
+  infos.forEach(x=>{
+    if(!x.ok)return;
+    x.calc.etapas.forEach(e=>{
+      if(!chavesBase.has(e.key)&&!vistos[e.key])vistos[e.key]={key:e.key,label:e.label};
+    });
+  });
+  return[...base,...Object.values(vistos)];
+}
+function _lpCelulaEtapaHtml(x,def,hojeIso){
+  const e=x.calc.etapas.find(d=>d.key===def.key);
+  if(!e||!e.aplicavel)return '<span style="color:var(--ink4)">—</span>';
+  const ehFinal=e.key==='finalInstalacao';
+  const temBaixa=LP_ETAPAS_COM_BAIXA.includes(e.key);
+  let dataReal=null;
+  if(ehFinal&&x.concluido)dataReal=x.p.finalizacao.dataFinalizacao;
+  else if(temBaixa){
+    const baixa=x.p.lpBaixas&&x.p.lpBaixas[e.key];
+    if(baixa)dataReal=baixa.data;
+  }
+  if(dataReal){
+    const cor=dataReal<=e.iso?'#16a34a':'#dc2626';
+    return `<div style="font-size:.72rem;white-space:nowrap;color:var(--ink4)">${fmtD(e.iso)}</div><div style="font-size:.72rem;font-weight:800;white-space:nowrap;color:${cor}">${fmtD(dataReal)}</div>`;
+  }
+  if(ehFinal||temBaixa){
+    const atrasado=e.iso<hojeIso;
+    return `<div style="font-size:.72rem;white-space:nowrap;color:var(--ink4)">${fmtD(e.iso)}</div><div style="font-size:.66rem;white-space:nowrap;color:${atrasado?'#dc2626':'#94a3b8'}">${atrasado?'🔴 Atrasado':'⚪ Pendente'}</div>`;
+  }
+  const cumprida=e.iso<=hojeIso;
+  return `<div style="font-size:.72rem;white-space:nowrap;color:var(--ink4)">${fmtD(e.iso)}</div><div style="font-size:.66rem;white-space:nowrap;color:${cumprida?'#16a34a':'#94a3b8'}">${cumprida?'✅ Estimado':'⚪ Programada'}</div>`;
+}
+function _lpEtapasCelulasHtml(x,colunasEtapas,hojeIso){
+  return colunasEtapas.map(d=>`<td style="padding:8px 10px">${_lpCelulaEtapaHtml(x,d,hojeIso)}</td>`).join('');
+}
 function renderListaPedidos(){
   const body=document.getElementById('lp-body');
   if(!body)return;
@@ -21720,6 +21891,16 @@ function renderListaPedidos(){
     return;
   }
   const infos=_lpListaFiltrada();
+  const hojeIso=new Date().toISOString().slice(0,10);
+  // Colunas de etapas (2026-08-28, a pedido do usuário: "as colunas com a data que era pra
+  // fazer cada etapa... a data original que era pra finalizar e a data que foi de fato
+  // finalizado embaixo, se finalizou na data aparece verde, senao vermelho") — mesma lista
+  // de etapas do Kanban (_lpEtapasDefParaPedido(null) + qualquer etapa extra vista nos
+  // pedidos filtrados), pra nunca faltar coluna de uma etapa personalizada em Configurações.
+  const colunasEtapas=_lpColunasEtapasParaInfos(infos);
+  const etapasHeaderHtml=colunasEtapas.map(d=>`<th style="padding:8px 10px;white-space:nowrap" title="Prazo calculado em cima; data real de conclusão embaixo">${d.label}</th>`).join('');
+  const etapasBlankHtml=colunasEtapas.map(()=>'<td style="padding:8px 10px;color:var(--ink4)">—</td>').join('');
+  const etapasLegendaHtml=colunasEtapas.length?`<div style="font-size:.68rem;color:var(--ink4);margin-bottom:8px">📅 Cada coluna de etapa mostra o prazo previsto em cima e a data real de conclusão embaixo — <span style="color:#16a34a;font-weight:700">verde</span> quando concluída dentro do prazo, <span style="color:#dc2626;font-weight:700">vermelho</span> quando atrasada ou concluída fora do prazo.</div>`:'';
   // Assertividade GERAL (todos os pedidos elegíveis, não só os filtrados na tela) — visível
   // sempre, mesmo com filtro aplicado, pra dar o retrato real do time (2026-07-31, a pedido
   // do usuário, no lugar da antiga coluna "Etapa Atual").
@@ -21758,10 +21939,11 @@ function renderListaPedidos(){
     body.innerHTML=geralHtml+capacidadeHtml+'<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum pedido encontrado.</div>';
     return;
   }
-  body.innerHTML=geralHtml+capacidadeHtml+`<div style="overflow-x:auto"><table class="tbl-acoes-fixa" style="width:100%;border-collapse:collapse;font-size:.82rem">
+  body.innerHTML=geralHtml+capacidadeHtml+etapasLegendaHtml+`<div style="overflow-x:auto"><table class="tbl-acoes-fixa" style="width:100%;border-collapse:collapse;font-size:.82rem">
     <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
       <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">JOB</th>
       <th style="padding:8px 10px">Vendedor</th><th style="padding:8px 10px" title="Data em que o pedido foi levado ao Conselho de Pedidos">Conselho</th><th style="padding:8px 10px">Emissão</th><th style="padding:8px 10px">Prazo Final</th>
+      ${etapasHeaderHtml}
       <th style="padding:8px 10px">Assertividade</th><th style="padding:8px 10px">Progresso</th><th style="padding:8px 10px">Status</th><th style="padding:8px 10px"></th>
     </tr></thead><tbody>
     ${infos.map(x=>{
@@ -21783,6 +21965,7 @@ function renderListaPedidos(){
           <td style="padding:8px 10px">${p.conselhoData?fmtD(p.conselhoData):'—'}</td>
           <td style="padding:8px 10px">${emissaoCell}</td>
           <td style="padding:8px 10px">${prazoCell}</td>
+          ${etapasBlankHtml}
           <td colspan="4" style="padding:8px 10px;color:#b45309;font-size:.76rem" title="${_lpProblemasTexto(x.calc.problemas).replace(/"/g,'&quot;')}">⚠️ Dados incompletos — ${_lpProblemasTexto(x.calc.problemas)}</td>
         </tr>`;
       }
@@ -21804,6 +21987,7 @@ function renderListaPedidos(){
         <td style="padding:8px 10px;${corLinha}">${p.conselhoData?fmtD(p.conselhoData):'—'}</td>
         <td style="padding:8px 10px;${corLinha}">${fmtD(calc.emissaoIso)}</td>
         <td style="padding:8px 10px;${corLinha}">${fmtD(calc.prazoIso)}</td>
+        ${_lpEtapasCelulasHtml(x,colunasEtapas,hojeIso)}
         <td style="padding:8px 10px;${corLinha};white-space:nowrap">${_lpAssertividadeBarraHtml(assertPedido)}</td>
         <td style="padding:8px 10px">${_lpMiniBarraHtml(progresso,atrasado,concluido)}<div style="font-size:.68rem;color:var(--ink4);margin-top:2px">${progresso}%</div></td>
         <td style="padding:8px 10px">${statusHtml}${atencaoHtml}</td>
@@ -22468,6 +22652,93 @@ function _lpComentariosTexto(p,etapaKey){
     return `${c.por||'—'} (${dt}): ${c.texto||''}`;
   }).join('\n');
 }
+// ===================== VISÃO POR DIAS — CALENDÁRIO DA LISTA DE PEDIDOS (2026-08-28, a pedido
+// do usuário: "o calendario da lista de pedidos eu quero no mesmo formato que fizemos o
+// calendario em produçao, dia a dia... com mesmo jeito de filtras datas") — substitui a grade
+// mensal antiga (renderListaPedidosCalendario, deixada abaixo sem uso nenhum, só como
+// referência/segurança, mesmo padrão já usado em Produção) por colunas por dia
+// (dia/semana/mês navegável, com botão "Hoje"), reaproveitando 100% dos dados já calculados
+// (_lpEventosFiltrados) — só a apresentação muda, nenhum cálculo novo.
+let _lpDiasView={periodo:'semana',refIso:new Date().toISOString().slice(0,10)};
+function _lpDiasRange(){
+  const periodo=_lpDiasView.periodo;
+  const ref=new Date(_lpDiasView.refIso+'T00:00:00');
+  let ini,fim;
+  if(periodo==='dia'){ini=new Date(ref);fim=new Date(ref);}
+  else if(periodo==='mes'){ini=new Date(ref.getFullYear(),ref.getMonth(),1);fim=new Date(ref.getFullYear(),ref.getMonth()+1,0);}
+  else{const dow=ref.getDay();ini=new Date(ref);ini.setDate(ref.getDate()-dow);fim=new Date(ini);fim.setDate(ini.getDate()+6);}
+  const dias=[];
+  for(let d=new Date(ini);d<=fim;d.setDate(d.getDate()+1))dias.push(fmtISOLocal(d));
+  return{ini,fim,dias};
+}
+function lpDiasNav(dir){
+  const periodo=_lpDiasView.periodo;
+  const d=new Date(_lpDiasView.refIso+'T00:00:00');
+  if(periodo==='dia')d.setDate(d.getDate()+dir);
+  else if(periodo==='mes')d.setMonth(d.getMonth()+dir);
+  else d.setDate(d.getDate()+dir*7);
+  _lpDiasView.refIso=fmtISOLocal(d);
+  renderListaPedidosDias();
+}
+function lpDiasHoje(){_lpDiasView.refIso=new Date().toISOString().slice(0,10);renderListaPedidosDias();}
+function lpDiasSetPeriodo(p){_lpDiasView.periodo=p;renderListaPedidosDias();}
+function _lpDiaCardHtml(ev){
+  const cor=ev.statusEtapa==='ok'?'#16a34a':ev.statusEtapa==='atrasado'?'#dc2626':_lpCorEtapa(ev.etapa.key);
+  const statusTxt=ev.statusEtapa==='ok'?'✅ Baixa dada':ev.statusEtapa==='atrasado'?'🔴 Atrasado':'🔜 Programada';
+  const valorTxt=ev.valorChunk!=null?fmtR(ev.valorChunk):'';
+  return `<div onclick="lpAbrirDetalhe('${ev.p.id}')" style="background:#fff;border:1px solid ${ev.statusEtapa==='atrasado'?'#dc2626':'var(--border-lt)'};border-radius:10px;padding:10px;cursor:pointer">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+      <span style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${ev.p.os||'—'}</span>
+      ${ev.estouroChunk?'<span title="Requer atenção — estourou a janela de recuo">⚠️</span>':''}
+    </div>
+    <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(ev.p.cliente||'').replace(/"/g,'&quot;')}">${ev.p.cliente||'—'}</div>
+    <div style="font-size:.66rem;color:var(--ink4)">${ev.etapa.label}${ev.p.job?' · JOB '+String(ev.p.job).replace(/</g,'&lt;'):''}</div>
+    ${valorTxt?`<div style="font-size:.7rem;font-weight:700;color:${cor};margin-top:2px">${valorTxt}</div>`:''}
+    <div style="font-size:.62rem;font-weight:700;margin-top:2px;color:${cor}">${statusTxt}</div>
+    ${ev.atrasadoPedido?'<div style="font-size:.6rem;color:#dc2626;font-weight:700;margin-top:2px">🔴 Pedido atrasado (entrega final)</div>':ev.concluidoPedido?'<div style="font-size:.6rem;color:#16a34a;font-weight:700;margin-top:2px">✅ Pedido concluído</div>':''}
+  </div>`;
+}
+function renderListaPedidosDias(){
+  const lbl=document.getElementById('lp-cal-lbl');
+  const body=document.getElementById('lp-cal-body');
+  if(!body)return;
+  if(!_isPlanejamentoUser()){body.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const atencaoElCal=document.getElementById('lp-cal-atencao');
+  if(atencaoElCal)atencaoElCal.innerHTML=_lpBadgeAtencaoHtml();
+  const eventos=_lpEventosFiltrados();
+  const{ini,fim,dias}=_lpDiasRange();
+  const porDia={};
+  dias.forEach(iso=>porDia[iso]=[]);
+  eventos.forEach(ev=>{if(porDia[ev.etapa.iso])porDia[ev.etapa.iso].push(ev);});
+  const perEl=document.getElementById('lp-cal-periodo');
+  if(perEl)perEl.value=_lpDiasView.periodo;
+  if(lbl)lbl.textContent=_lpDiasView.periodo==='mes'?(MESES_PT[fim.getMonth()+1]+' '+fim.getFullYear()):_lpDiasView.periodo==='dia'?fmtD(dias[0]):(fmtD(dias[0])+' – '+fmtD(dias[dias.length-1]));
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const nomesFeriados=Object.assign({},getFeriadosComNome(ini.getFullYear()),getFeriadosComNome(fim.getFullYear()));
+  body.innerHTML=dias.map(iso=>{
+    const itens=(porDia[iso]||[]).slice().sort((a,b)=>String((a.p&&a.p.os)||'').localeCompare(String((b.p&&b.p.os)||''),'pt-BR',{numeric:true}));
+    const ehHoje=iso===hojeIso;
+    const nomeFeriado=nomesFeriados[iso];
+    const dataObj=new Date(iso+'T00:00:00');
+    const diaSemana=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][dataObj.getDay()];
+    const temAtrasado=itens.some(ev=>ev.statusEtapa==='atrasado');
+    const corBorda=nomeFeriado?'#f59e0b':(ehHoje?'var(--brand)':'var(--border-lt)');
+    const corTopo=temAtrasado?'#dc2626':(itens.length?'#0284c7':'#94a3b8');
+    return `<div style="flex:0 0 260px;background:#f8fafc;border-radius:12px;border:1px solid ${corBorda};display:flex;flex-direction:column;max-height:74vh">
+      <div style="padding:10px 12px;border-bottom:2px solid ${corTopo};${ehHoje?'background:var(--brand-xlt)':''}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:.76rem;font-weight:800;color:${ehHoje?'var(--brand-d)':'var(--ink)'}">${diaSemana} ${String(dataObj.getDate()).padStart(2,'0')}/${String(dataObj.getMonth()+1).padStart(2,'0')}</span>
+          <span style="font-size:.64rem;font-weight:700;color:#fff;background:${corTopo};border-radius:20px;padding:1px 8px">${itens.length}</span>
+        </div>
+        ${nomeFeriado?`<div style="font-size:.6rem;color:#b45309;font-weight:700;margin-top:1px">🎌 ${nomeFeriado}</div>`:''}
+      </div>
+      <div style="padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px">
+        ${itens.length?itens.map(ev=>_lpDiaCardHtml(ev)).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.7rem">—</div>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+// ===================== FIM VISÃO POR DIAS — CALENDÁRIO DA LISTA DE PEDIDOS =====================
 let _lpCalMes={y:new Date().getFullYear(),m:new Date().getMonth()+1};
 function lpCalMov(dir){
   _lpCalMes.m+=dir;
@@ -22477,7 +22748,7 @@ function lpCalMov(dir){
 }
 function renderListaPedidosCalendario(){
   const lbl=document.getElementById('lp-cal-lbl');
-  const{y,m}=_lpCalMes;
+  const _lpCalRef=new Date(_lpDiasView.refIso+'T00:00:00');const y=_lpCalRef.getFullYear(),m=_lpCalRef.getMonth()+1;
   if(lbl)lbl.textContent=MESES_PT[m]+' '+y;
   const body=document.getElementById('lp-cal-body');
   if(!body)return;
@@ -22957,7 +23228,7 @@ async function lpExportarKanbanPDF(){
 // prática num CSV — combinado com o usuário); PDF desenha a grade de verdade. Os dois usam o
 // mesmo mês NAVEGADO na tela (_lpCalMes, botão ◀▶) e os mesmos filtros ativos.
 function _lpEventosDoMesCalendario(){
-  const{y,m}=_lpCalMes;
+  const _lpCalRef=new Date(_lpDiasView.refIso+'T00:00:00');const y=_lpCalRef.getFullYear(),m=_lpCalRef.getMonth()+1;
   return _lpEventosFiltrados().filter(ev=>{
     const partes=ev.etapa.iso.split('-');
     return parseInt(partes[0],10)===y&&parseInt(partes[1],10)===m;
@@ -22972,7 +23243,7 @@ function lpExportarCalendarioExcel(){
     fmtD(ev.etapa.iso),ev.etapa.label,ev.p.os||'',ev.p.cliente||'',ev.p.job||'',
     ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada'
   ]);
-  const{y,m}=_lpCalMes;
+  const _lpCalRef=new Date(_lpDiasView.refIso+'T00:00:00');const y=_lpCalRef.getFullYear(),m=_lpCalRef.getMonth()+1;
   _csvDownload(`calendario_pedidos_${y}_${String(m).padStart(2,'0')}.csv`,headers,body);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
 }
@@ -22982,7 +23253,7 @@ function lpExportarCalendarioExcel(){
 async function lpExportarCalendarioPDF(){
   if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
   const{jsPDF}=window.jspdf;
-  const{y,m}=_lpCalMes;
+  const _lpCalRef=new Date(_lpDiasView.refIso+'T00:00:00');const y=_lpCalRef.getFullYear(),m=_lpCalRef.getMonth()+1;
   const eventosMes=_lpEventosDoMesCalendario();
   if(!eventosMes.length){toast('Nenhuma etapa encontrada neste mês com esses filtros','terr');return;}
   const porDia={};
@@ -26566,6 +26837,56 @@ function _plAbrirMenuMes(el){
   window.addEventListener('resize',_planFecharMenuAcoes);
 }
 
+// ── MENU COMPACTO DE AÇÕES DA LISTA DE VENDAS (2026-08-28, a pedido do usuário) ─────────
+// Mesma ideia do menu de ações do Planejamento (ver comentário acima): a coluna "Ações"
+// desta tabela (.dt-vendas, também com scroll horizontal) tinha até 3 botões sempre
+// visíveis (✏️ Editar / Cancelar / 🔁 Reenviar Email, + o botão amarelo de "Incluir na
+// Finalização" quando aplicável) lado a lado, ficando apertada e "feia" igual a de
+// Planejamento era antes. Agora é um botão "⋮" só, reaproveitando toda a infraestrutura
+// já existente (_planFecharMenuAcoes/_planFecharMenuAcoesClickFora/_planAcoesMenuBtn/
+// .plan-acoes-menu/.plan-menu-trigger) — só a montagem da lista de itens é nova aqui,
+// porque depende de isAdm/jaForcadoFin/jaElegivelFin (calculados por linha em
+// renderDashVendas). As mesmas funções de sempre continuam sendo chamadas
+// (editarVendaLista/cancelarVenda/incluirVendaNaFinalizacao/reenviarEmailPedido) — só a
+// apresentação mudou.
+function _vendasAbrirMenuAcoes(btn,os,pid,isAdmRow,jaForcadoFin,jaElegivelFin){
+  const clicouNoMesmoBotao=(_planAcoesMenuBtn===btn);
+  _planFecharMenuAcoes();
+  if(clicouNoMesmoBotao)return;
+  _planAcoesMenuBtn=btn;
+  const r=btn.getBoundingClientRect();
+  const osEsc=String(os).replace(/'/g,"\\'");
+  const itens=[];
+  if(isAdmRow){
+    itens.push({icone:'✏️',label:'Editar',fn:`editarVendaLista('${osEsc}','${pid}')`});
+    itens.push({icone:'🚫',label:'Cancelar',fn:`cancelarVenda('${osEsc}')`});
+    if(jaForcadoFin){
+      itens.push({icone:'✅',label:'Na Finalização',info:true});
+    }else if(!jaElegivelFin){
+      itens.push({icone:'🏗️',label:'Incluir na Finalização',fn:`incluirVendaNaFinalizacao('${osEsc}','${pid}')`});
+    }
+  }
+  if(pid){
+    itens.push({icone:'🔁',label:'Reenviar Email',fn:`reenviarEmailPedido('${pid}')`});
+  }
+  const menu=document.createElement('div');
+  menu.className='plan-acoes-menu';
+  menu.innerHTML=itens.map(it=>it.info
+    ?`<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;font-size:.8rem;font-weight:600;color:#166534;white-space:nowrap" title="Incluída manualmente — já aparece em Planejamento → Finalização de Obra">${it.icone} ${it.label}</div>`
+    :`<button onclick="_planFecharMenuAcoes();${it.fn}">${it.icone} ${it.label}</button>`
+  ).join('');
+  document.body.appendChild(menu);
+  const mw=menu.offsetWidth,mh=menu.offsetHeight;
+  let top=r.bottom+4,left=r.right-mw;
+  if(left<8)left=8;
+  if(top+mh>window.innerHeight-8)top=r.top-mh-4;
+  menu.style.top=top+'px';
+  menu.style.left=left+'px';
+  setTimeout(()=>document.addEventListener('click',_planFecharMenuAcoesClickFora,true),0);
+  document.addEventListener('scroll',_planFecharMenuAcoes,true);
+  window.addEventListener('resize',_planFecharMenuAcoes);
+}
+
 // ── FINALIZADOS COM PENDÊNCIAS (2026-07-23) ─────────────────────────────────────────────
 // Obra já finalizada (p.finalizacao.dataFinalizacao) em que o usuário escreveu alguma
 // pendência no campo "Pendências desta Obra" do formulário (separado de "Observações desta
@@ -29074,21 +29395,77 @@ function finVerClienteHistorico(nome){
 function _finGruposPadrao(){
   return [
     {nome:"BOB'S",palavras:["BOB'S","BOBS"],separarFranqueado:false},
-    {nome:'BURGER KING',palavras:['BURGER KING','BURGER'],separarFranqueado:true},
+    // 'ESTRADA DO MONTEIRO' entrou em 2026-08-28 (a pedido do usuário: "um estrada do
+    // monteiro que é burger king e nao ta no burger king") — loja identificada só pelo nome
+    // da rua no Cliente/JOB, sem a palavra "BURGER" nem "KING" no nome, então nenhuma das 2
+    // palavras-chave já existentes conseguia casar com ela.
+    {nome:'BURGER KING',palavras:['BURGER KING','BURGER','ESTRADA DO MONTEIRO'],separarFranqueado:true},
     {nome:'C&A',palavras:['C&A'],separarFranqueado:false},
-    {nome:'ARCELOR MITTAL',palavras:['ARCELOR MITTAL','ARCELORMITTAL'],separarFranqueado:false}
+    {nome:'ARCELOR MITTAL',palavras:['ARCELOR MITTAL','ARCELORMITTAL'],separarFranqueado:false},
+    // MADERO entrou em 2026-08-28 (a pedido do usuário: revisão do Faturamento por Cliente
+    // achou "o pedido mais shopping que fala no job que ele é um madero" aparecendo como
+    // avulso em vez de somar junto com o resto da marca). O agrupamento automático
+    // (_fatClientePrimeiraPalavra) só olha a 1ª palavra do Cliente — um pedido cujo Cliente é
+    // a razão social do SHOPPING (não "MADERO...") mas o JOB menciona Madero escapava dele;
+    // um override aqui casa por Cliente OU JOB (ver _finGrupoCliente/_fatClienteGrupoNome),
+    // resolvendo isso sem precisar mudar nenhuma lógica de match.
+    {nome:'MADERO',palavras:['MADERO'],separarFranqueado:false}
+    // ZAMP NÃO tem grupo próprio aqui — é só a holding/operadora por trás de várias marcas de
+    // fast-food no Brasil (CLIENTE vem como "ZAMP S.A." etc.), não uma marca em si. Se o JOB
+    // citar alguma marca JÁ cadastrada aqui (Burger King, Madero, etc.) o loop acima já
+    // resolve certo antes de chegar em _zampResolver() logo abaixo.
   ];
 }
+// Cliente com "ZAMP" no nome cujo Cliente/JOB não bateu com NENHUMA marca cadastrada acima:
+// 1º tenta o que o próprio administrador já identificou manualmente pra essa OS
+// (cfg.zampGruposManuais, ver definirGrupo/salvarGrupoZampManual() perto de
+// renderFaturamentoPorCliente()); sem isso, devolve o marcador ZAMP_NAO_IDENTIFICADO — NÃO
+// tenta mais adivinhar sozinho. Histórico: chegou a ter um grupo 'ZAMP' próprio (2026-08-28,
+// juntava tudo com "ZAMP" no nome, errado — misturava marcas diferentes debaixo de um nome
+// que não é marca nenhuma), depois um fallback automático pra BURGER KING (mesmo dia, "zamp é
+// mesma coisa que burger king... deixa tudo como burger king"), e por fim ESTE comportamento
+// (ainda o mesmo dia, a pedido do usuário: "se tiver no nome da razao social zamp e no job
+// nao fica claro qual marca ele é, deixe um aviso... pra eu administrador identificar dai, eu
+// digito e ele vai pra algum grupo especifico ou seleciono") — porque assumir Burger King
+// automaticamente arriscava identificar errado um pedido que na real fosse de outra marca
+// operada pela Zamp (ex.: Popeyes, Subway).
+const ZAMP_NAO_IDENTIFICADO='⚠️ ZAMP — não identificado';
+function _zampGrupoManual(os){
+  const key=String(os||'').trim();
+  if(!key||!cfg.zampGruposManuais)return null;
+  return cfg.zampGruposManuais[key]||null;
+}
+function _zampResolver(cliente,os){
+  if(!/ZAMP/.test((cliente||'').toUpperCase()))return null;
+  return _zampGrupoManual(os)||ZAMP_NAO_IDENTIFICADO;
+}
 function getGruposClienteFinanceiro(){
-  if(!cfg.gruposClienteFinanceiro||!cfg.gruposClienteFinanceiro.length)return _finGruposPadrao();
+  const padrao=_finGruposPadrao();
+  if(!cfg.gruposClienteFinanceiro||!cfg.gruposClienteFinanceiro.length)return padrao;
   // Junta grupos padrão novos (ex.: C&A/ARCELOR MITTAL, adicionados 2026-08-03) que ainda não
   // estão numa config já salva antes deles existirem — sem isso, quem já tinha aberto
   // Configurações → Grupos de Cliente antes ficava preso pra sempre na lista antiga, nunca
   // ganhando os grupos padrão adicionados depois no código. Nunca sobrescreve o que o admin
   // já customizou (renomeou/removeu) — só ACRESCENTA o que estiver faltando por nome.
+  //
+  // Reforçado em 2026-08-28 (a pedido do usuário, revisão do Faturamento por Cliente) —
+  // além de grupo inteiro faltando, agora também UNE palavra-chave nova do padrão (ex.:
+  // "ESTRADA DO MONTEIRO" adicionada em BURGER KING) num grupo que o admin JÁ tinha salvo
+  // com o mesmo nome antes dessa palavra existir — senão a correção feita aqui no código
+  // nunca chegaria a valer de verdade pra quem já tinha customizado essa tela antes. Nunca
+  // remove nem troca nada que o admin já tenha (só acrescenta o que estiver faltando).
+  const porNomePadrao={};
+  padrao.forEach(g=>{porNomePadrao[g.nome.toUpperCase()]=g;});
+  const gruposUnidos=cfg.gruposClienteFinanceiro.map(g=>{
+    const def=porNomePadrao[(g.nome||'').toUpperCase()];
+    if(!def)return g;
+    const jaTem=new Set((g.palavras||[]).map(p=>(p||'').toUpperCase().trim()));
+    const novas=(def.palavras||[]).filter(p=>!jaTem.has((p||'').toUpperCase().trim()));
+    return novas.length?{...g,palavras:[...(g.palavras||[]),...novas]}:g;
+  });
   const nomesExistentes=new Set(cfg.gruposClienteFinanceiro.map(g=>(g.nome||'').toUpperCase()));
-  const faltando=_finGruposPadrao().filter(g=>!nomesExistentes.has(g.nome.toUpperCase()));
-  return faltando.length?[...cfg.gruposClienteFinanceiro,...faltando]:cfg.gruposClienteFinanceiro;
+  const faltando=padrao.filter(g=>!nomesExistentes.has(g.nome.toUpperCase()));
+  return faltando.length?[...gruposUnidos,...faltando]:gruposUnidos;
 }
 function _finGrupoCliente(item){
   const cliente=(item.cliente||'').toUpperCase();
@@ -29105,6 +29482,8 @@ function _finGrupoCliente(item){
     if(g.separarFranqueado&&categoria.includes('FRANQUEADO'))return item.cliente||'—';
     return g.nome;
   }
+  const zampR=_zampResolver(item.cliente,item.pedidoOs);
+  if(zampR)return zampR;
   return item.cliente||'—'; // sem grupo cadastrado pra essa palavra-chave: cliente individual, como sempre foi
 }
 // Faturamento por Cliente — painel em Visão Comercial → Gráficos (2026-08-01, a pedido do
@@ -29147,6 +29526,8 @@ function _fatClienteGrupoNome(r){
     const bateu=(g.palavras||[]).some(p=>{const pu=(p||'').toUpperCase().trim();return pu&&(cliente.includes(pu)||job.includes(pu));});
     if(bateu)return g.nome;
   }
+  const zampR=_zampResolver(r.cl,r.p);
+  if(zampR)return zampR;
   return _fatClientePrimeiraPalavra(r.cl);
 }
 function _fatClienteCategoriaDisplay(r){
@@ -29189,7 +29570,11 @@ function _fatClienteAgrupar(){
     g.totalBr+=r.br||0;
     g.totalLq+=r.lq||0;
     const outras=(r.ba||0)+(r.ou||0);
-    const venda={cliente:(r.cl||'—').trim(),categoria:r.cat||'—',mes:r.m,br:r.br||0,lq:r.lq||0,outras};
+    // os/job/pid (2026-08-28, a pedido do usuário: "aparecer nessa lista dos
+    // faturamentos o numero do pedido e o job tbm... e ser clicavel, clicou abre o
+    // resumo da emissao") — mesmos campos já usados em Lista de Vendas (r.p=OS,
+    // r._pid=id do pedido no Firestore) pra abrir o mesmo modal verVendaDetalhe().
+    const venda={cliente:(r.cl||'—').trim(),categoria:r.cat||'—',mes:r.m,br:r.br||0,lq:r.lq||0,outras,os:r.p||'',job:r.job||'',pid:r._pid||''};
     FATCLI_CAMPOS_DESPESA.forEach(c=>{
       const v=c.key==='outras'?outras:(r[c.key]||0);
       g['total_'+c.key]+=v;
@@ -29198,6 +29583,52 @@ function _fatClienteAgrupar(){
     g.vendas.push(venda);
   });
   return Object.values(grupos).map(g=>({...g,qtdVendas:g.vendas.length}));
+}
+// ── Identificação manual de pedido ZAMP não identificado (2026-08-28, a pedido do usuário)
+// ────────────────────────────────────────────────────────────────────────────────────────
+// Painel de aviso mostrado ACIMA da tabela de Faturamento por Cliente sempre que existir
+// pelo menos 1 venda no grupo ZAMP_NAO_IDENTIFICADO (ver _zampResolver()) — cada linha deixa
+// o administrador escolher uma marca já cadastrada (select) ou digitar uma nova, salvando em
+// cfg.zampGruposManuais[OS]=NOME. Depois de salvo, essa OS específica passa a cair sempre
+// nesse grupo (ver _zampGrupoManual()), sem precisar identificar de novo.
+function _zampDomId(os){return String(os||'').replace(/[^a-zA-Z0-9]/g,'_')||'semos';}
+function _zampSelChange(domId,sel){
+  const inp=document.getElementById('zamp-input-'+domId);
+  if(inp)inp.style.display=sel.value==='__outro__'?'':'none';
+}
+async function salvarGrupoZampManual(os){
+  const domId=_zampDomId(os);
+  const sel=document.getElementById('zamp-sel-'+domId);
+  const inp=document.getElementById('zamp-input-'+domId);
+  const nome=((sel&&sel.value==='__outro__')?(inp?inp.value:''):(sel?sel.value:'')).trim().toUpperCase();
+  if(!nome){toast('Escolha ou digite o nome da marca','terr');return;}
+  if(!cfg.zampGruposManuais)cfg.zampGruposManuais={};
+  cfg.zampGruposManuais[String(os||'').trim()]=nome;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  toast('OS '+(os||'—')+' identificada como '+nome+'!','tok');
+  renderFaturamentoPorCliente();
+}
+function _renderFaturamentoZampAlerta(vendasPendentes){
+  const el=document.getElementById('gc-fatcli-zamp-alerta');if(!el)return;
+  if(!vendasPendentes.length){el.innerHTML='';return;}
+  const gruposExistentes=getGruposClienteFinanceiro().map(g=>g.nome);
+  el.innerHTML=`<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+    <div style="font-weight:800;color:#92400e;font-size:.82rem;margin-bottom:8px">⚠️ ${vendasPendentes.length} pedido(s) da ZAMP sem marca identificada — o Cliente vem como "ZAMP..." e o JOB não deixou claro qual marca é (Burger King, Popeyes etc.). Identifique manualmente pra entrar na soma certa:</div>
+    ${vendasPendentes.map(v=>{
+      const domId=_zampDomId(v.os);
+      return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fff;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-bottom:6px">
+        <div style="flex:1;min-width:200px;font-size:.78rem;color:#78350f"><strong>OS ${v.os||'—'}</strong> · ${v.cliente}${v.job?' · JOB: '+v.job:''} <span style="color:#b45309;font-weight:700">(${fmtR(v.br)})</span></div>
+        <select id="zamp-sel-${domId}" onchange="_zampSelChange('${domId}',this)" style="font-size:.76rem;padding:5px 7px;border-radius:6px;border:1.5px solid var(--border)">
+          <option value="">Selecionar marca...</option>
+          ${gruposExistentes.map(n=>`<option value="${n.replace(/"/g,'&quot;')}">${n}</option>`).join('')}
+          <option value="__outro__">+ Digitar outro nome...</option>
+        </select>
+        <input id="zamp-input-${domId}" placeholder="Nome da marca" style="display:none;font-size:.76rem;padding:5px 7px;border-radius:6px;border:1.5px solid var(--border);text-transform:uppercase">
+        <button onclick="salvarGrupoZampManual('${String(v.os||'').replace(/'/g,"\\'")}')" class="dash-btn-conf" style="padding:5px 12px;font-size:.76rem">Salvar</button>
+      </div>`;
+    }).join('')}
+  </div>`;
 }
 let _fatClienteModo='br';
 // Marcas com a lista de vendas individuais ABERTA — recolhida por padrão (2026-08-03, a pedido
@@ -29248,7 +29679,14 @@ function renderFaturamentoPorCliente(){
   const tbl=document.getElementById('gc-fatcli-table');
   if(!tbl)return;
   const campo=_fatClienteModo;
-  const grupos=_fatClienteAgrupar();
+  // ZAMP_NAO_IDENTIFICADO (2026-08-28) some da tabela/gráfico normais — vira o painel de
+  // aviso próprio acima, com o controle de identificação manual (ver
+  // _renderFaturamentoZampAlerta()) — nunca conta como "empresa"/"avulso" de verdade
+  // enquanto o administrador não identificar a marca de cada OS.
+  const gruposTodos=_fatClienteAgrupar();
+  const grupoZampPendente=gruposTodos.find(g=>g.nome===ZAMP_NAO_IDENTIFICADO);
+  _renderFaturamentoZampAlerta(grupoZampPendente?grupoZampPendente.vendas:[]);
+  const grupos=gruposTodos.filter(g=>g.nome!==ZAMP_NAO_IDENTIFICADO);
   if(!grupos.length){
     tbl.innerHTML='<tbody><tr><td style="padding:16px 4px;color:#94a3b8;font-size:.85rem">Nenhuma venda encontrada.</td></tr></tbody>';
     if(gcCharts.fatcli){try{gcCharts.fatcli.destroy();}catch(e){}gcCharts.fatcli=null;}
@@ -29309,7 +29747,8 @@ function renderFaturamentoPorCliente(){
         const resumoDesp=FATCLI_CAMPOS_DESPESA.map(cd=>`${cd.label} ${fmtR(c['total_'+cd.key])}`).join(' · ');
         const header=`<tr><td colspan="${NCOLS}" style="padding-left:22px;padding-top:8px;color:#94a3b8;font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.3px">${c.categoria} <span style="color:#cbd5e1">— Bruto ${fmtR(c.totalBr)} · ${resumoDesp} · Líquido ${fmtR(c.totalLq)}</span></td></tr>`;
         const linhas=c.vendas.map(v=>{
-          return `<tr><td style="padding-left:34px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(v.br)}</td>${_tdDespesas(v)}<td style="text-align:right">${fmtR(v.lq)}</td></tr>`;
+          const osJobTxt=[v.os?('OS '+v.os):'',v.job].filter(Boolean).join(' · ');
+          return `<tr onclick="verVendaDetalhe('${String(v.os||'').replace(/'/g,"\\'")}','${v.pid||''}')" style="cursor:pointer" title="Clique para ver o resumo da emissão"><td style="padding-left:34px;color:#64748b"><span style="color:#94a3b8">↳</span> ${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span>${osJobTxt?`<div style="font-size:.64rem;color:#94a3b8;padding-left:18px">${osJobTxt}</div>`:''}</td><td style="text-align:right">${fmtR(v.br)}</td>${_tdDespesas(v)}<td style="text-align:right">${fmtR(v.lq)}</td></tr>`;
         }).join('');
         return header+linhas;
       }).join('');
@@ -29318,7 +29757,8 @@ function renderFaturamentoPorCliente(){
   }
   function linhaAvulso(g){
     const v=g.vendas[0];
-    return `<tr><td>${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span></td><td style="text-align:right">${fmtR(g.totalBr)}</td>${_tdDespesas(g)}<td style="text-align:right">${fmtR(g.totalLq)}</td></tr>`;
+    const osJobTxt=[v.os?('OS '+v.os):'',v.job].filter(Boolean).join(' · ');
+    return `<tr onclick="verVendaDetalhe('${String(v.os||'').replace(/'/g,"\\'")}','${v.pid||''}')" style="cursor:pointer" title="Clique para ver o resumo da emissão"><td>${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span>${osJobTxt?`<div style="font-size:.64rem;color:#94a3b8">${osJobTxt}</div>`:''}</td><td style="text-align:right">${fmtR(g.totalBr)}</td>${_tdDespesas(g)}<td style="text-align:right">${fmtR(g.totalLq)}</td></tr>`;
   }
   const bodyEmpresas=empresas.map(linhaEmpresa).join('');
   const divisorAvulsos=avulsos.length?`<tr><td colspan="${NCOLS}" style="background:#eef2f7;color:#64748b;font-size:.68rem;font-weight:800;letter-spacing:.5px;padding:8px 10px;text-transform:uppercase">🎲 Clientes avulsos — 1 pedido só até agora, ainda sem histórico de recorrência</td></tr>`:'';
@@ -32228,7 +32668,7 @@ function renderDashVendas(){
       <td style="white-space:nowrap"><span class="dt-vend-pill" style="background:${vCor.bg};color:${vCor.fg}">${r.v||'—'}</span></td>
       <td style="font-size:.68rem;white-space:nowrap;line-height:1.5">
         <div>🗳️ ${pedFin&&pedFin.conselhoData?fmtD(pedFin.conselhoData):'—'}</div>
-        <div>📝 ${pedFin&&pedFin.emissaoEm?fmtD(pedFin.emissaoEm):'—'}</div>
+        <div title="${pedFin&&pedFin.emissaoEmHora?('Emitido em '+new Date(pedFin.emissaoEmHora).toLocaleDateString('pt-BR')+' às '+new Date(pedFin.emissaoEmHora).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})):''}">📝 ${pedFin&&pedFin.emissaoEm?fmtD(pedFin.emissaoEm):'—'}</div>
       </td>
       <td class="dt-pag">${fmtProximoPagamento(r.p)}</td>
       <td style="font-size:.74rem;white-space:nowrap">${r.entrega?`${fmtD(r.entrega)}${r.prazoOriginal&&r.prazoOriginal!==r.entrega?` <span title="Prazo original: ${fmtD(r.prazoOriginal)}" style="font-size:.64rem;color:#d97706;cursor:help">(adiado)</span>`:''}`:'<span style="color:#94a3b8">—</span>'}</td>
@@ -32238,7 +32678,7 @@ function renderDashVendas(){
         ${r.opAdj>0?`<a href="javascript:void(0)" onclick="${verDet}" class="dt-ver-detalhes">ver detalhes</a>`:''}
       </td>
       <td class="dt-num dt-fin" style="font-weight:800;color:#e0245e">${fmtR(r.lqAdj)}</td>
-      <td style="white-space:nowrap">${isAdm?`<button class="btn-mini" style="background:#dbeafe;color:#1d4ed8;border:none;border-radius:6px;padding:3px 8px;font-size:.65rem;font-weight:700;cursor:pointer;margin-right:4px" onclick="editarVendaLista('${String(r.p).replace(/'/g,"\\'")}','${r._pid||''}')">✏️ Editar</button><button class="btn-mini" style="background:#fee2e2;color:#dc2626;border:none;border-radius:6px;padding:3px 8px;font-size:.65rem;font-weight:700;cursor:pointer;margin-right:4px" onclick="cancelarVenda('${String(r.p).replace(/'/g,"\\'")}')">Cancelar</button>${btnFinalizacao}`:''}${r._pid?`<button class="btn-mini" style="background:#dbeafe;color:#1a2b5e;border:none;border-radius:6px;padding:3px 8px;font-size:.65rem;font-weight:700;cursor:pointer" onclick="reenviarEmailPedido('${r._pid}')">🔁 Reenviar Email</button>`:''}</td>
+      <td style="padding:8px 10px;text-align:right;white-space:nowrap">${(isAdm||r._pid)?`<button onclick="_vendasAbrirMenuAcoes(this,'${String(r.p).replace(/'/g,"\\'")}','${r._pid||''}',${isAdm},${jaForcadoFin},${jaElegivelFin})" title="Mais ações" class="plan-acoes-btn plan-menu-trigger">⋮</button>`:''}</td>
     </tr>`;
   }).join('');
 
@@ -33871,11 +34311,17 @@ function _prospRenderCard(e){
   const ultInt=_prospUltimaInteracao(e);
 
   const regioesHtml=(e.regioes||[]).length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${e.regioes.map(r=>`<span class="prosp-chip">${r}</span>`).join('')}</div>`:'<div style="font-size:.78rem;color:var(--ink4)">—</div>';
-  const decisoresHtml=(e.decisores||[]).length?e.decisores.map(d=>`<div style="border:1px solid var(--border-lt);border-radius:8px;padding:8px 10px;font-size:.78rem">
-      <div style="font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span>👤 ${d.nome||'—'}</span>
-        ${d.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700">${d.cargo}</span>`:''}
-        ${d.linkedin?`<a href="${d.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700;text-decoration:none">🔗 LinkedIn ↗</a>`:''}
+  const decisoresHtml=(e.decisores||[]).length?e.decisores.map((d,idx)=>`<div style="border:1px solid var(--border-lt);border-radius:8px;padding:8px 10px;font-size:.78rem">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div style="font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0">
+          <span>👤 ${d.nome||'—'}</span>
+          ${d.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700">${d.cargo}</span>`:''}
+          ${d.linkedin?`<a href="${d.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700;text-decoration:none">🔗 LinkedIn ↗</a>`:''}
+        </div>
+        <div style="display:flex;gap:2px;flex-shrink:0">
+          <button type="button" onclick="prospAbrirEditarDecisor('${e.id}',${idx})" title="Editar decisor" style="background:none;border:none;cursor:pointer;color:#64748b;font-size:.8rem;padding:3px 5px">✏️</button>
+          <button type="button" onclick="prospExcluirDecisor('${e.id}',${idx})" title="Excluir decisor" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.8rem;padding:3px 5px">🗑️</button>
+        </div>
       </div>
       <div style="color:var(--ink3);margin-top:2px">${_prospContatoComCopiar(d)}</div>
     </div>`).join(''):'<div style="font-size:.78rem;color:var(--ink4)">Nenhum decisor cadastrado ainda.</div>';
@@ -33996,7 +34442,9 @@ async function prospAdicionarComentario(empresaId){
 function prospAbrirAdicionarDecisor(empresaId){
   const e=prospEmpresas.find(x=>x.id===empresaId);
   if(!e)return;
+  document.getElementById('prosp-decisor-add-titulo').textContent='➕ Adicionar Decisor';
   document.getElementById('prosp-decisor-add-empresa-id').value=empresaId;
+  document.getElementById('prosp-decisor-add-idx').value='-1';
   document.getElementById('prosp-decisor-add-nome').value='';
   document.getElementById('prosp-decisor-add-cargo').value='';
   document.getElementById('prosp-decisor-add-tel').value='';
@@ -34004,10 +34452,53 @@ function prospAbrirAdicionarDecisor(empresaId){
   document.getElementById('prosp-decisor-add-linkedin').value='';
   openM('mo-prosp-decisor-add');
 }
+// Abre o MESMO modal de "Adicionar Decisor" pré-preenchido pro decisor de índice `idx` em
+// e.decisores (2026-08-28, a pedido do usuário: "preciso poder editar ou excluir um
+// decisor") — decisor não tem id próprio (ver comentário em _prospLogDiffDecisores), então
+// usa a posição no array, igual ao índice usado pra excluir (prospExcluirDecisor). Card é
+// sempre re-renderizado do zero a cada mudança, então a posição nunca fica desatualizada
+// entre o clique e a abertura do modal.
+function prospAbrirEditarDecisor(empresaId,idx){
+  const e=prospEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  const d=(e.decisores||[])[idx];
+  if(!d){toast('Decisor não encontrado — atualize e tente de novo','terr');return;}
+  document.getElementById('prosp-decisor-add-titulo').textContent='✏️ Editar Decisor';
+  document.getElementById('prosp-decisor-add-empresa-id').value=empresaId;
+  document.getElementById('prosp-decisor-add-idx').value=idx;
+  document.getElementById('prosp-decisor-add-nome').value=d.nome||'';
+  document.getElementById('prosp-decisor-add-cargo').value=d.cargo||'';
+  document.getElementById('prosp-decisor-add-tel').value=d.telefone||'';
+  document.getElementById('prosp-decisor-add-email').value=d.email||'';
+  document.getElementById('prosp-decisor-add-linkedin').value=d.linkedin||'';
+  openM('mo-prosp-decisor-add');
+}
+// Exclui o decisor de índice `idx` (2026-08-28, a pedido do usuário) — confirma antes (mesmo
+// padrão de excluirTarefaComercial/excluirTarefaGeral) e loga no histórico do card, igual ao
+// que já acontecia ao remover um decisor pela tela de editar empresa (_prospLogDiffDecisores).
+async function prospExcluirDecisor(empresaId,idx){
+  const e=prospEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  const d=(e.decisores||[])[idx];
+  if(!d){toast('Decisor não encontrado — atualize e tente de novo','terr');return;}
+  if(!confirm('Excluir o decisor "'+(d.nome||'—')+'"? Essa ação não pode ser desfeita.'))return;
+  e.decisores.splice(idx,1);
+  if(!e.timeline)e.timeline=[];
+  const dados=_prospDecisorDadosTexto(d);
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'🗑️ Decisor removido: '+(d.nome||'—')+(dados?' — '+dados:''),autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString(),sistema:true});
+  e.atualizadoEm=new Date().toISOString();
+  try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
+  toast('Decisor excluído','tok');
+  if(_prospCardAtualId===empresaId)_prospRenderCard(e);
+  if(_prospTabAtiva==='kanban')renderProspKanban();
+  else if(_prospTabAtiva==='empresas')_prospRenderContatosSubtab();
+}
 async function prospSalvarDecisorRapido(){
   const empresaId=document.getElementById('prosp-decisor-add-empresa-id').value;
   const e=prospEmpresas.find(x=>x.id===empresaId);
   if(!e){toast('Empresa não encontrada','terr');return;}
+  const idx=parseInt(document.getElementById('prosp-decisor-add-idx').value,10);
+  const ehEdicao=idx>=0&&!!(e.decisores||[])[idx];
   const nome=(document.getElementById('prosp-decisor-add-nome').value||'').trim();
   const cargo=(document.getElementById('prosp-decisor-add-cargo').value||'').trim();
   if(!nome){toast('Preencha o nome do decisor','terr');return;}
@@ -34019,14 +34510,27 @@ async function prospSalvarDecisorRapido(){
     linkedin:_prospNormalizarLinkedin(document.getElementById('prosp-decisor-add-linkedin').value)
   };
   if(!e.decisores)e.decisores=[];
-  e.decisores.push(d);
   if(!e.timeline)e.timeline=[];
-  const dados=_prospDecisorDadosTexto(d);
-  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'➕ Decisor adicionado: '+d.nome+(dados?' — '+dados:''),autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString(),sistema:true});
+  const autor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  if(ehEdicao){
+    // Edição (2026-08-28, a pedido do usuário) — substitui na MESMA posição (nunca reordena
+    // a lista) e loga a mudança no histórico, mesmo espírito de _prospLogDiffDecisores mas
+    // pra edição em vez de add/remove.
+    const antigo=e.decisores[idx];
+    e.decisores[idx]=d;
+    const dadosAntigos=_prospDecisorDadosTexto(antigo);
+    const dadosNovos=_prospDecisorDadosTexto(d);
+    const trocouNome=(antigo.nome||'')!==d.nome;
+    e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'✏️ Decisor editado: '+(antigo.nome||'—')+(trocouNome?' → '+d.nome:'')+' — antes: '+(dadosAntigos||'—')+' · agora: '+(dadosNovos||'—'),autor,em:new Date().toISOString(),sistema:true});
+  } else {
+    e.decisores.push(d);
+    const dados=_prospDecisorDadosTexto(d);
+    e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'➕ Decisor adicionado: '+d.nome+(dados?' — '+dados:''),autor,em:new Date().toISOString(),sistema:true});
+  }
   e.atualizadoEm=new Date().toISOString();
   try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
   closeM('mo-prosp-decisor-add');
-  toast('Decisor adicionado!','tok');
+  toast(ehEdicao?'Decisor atualizado!':'Decisor adicionado!','tok');
   if(_prospCardAtualId===empresaId)_prospRenderCard(e);
   if(_prospTabAtiva==='kanban')renderProspKanban();
   else if(_prospTabAtiva==='empresas')_prospRenderContatosSubtab();
