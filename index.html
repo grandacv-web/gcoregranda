@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-26.33';</script>
+<script>const APP_BUILD_VERSION='2026-08-28.1';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -152,6 +152,17 @@ body{font-family:'Inter',system-ui,sans-serif;background:#f4f6f8;color:var(--ink
 .dash-table thead th:last-child,.tbl-acoes-fixa thead th:last-child{background:#f8fafc}
 .dash-table .dt-alt td:last-child{background:#f8fafc}
 .dash-table .dt-mes-row td:last-child{background:#1a2b5e}
+/* Menu compacto de ações do Planejamento (2026-08-28, a pedido do usuário) — antes eram 3
+   botões (Diário de Obra/Fornecedores/Finalizar Obra) sempre lado a lado na coluna fixa da
+   direita (.tbl-acoes-fixa, ver comentário 2026-07-31 acima), deixando a coluna "pesada"
+   demais no canto. Agora um botão "⋮" só (.plan-acoes-btn) abre um menuzinho flutuante
+   (.plan-acoes-menu, anexado no <body> via JS — ver _planAbrirMenuAcoes logo após
+   renderPlanejamentoObras) com as mesmas 3 ações. Coluna fixa fica bem mais estreita. */
+.plan-acoes-btn{background:#fff;border:1.5px solid var(--border);border-radius:6px;cursor:pointer;color:#475569;font-size:1rem;line-height:1;padding:5px 12px;font-weight:700;font-family:inherit}
+.plan-acoes-btn:hover{background:#f1f5f9;border-color:#cbd5e1}
+.plan-acoes-menu{position:fixed;z-index:2000;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:6px;display:flex;flex-direction:column;min-width:190px}
+.plan-acoes-menu button{display:flex;align-items:center;gap:8px;text-align:left;background:none;border:none;border-radius:7px;padding:8px 10px;font-size:.8rem;font-weight:600;color:#1e293b;cursor:pointer;white-space:nowrap;font-family:inherit}
+.plan-acoes-menu button:hover{background:#f1f5f9}
 /* ── Lista de Vendas (tabela redesenhada) ── */
 .dt-vendas th,.dt-vendas td{vertical-align:top}
 .dt-num{text-align:right;white-space:nowrap}
@@ -26441,12 +26452,58 @@ function renderPlanejamentoObras(){
         <td style="padding:8px 10px;${corLinha}">${loc}</td>
         <td style="padding:8px 10px">${statusHtml}</td>
         <td style="padding:8px 10px;text-align:right;white-space:nowrap">
-          <button onclick="abrirDiarioObra('${p.id}')" title="Diário de Obra" style="background:none;border:1px solid var(--border);cursor:pointer;color:#0891b2;font-size:.7rem;padding:5px 8px;border-radius:6px;margin-right:6px;white-space:nowrap">📔 Diário de Obra</button>
-          <button onclick="abrirFgLancar('${p.id}')" title="Definir instalador/frete/munque contratados" style="background:none;border:1px solid var(--border);cursor:pointer;color:#4f46e5;font-size:.7rem;padding:5px 8px;border-radius:6px;margin-right:6px;white-space:nowrap">🧰 Fornecedores</button>
-          <button onclick="abrirFinalizacaoObra('${p.id}')" class="dash-btn-conf" style="white-space:nowrap">${concl?'👁️ Ver / Editar':'🏗️ Finalizar Obra'}</button></td>
+          <button onclick="_planAbrirMenuAcoes(this,'${p.id}',${concl})" title="Mais ações" class="plan-acoes-btn">⋮</button>
+        </td>
       </tr>`;
     }).join('')}
     </tbody></table></div>`;
+}
+
+// ── MENU COMPACTO DE AÇÕES DO PLANEJAMENTO (2026-08-28, a pedido do usuário) ────────────
+// Substitui os 3 botões que ficavam sempre visíveis na última coluna (fixa) da tabela por
+// um único botão "⋮" que abre um menuzinho flutuante com as mesmas 3 ações — mesmas funções
+// de sempre (abrirDiarioObra/abrirFgLancar/abrirFinalizacaoObra), só a apresentação mudou.
+// O menu é anexado direto no <body> (não dentro da tabela) e posicionado via
+// getBoundingClientRect do botão, pra nunca ficar cortado pelo overflow-x:auto da tabela
+// nem escondido atrás da coluna sticky (.tbl-acoes-fixa). Fecha sozinho ao clicar fora, rolar
+// (a própria tabela ou a página) ou redimensionar a janela — sem isso o menu ficaria "solto"
+// flutuando fora do lugar certo.
+let _planAcoesMenuBtn=null;
+function _planFecharMenuAcoes(){
+  document.querySelectorAll('.plan-acoes-menu').forEach(m=>m.remove());
+  document.removeEventListener('click',_planFecharMenuAcoesClickFora,true);
+  document.removeEventListener('scroll',_planFecharMenuAcoes,true);
+  window.removeEventListener('resize',_planFecharMenuAcoes);
+  _planAcoesMenuBtn=null;
+}
+function _planFecharMenuAcoesClickFora(e){
+  if(e.target.closest('.plan-acoes-menu')||e.target.closest('.plan-acoes-btn'))return;
+  _planFecharMenuAcoes();
+}
+function _planAbrirMenuAcoes(btn,pedidoId,concl){
+  const clicouNoMesmoBotao=(_planAcoesMenuBtn===btn);
+  _planFecharMenuAcoes();
+  if(clicouNoMesmoBotao)return; // segundo clique no mesmo botão = só fechar
+  _planAcoesMenuBtn=btn;
+  const r=btn.getBoundingClientRect();
+  const itens=[
+    {icone:'📔',label:'Diário de Obra',fn:`abrirDiarioObra('${pedidoId}')`},
+    {icone:'🧰',label:'Fornecedores',fn:`abrirFgLancar('${pedidoId}')`},
+    {icone:concl?'👁️':'🏗️',label:concl?'Ver / Editar':'Finalizar Obra',fn:`abrirFinalizacaoObra('${pedidoId}')`}
+  ];
+  const menu=document.createElement('div');
+  menu.className='plan-acoes-menu';
+  menu.innerHTML=itens.map(it=>`<button onclick="_planFecharMenuAcoes();${it.fn}">${it.icone} ${it.label}</button>`).join('');
+  document.body.appendChild(menu);
+  const mw=menu.offsetWidth,mh=menu.offsetHeight;
+  let top=r.bottom+4,left=r.right-mw;
+  if(left<8)left=8;
+  if(top+mh>window.innerHeight-8)top=r.top-mh-4;
+  menu.style.top=top+'px';
+  menu.style.left=left+'px';
+  setTimeout(()=>document.addEventListener('click',_planFecharMenuAcoesClickFora,true),0);
+  document.addEventListener('scroll',_planFecharMenuAcoes,true);
+  window.addEventListener('resize',_planFecharMenuAcoes);
 }
 
 // ── FINALIZADOS COM PENDÊNCIAS (2026-07-23) ─────────────────────────────────────────────
