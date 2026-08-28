@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-28.12';</script>
+<script>const APP_BUILD_VERSION='2026-08-28.13';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -2892,8 +2892,38 @@ select.fc{cursor:pointer}
       <button type="button" id="prosp-atividade-btn-nao-atendeu" onclick="_prospAtividadeSetStatus('nao-atendeu')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer">❌ Não Atendeu</button>
     </div>
   </div>
-  <div class="fg" id="prosp-atividade-relato-wrap"><label>Relato <span class="r">*</span></label><textarea class="fc" id="prosp-atividade-relato" rows="3" placeholder="Com quem falou e o que foi conversado..." style="text-transform:none"></textarea></div>
+  <div class="fg" id="prosp-atividade-direcao-wrap" style="display:none">
+    <label>Você enviou ou recebeu a mensagem?</label>
+    <div style="display:flex;gap:8px">
+      <button type="button" id="prosp-atividade-btn-enviei" onclick="_prospAtividadeSetDirecao('enviei')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer">📤 Eu enviei</button>
+      <button type="button" id="prosp-atividade-btn-recebi" onclick="_prospAtividadeSetDirecao('recebi')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer">📥 Eu recebi</button>
+    </div>
+  </div>
+  <input type="hidden" id="prosp-atividade-direcao">
+  <div class="fg" id="prosp-atividade-relato-wrap"><label id="prosp-atividade-relato-label">Relato <span class="r">*</span></label><textarea class="fc" id="prosp-atividade-relato" rows="3" placeholder="Com quem falou e o que foi conversado..." style="text-transform:none"></textarea></div>
   <button onclick="prospSalvarAtividade()" style="width:100%;background:#00bac7;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Salvar Atividade</button>
+</div>
+</div>
+
+<!-- MENSAGEM RESPONDIDA (2026-08-28, a pedido do usuário: depois de registrar que enviou uma
+     mensagem, "ele pode ter a opção de clicar num botão MENSAGEM RESPONDIDA e colocar o que
+     a pessoa respondeu pra ele, dai fica uma sequencia boa de acompanhar"). Guarda a resposta
+     DENTRO do mesmo evento da timeline (ev.resposta/respondidaEm/respondidaPor) — não cria um
+     evento novo solto, pra continuar lendo como uma conversa (pergunta → resposta) em vez de
+     2 linhas soltas na timeline. Ver prospAbrirMensagemResposta()/prospSalvarMensagemResposta().
+     Não fecha ao clicar fora (mesmo padrão já usado nos outros modais desta sessão) — só X ou
+     Esc (ver listener de Escape perto do de mo-prosp-decisor-add). -->
+<div class="mov" id="mo-prosp-msg-resposta">
+<div class="mvmod" style="width:420px;max-width:96vw">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+    <h3 style="margin-bottom:0">💬 Mensagem Respondida</h3>
+    <button onclick="closeM('mo-prosp-msg-resposta')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <input type="hidden" id="prosp-msg-resposta-empresa-id">
+  <input type="hidden" id="prosp-msg-resposta-evento-id">
+  <div id="prosp-msg-resposta-original" style="background:#f8fafc;border-radius:8px;padding:8px 10px;font-size:.76rem;color:#64748b;margin-bottom:10px;white-space:pre-wrap"></div>
+  <div class="fg"><label>O que a pessoa respondeu <span class="r">*</span></label><textarea class="fc" id="prosp-msg-resposta-texto" rows="3" placeholder="Cole ou digite a resposta recebida..." style="text-transform:none"></textarea></div>
+  <button onclick="prospSalvarMensagemResposta()" style="width:100%;background:#00bac7;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Salvar Resposta</button>
 </div>
 </div>
 
@@ -8010,6 +8040,13 @@ document.addEventListener('keydown',function(e){
   if(e.key!=='Escape')return;
   const mo=document.getElementById('mo-prosp-decisor-add');
   if(mo&&mo.classList.contains('open'))closeM('mo-prosp-decisor-add');
+});
+// ESC fecha "Mensagem Respondida" (mo-prosp-msg-resposta) — mesmo padrão acima, registrado
+// depois do listener do mo-prosp-decisor-add de propósito (mesma lógica de não fechar 2 de uma vez).
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Escape')return;
+  const mo=document.getElementById('mo-prosp-msg-resposta');
+  if(mo&&mo.classList.contains('open'))closeM('mo-prosp-msg-resposta');
 });
 
 function saveSt(){
@@ -34327,7 +34364,7 @@ function _prospRenderCard(e){
     </div>`).join(''):'<div style="font-size:.78rem;color:var(--ink4)">Nenhum decisor cadastrado ainda.</div>';
 
   const timeline=(e.timeline||[]).slice().sort((a,b)=>(b.em||'').localeCompare(a.em||''));
-  const timelineHtml=timeline.length?timeline.map(ev=>`
+  const timelineHtml=timeline.length?timeline.map(ev=>ev.tipoAtividade==='mensagem'?_prospMensagemTimelineHtml(ev,e.id):`
     <div style="display:flex;gap:10px;margin-bottom:12px">
       <div style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:${ev.sistema?'#f1f5f9':'var(--brand-lt)'};display:flex;align-items:center;justify-content:center;font-size:.85rem">${ev.sistema?'🔄':'💬'}</div>
       <div style="min-width:0;flex:1;padding-bottom:2px;border-bottom:1px solid var(--border-lt)">
@@ -34407,6 +34444,32 @@ function _prospRenderCard(e){
       ${timelineHtml}
     </div>
   `;
+}
+function _prospMensagemTimelineHtml(ev,empresaId){
+  const enviei=ev.direcao==='enviei';
+  const icone=enviei?'📤':'📥';
+  const direcaoLabel=enviei?'Mensagem enviada':'Mensagem recebida';
+  const respostaHtml=ev.resposta?`<div style="margin-top:8px;padding:8px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+        <div style="font-weight:700;color:#15803d;font-size:.74rem">↩️ Resposta${ev.respondidaPor?' — '+ev.respondidaPor:''}</div>
+        <div style="font-size:.66rem;color:var(--ink4);white-space:nowrap">${_fmtDataHora(ev.respondidaEm)}</div>
+      </div>
+      <div style="font-size:.78rem;color:var(--ink3);margin-top:2px;white-space:pre-wrap">${(ev.resposta||'').replace(/</g,'&lt;')}</div>
+    </div>`:'';
+  const btnResponderHtml=(enviei&&!ev.resposta)?`<button type="button" onclick="prospAbrirMensagemResposta('${empresaId}','${ev.id}')" style="margin-top:8px;background:#4338ca;color:#fff;border:none;border-radius:7px;padding:6px 10px;font-size:.7rem;font-weight:700;cursor:pointer">💬 Mensagem Respondida</button>`:'';
+  return `
+    <div style="display:flex;gap:10px;margin-bottom:12px">
+      <div style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--brand-lt);display:flex;align-items:center;justify-content:center;font-size:.85rem">${icone}</div>
+      <div style="min-width:0;flex:1;padding-bottom:2px;border-bottom:1px solid var(--border-lt)">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <div style="font-weight:700;color:var(--ink);font-size:.78rem">${ev.autor||'—'} <span style="font-weight:600;color:var(--ink4);font-size:.68rem">· ${direcaoLabel}</span></div>
+          <div style="font-size:.68rem;color:var(--ink4);white-space:nowrap">${_fmtDataHora(ev.em)}</div>
+        </div>
+        <div style="font-size:.78rem;color:var(--ink3);margin-top:2px;padding-bottom:8px;white-space:pre-wrap">${(ev.texto||'').replace(/</g,'&lt;')}</div>
+        ${respostaHtml}
+        ${btnResponderHtml}
+      </div>
+    </div>`;
 }
 async function _prospSalvarEmpresaObj(e){
   try{
@@ -34551,7 +34614,9 @@ function prospAbrirModalAtividade(tipo,empresaId){
   document.getElementById('prosp-atividade-outra-nome').value='';
   document.getElementById('prosp-atividade-relato').value='';
   document.getElementById('prosp-atividade-status-wrap').style.display=tipo==='ligacao'?'':'none';
+  document.getElementById('prosp-atividade-direcao-wrap').style.display=tipo==='mensagem'?'':'none';
   _prospAtividadeSetStatus('');
+  _prospAtividadeSetDirecao('');
   _prospAtividadeToggleOutraPessoa();
   openM('mo-prosp-atividade');
 }
@@ -34578,6 +34643,23 @@ function _prospAtividadeToggleOutraPessoa(){
   if(!sel||!wrap)return;
   wrap.style.display=sel.value==='__outra__'?'':'none';
 }
+// Botões "Eu enviei"/"Eu recebi" (2026-08-28, a pedido do usuário: "quando eu apontar uma
+// atividade de mensagem precisa perguntar pro usuario se ele mandou uma mensagem ou se
+// recebeu uma mensagem e dai colocar o conteudo") — só aparece pra tipo 'mensagem' (ver
+// display:none condicional em prospAbrirModalAtividade). Ao contrário do Atendeu/Não
+// Atendeu da ligação, aqui o relato NUNCA fica opcional — as duas direções sempre exigem o
+// conteúdo da mensagem; só o texto do rótulo muda pra deixar claro o que digitar.
+let _prospAtividadeDirecaoAtual='';
+function _prospAtividadeSetDirecao(direcao){
+  _prospAtividadeDirecaoAtual=direcao;
+  document.getElementById('prosp-atividade-direcao').value=direcao;
+  const btnE=document.getElementById('prosp-atividade-btn-enviei');
+  const btnR=document.getElementById('prosp-atividade-btn-recebi');
+  if(btnE){btnE.style.background=direcao==='enviei'?'#00bac7':'#f1f5f9';btnE.style.color=direcao==='enviei'?'#fff':'#334155';}
+  if(btnR){btnR.style.background=direcao==='recebi'?'#4338ca':'#f1f5f9';btnR.style.color=direcao==='recebi'?'#fff':'#334155';}
+  const lbl=document.getElementById('prosp-atividade-relato-label');
+  if(lbl)lbl.innerHTML=direcao==='recebi'?'O que a pessoa te mandou <span class="r">*</span>':direcao==='enviei'?'O que você mandou <span class="r">*</span>':'Relato <span class="r">*</span>';
+}
 async function prospSalvarAtividade(){
   const empresaId=document.getElementById('prosp-atividade-empresa-id').value;
   const e=prospEmpresas.find(x=>x.id===empresaId);
@@ -34590,18 +34672,60 @@ async function prospSalvarAtividade(){
   const relato=(document.getElementById('prosp-atividade-relato').value||'').trim();
   if(selVal==='__outra__'&&!outraNome){toast('Informe o nome da pessoa','terr');return;}
   const ehLigacao=tipo==='ligacao';
+  const ehMensagem=tipo==='mensagem';
   const naoAtendeu=ehLigacao&&_prospAtividadeStatusAtual==='nao-atendeu';
   if(ehLigacao&&!_prospAtividadeStatusAtual){toast('Marque se atendeu ou não','terr');return;}
+  if(ehMensagem&&!_prospAtividadeDirecaoAtual){toast('Diga se você enviou ou recebeu a mensagem','terr');return;}
   if(!naoAtendeu&&!relato){toast('Escreva um breve relato da atividade','terr');return;}
   if(!e.timeline)e.timeline=[];
+  const direcaoTxt=ehMensagem?(_prospAtividadeDirecaoAtual==='recebi'?' (recebida)':' (enviada)'):'';
   const texto=naoAtendeu
     ?info.icone+' Ligação com '+(contato||'—')+': não atendeu'
-    :info.icone+' '+info.label+' com '+(contato||'—')+(ehLigacao?' (atendeu)':'')+': '+relato;
-  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString()});
+    :info.icone+' '+info.label+' com '+(contato||'—')+(ehLigacao?' (atendeu)':'')+direcaoTxt+': '+relato;
+  const entry={id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString()};
+  if(ehMensagem){
+    entry.tipoAtividade='mensagem';
+    entry.direcao=_prospAtividadeDirecaoAtual;
+    entry.contato=contato||'';
+    entry.textoMsg=relato;
+    entry.resposta=null;
+    entry.respondidaEm=null;
+    entry.respondidaPor='';
+  }
+  e.timeline.push(entry);
   e.atualizadoEm=new Date().toISOString();
   try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
   closeM('mo-prosp-atividade');
   toast('Atividade registrada!','tok');
+  if(_prospCardAtualId===empresaId)_prospRenderCard(e);
+}
+function prospAbrirMensagemResposta(empresaId,eventoId){
+  const e=prospEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  const ev=(e.timeline||[]).find(x=>x.id===eventoId);
+  if(!ev)return;
+  document.getElementById('prosp-msg-resposta-empresa-id').value=empresaId;
+  document.getElementById('prosp-msg-resposta-evento-id').value=eventoId;
+  document.getElementById('prosp-msg-resposta-original').textContent=ev.textoMsg||ev.texto||'';
+  document.getElementById('prosp-msg-resposta-texto').value='';
+  openM('mo-prosp-msg-resposta');
+}
+async function prospSalvarMensagemResposta(){
+  const empresaId=document.getElementById('prosp-msg-resposta-empresa-id').value;
+  const eventoId=document.getElementById('prosp-msg-resposta-evento-id').value;
+  const e=prospEmpresas.find(x=>x.id===empresaId);
+  if(!e){toast('Empresa não encontrada','terr');return;}
+  const ev=(e.timeline||[]).find(x=>x.id===eventoId);
+  if(!ev){toast('Mensagem não encontrada','terr');return;}
+  const resposta=(document.getElementById('prosp-msg-resposta-texto').value||'').trim();
+  if(!resposta){toast('Escreva o que a pessoa respondeu','terr');return;}
+  ev.resposta=resposta;
+  ev.respondidaEm=new Date().toISOString();
+  ev.respondidaPor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  e.atualizadoEm=new Date().toISOString();
+  try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
+  closeM('mo-prosp-msg-resposta');
+  toast('Resposta registrada!','tok');
   if(_prospCardAtualId===empresaId)_prospRenderCard(e);
 }
 
