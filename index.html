@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-28.1';</script>
+<script>const APP_BUILD_VERSION='2026-08-28.2';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -1452,7 +1452,7 @@ select.fc{cursor:pointer}
                inicial) pra nunca esconder pendências por padrão. -->
           <div class="dash-mes-nav" style="margin:0">
             <button onclick="_plMesMov(-1)" type="button">◀</button>
-            <div class="dash-mes-label" id="pl-mes-lbl" style="min-width:150px">Todos os meses</div>
+            <div class="dash-mes-label plan-menu-trigger" id="pl-mes-lbl" onclick="_plAbrirMenuMes(this)" title="Clique para escolher o mês diretamente" style="min-width:150px;cursor:pointer;user-select:none">Todos os meses ▾</div>
             <button onclick="_plMesMov(1)" type="button">▶</button>
           </div>
           <input id="pl-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="renderPlanejamentoObras()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
@@ -26319,7 +26319,7 @@ function rhAbrirAvisoJaExisteDemitido(funcionarioId){
 
 function renderPlanejamentoObras(){
   const lblEl=document.getElementById('pl-mes-lbl');
-  if(lblEl)lblEl.textContent=_plMes?MESES_PT[_plMes]:'Todos os meses';
+  if(lblEl)lblEl.textContent=(_plMes?MESES_PT[_plMes]:'Todos os meses')+' ▾';
   const busca=(document.getElementById('pl-fil-busca')?.value||'').toUpperCase().trim();
   const filStatus=document.getElementById('pl-fil-status')?.value||'';
   let lista=_plPedidosElegiveis();
@@ -26452,7 +26452,7 @@ function renderPlanejamentoObras(){
         <td style="padding:8px 10px;${corLinha}">${loc}</td>
         <td style="padding:8px 10px">${statusHtml}</td>
         <td style="padding:8px 10px;text-align:right;white-space:nowrap">
-          <button onclick="_planAbrirMenuAcoes(this,'${p.id}',${concl})" title="Mais ações" class="plan-acoes-btn">⋮</button>
+          <button onclick="_planAbrirMenuAcoes(this,'${p.id}',${concl})" title="Mais ações" class="plan-acoes-btn plan-menu-trigger">⋮</button>
         </td>
       </tr>`;
     }).join('')}
@@ -26477,7 +26477,7 @@ function _planFecharMenuAcoes(){
   _planAcoesMenuBtn=null;
 }
 function _planFecharMenuAcoesClickFora(e){
-  if(e.target.closest('.plan-acoes-menu')||e.target.closest('.plan-acoes-btn'))return;
+  if(e.target.closest('.plan-acoes-menu')||e.target.closest('.plan-menu-trigger'))return;
   _planFecharMenuAcoes();
 }
 function _planAbrirMenuAcoes(btn,pedidoId,concl){
@@ -26491,12 +26491,56 @@ function _planAbrirMenuAcoes(btn,pedidoId,concl){
     {icone:'🧰',label:'Fornecedores',fn:`abrirFgLancar('${pedidoId}')`},
     {icone:concl?'👁️':'🏗️',label:concl?'Ver / Editar':'Finalizar Obra',fn:`abrirFinalizacaoObra('${pedidoId}')`}
   ];
+  // "Finalizar sem Formulário" (2026-08-28, a pedido do usuário — obra duplicada que já
+  // foi concluída de verdade por fora deste registro específico, ex.: pedido emitido 2x
+  // por engano) — só admin, só pra quem ainda não concluiu. Reaproveita
+  // finalizarObraSemFormulario(), função que já existia no código desde 2026-07-23 mas
+  // nunca tinha ganhado nenhum botão na tela. Não manda e-mail e não mexe em Lista de
+  // Vendas/Comissões — só marca p.finalizacao no próprio pedido, pra ele sumir da lista de
+  // pendentes/atrasadas sem tocar em nenhum outro dado.
+  if(!concl&&_getUserCat().isAdm){
+    itens.push({icone:'⚡',label:'Finalizar sem Formulário',fn:`finalizarObraSemFormulario('${pedidoId}')`});
+  }
   const menu=document.createElement('div');
   menu.className='plan-acoes-menu';
   menu.innerHTML=itens.map(it=>`<button onclick="_planFecharMenuAcoes();${it.fn}">${it.icone} ${it.label}</button>`).join('');
   document.body.appendChild(menu);
   const mw=menu.offsetWidth,mh=menu.offsetHeight;
   let top=r.bottom+4,left=r.right-mw;
+  if(left<8)left=8;
+  if(top+mh>window.innerHeight-8)top=r.top-mh-4;
+  menu.style.top=top+'px';
+  menu.style.left=left+'px';
+  setTimeout(()=>document.addEventListener('click',_planFecharMenuAcoesClickFora,true),0);
+  document.addEventListener('scroll',_planFecharMenuAcoes,true);
+  window.addEventListener('resize',_planFecharMenuAcoes);
+}
+
+// ── SELEÇÃO DIRETA DE MÊS NO PLANEJAMENTO (2026-08-28, a pedido do usuário) ─────────────
+// Clicar no texto do mês (ex.: "Todos os meses ▾") abre um menu com "Todos os meses" + os 12
+// meses pra pular direto num clique só, em vez de ter que clicar ◀/▶ várias vezes (as setas
+// continuam funcionando igual, pra quem preferir andar mês a mês). Reaproveita o mesmo
+// estilo/mecanismo de fechar do menu de ações (.plan-acoes-menu/_planFecharMenuAcoes).
+function _plAbrirMenuMes(el){
+  const clicouNoMesmo=(_planAcoesMenuBtn===el);
+  _planFecharMenuAcoes();
+  if(clicouNoMesmo)return;
+  _planAcoesMenuBtn=el;
+  const r=el.getBoundingClientRect();
+  const opcoes=[{v:'',label:'Todos os meses'}].concat(
+    [1,2,3,4,5,6,7,8,9,10,11,12].map(m=>({v:m,label:MESES_PT[m].charAt(0)+MESES_PT[m].slice(1).toLowerCase()}))
+  );
+  const menu=document.createElement('div');
+  menu.className='plan-acoes-menu';
+  menu.innerHTML=opcoes.map(o=>{
+    const ativo=String(o.v)===String(_plMes);
+    const valorJs=(o.v==='')?"''":o.v;
+    return `<button onclick="_planFecharMenuAcoes();_plMes=${valorJs};renderPlanejamentoObras();" style="${ativo?'background:#eef2ff;color:#4338ca;font-weight:700':''}">${ativo?'✓ ':''}${o.label}</button>`;
+  }).join('');
+  document.body.appendChild(menu);
+  const mw=menu.offsetWidth,mh=menu.offsetHeight;
+  let top=r.bottom+4,left=r.left;
+  if(left+mw>window.innerWidth-8)left=window.innerWidth-8-mw;
   if(left<8)left=8;
   if(top+mh>window.innerHeight-8)top=r.top-mh-4;
   menu.style.top=top+'px';
