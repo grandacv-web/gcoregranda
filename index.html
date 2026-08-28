@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-28.13';</script>
+<script>const APP_BUILD_VERSION='2026-08-28.17';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -2947,10 +2947,14 @@ select.fc{cursor:pointer}
   <input type="hidden" id="prosp-decisor-add-idx" value="-1">
   <div class="fg"><label>Nome <span class="r">*</span></label><input class="fc" id="prosp-decisor-add-nome" placeholder="Nome do decisor/comprador"></div>
   <div class="fg"><label>Cargo <span class="r">*</span></label><input class="fc" id="prosp-decisor-add-cargo" placeholder="Ex.: Comprador, Gerente, Sócio..."></div>
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-    <div class="fg"><label>Telefone</label><input class="fc no-upper" id="prosp-decisor-add-tel"></div>
-    <div class="fg"><label>E-mail</label><input class="fc no-upper" id="prosp-decisor-add-email" style="text-transform:none"></div>
+  <div class="fg">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+      <label style="margin-bottom:0">Telefone(s)</label>
+      <button type="button" onclick="_prospDecisorAddTelRowQuick()" style="background:var(--brand);color:#fff;border:none;border-radius:7px;padding:3px 9px;font-size:.68rem;font-weight:700;cursor:pointer">+ Telefone</button>
+    </div>
+    <div id="prosp-decisor-add-tels" style="display:flex;flex-direction:column;gap:6px"></div>
   </div>
+  <div class="fg"><label>E-mail</label><input class="fc no-upper" id="prosp-decisor-add-email" style="text-transform:none"></div>
   <div class="fg"><label>LinkedIn</label><input class="fc no-upper" id="prosp-decisor-add-linkedin" placeholder="Link do perfil no LinkedIn" style="text-transform:none"></div>
   <button onclick="prospSalvarDecisorRapido()" style="width:100%;background:#00bac7;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">💾 Salvar</button>
 </div>
@@ -33635,6 +33639,14 @@ let _prospTarefasTabAtiva='pendentes';
 let _prospTarefasViewAtiva='lista';
 let _prospCalRef=new Date();
 let _prospCardAtualId=null;
+// Aba ativa dentro do card de empresa (2026-08-28, a pedido do usuário: "as informações tao
+// todas iguais, parece tudo a mesma coisa... confunde... sugiro mudarmos o design pra deixar
+// cada coisa separada"). Card virou abas (Visão Geral/Decisores/Tarefas/Atividade) em vez de
+// um scroll único — ver _prospCardSetTab()/_prospRenderCard(). Só é resetada pra 'visao' ao
+// ABRIR um card (prospAbrirCard); re-renders do MESMO card (depois de salvar um decisor, uma
+// tarefa etc.) preservam a aba em que o usuário estava, senão toda ação jogaria ele de volta
+// pro início.
+let _prospCardTabAtiva='visao';
 
 function setupProspSync(){
   if(!window._fbWatchProspEmpresas)return;
@@ -33961,7 +33973,7 @@ function _prospContatosFiltrados(busca){
     (c.nome||'').toUpperCase().includes(q)||
     (c.cargo||'').toUpperCase().includes(q)||
     (c.empresaNome||'').toUpperCase().includes(q)||
-    (c.telefone||'').toUpperCase().includes(q)||
+    _prospTelefonesDecisor(c).some(t=>(t.numero||'').toUpperCase().includes(q)||(t.tipo||'').toUpperCase().includes(q))||
     (c.email||'').toUpperCase().includes(q)
   );
 }
@@ -33978,7 +33990,7 @@ function renderProspContatosLista(){
           <span>👤 ${c.nome||'—'}</span>
           ${c.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700">${c.cargo}</span>`:''}
         </div>
-        <div style="font-size:.72rem;color:#64748b;margin-top:3px">${['🏢 '+(c.empresaNome||'—'),c.telefone,c.email].filter(Boolean).join(' · ')}</div>
+        <div style="font-size:.72rem;color:#64748b;margin-top:3px">${['🏢 '+(c.empresaNome||'—'),_prospTelefonesTexto(c),c.email].filter(Boolean).join(' · ')}</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
         ${c.linkedin?`<a href="${c.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:.66rem;font-weight:700;text-decoration:none;white-space:nowrap">🔗 LinkedIn ↗</a>`:''}
@@ -34022,13 +34034,13 @@ function prospExportarContatos(modo){
     body=lista.map(c=>[c.nome||'',c.cargo||'',c.email||'',c.empresaNome||'']);
     sufixo='emails';
   }else if(modo==='telefone'){
-    lista=lista.filter(c=>c.telefone);
+    lista=lista.filter(c=>_prospTelefonesDecisor(c).length);
     headers=['Nome','Cargo','Telefone','Empresa'];
-    body=lista.map(c=>[c.nome||'',c.cargo||'',c.telefone||'',c.empresaNome||'']);
+    body=lista.map(c=>[c.nome||'',c.cargo||'',_prospTelefonesTexto(c),c.empresaNome||'']);
     sufixo='telefones';
   }else{
     headers=['Nome','Cargo','Empresa','Telefone','E-mail','LinkedIn'];
-    body=lista.map(c=>[c.nome||'',c.cargo||'',c.empresaNome||'',c.telefone||'',c.email||'',c.linkedin||'']);
+    body=lista.map(c=>[c.nome||'',c.cargo||'',c.empresaNome||'',_prospTelefonesTexto(c),c.email||'',c.linkedin||'']);
     sufixo='completo';
   }
   if(!lista.length){toast(modo==='email'?'Nenhum contato com e-mail cadastrado':modo==='telefone'?'Nenhum contato com telefone cadastrado':'Nenhum contato encontrado para exportar','terr');return;}
@@ -34238,7 +34250,14 @@ function _prospTarefaKanbanCardHtml(t,concluida){
 function _prospRenderTarefasKanban(wrap){
   const hoje=new Date();
   const hojeIso=hoje.toISOString().slice(0,10);
-  const fimSemana=new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate()+6).toISOString().slice(0,10);
+  // Fim da semana ATUAL (sábado) — a semana aqui começa no domingo, mesmo padrão do
+  // calendário de Prospecção (diasSemana: Dom,Seg,Ter,Qua,Qui,Sex,Sáb). Antes era hoje+6 dias
+  // corridos (janela rolante), o que empurrava o início da semana que vem (ex.: a segunda-
+  // feira seguinte) pra dentro de "Esta semana" quando hoje já era sexta/sábado (2026-08-28,
+  // a pedido do usuário: "reveja essas tarefas no kanban porque não são desta semana e sim
+  // da semana que vem"). Com getDay() (0=domingo...6=sábado), dias até sábado = 6-getDay().
+  const diasAteSabado=6-hoje.getDay();
+  const fimSemana=new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate()+diasAteSabado).toISOString().slice(0,10);
   const todas=_prospTodasTarefas();
   const pendentes=todas.filter(t=>!t.feita);
   const colunas=[
@@ -34263,6 +34282,7 @@ function prospAbrirCard(id){
   const e=prospEmpresas.find(x=>x.id===id);
   if(!e){toast('Empresa não encontrada (a lista pode ter mudado) — atualize e tente de novo','terr');return;}
   _prospCardAtualId=id;
+  _prospCardTabAtiva='visao';
   _prospRenderCard(e);
   openM('mo-prosp-card');
 }
@@ -34304,9 +34324,49 @@ function _prospBtnCopiar(valor,titulo){
   if(!valor)return'';
   return `<button type="button" onclick="event.stopPropagation();_prospCopiarValor(this)" data-copy="${valor.replace(/"/g,'&quot;')}" title="${titulo}" aria-label="${titulo}" style="background:none;border:none;cursor:pointer;color:var(--ink4);opacity:.55;font-size:.72rem;padding:0 2px;line-height:1;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📋</button>`;
 }
+// Telefones do decisor — suporta o formato novo (d.telefones: [{tipo,numero}], vários
+// telefones com rótulo livre tipo "pessoal"/"comercial"/"fixo escritório") e o formato antigo
+// (d.telefone: string única) pra não quebrar decisores já cadastrados antes dessa mudança
+// (2026-08-28, a pedido do usuário: "poder adicionar mais de um telefone... e poder dizer
+// do que é cada telefone... escrita livre").
+function _prospTelefonesDecisor(d){
+  if(d&&Array.isArray(d.telefones)&&d.telefones.length)return d.telefones.filter(t=>t&&t.numero);
+  if(d&&d.telefone)return[{tipo:'',numero:d.telefone}];
+  return[];
+}
+function _prospTelefonesTexto(d){
+  return _prospTelefonesDecisor(d).map(t=>t.tipo?t.tipo+': '+t.numero:t.numero).join(' / ');
+}
+// HTML de uma linha "tipo + telefone + remover" reaproveitada nos dois lugares que editam
+// telefone de decisor: o modal rápido (mo-prosp-decisor-add) e o form completo de empresa
+// (prospAddDecisorRow). Tipo é texto livre — sem lista fixa, o usuário digita o que fizer
+// sentido pra aquele contato.
+function _prospTelRowInnerHtml(tipo,numero){
+  return '<input class="fc no-upper prosp-dec-tel-tipo" placeholder="Tipo (ex.: pessoal, comercial, fixo escritório)" value="'+(tipo||'').replace(/"/g,'&quot;')+'" style="font-size:.8rem;flex:1;text-transform:none">'
+    +'<input class="fc no-upper prosp-dec-tel-num" placeholder="Telefone" value="'+(numero||'').replace(/"/g,'&quot;')+'" style="font-size:.8rem;flex:1;text-transform:none">'
+    +'<button type="button" onclick="this.closest(\'.prosp-dec-tel-row\').remove()" title="Remover telefone" style="background:#fce4ec;color:#c62828;border:none;border-radius:6px;width:26px;height:26px;flex-shrink:0;cursor:pointer;font-size:.72rem">✕</button>';
+}
+function _prospDecisorAddTelRowQuick(tipo,numero){
+  const wrap=document.getElementById('prosp-decisor-add-tels');
+  if(!wrap)return;
+  const row=document.createElement('div');
+  row.className='prosp-dec-tel-row';
+  row.style.cssText='display:flex;gap:6px;align-items:center';
+  row.innerHTML=_prospTelRowInnerHtml(tipo,numero);
+  wrap.appendChild(row);
+}
+function _prospDecisorTelsDoFormQuick(){
+  return[...document.querySelectorAll('#prosp-decisor-add-tels .prosp-dec-tel-row')].map(row=>({
+    tipo:(row.querySelector('.prosp-dec-tel-tipo')&&row.querySelector('.prosp-dec-tel-tipo').value.trim())||'',
+    numero:(row.querySelector('.prosp-dec-tel-num')&&row.querySelector('.prosp-dec-tel-num').value.trim())||''
+  })).filter(t=>t.numero);
+}
 function _prospContatoComCopiar(d){
   const partes=[];
-  if(d.telefone)partes.push(`<span style="display:inline-flex;align-items:center;gap:2px">${d.telefone}${_prospBtnCopiar(d.telefone,'Copiar telefone')}</span>`);
+  _prospTelefonesDecisor(d).forEach(t=>{
+    const rotulo=t.tipo?t.tipo+': ':'';
+    partes.push(`<span style="display:inline-flex;align-items:center;gap:2px">${rotulo}${t.numero}${_prospBtnCopiar(t.numero,'Copiar telefone'+(t.tipo?' ('+t.tipo+')':''))}</span>`);
+  });
   if(d.email)partes.push(`<span style="display:inline-flex;align-items:center;gap:2px">${d.email}${_prospBtnCopiar(d.email,'Copiar e-mail')}</span>`);
   return partes.length?partes.join(' &nbsp;·&nbsp; '):'—';
 }
@@ -34391,6 +34451,9 @@ function _prospRenderCard(e){
       </div>
     </div>`;
   }).join(''):'<div style="text-align:center;padding:12px;color:var(--ink4);font-size:.76rem">Nenhuma tarefa agendada.</div>';
+  // Contador de tarefas pendentes pro badge da aba "Tarefas" (2026-08-28 — card virou abas,
+  // ver _prospCardTabAtiva/_prospCardSetTab) — dá visibilidade de relance sem precisar clicar.
+  const tarefasPendentesCount=tarefas.filter(t=>!t.feita).length;
 
   document.getElementById('prosp-card-body').innerHTML=`
     <div style="background:${saude.bg};border:1.5px solid ${saude.cor};border-radius:10px;padding:10px 12px;margin-bottom:14px">
@@ -34401,49 +34464,82 @@ function _prospRenderCard(e){
       <button type="button" onclick="prospAbrirEditarEmpresa('${e.id}')" style="background:none;border:none;color:var(--ink4);opacity:.75;cursor:pointer;font-size:.72rem;font-weight:600;padding:2px 4px;display:inline-flex;align-items:center;gap:4px" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.75">✏️ Editar empresa</button>
       ${_getUserCat().isAdm?`<button type="button" onclick="prospExcluirEmpresa('${e.id}')" style="background:none;border:none;color:#dc2626;opacity:.65;cursor:pointer;font-size:.72rem;font-weight:600;padding:2px 4px;display:inline-flex;align-items:center;gap:4px" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.65">🗑️ Excluir empresa</button>`:''}
     </div>
-    <div class="fg">
-      <label>Etapa atual</label>
-      <div style="display:flex;gap:8px">
-        <select class="fc" id="prosp-card-etapa-sel" style="flex:1">${etapas.map(et=>`<option value="${et.key}" ${et.key===etapaAtual.key?'selected':''}>${et.label}</option>`).join('')}</select>
-        <button onclick="prospMoverEtapa('${e.id}',document.getElementById('prosp-card-etapa-sel').value);prospAbrirCard('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:9px;padding:0 16px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap">Mover</button>
+    <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
+      <button type="button" id="prosp-tabbtn-visao" onclick="_prospCardSetTab('visao')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">📋 Visão Geral</button>
+      <button type="button" id="prosp-tabbtn-decisores" onclick="_prospCardSetTab('decisores')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">👤 Decisores${(e.decisores||[]).length?' ('+e.decisores.length+')':''}</button>
+      <button type="button" id="prosp-tabbtn-tarefas" onclick="_prospCardSetTab('tarefas')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">🗓️ Tarefas${tarefasPendentesCount?' ('+tarefasPendentesCount+')':''}</button>
+      <button type="button" id="prosp-tabbtn-atividade" onclick="_prospCardSetTab('atividade')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">💬 Atividade${timeline.length?' ('+timeline.length+')':''}</button>
+    </div>
+    <div id="prosp-tab-visao">
+      <div class="fg">
+        <label>Etapa atual</label>
+        <div style="display:flex;gap:8px">
+          <select class="fc" id="prosp-card-etapa-sel" style="flex:1">${etapas.map(et=>`<option value="${et.key}" ${et.key===etapaAtual.key?'selected':''}>${et.label}</option>`).join('')}</select>
+          <button onclick="prospMoverEtapa('${e.id}',document.getElementById('prosp-card-etapa-sel').value);prospAbrirCard('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:9px;padding:0 16px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap">Mover</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+        <div><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">Unidades existentes</div><div style="font-size:.85rem;font-weight:700;color:var(--ink)">${e.unidadesExistentes||0}</div></div>
+        <div><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">Unidades a abrir</div><div style="font-size:.85rem;font-weight:700;color:var(--ink)">${e.unidadesAbrir||0}</div></div>
+      </div>
+      <div class="fg"><label>Regiões de interesse</label>${regioesHtml}</div>
+    </div>
+    <div id="prosp-tab-decisores">
+      <div class="fg">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+          <label style="margin-bottom:0">Decisores / Compradores</label>
+          <button type="button" onclick="prospAbrirAdicionarDecisor('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">+ Adicionar Decisor</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">${decisoresHtml}</div>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
-      <div><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">Unidades existentes</div><div style="font-size:.85rem;font-weight:700;color:var(--ink)">${e.unidadesExistentes||0}</div></div>
-      <div><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">Unidades a abrir</div><div style="font-size:.85rem;font-weight:700;color:var(--ink)">${e.unidadesAbrir||0}</div></div>
-    </div>
-    <div class="fg"><label>Regiões de interesse</label>${regioesHtml}</div>
-    <div class="fg">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
-        <label style="margin-bottom:0">Decisores / Compradores</label>
-        <button type="button" onclick="prospAbrirAdicionarDecisor('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">+ Adicionar Decisor</button>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:6px">${decisoresHtml}</div>
-    </div>
-    <div style="border-top:1px solid var(--border-lt);margin:16px 0;padding-top:14px">
+    <div id="prosp-tab-tarefas">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="font-weight:800;font-size:.85rem;color:var(--ink)">🗓️ Tarefas</div>
         <button onclick="prospAbrirNovaTarefa('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:.74rem;font-weight:700;cursor:pointer">+ Nova Tarefa</button>
       </div>
       ${tarefasHtml}
     </div>
-    <div style="border-top:1px solid var(--border-lt);margin:16px 0;padding-top:14px">
-      <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:8px">📋 Registrar Atividade Realizada</div>
-      <div style="display:flex;gap:8px">
-        <button onclick="prospAbrirModalAtividade('ligacao','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">📞 Ligação</button>
-        <button onclick="prospAbrirModalAtividade('mensagem','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">💬 Mensagem</button>
-        <button onclick="prospAbrirModalAtividade('email','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">✉️ E-mail</button>
+    <div id="prosp-tab-atividade">
+      <div style="margin-bottom:14px">
+        <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:8px">📋 Registrar Atividade Realizada</div>
+        <div style="display:flex;gap:8px">
+          <button onclick="prospAbrirModalAtividade('ligacao','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">📞 Ligação</button>
+          <button onclick="prospAbrirModalAtividade('mensagem','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">💬 Mensagem</button>
+          <button onclick="prospAbrirModalAtividade('email','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">✉️ E-mail</button>
+        </div>
       </div>
-    </div>
-    <div style="border-top:1px solid var(--border-lt);margin:16px 0;padding-top:14px">
-      <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:8px">💬 Linha do Tempo</div>
-      <div style="margin-bottom:10px">
-        <textarea id="prosp-comentario-novo" class="fc" rows="2" placeholder="Registre o que está fazendo com essa empresa..." style="text-transform:none;width:100%"></textarea>
+      <div style="border-top:1px solid var(--border-lt);padding-top:14px">
+        <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:8px">💬 Linha do Tempo</div>
+        <div style="margin-bottom:10px">
+          <textarea id="prosp-comentario-novo" class="fc" rows="2" placeholder="Registre o que está fazendo com essa empresa..." style="text-transform:none;width:100%"></textarea>
+        </div>
+        <button onclick="prospAdicionarComentario('${e.id}')" style="width:100%;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer;margin-bottom:14px">+ Adicionar comentário</button>
+        ${timelineHtml}
       </div>
-      <button onclick="prospAdicionarComentario('${e.id}')" style="width:100%;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer;margin-bottom:14px">+ Adicionar comentário</button>
-      ${timelineHtml}
     </div>
   `;
+  _prospCardSetTab(_prospCardTabAtiva);
+}
+// Controla qual aba do card de empresa está visível (2026-08-28, a pedido do usuário: "as
+// informações tao todas iguais... confunde... sugiro mudarmos o design pra deixar cada coisa
+// separada"). Chamado sempre que o card é (re)renderizado, com a aba atual (_prospCardTabAtiva)
+// — só alterna display:none/'' dos painéis já existentes no DOM, não recria HTML nem fecha o
+// modal, então a posição/rolagem do usuário não pula. Nenhuma outra função precisa saber em
+// qual aba o usuário está: elas só chamam _prospRenderCard(e), que reaplica a aba no final.
+function _prospCardSetTab(tab){
+  _prospCardTabAtiva=tab;
+  const cores={on:{bg:'var(--brand)',cor:'#fff'},off:{bg:'#f1f5f9',cor:'#334155'}};
+  ['visao','decisores','tarefas','atividade'].forEach(t=>{
+    const painel=document.getElementById('prosp-tab-'+t);
+    if(painel)painel.style.display=t===tab?'':'none';
+    const btn=document.getElementById('prosp-tabbtn-'+t);
+    if(btn){
+      const c=t===tab?cores.on:cores.off;
+      btn.style.background=c.bg;
+      btn.style.color=c.cor;
+    }
+  });
 }
 function _prospMensagemTimelineHtml(ev,empresaId){
   const enviei=ev.direcao==='enviei';
@@ -34510,7 +34606,8 @@ function prospAbrirAdicionarDecisor(empresaId){
   document.getElementById('prosp-decisor-add-idx').value='-1';
   document.getElementById('prosp-decisor-add-nome').value='';
   document.getElementById('prosp-decisor-add-cargo').value='';
-  document.getElementById('prosp-decisor-add-tel').value='';
+  document.getElementById('prosp-decisor-add-tels').innerHTML='';
+  _prospDecisorAddTelRowQuick();
   document.getElementById('prosp-decisor-add-email').value='';
   document.getElementById('prosp-decisor-add-linkedin').value='';
   openM('mo-prosp-decisor-add');
@@ -34531,7 +34628,11 @@ function prospAbrirEditarDecisor(empresaId,idx){
   document.getElementById('prosp-decisor-add-idx').value=idx;
   document.getElementById('prosp-decisor-add-nome').value=d.nome||'';
   document.getElementById('prosp-decisor-add-cargo').value=d.cargo||'';
-  document.getElementById('prosp-decisor-add-tel').value=d.telefone||'';
+  const telsWrap=document.getElementById('prosp-decisor-add-tels');
+  telsWrap.innerHTML='';
+  const tels=_prospTelefonesDecisor(d);
+  if(tels.length)tels.forEach(t=>_prospDecisorAddTelRowQuick(t.tipo,t.numero));
+  else _prospDecisorAddTelRowQuick();
   document.getElementById('prosp-decisor-add-email').value=d.email||'';
   document.getElementById('prosp-decisor-add-linkedin').value=d.linkedin||'';
   openM('mo-prosp-decisor-add');
@@ -34568,7 +34669,7 @@ async function prospSalvarDecisorRapido(){
   if(!cargo){toast('Informe o cargo do decisor','terr');return;}
   const d={
     nome,cargo,
-    telefone:(document.getElementById('prosp-decisor-add-tel').value||'').trim(),
+    telefones:_prospDecisorTelsDoFormQuick(),
     email:(document.getElementById('prosp-decisor-add-email').value||'').trim(),
     linkedin:_prospNormalizarLinkedin(document.getElementById('prosp-decisor-add-linkedin').value)
   };
@@ -34807,19 +34908,35 @@ function prospToggleRegiao(btn){btn.classList.toggle('off');}
 function _prospRegioesSelecionadas(){
   return[...document.querySelectorAll('#prosp-emp-regioes .prosp-chip')].filter(b=>!b.classList.contains('off')).map(b=>b.textContent);
 }
+function _prospAddTelRowToRow(btn){
+  const row=btn.closest('.prosp-decisor-row');
+  const wrap=row&&row.querySelector('.prosp-dec-tels-wrap');
+  if(!wrap)return;
+  const div=document.createElement('div');
+  div.className='prosp-dec-tel-row';
+  div.style.cssText='display:flex;gap:6px;align-items:center';
+  div.innerHTML=_prospTelRowInnerHtml('','');
+  wrap.appendChild(div);
+}
 function prospAddDecisorRow(d){
   const l=document.getElementById('prosp-emp-decisores-l');
   if(!l)return;
   const row=document.createElement('div');
   row.className='prosp-decisor-row';
   row.style.cssText='border:1px solid var(--border-lt);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;position:relative';
+  const tels=_prospTelefonesDecisor(d);
+  const telsHtml=(tels.length?tels:[{tipo:'',numero:''}]).map(t=>'<div class="prosp-dec-tel-row" style="display:flex;gap:6px;align-items:center">'+_prospTelRowInnerHtml(t.tipo,t.numero)+'</div>').join('');
   row.innerHTML='<button type="button" onclick="this.closest(\'.prosp-decisor-row\').remove()" style="position:absolute;top:6px;right:6px;background:#fce4ec;color:#c62828;border:none;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:.75rem">✕</button>'
     +'<input class="fc prosp-dec-nome" placeholder="Nome do decisor/comprador" value="'+((d&&d.nome)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem;padding-right:30px">'
     +'<input class="fc prosp-dec-cargo" placeholder="Cargo (obrigatório) — ex.: Comprador, Gerente, Sócio..." value="'+((d&&d.cargo)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem">'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'
-    +'<input class="fc no-upper prosp-dec-tel" placeholder="Telefone" value="'+((d&&d.telefone)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem">'
-    +'<input class="fc no-upper prosp-dec-email" placeholder="E-mail" value="'+((d&&d.email)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem;text-transform:none">'
+    +'<div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">'
+    +'<label style="margin-bottom:0;font-size:.7rem;color:var(--ink4);font-weight:700">Telefone(s)</label>'
+    +'<button type="button" onclick="_prospAddTelRowToRow(this)" style="background:var(--brand);color:#fff;border:none;border-radius:6px;padding:2px 8px;font-size:.64rem;font-weight:700;cursor:pointer">+ Telefone</button>'
     +'</div>'
+    +'<div class="prosp-dec-tels-wrap" style="display:flex;flex-direction:column;gap:6px">'+telsHtml+'</div>'
+    +'</div>'
+    +'<input class="fc no-upper prosp-dec-email" placeholder="E-mail" value="'+((d&&d.email)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem;text-transform:none">'
     +'<input class="fc no-upper prosp-dec-linkedin" placeholder="Link do perfil no LinkedIn" value="'+((d&&d.linkedin)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem;text-transform:none">';
   l.appendChild(row);
 }
@@ -34835,10 +34952,13 @@ function _prospDecisoresDoForm(){
   return[...document.querySelectorAll('#prosp-emp-decisores-l .prosp-decisor-row')].map(row=>({
     nome:(row.querySelector('.prosp-dec-nome')&&row.querySelector('.prosp-dec-nome').value.trim())||'',
     cargo:(row.querySelector('.prosp-dec-cargo')&&row.querySelector('.prosp-dec-cargo').value.trim())||'',
-    telefone:(row.querySelector('.prosp-dec-tel')&&row.querySelector('.prosp-dec-tel').value.trim())||'',
+    telefones:[...row.querySelectorAll('.prosp-dec-tels-wrap .prosp-dec-tel-row')].map(tr=>({
+      tipo:(tr.querySelector('.prosp-dec-tel-tipo')&&tr.querySelector('.prosp-dec-tel-tipo').value.trim())||'',
+      numero:(tr.querySelector('.prosp-dec-tel-num')&&tr.querySelector('.prosp-dec-tel-num').value.trim())||''
+    })).filter(t=>t.numero),
     email:(row.querySelector('.prosp-dec-email')&&row.querySelector('.prosp-dec-email').value.trim())||'',
     linkedin:_prospNormalizarLinkedin(row.querySelector('.prosp-dec-linkedin')&&row.querySelector('.prosp-dec-linkedin').value)
-  })).filter(d=>d.nome||d.telefone||d.email||d.linkedin);
+  })).filter(d=>d.nome||d.telefones.length||d.email||d.linkedin);
 }
 function prospAbrirNovaEmpresa(){
   document.getElementById('prosp-emp-modal-titulo').textContent='🏢 Nova Empresa';
@@ -34888,7 +35008,7 @@ function prospAbrirEditarEmpresa(id){
 // outros lugares do sistema tipo _rhFuncionarioPorNome) comparando a lista antes/depois do
 // salvar. Entradas ficam com sistema:true (mesmo estilo das de "Etapa alterada: X → Y").
 function _prospDecisorDadosTexto(d){
-  return[d.cargo,d.telefone,d.email,d.linkedin].filter(Boolean).join(' · ');
+  return[d.cargo,_prospTelefonesTexto(d),d.email,d.linkedin].filter(Boolean).join(' · ');
 }
 function _prospLogDiffDecisores(e,antigos,novos){
   const porNome=lista=>{const m={};(lista||[]).forEach(d=>{if(d&&d.nome)m[d.nome.trim().toUpperCase()]=d;});return m;};
@@ -35016,7 +35136,21 @@ function _prospIndicadoresDados(){
   }).filter(r=>r.total>0).sort((a,b)=>(b.desassistidas-a.desassistidas)||(b.total-a.total));
   const semResponsavel=empresas.filter(e=>!e.responsavel).length;
   const semTarefa=comSaude.filter(x=>!(x.e.tarefas||[]).some(t=>!t.feita)).sort((a,b)=>b.s.dias-a.s.dias);
-  return{total,porNivel,desassistidas,atencao,mediaDias,porEtapa,porResponsavel,semResponsavel,semTarefa};
+  // Panorama de tarefas pro indicador "📋 Tarefas" (2026-08-28, a pedido do usuário: "quero o
+  // titulo TAREFAS e dai o que vai aparecer nele: negocios sem tarefa programada, tarefas
+  // atrasadas etc") — mesmas categorias por prazo do Kanban de Tarefas (ver
+  // _prospRenderTarefasKanban: Atrasadas/Hoje/Esta semana), calculadas aqui em cima de TODAS
+  // as tarefas pendentes do funil (não só as da empresa aberta), pra bater com o que o Kanban
+  // mostra. Fim de semana = sábado da semana atual (domingo→sábado, mesmo padrão do resto do
+  // sistema — ver fix de 2026-08-28 no Kanban de Prospecção).
+  const todasTarefas=_prospTodasTarefas();
+  const tarefasPendentes=todasTarefas.filter(t=>!t.feita);
+  const tarefasAtrasadas=tarefasPendentes.filter(t=>t.data&&t.data<hojeIso).length;
+  const tarefasHoje=tarefasPendentes.filter(t=>t.data===hojeIso).length;
+  const diasAteSabadoInd=6-new Date().getDay();
+  const fimSemanaInd=new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate()+diasAteSabadoInd).toISOString().slice(0,10);
+  const tarefasSemana=tarefasPendentes.filter(t=>t.data&&t.data>hojeIso&&t.data<=fimSemanaInd).length;
+  return{total,porNivel,desassistidas,atencao,mediaDias,porEtapa,porResponsavel,semResponsavel,semTarefa,tarefasAtrasadas,tarefasHoje,tarefasSemana};
 }
 function _prospAtualizarBadgeSaude(d){
   const badge=document.getElementById('prosp-ind-badge');
@@ -35076,10 +35210,23 @@ function renderProspIndicadores(){
     {label:'🟡 Em Atenção',val:`${d.porNivel.amarelo} (${pct(d.porNivel.amarelo)}%)`,sub:`${lim.amarelo} a ${lim.vermelho-1} dias sem interação`,color:'#d97706'},
     {label:'🔴 Desassistidas',val:`${d.porNivel.vermelho} (${pct(d.porNivel.vermelho)}%)`,sub:`${lim.vermelho}+ dias sem interação`,color:'#dc2626'},
     {label:'Média de dias sem interação',val:`${d.mediaDias}d`,sub:'Considerando todo o funil',color:'#7c3aed'},
-    {label:'📋 Sem Tarefa Agendada',val:`${d.semTarefa.length} (${pct(d.semTarefa.length)}%)`,sub:'Nenhuma tarefa pendente no momento',color:'#0ea5e9'},
+    {label:'📋 Tarefas',linhas:[
+      {texto:'Sem tarefa agendada',valor:`${d.semTarefa.length} (${pct(d.semTarefa.length)}%)`,color:'#0ea5e9'},
+      {texto:'Atrasadas',valor:String(d.tarefasAtrasadas),color:'#dc2626'},
+      {texto:'Hoje',valor:String(d.tarefasHoje),color:'#0369a1'},
+      {texto:'Esta semana',valor:String(d.tarefasSemana),color:'#7c3aed'}
+    ]},
   ];
   const tilesHtml=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px">
-    ${tiles.map(c=>`<div style="background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e5e7eb">
+    ${tiles.map(c=>c.linhas?`<div style="background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e5e7eb">
+      <div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:8px">${c.label}</div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        ${c.linhas.map(l=>`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+          <span style="font-size:.72rem;color:#64748b">${l.texto}</span>
+          <span style="font-size:.85rem;font-weight:800;color:${l.color};white-space:nowrap">${l.valor}</span>
+        </div>`).join('')}
+      </div>
+    </div>`:`<div style="background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e5e7eb">
       <div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:6px">${c.label}</div>
       <div style="font-size:1.25rem;font-weight:800;color:${c.color}">${c.val}</div>
       <div style="font-size:.72rem;color:#94a3b8;margin-top:4px">${c.sub}</div>
