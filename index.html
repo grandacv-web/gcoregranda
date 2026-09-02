@@ -1215,10 +1215,11 @@ select.fc{cursor:pointer}
             <span style="font-size:.75rem;color:#94a3b8;font-weight:600">até</span>
             <input id="fc-fil-data-fim" type="date" style="width:150px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit" onchange="fcAplicarFiltros()">
             <button onclick="abrirImportarContasPagarXLSX()" class="dash-btn-conf" style="white-space:nowrap">📥 Importar Excel (Pagar)</button>
+            <button id="fc-btn-excluir-mes-pagar" onclick="abrirExcluirMesContasPagar()" class="dash-btn-conf" style="white-space:nowrap;display:none;background:#dc2626">🗑️ Excluir Contas a Pagar do Mês</button>
             <button onclick="abrirNovaContaPagar()" class="dash-btn-conf" style="white-space:nowrap;background:#1d4ed8">+ Nova despesa</button>
             <button onclick="abrirNovaContaReceber()" class="dash-btn-conf" style="white-space:nowrap;background:#16a34a">+ Nova receita</button>
-            <button onclick="gerarPDFFinanceiro()" class="dash-btn-conf" style="white-space:nowrap">📄 PDF (Receber)</button>
-            <button onclick="exportarExcelFinanceiro()" class="dash-btn-conf" style="white-space:nowrap;background:#16a34a">📊 Excel (Receber)</button>
+            <button onclick="gerarPDFFinanceiro()" class="dash-btn-conf" style="white-space:nowrap">📄 PDF</button>
+            <button onclick="exportarExcelFinanceiro()" class="dash-btn-conf" style="white-space:nowrap;background:#16a34a">📊 Excel</button>
           </div>
           <div class="dash-tabs" style="margin-bottom:14px">
             <button id="fc-tab-lista" class="dash-tab active fin-view-tab" onclick="finSetView('lista',this)">📋 Lista</button>
@@ -3441,6 +3442,68 @@ select.fc{cursor:pointer}
   <div id="cp-import-status" style="font-size:.8rem;color:var(--ink3);margin-bottom:10px"></div>
   <div id="cp-import-body" style="overflow-y:auto;flex:1"></div>
   <button id="cp-import-confirmar-btn" onclick="confirmarImportacaoContasPagar()" style="display:none;margin-top:12px;width:100%;background:#16a34a;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">Confirmar importação</button>
+</div>
+</div>
+
+<!-- Excluir Contas a Pagar de um mês inteiro (2026-09-02, a pedido do usuário: "eu acho que
+     precisamos ter um botao de EXCLUIR TODAS AS CONTAS A PAGAR e selecionar o mes que eu
+     quero, pq por exemplo bagunçou meu mes de julho agora e nao adianta eu ficar upando
+     planilha la, entao eu quero poder limpar tudo e poder colocar uma nova planilha pra ele
+     ler certo" — só administrador (ver fc-btn-excluir-mes-pagar/renderContasUnificado()),
+     pede PIN de admin antes de gravar, e usa o mesmo caminho de exclusão em lote pela
+     Lixeira já usado na importação (window._fbRemoverContasPagarBatch, ver
+     confirmarImportacaoContasPagar()) — nada é apagado de vez, dá pra restaurar. -->
+<div class="mov" id="mo-cp-excluir-mes" onclick="cio(event,'mo-cp-excluir-mes')">
+<div class="mvmod" style="width:480px;max-width:96vw">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <h3 style="margin-bottom:0">🗑️ Excluir Contas a Pagar do Mês</h3>
+    <button onclick="closeM('mo-cp-excluir-mes')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:8px 12px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca">
+    Remove <strong>todos</strong> os lançamentos de Contas a Pagar cujo vencimento cai no mês escolhido — útil pra limpar um mês que ficou errado antes de subir uma planilha nova. Vai tudo pra Lixeira antes de apagar de vez, dá pra restaurar se precisar. Só administrador pode fazer isso.
+  </div>
+  <div class="fg"><label>Mês a excluir</label><input type="month" id="cp-excluir-mes-input" class="fc" oninput="_cpExcluirMesAtualizarPreview()"></div>
+  <div id="cp-excluir-mes-preview" style="font-size:.82rem;color:var(--ink3);margin:10px 0 14px"></div>
+  <button onclick="confirmarExcluirMesContasPagar()" style="width:100%;background:#dc2626;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">Excluir lançamentos deste mês</button>
+</div>
+</div>
+
+<!-- Ajustar Quinzena de uma Comissão manualmente (2026-09-02, a pedido do usuário) — a
+     quinzena de pagamento de uma comissão é sempre recalculada automaticamente a partir da
+     data em que o recebimento foi confirmado (ver _quinzenaParaComissao/getQuinzenaInfo) —
+     regra pedida e reafirmada pelo próprio usuário em 04/08 e 18/08. Só que às vezes o
+     Financeiro processa/fecha um lote de comissões com atraso (ex.: fechou em 19/08 um lote
+     que na cabeça dele é "referente à quinzena de 15/08") — o cálculo automático empurra isso
+     pra quinzena seguinte, o que é tecnicamente certo mas não bate com a intenção de quem
+     fechou. Este modal grava uma EXCEÇÃO manual (cfg.comissaoQuinzenaOverride[confKey]) só
+     pra aquele item específico, sem mudar a regra automática pra mais ninguém — ver
+     _setComissaoQuinzenaOverride()/_itemNaJanelaRecebido() (agora checa esse override
+     primeiro) e o post-processing em getComissaoItemsAll() que sobrescreve i.qy/i.qm/i.qhalf
+     quando existe um override. Isso propaga automaticamente pro PDF (gerarPDFComissao usa a
+     mesma fonte) e pro Histórico do pedido (ver _histPedidoEventos). -->
+<div class="mov" id="mo-quinzena-override" onclick="cio(event,'mo-quinzena-override')">
+<div class="mvmod" style="width:440px;max-width:96vw">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+    <h3 style="margin-bottom:0">📌 Ajustar Quinzena desta Comissão</h3>
+    <button onclick="closeM('mo-quinzena-override')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <div id="qov-info" style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:8px 12px;background:#f5f3ff;border-radius:8px;border:1px solid #ddd6fe"></div>
+  <div class="fg"><label>Nova quinzena de pagamento</label>
+    <div style="display:flex;gap:8px">
+      <input type="month" id="qov-mes" class="fc" style="flex:1">
+      <select id="qov-half" class="fc" style="flex:1">
+        <option value="I">1ª Quinzena (dia 5)</option>
+        <option value="II">2ª Quinzena (dia 15)</option>
+      </select>
+    </div>
+  </div>
+  <div class="fg"><label>Motivo (opcional, fica registrado no Histórico do pedido)</label>
+    <textarea id="qov-motivo" class="fc" rows="2" placeholder="Ex: fechei essa comissão com atraso em 19/08, mas era referente ao dia 15/08"></textarea>
+  </div>
+  <div style="display:flex;gap:8px;margin-top:6px">
+    <button onclick="closeM('mo-quinzena-override')" style="flex:1;background:#f3f4f6;color:#374151;border:none;border-radius:10px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">Cancelar</button>
+    <button onclick="confirmarAlterarQuinzenaComissao()" style="flex:1;background:#7c3aed;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">Salvar</button>
+  </div>
 </div>
 </div>
 
@@ -14821,6 +14884,143 @@ async function desfazerComissaoQuitada(confKey){
   toast('Desfeito — comissão voltou pra lista a confirmar.','tok');
   if(typeof renderDashComissoes==='function')try{renderDashComissoes();}catch(e){}
 }
+// Comissão do GERENTE (Guilherme Clabonde/pctClab) já paga — pedido do usuário (2026-09-02):
+// "eu gostei dessa checagem que vc colocou pra ver se ja foi paga aquela comissao x pro
+// vendedor, mas eu preciso tambem que confira a minha". É uma marcação TOTALMENTE separada
+// de cfg.comissaoQuitada (aquela é só do vendedor) — o mesmo confKey pode estar quitado pro
+// vendedor e não pro gerente, ou vice-versa, já que quem paga cada um pode ser em momentos
+// diferentes. Mesmo padrão exato de _setComissaoQuitada() (escrita atômica em
+// cfg.comissaoQuitadaGerente[confKey]), só trocando a chave gravada no Firestore.
+async function _setComissaoQuitadaGerente(confKey,marcar,por){
+  if(!cfg.comissaoQuitadaGerente)cfg.comissaoQuitadaGerente={};
+  if(marcar){
+    const data={em:new Date().toISOString(),por:por||usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'};
+    cfg.comissaoQuitadaGerente[confKey]=data;
+    try{
+      if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['comissaoQuitadaGerente',confKey],data).catch(e=>{
+        console.error('Erro ao gravar comissaoQuitadaGerente via updateDoc, tentando fallback completo',e);
+        if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+      });
+      else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }catch(e){
+      console.error('Erro síncrono ao gravar comissaoQuitadaGerente, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }
+  } else {
+    delete cfg.comissaoQuitadaGerente[confKey];
+    try{
+      if(window._fbDeleteCfgField)await window._fbDeleteCfgField(['comissaoQuitadaGerente',confKey]).catch(e=>{
+        console.error('Erro ao remover comissaoQuitadaGerente via updateDoc, tentando fallback completo',e);
+        if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+      });
+      else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }catch(e){
+      console.error('Erro síncrono ao remover comissaoQuitadaGerente, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    }
+  }
+  try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){console.error('Erro ao gravar cache local (gcore_cfg)',e);}
+}
+async function confirmarComissaoQuitadaGerenteSelecionados(dia){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem confirmar pagamento de comissão','terr');return;}
+  const chks=[...document.querySelectorAll(`.com-quitar-gerente-chk[data-dia="${dia}"]:checked`)];
+  if(!chks.length){toast('Marque pelo menos uma comissão do gerente pra confirmar','terr');return;}
+  const quinzTxt=dia===5?'1ª Quinzena (dia 5)':'2ª Quinzena (dia 15)';
+  if(!confirm(`Confirmar que ${chks.length} comissão${chks.length>1?'ões foram':' foi'} do GERENTE paga${chks.length>1?'s':''} (${quinzTxt})?\n\nFica registrado com a data de hoje pra você consultar depois quanto foi pago pra Guilherme Clabonde.`))return;
+  const por=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
+  for(const chk of chks){
+    await _setComissaoQuitadaGerente(chk.dataset.ck,true,por);
+  }
+  toast(`${chks.length} comissão${chks.length>1?'ões':''} do gerente marcada${chks.length>1?'s':''} como paga${chks.length>1?'s':''} ✅`,'tok');
+  if(typeof renderDashComissoes==='function')try{renderDashComissoes();}catch(e){}
+}
+async function desfazerComissaoQuitadaGerente(confKey){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem desfazer isso','terr');return;}
+  if(!confirm('Desfazer a marcação de "comissão do gerente paga" desta linha? Ela volta pra "⏳ A confirmar" do gerente.'))return;
+  await _setComissaoQuitadaGerente(confKey,false,'');
+  toast('Desfeito — comissão do gerente voltou pra lista a confirmar.','tok');
+  if(typeof renderDashComissoes==='function')try{renderDashComissoes();}catch(e){}
+}
+function marcarTodasComQuitarGerente(dia,marcar){
+  document.querySelectorAll(`.com-quitar-gerente-chk[data-dia="${dia}"]`).forEach(c=>{c.checked=marcar;});
+  _atualizarContadorQuitarGerente(dia);
+}
+function _atualizarContadorQuitarGerente(dia){
+  const n=document.querySelectorAll(`.com-quitar-gerente-chk[data-dia="${dia}"]:checked`).length;
+  const btn=document.getElementById('com-btn-confirmar-gerente-'+dia);
+  if(btn)btn.textContent=`✅ Confirmar comissão do Gerente (${n})`;
+}
+// Ajuste manual de quinzena de uma comissão (2026-09-02, a pedido do usuário — ver comentário
+// grande no modal mo-quinzena-override). Grava cfg.comissaoQuinzenaOverride[confKey]=
+// {qy,qm,qhalf,motivo,por,em} — escrita atômica, mesmo padrão de _setComissaoQuitada(). Lido de
+// volta em dois lugares: (1) getComissaoItemsAll() sobrescreve i.qy/i.qm/i.qhalf do item com o
+// override, o que já basta pra corrigir a bucketização de itens PENDENTES e a data de
+// pagamento mostrada; (2) _itemNaJanelaRecebido() (usada pra decidir em qual quinzena um item
+// JÁ CONFIRMADO aparece — cards, Consolidados, PDF) agora checa o override primeiro, antes da
+// janela de data automática.
+async function _setComissaoQuinzenaOverride(confKey,qy,qm,qhalf,motivo,por){
+  if(!cfg.comissaoQuinzenaOverride)cfg.comissaoQuinzenaOverride={};
+  const data={qy,qm,qhalf,motivo:motivo||'',por:por||usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—',em:new Date().toISOString()};
+  cfg.comissaoQuinzenaOverride[confKey]=data;
+  try{
+    if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['comissaoQuinzenaOverride',confKey],data).catch(e=>{
+      console.error('Erro ao gravar comissaoQuinzenaOverride via updateDoc, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    });
+    else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  }catch(e){
+    console.error('Erro síncrono ao gravar comissaoQuinzenaOverride, tentando fallback completo',e);
+    if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  }
+  try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){console.error('Erro ao gravar cache local (gcore_cfg)',e);}
+}
+async function desfazerQuinzenaOverrideComissao(confKey){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem fazer isso','terr');return;}
+  if(!confirm('Remover o ajuste manual de quinzena desta comissão? Ela volta a usar o cálculo automático (data em que foi confirmada).'))return;
+  if(cfg.comissaoQuinzenaOverride)delete cfg.comissaoQuinzenaOverride[confKey];
+  try{
+    if(window._fbDeleteCfgField)await window._fbDeleteCfgField(['comissaoQuinzenaOverride',confKey]).catch(e=>{
+      console.error('Erro ao remover comissaoQuinzenaOverride via updateDoc, tentando fallback completo',e);
+      if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+    });
+    else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  }catch(e){
+    console.error('Erro síncrono ao remover comissaoQuinzenaOverride, tentando fallback completo',e);
+    if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  }
+  try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){console.error('Erro ao gravar cache local (gcore_cfg)',e);}
+  toast('Ajuste removido — quinzena volta a ser calculada automaticamente.','tok');
+  if(typeof renderDashComissoes==='function')try{renderDashComissoes();}catch(e){}
+}
+let _qovConfKey=null;
+function abrirAlterarQuinzenaComissao(confKey,curQy,curQm,curQhalf,clienteLabel){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem ajustar a quinzena de uma comissão','terr');return;}
+  _qovConfKey=confKey;
+  const info=document.getElementById('qov-info');
+  if(info)info.innerHTML=`<strong>${clienteLabel||'—'}</strong><br>Quinzena calculada automaticamente hoje: <strong>${curQhalf==='I'?'1ª':'2ª'} Quinzena de ${MESES_PT[curQm]}/${curQy}</strong>. Isso não muda o cálculo automático em si — só registra uma exceção manual pra ESTE item específico (fica valendo até você desfazer).`;
+  const mesInp=document.getElementById('qov-mes');
+  if(mesInp)mesInp.value=`${curQy}-${String(curQm).padStart(2,'0')}`;
+  const halfSel=document.getElementById('qov-half');
+  if(halfSel)halfSel.value=curQhalf;
+  const motivoInp=document.getElementById('qov-motivo');
+  if(motivoInp)motivoInp.value='';
+  openM('mo-quinzena-override');
+}
+async function confirmarAlterarQuinzenaComissao(){
+  if(!_qovConfKey)return;
+  const mesInp=document.getElementById('qov-mes');
+  const v=mesInp?.value||'';
+  const mm=v.match(/^(\d{4})-(\d{2})$/);
+  if(!mm){toast('Escolha o mês/ano','terr');return;}
+  const qy=parseInt(mm[1],10),qm=parseInt(mm[2],10);
+  const qhalf=document.getElementById('qov-half')?.value||'I';
+  const motivo=(document.getElementById('qov-motivo')?.value||'').trim();
+  const por=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
+  await _setComissaoQuinzenaOverride(_qovConfKey,qy,qm,qhalf,motivo,por);
+  closeM('mo-quinzena-override');
+  toast('Quinzena ajustada ✅','tok');
+  if(typeof renderDashComissoes==='function')try{renderDashComissoes();}catch(e){}
+}
 // "☑️ Marcar todas / ☐ Desmarcar todas" por quinzena (2026-08-19, a pedido do usuário: "ter
 // uma opção de marcar todas por quinzena, para facilitar") — só mexe no checkbox na tela, não
 // salva nada sozinho; ainda precisa clicar em "Confirmar que foi pago" depois.
@@ -15069,6 +15269,24 @@ function comPeriodoLimpar(){
   comPeriodoBusca='';
   const de=document.getElementById('com-per-de');if(de)de.value='';
   const ate=document.getElementById('com-per-ate');if(ate)ate.value='';
+  const mesSel=document.getElementById('com-per-mes');if(mesSel)mesSel.value='';
+  renderDashComissoes();
+}
+// Atalho "Mês" no quadro "🔎 Buscar Comissão" (2026-09-02, a pedido do usuário: "o filtro dos
+// meses ali pode ter TODOS OS MESES igual os outros filtros pra eu poder pesquisar uma
+// comissao ja paga se eu quiser de outros meses") — mesmo padrão de "📅 Todos os meses" já
+// usado em Fluxo de Caixa/DRE/Planejamento (ver _mesAnoNavCiclo). Não é um filtro novo: só
+// preenche "Pago de"/"até" com o 1º e o último dia do mês escolhido (ou limpa os dois, pra
+// "Todos os meses") — a busca em si continua sendo feita pelos campos de data já existentes,
+// que já cobriam qualquer mês (getComissaoItemsAll(), sem restrição de mês ativo).
+function comPeriodoMesAno(v){
+  const de=document.getElementById('com-per-de'),ate=document.getElementById('com-per-ate');
+  if(!v){if(de)de.value='';if(ate)ate.value='';renderDashComissoes();return;}
+  const [yy,mm]=v.split('-');
+  const y=+yy,mo=+mm;
+  const lastDay=new Date(y,mo,0).getDate();
+  if(de)de.value=`${yy}-${mm}-01`;
+  if(ate)ate.value=`${yy}-${mm}-${String(lastDay).padStart(2,'0')}`;
   renderDashComissoes();
 }
 
@@ -15093,11 +15311,18 @@ function _janelaRecebido(y,m,half){
   return {start:new Date(y,m-1,5,0,0,0,0),end:new Date(ny,nm-1,4,23,59,59,999)};
 }
 function _itemNaJanelaRecebido(item,y,m,half){
-  if(!item.confirmedAt)return false;
-  const d=new Date(item.confirmedAt);
-  if(isNaN(d))return false;
-  const {start,end}=_janelaRecebido(y,m,half);
-  return d>=start&&d<=end;
+  // Corrigido 2026-09-02 (pedido do usuário: "nao pode aparecer em duas quinzenas se o
+  // pagamento é na quinzena x ele tem que ficar la") — antes esta função usava uma janela de
+  // data alargada (_janelaRecebido) que se sobrepunha por completo com a quinzena seguinte
+  // (qualquer confirmedAt de dia 15 em diante batia ao mesmo tempo na 2ª quinzena deste mês E
+  // na 1ª quinzena do mês seguinte — a janela da 1ª quinzena do mês seguinte era um SUBCONJUNTO
+  // inteiro da janela da 2ª quinzena deste mês), fazendo o mesmo item aparecer como "já pago"
+  // em duas listas diferentes. Agora usa o MESMO bucket único já calculado por
+  // _quinzenaParaComissao (i.qy/i.qm/i.qhalf — baseado no confirmedAt real pra item
+  // confirmado, já com o ajuste manual de quinzena aplicado se houver, ver
+  // getComissaoItemsAll()) — cada item pertence a exatamente UMA quinzena, nunca duas.
+  // _janelaRecebido() ficou sem uso, mantida só por histórico.
+  return item.qy===y&&item.qm===m&&item.qhalf===half;
 }
 // Mantida por compatibilidade (não usada mais nos cards de recebido, ver acima) — ainda
 // referenciada em nenhum outro lugar, só deixada pra não quebrar nada que eventualmente
@@ -15576,6 +15801,14 @@ function getComissaoItemsAll(){
     i.comissaoPagaFora=(cfg.comissaoPagaFora&&cfg.comissaoPagaFora[i.confKey])||null;
     i.comissaoRemovida=(cfg.comissaoRemovida&&cfg.comissaoRemovida[i.confKey])||null;
     i.comissaoQuitada=(cfg.comissaoQuitada&&cfg.comissaoQuitada[i.confKey])||null;
+    i.comissaoQuitadaGerente=(cfg.comissaoQuitadaGerente&&cfg.comissaoQuitadaGerente[i.confKey])||null;
+    // Ajuste manual de quinzena (2026-09-02) — sobrescreve qy/qm/qhalf calculados acima quando
+    // existe uma exceção registrada pra este confKey (ver _setComissaoQuinzenaOverride() e o
+    // comentário grande no modal mo-quinzena-override). Propaga sozinho pra tudo que lê
+    // i.qy/i.qm/i.qhalf (Pendentes, PDF, cards) — ver também _itemNaJanelaRecebido(), que faz
+    // o mesmo pro lado dos itens já CONFIRMADOS (que não usam qy/qm/qhalf pra bucketização).
+    i.quinzenaOverride=(cfg.comissaoQuinzenaOverride&&cfg.comissaoQuinzenaOverride[i.confKey])||null;
+    if(i.quinzenaOverride){i.qy=i.quinzenaOverride.qy;i.qm=i.quinzenaOverride.qm;i.qhalf=i.quinzenaOverride.qhalf;}
   });
   // REMOVIDO (2026-08-18, mesmo dia) — o bloco que existia aqui marcava automaticamente
   // comissaoRemovida nos 17 pedidos do PDF de 04/08 com base numa história de "reaberto e
@@ -16104,6 +16337,91 @@ async function excluirContaPagar(id){
   if(c)await _lixeiraAdicionar('contaPagar',c,{resumo:`${c.fornecedor||c.descricao||'Lançamento'} — R$ ${(c.valor||0).toFixed?c.valor.toFixed(2):c.valor}`});
   await deleteContaPagarFS(id);
   toast('Lançamento excluído','tok');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// EXCLUIR CONTAS A PAGAR DE UM MÊS INTEIRO (2026-09-02, a pedido do usuário — ver comentário
+// no modal mo-cp-excluir-mes, HTML) — pra quando uma importação bagunçou um mês inteiro e o
+// jeito mais simples de corrigir é limpar tudo daquele mês e subir a planilha de novo, em vez
+// de tentar consertar lançamento por lançamento. Só administrador (checado 3x: ao abrir o
+// modal, ao confirmar, e o botão que abre já só aparece pra admin — ver
+// renderContasUnificado()); pede PIN de admin antes de gravar, igual qualquer outra exclusão
+// de Contas a Pagar (ver excluirContaPagar() acima). Filtra por MÊS DO VENCIMENTO
+// (c.vencimento, 'YYYY-MM-DD') — o mesmo campo usado em todo o resto de Contas a Pagar (import,
+// filtros, cards). Usa o mesmo caminho em lote pela Lixeira já usado na importação
+// (window._fbRemoverContasPagarBatch, ver confirmarImportacaoContasPagar()), então centenas de
+// lançamentos de um mês bagunçado saem numa gravação só, sem travar a tela.
+function abrirExcluirMesContasPagar(){
+  if(!_getUserCat().isAdm){toast('Apenas administrador pode excluir contas a pagar em massa','terr');return;}
+  const inp=document.getElementById('cp-excluir-mes-input');
+  if(inp)inp.value=new Date().toISOString().slice(0,7); // sugere o mês atual, mas é livre pra trocar
+  _cpExcluirMesAtualizarPreview();
+  openM('mo-cp-excluir-mes');
+}
+function _cpExcluirMesAtualizarPreview(){
+  const prevEl=document.getElementById('cp-excluir-mes-preview');
+  if(!prevEl)return;
+  const mes=document.getElementById('cp-excluir-mes-input')?.value||'';
+  if(!mes){prevEl.innerHTML='';return;}
+  const alvo=(contasPagar||[]).filter(c=>(c.vencimento||'').slice(0,7)===mes);
+  if(!alvo.length){prevEl.innerHTML='<span style="color:#94a3b8">Nenhum lançamento de Contas a Pagar com vencimento neste mês.</span>';return;}
+  const total=alvo.reduce((s,c)=>s+_cpValorAjustado(c),0);
+  prevEl.innerHTML=`<strong style="color:#dc2626">${alvo.length} lançamento(s)</strong> — soma ${fmtR(total)} — serão removidos pra Lixeira.`;
+}
+async function confirmarExcluirMesContasPagar(){
+  if(!_getUserCat().isAdm){toast('Apenas administrador pode excluir contas a pagar em massa','terr');return;}
+  const mes=document.getElementById('cp-excluir-mes-input')?.value||'';
+  if(!mes){toast('Escolha o mês antes de confirmar','terr');return;}
+  const alvo=(contasPagar||[]).filter(c=>(c.vencimento||'').slice(0,7)===mes);
+  if(!alvo.length){toast('Nenhum lançamento de Contas a Pagar encontrado nesse mês','tinf');return;}
+  const [y,m]=mes.split('-');
+  const mesLbl=(MESES_PT[parseInt(m,10)]||m)+'/'+y;
+  const total=alvo.reduce((s,c)=>s+_cpValorAjustado(c),0);
+  if(!confirm(`Excluir TODOS os ${alvo.length} lançamento(s) de Contas a Pagar com vencimento em ${mesLbl} (soma ${fmtR(total)})?\n\nVai pra Lixeira, dá pra restaurar se precisar.`))return;
+  const senha=await pedirSenhaAdmin('Excluir Contas a Pagar do Mês','Digite a senha/PIN de administrador para excluir esses lançamentos:');
+  if(!senha){toast('Exclusão cancelada','tinf');return;}
+  if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
+  const itensLixeira=alvo.map((c,i)=>({
+    lixeiraItem:{
+      id:'lix_'+Date.now()+'_'+i+'_'+Math.random().toString(36).slice(2,8),
+      tipo:'contaPagar',
+      dados:JSON.parse(JSON.stringify(c)),
+      apagadoPor:(window._fbAuth&&window._fbAuth.currentUser&&window._fbAuth.currentUser.email)||'desconhecido',
+      apagadoEm:new Date().toISOString(),
+      resumo:`Exclusão em massa (mês ${mesLbl}) — ${c.fornecedor||'Lançamento'} — R$ ${(c.valor||0).toFixed?c.valor.toFixed(2):c.valor}`
+    },
+    contaId:c.id
+  }));
+  try{
+    if(window._fbRemoverContasPagarBatch){
+      await window._fbRemoverContasPagarBatch(itensLixeira);
+    }else{
+      for(const c of alvo){ // fallback se writeBatch não estiver disponível
+        try{
+          await _lixeiraAdicionar('contaPagar',c,{resumo:`Exclusão em massa (mês ${mesLbl}) — ${c.fornecedor||'Lançamento'} — R$ ${(c.valor||0).toFixed?c.valor.toFixed(2):c.valor}`});
+          await deleteContaPagarFS(c.id);
+        }catch(e){console.error(e);}
+      }
+    }
+    // Mesma purga de excedente da Lixeira já usada na importação (ver
+    // confirmarImportacaoContasPagar()) — sem isso, uma exclusão de mês grande podia estourar
+    // o limite _LIXEIRA_MAX de uma vez só.
+    if(window._fbDeleteLixeiraItem){
+      const novoTotal=lixeira.length+itensLixeira.length;
+      if(novoTotal>_LIXEIRA_MAX){
+        const ordenado=[...lixeira].sort((a,b)=>(a.apagadoEm||'').localeCompare(b.apagadoEm||''));
+        const excedente=ordenado.slice(0,novoTotal-_LIXEIRA_MAX);
+        excedente.forEach(x=>window._fbDeleteLixeiraItem(x.id).catch(()=>{}));
+      }
+    }
+    toast(`✅ ${alvo.length} lançamento(s) de ${mesLbl} excluído(s) — pode subir a planilha nova`,'tok');
+    closeM('mo-cp-excluir-mes');
+    if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();
+    else if(typeof renderContasPagar==='function')renderContasPagar();
+  }catch(e){
+    console.error(e);
+    toast('Erro ao excluir: '+e.message,'terr');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -16751,6 +17069,11 @@ function _cpxParseValor(v){
   const n=parseFloat(String(v).replace(/\./g,'').replace(',','.'));
   return isNaN(n)?0:n;
 }
+// (2026-09-02: removida a leitura de título/nome de planilha pra descobrir tipo/período do
+// relatório — a pedido do usuário: "nao quero que leia por nome de planilha, pq eu nomeei
+// agora a planilha mas o upload que o usuario vai fazer pode ser com qualquer nome". O escopo
+// seguro de remoção agora é calculado 100% a partir da própria DATA (vencimento) das linhas
+// da planilha, dentro de _cpCalcularPlanoImportacao() — ver comentário lá.)
 async function parseContasPagarXLSX(arrayBuffer){
   if(!window.XLSX)throw new Error('Biblioteca de leitura de Excel não carregada. Verifique sua conexão.');
   const wb=XLSX.read(arrayBuffer,{type:'array'});
@@ -16902,18 +17225,55 @@ function _cpCalcularPlanoImportacao(){
   const ordenado=[...candidatos].sort((a,b)=>String(b.criadoEm||'').localeCompare(String(a.criadoEm||'')));
   const claims={}; // índice em _cpImportRecords -> lançamento existente que reivindicou aquela linha
   const remover=[];
+  const puladosForaDoEscopo=[]; // só pra mostrar na tela — não achou par, mas não é removido (ver abaixo)
+  // Escopo seguro de remoção, lido 100% dos DADOS da própria planilha — NUNCA do nome do
+  // arquivo ou de texto de título (2026-09-02, a pedido do usuário: "nao quero que leia por
+  // nome de planilha, pq ... o upload que o usuario vai fazer pode ser com qualquer nome").
+  // Só uma linha ainda EM ABERTO (status pendente/vencido, não "pago") prova "isto é o que
+  // está aberto nesta data" — uma linha já paga não prova que outra conta com aquele
+  // vencimento deixou de existir (pode ter sido paga antes, fora deste arquivo). Por isso o
+  // intervalo de vencimento [mín,máx] considerado "coberto" por este upload usa só as linhas
+  // pendentes/vencidas da planilha atual. Planilha só com pagamentos (nenhuma linha em
+  // aberto) → escopo vazio → nunca remove nada, só lança/atualiza o que vier. Ver
+  // [[project_contas_pagar_julho_nao_bate_planilha_investigacao]].
+  const vencAbertosNaPlanilha=_cpImportRecords.filter(r=>r.status!=='pago').map(r=>r.vencimento);
+  const escopoDe=vencAbertosNaPlanilha.length?vencAbertosNaPlanilha.reduce((a,b)=>a<b?a:b):null;
+  const escopoAte=vencAbertosNaPlanilha.length?vencAbertosNaPlanilha.reduce((a,b)=>a>b?a:b):null;
   ordenado.forEach(c=>{
-    const idx=_cpImportRecords.findIndex((r,i)=>!usado[i]
-      &&_cpxNorm(c.fornecedor)===_cpxNorm(r.fornecedor)
-      &&c.vencimento===r.vencimento
-      &&_cpxNorm(c.parcela)===_cpxNorm(r.parcela)
-      &&(!(c.nf&&r.nf)||_cpxNorm(c.nf)===_cpxNorm(r.nf)));
+    // Acha TODAS as linhas livres que batem a chave base (fornecedor+vencimento+parcela+NF-
+    // quando-os-dois-têm) — quando um fornecedor tem mais de uma conta simultânea com a MESMA
+    // combinação (ex.: 2 parcelamentos "7 de 99" no mesmo vencimento, ou várias tarifas
+    // bancárias "1 de 1" no mesmo dia — casos reais achados 2026-09-02 numa planilha de
+    // pagamentos real, MINISTERIO DA FAZENDA x3 e BANCO SICREDI x7 com valores bem diferentes
+    // entre si), a chave base sozinha não distingue qual é qual — desempata pela Descrição da
+    // despesa (despesaDesc no sistema = despesaRaw vindo da planilha) quando bate exatamente;
+    // se nenhuma bater (ex.: descrição foi editada à mão depois), cai no comportamento antigo
+    // (primeira linha livre), pra não regredir o caso comum onde só existe 1 candidata mesmo.
+    let idx=-1;
+    for(let i=0;i<_cpImportRecords.length;i++){
+      if(usado[i])continue;
+      const r=_cpImportRecords[i];
+      const bateChaveBase=_cpxNorm(c.fornecedor)===_cpxNorm(r.fornecedor)
+        &&c.vencimento===r.vencimento
+        &&_cpxNorm(c.parcela)===_cpxNorm(r.parcela)
+        &&(!(c.nf&&r.nf)||_cpxNorm(c.nf)===_cpxNorm(r.nf));
+      if(!bateChaveBase)continue;
+      if(idx===-1)idx=i; // fallback: primeira livre, igual ao comportamento antigo
+      if(_cpxNorm(c.despesaDesc)===_cpxNorm(r.despesaRaw)){idx=i;break;} // desempate por descrição, se bater exato
+    }
     if(idx===-1){
-      // Não achou nenhuma linha livre pra reivindicar: ou sumiu da planilha, ou é cópia
+      // Não achou NENHUMA linha livre pra reivindicar: ou sumiu da planilha, ou é cópia
       // duplicada excedente. Nunca mexe em lançamento manual/fora do planejado (já filtrado por
       // origem acima) nem no que já está PAGO — a planilha pode ter uma janela de datas menor
       // que o histórico, um pago sumir do recorte recente não quer dizer que deixou de existir.
-      if(c.status!=='pago')remover.push(c);
+      //
+      // Também nunca remove quando o vencimento do lançamento existente está FORA do escopo
+      // (calculado acima a partir das próprias datas da planilha) — o upload não diz nada
+      // sobre contas com vencimento fora desse intervalo, então sumir do arquivo não prova
+      // que sumiram do mundo real.
+      const foraDoRecorte=!escopoDe||c.vencimento<escopoDe||c.vencimento>escopoAte;
+      if(foraDoRecorte)puladosForaDoEscopo.push(c);
+      else if(c.status!=='pago')remover.push(c);
     }else{
       usado[idx]=true;
       claims[idx]=c;
@@ -16927,7 +17287,7 @@ function _cpCalcularPlanoImportacao(){
     if(mudou)syncs.push({r,existente:c});
     else semMudanca.push(r);
   });
-  return{novos,syncs,semMudanca,remover};
+  return{novos,syncs,semMudanca,remover,puladosForaDoEscopo,escopoDe,escopoAte};
 }
 function renderImportPreview(fileName){
   const statusEl=document.getElementById('cp-import-status');
@@ -16935,10 +17295,18 @@ function renderImportPreview(fileName){
   const btnEl=document.getElementById('cp-import-confirmar-btn');
   const plano=_cpCalcularPlanoImportacao();
   const naoReconhecidos=_cpImportRecords.filter(r=>r.centroCusto===CENTRO_CUSTO_NAO_RECONHECIDO).length;
+  // Rótulo do escopo de datas detectado nesta planilha (2026-09-02) — calculado 100% a partir
+  // das próprias linhas em aberto do arquivo (ver _cpCalcularPlanoImportacao), nunca do nome/
+  // título — pra deixar visível o que o sistema entendeu antes de confirmar, já que isso muda
+  // o comportamento de remoção.
+  const escopoLbl=plano.escopoDe
+    ?`📅 Vencimentos em aberto nesta planilha: ${fmtD(plano.escopoDe)}${plano.escopoDe!==plano.escopoAte?` a ${fmtD(plano.escopoAte)}`:''} — só remove lançamento existente com vencimento dentro desse intervalo`
+    :'💰 Nenhum lançamento em aberto nesta planilha (só pagos) — nada será removido, só lançado/atualizado o que houver';
   statusEl.innerHTML=`📄 <strong>${fileName}</strong> — ${_cpImportRecords.length} lançamento(s) na planilha: `
     +`<strong>${plano.novos.length} novo(s)</strong>, <strong>${plano.syncs.length} atualiza(m)</strong>, ${plano.semMudanca.length} sem mudança`
     +(plano.remover.length?`, <strong style="color:#dc2626">${plano.remover.length} serão removidos</strong> (não estão mais na planilha)`:'')
     +'. Ao confirmar, o sistema fica igual à planilha automaticamente.'
+    +`<br><span style="color:#64748b;font-size:.78rem">${escopoLbl}${plano.puladosForaDoEscopo.length?` · ${plano.puladosForaDoEscopo.length} lançamento(s) existente(s) fora deste recorte não foram mexidos`:''}</span>`
     +(naoReconhecidos?` <span style="color:#dc2626">${naoReconhecidos} com Centro de Custo "${CENTRO_CUSTO_NAO_RECONHECIDO}" (célula vazia na planilha) — revise antes ou corrija depois na lista.</span>`:'');
 
   bodyEl.innerHTML=`<div style="overflow-x:auto"><table class="dash-table">
@@ -16975,10 +17343,11 @@ function renderImportPreview(fileName){
   btnEl.style.display='';
   btnEl.textContent='Confirmar importação';
 }
-// Único botão, uma senha (só se houver algo a remover), um resultado: o sistema fica igual à
-// planilha (2026-08-04, reescrito a pedido do usuário — chega de tela/checkbox/botão extra).
-// Recalcula o plano na hora de confirmar (não reaproveita o de renderImportPreview) pra refletir
-// qualquer ajuste de Empresa/Centro de Custo feito na tabela de revisão antes de clicar.
+// Único botão, um resultado: o sistema fica igual à planilha (2026-08-04, reescrito a pedido
+// do usuário — chega de tela/checkbox/botão extra; senha de admin removida em 2026-09-02, ver
+// comentário mais abaixo). Recalcula o plano na hora de confirmar (não reaproveita o de
+// renderImportPreview) pra refletir qualquer ajuste de Empresa/Centro de Custo feito na tabela
+// de revisão antes de clicar.
 async function confirmarImportacaoContasPagar(){
   // Trava própria (2026-08-25, ver auditoria de acesso ao Financeiro) — grava lançamentos
   // direto no Firestore, sem checar nada até aqui.
@@ -16996,11 +17365,9 @@ async function confirmarImportacaoContasPagar(){
   if(plano.syncs.length)partes.push(`• ${plano.syncs.length} atualizado(s)`);
   if(plano.remover.length)partes.push(`• ${plano.remover.length} removido(s) — não estão mais na planilha (soma ${fmtR(plano.remover.reduce((s,c)=>s+(c.valor||0),0))})`);
   if(!confirm(`Deixar o sistema igual a esta planilha?\n\n${partes.join('\n')}\n\n${plano.remover.length?'A exclusão vai pra Lixeira, dá pra restaurar se precisar.':''}`))return;
-  if(plano.remover.length){
-    const senha=await pedirSenhaAdmin('Confirmar importação','Esta planilha remove lançamentos do sistema. Digite a senha de administrador para confirmar:');
-    if(!senha){toast('Importação cancelada','tinf');return;}
-    if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
-  }
+  // (2026-09-02: removida a senha de admin aqui, a pedido do usuário — "nao quero que peça
+  // senha pra importar a planilha de contas a pagar". O confirm() nativo acima continua sendo
+  // o gate único, e qualquer remoção ainda vai pra Lixeira antes de apagar de vez.)
   const btnEl=document.getElementById('cp-import-confirmar-btn');
   btnEl.disabled=true;btnEl.textContent='Gravando...';
   // Monta a lista de documentos ANTES de gravar (sem await no meio) e manda tudo de uma vez
@@ -27497,6 +27864,15 @@ function _histPedidoEventos(p){
     }
   });
 
+  // 3.5 Quinzena de comissão ajustada manualmente (2026-09-02, ver modal
+  // mo-quinzena-override/_setComissaoQuinzenaOverride()) — independente de confirmado/
+  // reaberto/adiado acima, então checa em outro forEach próprio.
+  (getParcelas(p)||[]).forEach(item=>{
+    const ov=cfg.comissaoQuinzenaOverride&&cfg.comissaoQuinzenaOverride[item.confKey];
+    if(!ov)return;
+    add('📌',`Quinzena de comissão ajustada manualmente — ${item.label}`,ov.em,`Ajustado pra ${ov.qhalf==='I'?'1ª':'2ª'} Quinzena de ${MESES_PT[ov.qm]}/${ov.qy}${ov.motivo?' — motivo: '+ov.motivo:''} (${ov.por||'—'})`,'#7c3aed');
+  });
+
   // 4. Finalização de obra.
   if(p.finalizacao&&p.finalizacao.dataFinalizacao){
     const fin=p.finalizacao;
@@ -29111,6 +29487,13 @@ function renderContasUnificado(){
     selCatHid.innerHTML=opts;selCatVis.innerHTML=opts;
   }
 
+  // Botão "Excluir Contas a Pagar do Mês" (2026-09-02, a pedido do usuário) — só
+  // administrador vê/usa, mesmo padrão de outros elementos admin-only já toggled via
+  // el.style.display (ver fluxoBtn em fcSetTipo() etc.). Recalcula a cada render pra nunca
+  // ficar visível/escondido errado se o usuário logado mudar durante a sessão.
+  const btnExcluirMesPagar=document.getElementById('fc-btn-excluir-mes-pagar');
+  if(btnExcluirMesPagar)btnExcluirMesPagar.style.display=_getUserCat().isAdm?'':'none';
+
   const tipo=document.getElementById('fc-fil-tipo')?.value||'';
 
   // Chama as duas telas originais inteiras por baixo dos panos — populam
@@ -29222,8 +29605,21 @@ function renderContasUnificado(){
     // quinzena de comissão de verdade só fica definida depois que o recebimento é confirmado
     // (baseada em quando foi confirmado, não na data prevista) — continua calculada
     // normalmente por baixo, só não aparece mais nessa lista antes da hora.
+    // Data original prevista da parcela + Nova previsão embaixo, se já foi adiada
+    // (2026-09-02, a pedido do usuário: "quero que apareça a data da parcela original quando
+    // era pra acontecer e embaixo nova previsão, se tiver mais de um adiamento e nova previsão
+    // aparecer" — mesmo depois de vários adiamentos, conf.novaData sempre guarda só a
+    // previsão MAIS ATUAL, então "nova previsão" aqui já é sempre a mais recente).
+    // i.dataStr = data original da parcela (nunca muda); i.dataAtiva = original ou, se já
+    // adiada, a nova data (ver getComissaoItemsAll()/getParcelas() — todo item de Contas a
+    // Receber, venha de pedido real, planilha ou saldo devedor, sempre carrega os dois campos).
+    const dataOriginalRec=i.dataStr||i.dataAtiva||'—';
+    const foiAdiadaRec=!!(i.dataStr&&i.dataAtiva&&i.dataStr!==i.dataAtiva);
+    const dataLabelRec=foiAdiadaRec
+      ?`${dataOriginalRec}<div style="font-size:.66rem;color:#d97706;font-weight:600;margin-top:2px">↪ Nova previsão: ${i.dataAtiva}</div>`
+      :dataOriginalRec;
     return{
-      iso,dataLabel:i.dataAtiva||'—',
+      iso,dataLabel:dataLabelRec,
       tipoBadge:'<span style="background:#dbeafe;color:#1e40af;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">📥 Receber</span>',
       quem:quemHtml,quemSub:[pedidoDisplay(i.pedidoOs)||i.mesPedido||'',i.job?'JOB: '+i.job:''].filter(Boolean).join(' · '),
       prazoObra,prazoObraOrig,
@@ -29350,7 +29746,7 @@ function renderContasUnificado(){
       const prazoObraHtml=l.prazoObra?`${fmtD(l.prazoObra)}${prazoAdiadoTag}`:'<span style="color:#94a3b8">—</span>';
       return`
       <tr>
-        <td style="white-space:nowrap;font-size:.78rem">${l.dataLabel}</td>
+        <td style="font-size:.78rem">${l.dataLabel}</td>
         <td>${l.tipoBadge}</td>
         <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:130px">${l.quem}${l.quemSub?`<div style="font-size:.68rem;color:#94a3b8;font-weight:500">${l.quemSub}</div>`:''}</td>
         <td style="font-size:.78rem;white-space:nowrap">${prazoObraHtml}</td>
@@ -30201,21 +30597,56 @@ function renderFinNaoRecebimento(){
 // (Líquido, não recebido etc.) não vir corrompida ao abrir no Excel do Windows.
 function exportarExcelFinanceiro(){
   if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem exportar','terr');return;}
-  const items=_finFilteredItems();
-  if(!items.length){toast('Nenhuma conta encontrada com esses filtros para exportar','terr');return;}
-  const statusLbl=s=>({confirmado:'Recebido',atrasado:'Atrasado',pendente:'Pendente'}[s]||s);
-  const headers=['Mês Venda','Pedido','Cliente','Vendedor','Parcela','Valor Bruto (R$)','Data Prevista','Dias em Atraso','Status','Motivo'];
-  const rows=items.map(i=>[
-    i.mesPedido||'',String(i.pedidoOs||''),i.cliente||'',i.nomeVend||'',i.label||'',
-    (i.valorBruto||0).toFixed(2).replace('.',','),i.dataAtiva||'',i.diasAtraso>0?i.diasAtraso:0,
-    statusLbl(i.statusCalc),i.motivoAtraso||''
-  ]);
+  // Exporta conforme o filtro Tipo da tela (🔀 Ambos / 📥 Receber / 📤 Pagar) — antes sempre
+  // exportava só Contas a Receber, mesmo com Contas a Pagar selecionado no filtro (2026-09-02,
+  // a pedido do usuário: "quero poder exportar o contas a pagar tbm, entao independente se o
+  // filtro tiver como receber o pdf sai o que o filtro ta selecionado, se tiver selecionado
+  // contas a pagar pendentes o pdf sai assim como o filtro ta e o excel mesma coisa").
+  const tipo=document.getElementById('fc-fil-tipo')?.value||'';
+  const statusLbl=s=>({confirmado:'Recebido',pago:'Pago',atrasado:'Atrasado',pendente:'Pendente'}[s]||s);
   const csvEscape=v=>{const s=String(v??'');return /[;"\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;};
+  let headers,rows,filename;
+  if(tipo==='pagar'){
+    const items=_cpFilteredItems();
+    if(!items.length){toast('Nenhuma conta encontrada com esses filtros para exportar','terr');return;}
+    headers=['Vencimento','Fornecedor','Despesa','Centro de Custo','Empresa','Valor (R$)','Dias em Atraso','Status'];
+    rows=items.map(c=>{
+      let dias=0;
+      if(c.statusCalc==='atrasado'){const v=new Date((c.vencimento||'')+'T23:59:59');if(!isNaN(v))dias=Math.max(0,Math.floor((new Date()-v)/86400000));}
+      return[fmtD(c.vencimento)||'',c.fornecedor||'',c.despesaDesc||'',c.centroCusto||'',_capLabel(c.empresa),_cpValorAjustado(c).toFixed(2).replace('.',','),dias,statusLbl(c.statusCalc)];
+    });
+    filename=`contas_a_pagar_${new Date().toISOString().slice(0,10)}.csv`;
+  }else if(tipo==='receber'){
+    const items=_finFilteredItems();
+    if(!items.length){toast('Nenhuma conta encontrada com esses filtros para exportar','terr');return;}
+    headers=['Mês Venda','Pedido','Cliente','Vendedor','Parcela','Valor Bruto (R$)','Data Prevista','Dias em Atraso','Status','Motivo'];
+    rows=items.map(i=>[
+      i.mesPedido||'',String(i.pedidoOs||''),i.cliente||'',i.nomeVend||'',i.label||'',
+      (i.valorBruto||0).toFixed(2).replace('.',','),i.dataAtiva||'',i.diasAtraso>0?i.diasAtraso:0,
+      statusLbl(i.statusCalc),i.motivoAtraso||''
+    ]);
+    filename=`contas_a_receber_${new Date().toISOString().slice(0,10)}.csv`;
+  }else{
+    // 🔀 Ambos — mesmo relatório combinado que a tela mostra com esse filtro, coluna Tipo
+    // pra diferenciar Receber de Pagar dentro do mesmo arquivo.
+    const itemsReceber=_finFilteredItems();
+    const itemsPagar=_cpFilteredItems();
+    if(!itemsReceber.length&&!itemsPagar.length){toast('Nenhuma conta encontrada com esses filtros para exportar','terr');return;}
+    headers=['Tipo','Data','Cliente/Fornecedor','Detalhe','Valor (R$)','Dias em Atraso','Status'];
+    const rowsReceber=itemsReceber.map(i=>['Receber',i.dataAtiva||'',i.cliente||'',i.label||'',(i.valorBruto||0).toFixed(2).replace('.',','),i.diasAtraso>0?i.diasAtraso:0,statusLbl(i.statusCalc)]);
+    const rowsPagar=itemsPagar.map(c=>{
+      let dias=0;
+      if(c.statusCalc==='atrasado'){const v=new Date((c.vencimento||'')+'T23:59:59');if(!isNaN(v))dias=Math.max(0,Math.floor((new Date()-v)/86400000));}
+      return['Pagar',fmtD(c.vencimento)||'',c.fornecedor||'',c.despesaDesc||'',_cpValorAjustado(c).toFixed(2).replace('.',','),dias,statusLbl(c.statusCalc)];
+    });
+    rows=[...rowsReceber,...rowsPagar];
+    filename=`contas_a_pagar_e_receber_${new Date().toISOString().slice(0,10)}.csv`;
+  }
   const csv='﻿'+[headers,...rows].map(r=>r.map(csvEscape).join(';')).join('\r\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=url;a.download=`contas_a_receber_${new Date().toISOString().slice(0,10)}.csv`;
+  a.href=url;a.download=filename;
   document.body.appendChild(a);a.click();document.body.removeChild(a);
   URL.revokeObjectURL(url);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
@@ -30224,34 +30655,111 @@ async function gerarPDFFinanceiro(){
   if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem gerar esse relatório','terr');return;}
   if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
   const {jsPDF}=window.jspdf;
+  // Mesmo princípio de exportarExcelFinanceiro() (2026-09-02) — gera o PDF do que o filtro
+  // Tipo da tela estiver mostrando (Ambos/Receber/Pagar), não sempre Contas a Receber.
+  const tipo=document.getElementById('fc-fil-tipo')?.value||'';
+  const statusLbl=s=>({confirmado:'Recebido',pago:'Pago',atrasado:'Atrasado',pendente:'Pendente'}[s]||s);
 
-  const fv=document.getElementById('fin-fil-vend')?.value||'';
-  const fs=document.getElementById('fin-fil-status')?.value||'';
-  const tipoData=document.getElementById('fin-fil-tipo-data')?.value||'venc';
-  const di=document.getElementById('fin-fil-data-ini')?.value||'';
-  const df=document.getElementById('fin-fil-data-fim')?.value||'';
-  const q=(document.getElementById('fin-fil-busca')?.value||'').toLowerCase().trim();
-  let items=_finFilteredItems();
+  const q=(document.getElementById('fc-fil-busca')?.value||'').toLowerCase().trim();
+  const fs=document.getElementById('fc-fil-status')?.value||'';
+  const di=document.getElementById('fc-fil-data-ini')?.value||'';
+  const df=document.getElementById('fc-fil-data-fim')?.value||'';
 
-  if(!items.length){toast('Nenhuma conta encontrada com esses filtros para gerar o PDF.','terr');return;}
-
-  const statusLbl=s=>({confirmado:'Recebido',atrasado:'Atrasado',pendente:'Pendente'}[s]||s);
-
-  const totPend=items.filter(i=>i.statusCalc!=='confirmado').reduce((s,i)=>s+i.valorBruto,0);
-  const totAtraso=items.filter(i=>i.statusCalc==='atrasado').reduce((s,i)=>s+i.valorBruto,0);
-  const totConf=items.filter(i=>i.statusCalc==='confirmado').reduce((s,i)=>s+i.valorBruto,0);
-
-  // Rótulo do período reflete o modo escolhido no dropdown "Filtrar por..." (2026-08-19) —
-  // antes dizia sempre "Pagamento de/até" mesmo quando o período filtrava por Vencimento
-  // (o padrão), o que já era enganoso; agora mostra Vencimento/Pagamento/Mês da Venda de
-  // acordo com o que realmente foi aplicado.
-  const periodoLbl=tipoData==='receb'?'Pagamento':tipoData==='venda'?'Mês da Venda':'Vencimento';
+  let subtitulo,head,body,boxes,valorColIdx,atrasoColIdx,statusCalcArr,slugBase;
   const filtrosAtivos=[];
-  if(fv)filtrosAtivos.push('Vendedor: '+fv);
-  if(fs)filtrosAtivos.push('Status: '+statusLbl(fs));
-  if(di)filtrosAtivos.push(periodoLbl+' de: '+fmtD(di));
-  if(df)filtrosAtivos.push(periodoLbl+' até: '+fmtD(df));
   if(q)filtrosAtivos.push('Busca: "'+q+'"');
+  if(fs)filtrosAtivos.push('Status: '+({aberto:'Em aberto',pendente:'Pendente',atrasado:'Atrasado',concluido:'Concluído'}[fs]||fs));
+
+  if(tipo==='pagar'){
+    const items=_cpFilteredItems();
+    if(!items.length){toast('Nenhuma conta encontrada com esses filtros para gerar o PDF.','terr');return;}
+    subtitulo='Contas a Pagar';
+    const femp=document.getElementById('fc-fil-empresa')?.value||'';
+    const fcat=document.getElementById('fc-fil-categoria')?.value||'';
+    if(femp)filtrosAtivos.push('Empresa: '+_capLabel(femp));
+    if(fcat)filtrosAtivos.push('Centro de Custo: '+fcat);
+    if(di)filtrosAtivos.push('Vencimento de: '+fmtD(di));
+    if(df)filtrosAtivos.push('Vencimento até: '+fmtD(df));
+    const totPend=items.filter(c=>c.statusCalc!=='pago').reduce((s,c)=>s+_cpValorAjustado(c),0);
+    const totAtraso=items.filter(c=>c.statusCalc==='atrasado').reduce((s,c)=>s+_cpValorAjustado(c),0);
+    const totPago=items.filter(c=>c.statusCalc==='pago').reduce((s,c)=>s+_cpValorAjustado(c),0);
+    boxes=[
+      {label:'A pagar',val:totPend,color:[255,237,213],text:[194,65,12]},
+      {label:'Em atraso',val:totAtraso,color:[254,226,226],text:[185,28,28]},
+      {label:'Pago',val:totPago,color:[241,245,249],text:[71,85,105]},
+      {label:'Itens',val:items.length,color:[241,245,249],text:[71,85,105],isCount:true}
+    ];
+    head=['Vencimento','Fornecedor','Despesa','Centro de Custo','Empresa','Valor','Atraso','Status'];
+    statusCalcArr=items.map(c=>c.statusCalc==='pago'?'confirmado':c.statusCalc);
+    body=items.map(c=>{
+      let dias=0;
+      if(c.statusCalc==='atrasado'){const v=new Date((c.vencimento||'')+'T23:59:59');if(!isNaN(v))dias=Math.max(0,Math.floor((new Date()-v)/86400000));}
+      return[fmtD(c.vencimento)||'—',c.fornecedor||'—',c.despesaDesc||'—',c.centroCusto||'—',_capLabel(c.empresa),fmtR(_cpValorAjustado(c)),dias>0?dias+'d':'—',statusLbl(c.statusCalc)];
+    });
+    valorColIdx=5;atrasoColIdx=6;slugBase='contas_a_pagar';
+  }else if(tipo==='receber'){
+    const items=_finFilteredItems();
+    if(!items.length){toast('Nenhuma conta encontrada com esses filtros para gerar o PDF.','terr');return;}
+    subtitulo='Contas a Receber';
+    const fv=document.getElementById('fc-fil-vend')?.value||'';
+    const tipoData=document.getElementById('fc-fil-tipo-data')?.value||'venc';
+    const periodoLbl=tipoData==='receb'?'Pagamento':tipoData==='venda'?'Mês da Venda':'Vencimento';
+    if(fv)filtrosAtivos.push('Vendedor: '+fv);
+    if(di)filtrosAtivos.push(periodoLbl+' de: '+fmtD(di));
+    if(df)filtrosAtivos.push(periodoLbl+' até: '+fmtD(df));
+    const totPend=items.filter(i=>i.statusCalc!=='confirmado').reduce((s,i)=>s+i.valorBruto,0);
+    const totAtraso=items.filter(i=>i.statusCalc==='atrasado').reduce((s,i)=>s+i.valorBruto,0);
+    const totConf=items.filter(i=>i.statusCalc==='confirmado').reduce((s,i)=>s+i.valorBruto,0);
+    boxes=[
+      {label:'A receber',val:totPend,color:[219,234,254],text:[30,64,175]},
+      {label:'Em atraso',val:totAtraso,color:[254,226,226],text:[185,28,28]},
+      {label:'Recebido',val:totConf,color:[220,252,231],text:[22,163,74]},
+      {label:'Itens',val:items.length,color:[241,245,249],text:[71,85,105],isCount:true}
+    ];
+    head=['Mês','Pedido','Cliente','Vendedor','Parcela','Valor','Data prev.','Atraso','Status','Motivo'];
+    statusCalcArr=items.map(i=>i.statusCalc);
+    body=items.map(i=>[
+      i.mesPedido||'—',
+      pedidoDisplay(i.pedidoOs)||'—',
+      i.cliente||'—',
+      i.nomeVend||'—',
+      i.label||'—',
+      fmtR(i.valorBruto),
+      i.dataAtiva||'—',
+      i.diasAtraso>0?i.diasAtraso+'d':'—',
+      statusLbl(i.statusCalc),
+      i.motivoAtraso||'—'
+    ]);
+    valorColIdx=5;atrasoColIdx=7;slugBase='contas_a_receber';
+  }else{
+    // 🔀 Ambos
+    const itemsReceber=_finFilteredItems();
+    const itemsPagar=_cpFilteredItems();
+    if(!itemsReceber.length&&!itemsPagar.length){toast('Nenhuma conta encontrada com esses filtros para gerar o PDF.','terr');return;}
+    subtitulo='Contas a Pagar e a Receber';
+    if(di)filtrosAtivos.push('Vencimento/Prev. de: '+fmtD(di));
+    if(df)filtrosAtivos.push('Vencimento/Prev. até: '+fmtD(df));
+    const totReceber=itemsReceber.filter(i=>i.statusCalc!=='confirmado').reduce((s,i)=>s+i.valorBruto,0);
+    const totPagar=itemsPagar.filter(c=>c.statusCalc!=='pago').reduce((s,c)=>s+_cpValorAjustado(c),0);
+    const totAtraso=itemsReceber.filter(i=>i.statusCalc==='atrasado').reduce((s,i)=>s+i.valorBruto,0)
+      +itemsPagar.filter(c=>c.statusCalc==='atrasado').reduce((s,c)=>s+_cpValorAjustado(c),0);
+    boxes=[
+      {label:'A receber',val:totReceber,color:[219,234,254],text:[30,64,175]},
+      {label:'A pagar',val:totPagar,color:[255,237,213],text:[194,65,12]},
+      {label:'Em atraso (total)',val:totAtraso,color:[254,226,226],text:[185,28,28]},
+      {label:'Itens',val:itemsReceber.length+itemsPagar.length,color:[241,245,249],text:[71,85,105],isCount:true}
+    ];
+    head=['Tipo','Data','Cliente/Fornecedor','Detalhe','Valor','Atraso','Status'];
+    const bodyReceber=itemsReceber.map(i=>['📥 Receber',i.dataAtiva||'—',i.cliente||'—',(i.nomeVend||'—')+(i.label?' · '+i.label:''),fmtR(i.valorBruto),i.diasAtraso>0?i.diasAtraso+'d':'—',statusLbl(i.statusCalc)]);
+    const bodyPagar=itemsPagar.map(c=>{
+      let dias=0;
+      if(c.statusCalc==='atrasado'){const v=new Date((c.vencimento||'')+'T23:59:59');if(!isNaN(v))dias=Math.max(0,Math.floor((new Date()-v)/86400000));}
+      return['📤 Pagar',fmtD(c.vencimento)||'—',c.fornecedor||'—',c.despesaDesc||'—',fmtR(_cpValorAjustado(c)),dias>0?dias+'d':'—',statusLbl(c.statusCalc)];
+    });
+    body=[...bodyReceber,...bodyPagar];
+    statusCalcArr=[...itemsReceber.map(i=>i.statusCalc),...itemsPagar.map(c=>c.statusCalc==='pago'?'confirmado':c.statusCalc)];
+    valorColIdx=4;atrasoColIdx=5;slugBase='contas_a_pagar_e_receber';
+  }
   const filtrosLbl=filtrosAtivos.length?filtrosAtivos.join('  ·  '):'Todos os lançamentos (sem filtro)';
 
   const doc=new jsPDF();
@@ -30269,7 +30777,7 @@ async function gerarPDFFinanceiro(){
     doc.text('RELATÓRIO FINANCEIRO',pageW-14,15,{align:'right'});
     doc.setTextColor(...PINK);
     doc.setFontSize(10);
-    doc.text('Contas a Receber',pageW-14,21,{align:'right'});
+    doc.text(subtitulo,pageW-14,21,{align:'right'});
     doc.setTextColor(...GRAY);
     doc.setFont('helvetica','normal');
     doc.setFontSize(7.5);
@@ -30300,13 +30808,6 @@ async function gerarPDFFinanceiro(){
 
   let curY=drawHeader();
 
-  // Caixas de resumo — mesmos totais mostrados nos cards da tela de Contas a Receber
-  const boxes=[
-    {label:'A receber',val:totPend,color:[219,234,254],text:[30,64,175]},
-    {label:'Em atraso',val:totAtraso,color:[254,226,226],text:[185,28,28]},
-    {label:'Recebido',val:totConf,color:[220,252,231],text:[22,163,74]},
-    {label:'Itens',val:items.length,color:[241,245,249],text:[71,85,105],isCount:true}
-  ];
   const boxW=(pageW-28-3*4)/4;
   boxes.forEach((b,idx)=>{
     const x=14+idx*(boxW+4);
@@ -30323,31 +30824,17 @@ async function gerarPDFFinanceiro(){
   doc.setTextColor(0,0,0);
   doc.setFont('helvetica','normal');
 
-  const head=['Mês','Pedido','Cliente','Vendedor','Parcela','Valor','Data prev.','Atraso','Status','Motivo'];
-  const body=items.map(i=>[
-    i.mesPedido||'—',
-    pedidoDisplay(i.pedidoOs)||'—',
-    i.cliente||'—',
-    i.nomeVend||'—',
-    i.label||'—',
-    fmtR(i.valorBruto),
-    i.dataAtiva||'—',
-    i.diasAtraso>0?i.diasAtraso+'d':'—',
-    statusLbl(i.statusCalc),
-    i.motivoAtraso||'—'
-  ]);
-
   doc.autoTable({
     startY:curY,head:[head],body,
     theme:'grid',
     styles:{fontSize:6.8,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.6},
     headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:7},
     alternateRowStyles:{fillColor:LIGHT},
-    columnStyles:{5:{halign:'right',fontStyle:'bold',textColor:PINK},7:{halign:'center'}},
+    columnStyles:{[valorColIdx]:{halign:'right',fontStyle:'bold',textColor:PINK},[atrasoColIdx]:{halign:'center'}},
     margin:{top:32,left:14,right:14,bottom:20},
     didParseCell:(data)=>{
       if(data.section==='body'){
-        const st=items[data.row.index]?.statusCalc;
+        const st=statusCalcArr[data.row.index];
         if(st==='atrasado')data.cell.styles.fillColor=[254,242,242];
         else if(st==='confirmado')data.cell.styles.fillColor=[240,253,244];
       }
@@ -30360,13 +30847,12 @@ async function gerarPDFFinanceiro(){
 
   for(let p=1;p<=doc.internal.getNumberOfPages();p++)drawFooter(p);
 
-  const slug=(fv?fv.toLowerCase().replace(/\s+/g,'_'):'todos')+(fs?'_'+fs:'');
+  const slug=slugBase+(fs?'_'+fs:'');
   const hoje=new Date();
   const stamp=hoje.getFullYear()+String(hoje.getMonth()+1).padStart(2,'0')+String(hoje.getDate()).padStart(2,'0');
-  doc.save(`contas_a_receber_${slug}_${stamp}.pdf`);
+  doc.save(`${slug}_${stamp}.pdf`);
   toast('PDF gerado! 📄','tok');
 }
-
 function renderDashComissoes(){
   _invalidateDashCache();
   const el=document.getElementById('dash-comissoes');if(!el)return;
@@ -30388,22 +30874,23 @@ function renderDashComissoes(){
 
   // Aplicar busca livre — pedido/OS, cliente, JOB, cidade ou vendedor, tudo num campo só,
   // sem acento/maiúsculas (norm()) pra não depender de digitar exatamente igual.
-  const busca=norm(dashComissaoBusca||'');
+  // Unificado (2026-09-02) com o campo de "🔎 Buscar Comissão" — antes era um input
+  // separado (dashComissaoBusca/dash-com-fil-busca) só pra esta lista; agora usa o mesmo
+  // texto digitado ali (comPeriodoBusca), que também busca no histórico de comissão paga.
+  const busca=norm(comPeriodoBusca||'');
   if(busca){
     const buscaMatch=i=>[i.pedidoOs,i.cliente,i.job,i.cidade,i.nomeVend].some(v=>v&&norm(String(v)).includes(busca));
     itemsI=itemsI.filter(buscaMatch);
     itemsII=itemsII.filter(buscaMatch);
   }
 
-  // Barra de filtro
-  const filterBar=`<div style="margin-bottom:10px">
-    <div style="position:relative;max-width:440px">
-      <span style="position:absolute;left:13px;top:50%;transform:translateY(-50%);font-size:.85rem;color:#94a3b8;pointer-events:none">🔍</span>
-      <input id="dash-com-fil-busca" value="${(dashComissaoBusca||'').replace(/"/g,'&quot;')}" oninput="dashComissaoBuscaInput(this.value)" placeholder="Buscar por pedido, JOB, cidade, cliente ou vendedor..."
-        style="width:100%;border:1.5px solid var(--border);border-radius:10px;padding:9px 12px 9px 36px;font-size:.82rem;background:var(--surface);color:var(--ink2);box-sizing:border-box">
-    </div>
-  </div>
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+  // Barra de filtro — busca por texto foi UNIFICADA (2026-09-02, a pedido do usuário: "essa
+  // janela de busca tem que ser uma so com o periodo ali, pq tem duas barras de pesquisa?")
+  // dentro do quadro "🔎 Buscar Comissão" abaixo (periodoBox) — o mesmo campo de texto agora
+  // filtra tanto Pendentes/Consolidados do mês ativo (via comPeriodoBusca, ver "busca" logo
+  // acima) quanto o histórico de comissão já paga em qualquer período. Aqui sobra só o filtro
+  // de vendedor + botões de PDF.
+  const filterBar=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
     <span style="font-size:.72rem;font-weight:700;text-transform:uppercase;color:#64748b">Filtrar por vendedor:</span>
     <select onchange="dashComissaoVend(this.value)" style="padding:5px 10px;border-radius:7px;border:1.5px solid #e5e7eb;font-size:.82rem;font-family:inherit;background:#fff;cursor:pointer">
       ${vendedoresUnicos.map(v=>`<option value="${v}"${v===filV?' selected':''}>${v||'— Todos —'}</option>`).join('')}
@@ -30431,6 +30918,16 @@ function renderDashComissoes(){
   const cpAte=document.getElementById('com-per-ate')?.value||'';
   const cpBuscaNorm=norm(comPeriodoBusca||'');
   let cpItems=getComissaoItemsAll().filter(i=>i.status==='confirmado');
+  // Opções do atalho "Mês" (2026-09-02) — meses/anos com pelo menos uma comissão confirmada,
+  // do mais recente pro mais antigo. Usa i.qy/i.qm (o bucket único da quinzena, já corrigido
+  // hoje pra não sobrepor — ver _itemNaJanelaRecebido) em vez de reler confirmedAt de novo.
+  const cpMesesDisponiveis=[...new Set(cpItems.map(i=>`${i.qy}-${String(i.qm).padStart(2,'0')}`))].sort().reverse();
+  let cpMesSel='';
+  const _cpDeMatch=cpDe.match(/^(\d{4})-(\d{2})-01$/);
+  if(_cpDeMatch){
+    const _lastDay=new Date(+_cpDeMatch[1],+_cpDeMatch[2],0).getDate();
+    if(cpAte===`${_cpDeMatch[1]}-${_cpDeMatch[2]}-${String(_lastDay).padStart(2,'0')}`)cpMesSel=`${_cpDeMatch[1]}-${_cpDeMatch[2]}`;
+  }
   // Corrigido 2026-08-18 (pedido do usuário: "eu preciso saber o dia so que foi pago a
   // comissao e nao pago o pedido... o filtro é sobre quando a comissao foi paga"). Antes este
   // filtro usava i.qy/i.qm/i.qhalf — a QUINZENA calculada (sempre cai só no dia 5 ou 15), que é
@@ -30474,15 +30971,23 @@ function renderDashComissoes(){
     </tr>`;
   }).join('');
   const periodoBox=`<div style="border:1.5px solid #c7d2fe;background:#eef2ff;border-radius:12px;padding:14px 16px;margin-bottom:20px">
-    <div style="font-size:.8rem;font-weight:700;color:#3730a3;margin-bottom:10px">🔎 Comissão Paga por Período</div>
+    <div style="font-size:.8rem;font-weight:700;color:#3730a3;margin-bottom:2px">🔎 Buscar Comissão</div>
+    <div style="font-size:.68rem;color:#4f46e5;margin-bottom:10px">O texto abaixo filtra Pendentes e Consolidados desta quinzena (mês ativo). Se você também escolher um mês (ou um período de datas), mostra comissão já paga naquele intervalo — em qualquer mês, sem precisar navegar pelas setas ◀ ▶ acima.</div>
     <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:${cpAtivo?'12px':'0'}">
       <div style="flex:1;min-width:220px">
-        <label style="display:block;font-size:.66rem;font-weight:700;color:#4338ca;text-transform:uppercase;margin-bottom:4px">Cliente, OS, JOB, cidade ou vendedor</label>
+        <label style="display:block;font-size:.66rem;font-weight:700;color:#4338ca;text-transform:uppercase;margin-bottom:4px">Pedido, OS, JOB, cidade, cliente ou vendedor</label>
         <div style="position:relative">
           <span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:.8rem;color:#818cf8;pointer-events:none">🔍</span>
           <input id="com-per-busca" value="${(comPeriodoBusca||'').replace(/"/g,'&quot;')}" oninput="comPeriodoBuscaInput(this.value)" placeholder="Ex: MAX, 12345, São Paulo..."
             style="width:100%;border:1.5px solid #c7d2fe;border-radius:8px;padding:7px 10px 7px 32px;font-size:.8rem;background:#fff;color:#1e1b4b;box-sizing:border-box">
         </div>
+      </div>
+      <div>
+        <label style="display:block;font-size:.66rem;font-weight:700;color:#4338ca;text-transform:uppercase;margin-bottom:4px">Mês</label>
+        <select id="com-per-mes" onchange="comPeriodoMesAno(this.value)" style="padding:6px 9px;border-radius:8px;border:1.5px solid #c7d2fe;font-size:.78rem;font-family:inherit;background:#fff;cursor:pointer">
+          <option value="">📅 Todos os meses</option>
+          ${cpMesesDisponiveis.map(v=>{const [yy,mm]=v.split('-');return`<option value="${v}"${v===cpMesSel?' selected':''}>${MESES_PT[+mm]} ${yy}</option>`;}).join('')}
+        </select>
       </div>
       <div>
         <label style="display:block;font-size:.66rem;font-weight:700;color:#4338ca;text-transform:uppercase;margin-bottom:4px">Pago de</label>
@@ -30494,7 +30999,7 @@ function renderDashComissoes(){
       </div>
       ${cpAtivo?`<button onclick="comPeriodoLimpar()" style="background:none;border:1px solid #c7d2fe;border-radius:8px;padding:6px 12px;font-size:.75rem;color:#4338ca;cursor:pointer;white-space:nowrap">✕ Limpar</button>`:''}
     </div>
-    ${cpAtivo?(cpItems.length?`<div style="font-size:.74rem;font-weight:700;color:#3730a3;margin-bottom:8px">${cpItems.length} recebimento${cpItems.length>1?'s':''} confirmado${cpItems.length>1?'s':''} · líquido ${fmtR(cpTotalLq)} · comissão ${fmtR(cpTotalCom)}</div><div style="overflow-x:auto"><table class="dash-table"><thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Parcela</th><th>Valor Bruto</th><th>Valor Líquido</th><th>Pagto comissão</th><th>Comissão</th><th>Confirmado em</th></tr></thead><tbody>${cpRows}</tbody></table></div>`:`<div style="padding:8px 0;color:#6366f1;font-size:.78rem">Nenhuma comissão paga encontrada para esse filtro.</div>`):`<div style="font-size:.72rem;color:#6366f1">Digite algo pra buscar ou escolha um período — mostra só comissão já PAGA (confirmada), de qualquer mês, sem precisar navegar pelas setas ◀ ▶ acima.</div>`}
+    ${cpAtivo?(cpItems.length?`<div style="font-size:.74rem;font-weight:700;color:#3730a3;margin-bottom:8px">${cpItems.length} recebimento${cpItems.length>1?'s':''} confirmado${cpItems.length>1?'s':''} · líquido ${fmtR(cpTotalLq)} · comissão ${fmtR(cpTotalCom)}</div><div style="overflow-x:auto"><table class="dash-table"><thead><tr><th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Parcela</th><th>Valor Bruto</th><th>Valor Líquido</th><th>Pagto comissão</th><th>Comissão</th><th>Confirmado em</th></tr></thead><tbody>${cpRows}</tbody></table></div>`:`<div style="padding:8px 0;color:#6366f1;font-size:.78rem">Nenhuma comissão paga encontrada para esse filtro.</div>`):`<div style="font-size:.72rem;color:#6366f1">Digite algo pra filtrar Pendentes/Consolidados desta quinzena. Pra também ver comissão já PAGA de qualquer mês (sem navegar pelas setas ◀ ▶ acima), escolha um mês no atalho acima (ou um período de datas).</div>`}
   </div>`;
 
   // 📌 Já Pago Nesta Quinzena (2026-08-18, reescrito no mesmo dia) — mostra o registro gravado
@@ -30534,11 +31039,11 @@ function renderDashComissoes(){
   }
 
   if(!allItemsI.length&&!allItemsII.length){
-    el.innerHTML=filterBar+periodoBox+`<div style="padding:32px;text-align:center;color:#94a3b8;font-size:.85rem">Nenhum recebimento previsto para ${MESES_PT[m]} ${y}.</div>`;
+    el.innerHTML=periodoBox+filterBar+`<div style="padding:32px;text-align:center;color:#94a3b8;font-size:.85rem">Nenhum recebimento previsto para ${MESES_PT[m]} ${y}.</div>`;
     return;
   }
   if(busca&&!itemsI.length&&!itemsII.length){
-    el.innerHTML=filterBar+periodoBox+`<div style="padding:32px;text-align:center;color:#94a3b8;font-size:.85rem">Nenhum resultado para "${dashComissaoBusca}".</div>`;
+    el.innerHTML=periodoBox+filterBar+`<div style="padding:32px;text-align:center;color:#94a3b8;font-size:.85rem">Nenhum resultado para "${comPeriodoBusca}".</div>`;
     return;
   }
 
@@ -30627,9 +31132,42 @@ function renderDashComissoes(){
       }).join('')}</tbody></table></div>`;
   }
 
+  // Célula "Comissão Gerente" — mostra o valor (base pctClab) e, junto, o próprio status de
+  // quitação do GERENTE pra este confKey (independente do status do vendedor ao lado — ver
+  // cfg.comissaoQuitadaGerente/_setComissaoQuitadaGerente, 2026-09-02, pedido do usuário: "eu
+  // gostei dessa checagem... mas preciso tambem que confira a minha"). Aparece em toda linha,
+  // tanto nas "a confirmar" quanto nas "já paga" (ao vendedor) — os dois acompanhamentos são
+  // independentes, então uma linha pode estar paga pro vendedor e ainda pendente pro gerente.
+  function mkGerenteCell(i,dia){
+    const comG=i.valor*i.pctClab/100;
+    const ck=i.confKey.replace(/'/g,"\'");
+    if(i.comissaoQuitadaGerente){
+      const qg=i.comissaoQuitadaGerente;
+      const dataQG=qg.em?new Date(qg.em).toLocaleDateString('pt-BR'):'—';
+      return`<div style="white-space:nowrap"><span style="font-weight:700;color:#7c3aed">${fmtR(comG)}</span><br><span style="font-size:.64rem;color:#16a34a;font-weight:700">✅ Pago em ${dataQG}</span><button onclick="desfazerComissaoQuitadaGerente('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:1px 5px;font-size:.58rem;color:#64748b;cursor:pointer;margin-left:4px" title="Desfazer — volta pra 'a confirmar' do gerente">↩</button></div>`;
+    }
+    const chk=`<input type="checkbox" class="com-quitar-gerente-chk" data-ck="${ck}" data-dia="${dia}" onchange="_atualizarContadorQuitarGerente(${dia})" style="width:13px;height:13px;cursor:pointer;margin-right:4px;vertical-align:middle">`;
+    return`<div style="white-space:nowrap"><span style="font-weight:700;color:#7c3aed">${fmtR(comG)}</span><br>${chk}<span style="font-size:.6rem;color:#b45309;font-weight:700">⏳ a confirmar</span></div>`;
+  }
   // Linha compartilhada pelas duas sub-listas abaixo (a confirmar / já paga) — só muda a
   // última célula (Ação).
-  function mkConsRow(i,acaoHtml){
+  // Célula "Quinzena" — mostra em qual quinzena (dia 5 ou 15, mês/ano) o item está
+  // bucketizado e deixa o admin ajustar manualmente (2026-09-02, a pedido do usuário: "coloca
+  // uma janela do lado de cada comissao pra eu alterar a quinzena se eu quiser" — caso real:
+  // fechou um lote de comissões em 19/08 que era "referente ao dia 15/08", mas o cálculo
+  // automático empurrou pra quinzena de setembro por ter sido confirmado depois do dia 14).
+  // Ver abrirAlterarQuinzenaComissao()/_setComissaoQuinzenaOverride().
+  function mkQuinzenaCell(i){
+    const ck=i.confKey.replace(/'/g,"\'");
+    const quinzTxt=`${i.qhalf==='I'?'1ª':'2ª'} Qz ${String(i.qm).padStart(2,'0')}/${i.qy}`;
+    const editBtn=`<button onclick="abrirAlterarQuinzenaComissao('${ck}',${i.qy},${i.qm},'${i.qhalf}','${(i.cliente||'').replace(/'/g,"\'")}')" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:.64rem;margin-left:4px" title="Ajustar quinzena manualmente">✏️</button>`;
+    if(i.quinzenaOverride){
+      const ov=i.quinzenaOverride;
+      return`<div style="white-space:nowrap"><span style="font-size:.72rem;font-weight:700;color:#5b21b6">${quinzTxt}</span>${editBtn}<br><span style="font-size:.6rem;color:#7c3aed;font-weight:700" title="${(ov.motivo||'').replace(/"/g,'')}">📌 ajustado por ${ov.por||'—'}</span> <button onclick="desfazerQuinzenaOverrideComissao('${ck}')" style="background:none;border:none;cursor:pointer;color:#94a3b8;font-size:.6rem" title="Desfazer — volta ao cálculo automático">↩</button></div>`;
+    }
+    return`<div style="white-space:nowrap"><span style="font-size:.72rem">${quinzTxt}</span>${editBtn}</div>`;
+  }
+  function mkConsRow(i,acaoHtml,dia){
     const com=i.valor*i.pct/100;
     const dataConf=i.confirmedAt?new Date(i.confirmedAt).toLocaleDateString('pt-BR'):'—';
     return`<tr style="background:#f0fdf4">
@@ -30641,12 +31179,14 @@ function renderDashComissoes(){
       <td>${mkLiqCell(i)}</td>
       <td style="font-weight:700;color:#e91e63">${i.pct>0?i.pct.toFixed(2).replace('.',',')+'%':'—'}</td>
       <td style="font-weight:700;color:#7c3aed">${fmtR(com)}</td>
+      <td>${mkGerenteCell(i,dia)}</td>
       <td style="font-size:.7rem;color:#16a34a;white-space:nowrap">${dataConf}</td>
+      <td>${mkQuinzenaCell(i)}</td>
       <td>${mkDetalhesCell(i)}</td>
       <td>${acaoHtml}</td>
     </tr>`;
   }
-  const CONS_HEAD='<th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor Bruto</th><th>Valor Líquido</th><th>%</th><th>Comissão</th><th>Confirmado em</th><th>Detalhes</th><th>Ação</th>';
+  const CONS_HEAD='<th>Mês Venda</th><th>Pedido</th><th>Cliente</th><th>Vendedor</th><th>Valor Bruto</th><th>Valor Líquido</th><th>%</th><th>Comissão</th><th>Comissão Gerente</th><th>Confirmado em</th><th>Quinzena</th><th>Detalhes</th><th>Ação</th>';
   // REESCRITO 2026-08-19 (a pedido do usuário) — antes era UMA lista só ("O que o Financeiro
   // confirmou..."), com um botão único "📌 Registrar Pagamento" que gravava TUDO que estava
   // confirmado na quinzena de uma vez, sem dar pra escolher item por item. Agora recebido do
@@ -30659,9 +31199,25 @@ function renderDashComissoes(){
   // pago pra cada pessoa (ver getComissaoItemsAll()/_setComissaoQuitada()).
   function mkConsolidado(items,dia){
     if(!items.length)return'';
+    // Bloco de controle da comissão do GERENTE (2026-09-02) — independente da divisão
+    // "a confirmar"/"já paga" logo abaixo, que é só do VENDEDOR. Opera em cima de TODOS os
+    // itens desta quinzena (não só os pendentes pro vendedor), porque o status do gerente
+    // não tem nenhuma relação com o do vendedor — ver mkGerenteCell()/cfg.comissaoQuitadaGerente.
+    const gerentePend=items.filter(i=>!i.comissaoQuitadaGerente);
+    const gerentePago=items.filter(i=>i.comissaoQuitadaGerente);
+    const totalGerentePend=gerentePend.reduce((s,i)=>s+(i.valor*i.pctClab/100),0);
+    const totalGerentePago=gerentePago.reduce((s,i)=>s+(i.valor*i.pctClab/100),0);
+    let out=`<div style="border:1.5px solid #ddd6fe;background:#f5f3ff;border-radius:12px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:.76rem;font-weight:700;color:#5b21b6;margin-bottom:6px">🧑‍💼 Comissão do Gerente (Guilherme Clabonde) nesta quinzena — a confirmar: ${fmtR(totalGerentePend)} (${gerentePend.length}) · já paga: ${fmtR(totalGerentePago)} (${gerentePago.length})</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button onclick="marcarTodasComQuitarGerente(${dia},true)" style="background:none;border:1px solid #ddd6fe;border-radius:7px;padding:5px 9px;font-size:.7rem;color:#5b21b6;cursor:pointer;font-weight:600">☑️ Marcar todas</button>
+        <button onclick="marcarTodasComQuitarGerente(${dia},false)" style="background:none;border:1px solid #ddd6fe;border-radius:7px;padding:5px 9px;font-size:.7rem;color:#5b21b6;cursor:pointer;font-weight:600">☐ Desmarcar todas</button>
+        <button id="com-btn-confirmar-gerente-${dia}" onclick="confirmarComissaoQuitadaGerenteSelecionados(${dia})" class="dash-btn-conf" style="background:#7c3aed">✅ Confirmar comissão do Gerente (0)</button>
+      </div>
+      <div style="font-size:.62rem;color:#7c3aed;margin-top:6px">Marque o checkbox na coluna "Comissão Gerente" de cada linha (nas duas listas abaixo) e clique em confirmar — funciona independente do status de pagamento ao vendedor.</div>
+    </div>`;
     const aConfirmar=items.filter(i=>!i.comissaoQuitada);
     const pagos=items.filter(i=>i.comissaoQuitada);
-    let out='';
     if(aConfirmar.length){
       const totalVal=aConfirmar.reduce((s,i)=>s+i.valor,0);
       const totalCom=aConfirmar.reduce((s,i)=>s+(i.valor*i.pct/100),0);
@@ -30671,7 +31227,7 @@ function renderDashComissoes(){
         const chk=`<input type="checkbox" class="com-quitar-chk" data-ck="${ck}" data-dia="${dia}" onchange="_atualizarContadorQuitar(${dia})" style="width:15px;height:15px;cursor:pointer;margin-right:6px;vertical-align:middle">`;
         const rtc=`<button onclick="abrirRetirarComissao('${ck}','${(i.cliente||'').replace(/'/g,"\\'")}',${com},'${pedidoDisplay(i.pedidoOs)||''}')" style="background:none;border:1px solid #fecaca;border-radius:6px;padding:3px 8px;font-size:.62rem;color:#dc2626;cursor:pointer;margin-left:6px" title="Essa comissão não vai ser paga por algum motivo — retira da lista a pagar, exige motivo">🗑️ Retirar</button>`;
         const acao=`<div style="display:flex;align-items:center;white-space:nowrap">${chk}<span style="font-size:.66rem;color:#b45309;font-weight:700">⏳ A confirmar</span>${rtc}</div>`;
-        return mkConsRow(i,acao);
+        return mkConsRow(i,acao,dia);
       }).join('');
       // Sempre aberto por padrão (mesmo motivo do antigo mkConsolidado, 2026-08-18) — é a
       // lista acionável desta quinzena, não devia ficar escondida atrás de um clique.
@@ -30698,7 +31254,7 @@ function renderDashComissoes(){
         // "Por quem" visível sem precisar de hover (2026-08-20, a pedido do usuário) — antes só
         // aparecia no title do badge; agora fica sempre à mostra, discreto (cinza, pequeno).
         const acao=`<div style="white-space:nowrap"><span style="font-size:.68rem;color:#16a34a;font-weight:700">✅ Pago em ${dataQ}</span><button onclick="desfazerComissaoQuitada('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.62rem;color:#64748b;cursor:pointer;margin-left:6px" title="Desfazer — volta pra 'a confirmar'">↩ Desfazer</button><div style="font-size:.62rem;color:#94a3b8;margin-top:2px">por ${(q.por||'—')}</div></div>`;
-        return mkConsRow(i,acao);
+        return mkConsRow(i,acao,dia);
       }).join('');
       out+=`<details style="margin:6px 0 16px">
         <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">✅ Comissão já paga ao vendedor nesta quinzena (${pagos.length} ${pagos.length===1?'item':'itens'}) — Líquido: ${fmtR(totalValP)} · Comissão: ${fmtR(totalComP)}</summary>
@@ -30777,7 +31333,7 @@ function renderDashComissoes(){
     }).join('');
     // Linha do gerente CLABONDE - comissão sobre o total do período, com a alíquota
     // cadastrada em Configurações (0,70% mês com meta batida / 0,40% mês sem meta batida)
-    const valClab=items.reduce((s,i)=>s+i.valor,0);
+    const valClab=items.filter(i=>i.status==='confirmado').reduce((s,i)=>s+i.valor,0);
     const comClab=items.reduce((s,i)=>s+(i.valor*i.pctClab/100),0);
     const pendClab=items.filter(i=>i.status!=='confirmado').reduce((s,i)=>s+(i.valor*i.pctClab/100),0);
     const extrasClab=incluirExtras?getPagamentosExtrasClabonde(y,m,dia):[];
@@ -30843,6 +31399,26 @@ function renderDashComissoes(){
     let items=getComissaoItemsAll().filter(i=>i.qy===y&&i.qm===m&&i.qhalf===half&&i.comissaoRemovida);
     if(filV)items=items.filter(i=>vendedorMatch(i.nomeVend,filV));
     if(!items.length)return'';
+    // Ordenação corrigida (2026-09-02, relatado pelo usuário com prints reais: retiradas de
+    // 19/08 e 05/08 aparecendo bem no TOPO da seção de setembro) — a quinzena aqui é a qy/qm/
+    // qhalf AO VIVO do item (mesmo problema de recálculo contínuo comentado acima de
+    // _empurraQuinzenaMesFechado/_quinzenaParaComissao: se o confirmedAt da parcela mudar
+    // depois, o item pode acabar recalculando pra uma quinzena bem mais nova mesmo já tendo
+    // sido "retirado" há meses) — então uma retirada antiga pode legitimamente aparecer numa
+    // quinzena atual sem ter acontecido agora. Pedido do usuário: "mesmo que seja deste mes
+    // isso aqui pode aparecer por ultimo... nao quero que apareça assim no começo". Não dá
+    // pra simplesmente sumir com o item (o admin ainda precisa achá-lo pra desfazer se for o
+    // caso), então a solução é só de ORDENAÇÃO: retirada feita DENTRO do mês sendo exibido
+    // (${MESES_PT[m]}/${y}) vem primeiro (mais recente primeiro); retirada de um mês anterior
+    // — mesmo que a quinzena ao vivo do item tenha virado a atual — vai pro final da lista.
+    items=items.slice().sort((a,b)=>{
+      const da=a.comissaoRemovida?.em?new Date(a.comissaoRemovida.em):null;
+      const db=b.comissaoRemovida?.em?new Date(b.comissaoRemovida.em):null;
+      const aNoMes=!!(da&&da.getFullYear()===y&&(da.getMonth()+1)===m);
+      const bNoMes=!!(db&&db.getFullYear()===y&&(db.getMonth()+1)===m);
+      if(aNoMes!==bNoMes)return aNoMes?-1:1;
+      return (db?db.getTime():0)-(da?da.getTime():0);
+    });
     const rows=items.map(i=>{
       const ck=i.confKey.replace(/'/g,"\\'");
       const com=i.valor*i.pct/100;
@@ -30909,8 +31485,8 @@ function renderDashComissoes(){
   const pendII=itemsIIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
 
   el.innerHTML=
-    filterBar+
     periodoBox+
+    filterBar+
     // Barra de título de quinzena virou fundo escuro sólido, de ponta a ponta (2026-08-04, a
     // pedido do usuário: só a borda esquerda fina não separava bem as duas seções visualmente).
     `<div style="background:#111827;padding:10px 16px;border-radius:8px;margin-bottom:16px;margin-top:4px">
@@ -31418,9 +31994,9 @@ function _confirmarDevolucaoTarefa(){
 }
 // Busca de pedido tipo autocomplete (2026-07-16) — substituiu o <select> antigo, que tinha
 // centenas de opções ("OS 275 · FILIAL BK DRIVE T-63"...) e era praticamente impossível de
-// usar rolando a lista. Agora é só digitar um pedaço da OS ou do nome do cliente (ex:
-// "MOGI") que a lista já filtra. tf-novo-pedido-id (hidden) guarda o id do pedido
-// selecionado; o texto visível é só pra busca/exibição.
+// usar rolando a lista. Agora é só digitar um pedaço da OS, do nome do cliente/razão social
+// ou do JOB (ex: "MOGI", adicionado 2026-09-01) que a lista já filtra. tf-novo-pedido-id
+// (hidden) guarda o id do pedido selecionado; o texto visível é só pra busca/exibição.
 function _tfPedidoOptions(){
   return[...pedidos].sort((a,b)=>(b.emissaoEm||'').localeCompare(a.emissaoEm||''));
 }
@@ -31432,7 +32008,7 @@ function _tfPedidoBuscaInput(v){
   const dd=document.getElementById('tf-novo-pedido-dropdown');if(!dd)return;
   const q=norm(v||'');
   const opts=_tfPedidoOptions();
-  const matches=q?opts.filter(p=>norm(String(p.os||'')).includes(q)||norm(p.cliente||'').includes(q)):opts.slice(0,30);
+  const matches=q?opts.filter(p=>norm(String(p.os||'')).includes(q)||norm(p.cliente||'').includes(q)||norm(p.job||'').includes(q)):opts.slice(0,30);
   if(!matches.length){
     dd.innerHTML='<div style="padding:10px 12px;font-size:.78rem;color:#94a3b8">Nenhum pedido encontrado.</div>';
   }else{
@@ -31584,7 +32160,7 @@ function renderRelatorioTarefas(){
       <button onclick="tfRelMov(-1)">◀</button>
       <div class="dash-mes-label">${MESES_PT[m]} ${y}</div>
       <button onclick="tfRelMov(1)">▶</button>
-      ${linhas.length?`<button onclick="exportarRelatorioTarefas()" style="margin-left:auto;background:#eff6ff;border:1.5px solid #bfdbfe;color:#1d4ed8;border-radius:8px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">⬇️ Exportar CSV</button>`:''}
+      ${linhas.length?`<button onclick="exportarRelatorioTarefasPDF()" class="dash-btn-conf" style="margin-left:auto;background:#dc2626;width:auto;height:auto">📄 Exportar PDF</button><button onclick="exportarRelatorioTarefas()" class="dash-btn-conf" style="background:#16a34a;width:auto;height:auto">📊 Exportar CSV</button>`:''}
     </div>
     <div class="dash-card" style="margin-bottom:14px">
       <div class="dash-sec-title">📊 Aproveitamento geral do mês</div>
@@ -31618,6 +32194,66 @@ function exportarRelatorioTarefas(){
   const rows=linhas.map(l=>[l.resp,l.noPrazo,l.comAtraso,l.pendente,l.pendenteVencida,l.pct==null?'':l.pct.toFixed(1).replace('.',',')]);
   _csvDownload(`relatorio_tarefas_${y}_${String(m).padStart(2,'0')}.csv`,headers,rows);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+// Exportar PDF do Relatório de Tarefas (2026-08-31, a pedido do usuário: "ali tem que ser
+// exportar em pdf tbm" — o botão de CSV do Relatório estava sem par em PDF, diferente do
+// resto do sistema onde Excel/CSV e PDF sempre andam juntos). Mesmos dados/mês da tabela em
+// tela (_tfRelDadosMes) e do CSV acima, só que como PDF com o cabeçalho/rodapé padrão (logo +
+// GCORE + data de geração + nº de página) igual todo outro export PDF do sistema (ver
+// prodExportarListaPDF/gerarPDFDRE etc.), pra manter a mesma cara em qualquer tela.
+async function exportarRelatorioTarefasPDF(){
+  const linhas=_tfRelDadosMes();
+  if(!linhas.length){toast('Nada pra exportar nesse mês','terr');return;}
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const {y,m}=_tfRelMes;
+  const totNoPrazo=linhas.reduce((s,l)=>s+l.noPrazo,0);
+  const totComAtraso=linhas.reduce((s,l)=>s+l.comAtraso,0);
+  const totPendenteVencida=linhas.reduce((s,l)=>s+l.pendenteVencida,0);
+  const totResolvido=totNoPrazo+totComAtraso;
+  const pctGeral=(totResolvido+totPendenteVencida)>0?(totNoPrazo/(totResolvido+totPendenteVencida)*100):null;
+  const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const drawnFooterPages=new Set();
+  function drawHeader(){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+    doc.text('RELATÓRIO DE TAREFAS',pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    doc.text(`${MESES_PT[m]} ${y} · Aproveitamento geral: ${pctGeral==null?'—':pctGeral.toFixed(1).replace('.',',')+'%'}`,pageW-14,26.5,{align:'right'});
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,29,pageW-14,29);
+    doc.setFont('helvetica','normal');
+    return 35;
+  }
+  function drawFooter(pageNum){
+    if(drawnFooterPages.has(pageNum))return;
+    drawnFooterPages.add(pageNum);
+    doc.setPage(pageNum);
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
+  }
+  const curY=drawHeader();
+  const head=['Responsável','No prazo','Com atraso','Pendente','Pendente vencida','Aproveitamento'];
+  const bodyPdf=linhas.map(l=>[l.resp,String(l.noPrazo),String(l.comAtraso),String(l.pendente),String(l.pendenteVencida),l.pct==null?'—':l.pct.toFixed(1).replace('.',',')+'%']);
+  doc.autoTable({
+    startY:curY,head:[head],body:bodyPdf,theme:'grid',
+    styles:{fontSize:8,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:2.2},
+    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:8},
+    alternateRowStyles:{fillColor:LIGHT},
+    columnStyles:{1:{halign:'center'},2:{halign:'center'},3:{halign:'center'},4:{halign:'center'},5:{halign:'center',fontStyle:'bold'}},
+    margin:{top:32,left:14,right:14,bottom:20},
+    didDrawPage:()=>{drawFooter(doc.internal.getNumberOfPages());}
+  });
+  drawFooter(doc.internal.getNumberOfPages());
+  doc.save(`relatorio_tarefas_${y}_${String(m).padStart(2,'0')}.pdf`);
+  toast('PDF gerado!','tok');
 }
 // ── EXPORTAR TAREFAS EM PDF (com filtros) ───────────────────────────────────
 // Independe da aba Pendentes/Concluídas em tela: sempre monta a lista combinando
@@ -32021,6 +32657,28 @@ async function reabrirPag(confKey){
     reabertoPor:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),
     confirmacaoAnterior:(anterior&&anterior.status==='confirmado')?{confirmedAt:anterior.confirmedAt||null,dataRecebimentoReal:anterior.dataRecebimentoReal||null,valorBrutoConfirmado:anterior.valorBrutoConfirmado||null}:null
   });
+  // BUG CRÍTICO corrigido (2026-09-02, relatado pelo usuário com casos reais: pedido 40
+  // "BURGER KING ARAGUAIA VARZEA" e pedido 88 "STARBUCKS PORTO BELO") — reabrir um recebimento
+  // aqui SEMPRE deixava cfg.comissaoQuitada[confKey] (e agora cfg.comissaoQuitadaGerente,
+  // ver _setComissaoQuitadaGerente logo abaixo) INTOCADO. Como _quinzenaParaComissao()
+  // recalcula a quinzena do item TODA VEZ a partir do confirmedAt mais recente (ver
+  // comentário grande acima de _empurraQuinzenaMesFechado), reabrir e depois RECONFIRMAR o
+  // mesmo confKey em uma data diferente empurra o item pra uma quinzena nova/futura — mas a
+  // marcação antiga de "comissão já paga ao vendedor em DD/MM" (de uma confirmação anterior,
+  // já desfeita) sobrevivia e continuava aparecendo junto do item na quinzena nova, como se
+  // a comissão dessa confirmação atual já tivesse sido paga (sem nunca ter sido, pro vendedor
+  // nem pro gerente). Exatamente o relato do usuário: pedido 40 mostrava "✅ Pago em 19/08"
+  // mesmo ele confirmando o recebimento pela primeira vez hoje — porque tinha existido uma
+  // confirmação+quitação anterior em 19/08 que foi reaberta (motivo perdido/corrigido) e
+  // nunca teve a quitação desfeita junto. Agora reabrir SEMPRE desfaz a quitação (vendedor e
+  // gerente) desse confKey também — evita comissão "fantasma" aparecendo como já paga numa
+  // reconfirmação nova. Quem reabre já vê no Histórico as duas coisas juntas.
+  if(cfg.comissaoQuitada&&cfg.comissaoQuitada[confKey]){
+    try{await _setComissaoQuitada(confKey,false,'');}catch(e){console.error('Erro ao desfazer comissaoQuitada ao reabrir',e);}
+  }
+  if(cfg.comissaoQuitadaGerente&&cfg.comissaoQuitadaGerente[confKey]){
+    try{await _setComissaoQuitadaGerente(confKey,false,'');}catch(e){console.error('Erro ao desfazer comissaoQuitadaGerente ao reabrir',e);}
+  }
   renderDashComissoes();renderDashCards();
   if(typeof fcAplicarFiltros==='function')fcAplicarFiltros();else if(typeof renderFinanceiro==='function')renderFinanceiro();
   toast('Pagamento reaberto','tok');
