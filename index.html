@@ -3452,7 +3452,7 @@ select.fc{cursor:pointer}
     <button onclick="closeM('mo-cp-excluir-mes')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
   </div>
   <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:8px 12px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca">
-    Remove <strong>todos</strong> os lançamentos de Contas a Pagar cujo vencimento cai no mês escolhido — útil pra limpar um mês que ficou errado antes de subir uma planilha nova. Vai tudo pra Lixeira antes de apagar de vez, dá pra restaurar se precisar. Só administrador pode fazer isso.
+    Remove <strong>todos</strong> os lançamentos de Contas a Pagar que aparecem no mês escolhido — mesma regra da tela: conta <strong>paga</strong> conta pela data de pagamento, conta <strong>ainda não paga</strong> conta pelo vencimento — útil pra limpar um mês que ficou errado antes de subir uma planilha nova. Vai tudo pra Lixeira antes de apagar de vez, dá pra restaurar se precisar. Só administrador pode fazer isso.
   </div>
   <div class="fg"><label>Mês a excluir</label><input type="month" id="cp-excluir-mes-input" class="fc" oninput="_cpExcluirMesAtualizarPreview()"></div>
   <div id="cp-excluir-mes-preview" style="font-size:.82rem;color:var(--ink3);margin:10px 0 14px"></div>
@@ -16387,8 +16387,14 @@ function _cpExcluirMesAtualizarPreview(){
   if(!prevEl)return;
   const mes=document.getElementById('cp-excluir-mes-input')?.value||'';
   if(!mes){prevEl.innerHTML='';return;}
-  const alvo=(contasPagar||[]).filter(c=>(c.vencimento||'').slice(0,7)===mes);
-  if(!alvo.length){prevEl.innerHTML='<span style="color:#94a3b8">Nenhum lançamento de Contas a Pagar com vencimento neste mês.</span>';return;}
+  // Usa _cpDataRefIso() (2026-09-03) — mesma regra da tela/filtro principal (paga conta pela
+  // data de pagamento, não-paga pelo vencimento). Antes filtrava só por vencimento cru, e
+  // ficava incoerente com o que a tela mostra pro mês: usuário via 23 lançamentos "em julho"
+  // na lista (vários pagos em julho com vencimento em outro mês) mas este botão dizia "Nenhum
+  // lançamento encontrado" pra julho, porque só olhava vencimento (relato do usuário,
+  // 2026-09-03 — ver project memory).
+  const alvo=(contasPagar||[]).filter(c=>_cpDataRefIso(c).slice(0,7)===mes);
+  if(!alvo.length){prevEl.innerHTML='<span style="color:#94a3b8">Nenhum lançamento de Contas a Pagar encontrado neste mês.</span>';return;}
   const total=alvo.reduce((s,c)=>s+_cpValorAjustado(c),0);
   prevEl.innerHTML=`<strong style="color:#dc2626">${alvo.length} lançamento(s)</strong> — soma ${fmtR(total)} — serão removidos pra Lixeira.`;
 }
@@ -16396,12 +16402,12 @@ async function confirmarExcluirMesContasPagar(){
   if(!_getUserCat().isAdm){toast('Apenas administrador pode excluir contas a pagar em massa','terr');return;}
   const mes=document.getElementById('cp-excluir-mes-input')?.value||'';
   if(!mes){toast('Escolha o mês antes de confirmar','terr');return;}
-  const alvo=(contasPagar||[]).filter(c=>(c.vencimento||'').slice(0,7)===mes);
+  const alvo=(contasPagar||[]).filter(c=>_cpDataRefIso(c).slice(0,7)===mes); // mesma regra de _cpExcluirMesAtualizarPreview() acima
   if(!alvo.length){toast('Nenhum lançamento de Contas a Pagar encontrado nesse mês','tinf');return;}
   const [y,m]=mes.split('-');
   const mesLbl=(MESES_PT[parseInt(m,10)]||m)+'/'+y;
   const total=alvo.reduce((s,c)=>s+_cpValorAjustado(c),0);
-  if(!confirm(`Excluir TODOS os ${alvo.length} lançamento(s) de Contas a Pagar com vencimento em ${mesLbl} (soma ${fmtR(total)})?\n\nVai pra Lixeira, dá pra restaurar se precisar.`))return;
+  if(!confirm(`Excluir TODOS os ${alvo.length} lançamento(s) de Contas a Pagar que aparecem em ${mesLbl} (soma ${fmtR(total)})?\n\nVai pra Lixeira, dá pra restaurar se precisar.`))return;
   const senha=await pedirSenhaAdmin('Excluir Contas a Pagar do Mês','Digite a senha/PIN de administrador para excluir esses lançamentos:');
   if(!senha){toast('Exclusão cancelada','tinf');return;}
   if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
