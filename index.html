@@ -3456,7 +3456,7 @@ select.fc{cursor:pointer}
   </div>
   <div class="fg"><label>Mês a excluir</label><input type="month" id="cp-excluir-mes-input" class="fc" oninput="_cpExcluirMesAtualizarPreview()"></div>
   <div id="cp-excluir-mes-preview" style="font-size:.82rem;color:var(--ink3);margin:10px 0 14px"></div>
-  <button onclick="confirmarExcluirMesContasPagar()" style="width:100%;background:#dc2626;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">Excluir lançamentos deste mês</button>
+  <button id="cp-excluir-mes-confirmar-btn" onclick="confirmarExcluirMesContasPagar()" style="width:100%;background:#dc2626;color:#fff;border:none;border-radius:10px;padding:11px;font-size:.9rem;font-weight:700;cursor:pointer">Excluir lançamentos deste mês</button>
 </div>
 </div>
 
@@ -16306,6 +16306,19 @@ function novaContaPagar(dados){
 // atraso (juros/multa reais) fazia o DRE e os cards SUBESTIMAREM a despesa de verdade — bug
 // silencioso, sem nenhum aviso na tela. Agora todo total usa esta função, nunca c.valor sozinho.
 function _cpValorAjustado(c){return (c.valor||0)+(c.juros||0)+(c.multa||0)-(c.desconto||0);}
+// Data de referência da conta a pagar pra filtro de período/mês e ordenação cronológica na
+// tela de Contas a Pagar/Receber (2026-09-03, a pedido do usuário — regras novas pra "leitura
+// da planilha de contas a pagar", depois da investigação do total de julho que parecia não
+// bater com a planilha PAGAMENTOS_REALIZADOS_JULHO.xlsx, ver project memory): conta com
+// status PAGO usa a data em que foi paga de verdade (c.dataPagamento, vem da coluna
+// "Pagamento" da planilha) — assim o mês em que a conta aparece na tela é o mês em que o
+// dinheiro realmente saiu, igual o relatório de "Pagamentos Realizados" que o usuário
+// importa. Conta ainda NÃO paga (pendente ou vencida) continua pelo Vencimento, que é a
+// única data que ela tem — é a previsão de quando vai vencer. NÃO usar isto dentro do DRE:
+// o regime Competência do DRE é a previsão inteira por Vencimento, sempre, mesmo já paga —
+// isso é intencional (calcularDRE()/_dreIndCpMes() têm sua própria lógica de regime,
+// não mexer). Esta função é só pra a tela/exportação de Contas a Pagar em si.
+function _cpDataRefIso(c){return(c.status==='pago'&&c.dataPagamento)?c.dataPagamento:(c.vencimento||'');}
 function _cpAtrasada(c){
   if(c.status==='pago')return false;
   const v=new Date((c.vencimento||'')+'T23:59:59');
@@ -16360,6 +16373,13 @@ function abrirExcluirMesContasPagar(){
   const inp=document.getElementById('cp-excluir-mes-input');
   if(inp)inp.value=new Date().toISOString().slice(0,7); // sugere o mês atual, mas é livre pra trocar
   _cpExcluirMesAtualizarPreview();
+  // Garante o botão sempre destravado/com texto normal ao abrir (2026-09-03, a pedido do
+  // usuário: "arrume esse botao de excluir que nao avisa o usuario que ta processando a
+  // exclusao e nao fecha sozinha a tela quando conclui") — se uma tentativa anterior tivesse
+  // ficado travada em 'Excluindo...' (erro de rede no meio do lote, por ex.), reabrir o modal
+  // agora sempre volta o botão pro estado normal, em vez de ficar preso desabilitado.
+  const btnEl=document.getElementById('cp-excluir-mes-confirmar-btn');
+  if(btnEl){btnEl.disabled=false;btnEl.textContent='Excluir lançamentos deste mês';}
   openM('mo-cp-excluir-mes');
 }
 function _cpExcluirMesAtualizarPreview(){
@@ -16385,6 +16405,14 @@ async function confirmarExcluirMesContasPagar(){
   const senha=await pedirSenhaAdmin('Excluir Contas a Pagar do Mês','Digite a senha/PIN de administrador para excluir esses lançamentos:');
   if(!senha){toast('Exclusão cancelada','tinf');return;}
   if(senha!==(cfg.senhaAdmin||cfg.senhaExclusao||cfg.dashMetasPin||'2024')){toast('Senha incorreta','terr');return;}
+  // Feedback de "processando" + trava contra clique duplo (2026-09-03, a pedido do usuário:
+  // "arrume esse botao de excluir que nao avisa o usuario que ta processando a exclusao e nao
+  // fecha sozinha a tela quando conclui") — mesmo padrão já usado no botão de importar
+  // planilha (ver confirmarImportacaoContasPagar()). Um mês com muitos lançamentos (ex.:
+  // 800+) leva vários segundos pra excluir em lote no Firestore — sem isso, o botão ficava
+  // parado com o mesmo texto de sempre, dando a impressão de que nada estava acontecendo.
+  const btnEl=document.getElementById('cp-excluir-mes-confirmar-btn');
+  if(btnEl){btnEl.disabled=true;btnEl.textContent='Excluindo...';}
   const itensLixeira=alvo.map((c,i)=>({
     lixeiraItem:{
       id:'lix_'+Date.now()+'_'+i+'_'+Math.random().toString(36).slice(2,8),
@@ -16425,6 +16453,9 @@ async function confirmarExcluirMesContasPagar(){
   }catch(e){
     console.error(e);
     toast('Erro ao excluir: '+e.message,'terr');
+    // Erro no meio do lote — destrava o botão pra dar pra tentar de novo, em vez de deixar
+    // "Excluindo..." preso pra sempre (o modal continua aberto nesse caso, de propósito).
+    if(btnEl){btnEl.disabled=false;btnEl.textContent='Excluir lançamentos deste mês';}
   }
 }
 
@@ -16685,10 +16716,10 @@ function _cpFilteredItems(){
     &&(!femp||c.empresa===femp)
     &&(!fcat||c.centroCusto===fcat)
     &&(!fstat||(fstat==='aberto'?(c.statusCalc==='pendente'||c.statusCalc==='atrasado'):c.statusCalc===fstat))
-    &&(!!q||!di||(c.vencimento&&c.vencimento>=di))
-    &&(!!q||!df||(c.vencimento&&c.vencimento<=df))
+    &&(!!q||!di||(_cpDataRefIso(c)&&_cpDataRefIso(c)>=di))
+    &&(!!q||!df||(_cpDataRefIso(c)&&_cpDataRefIso(c)<=df))
   );
-  items.sort((a,b)=>(a.vencimento||'').localeCompare(b.vencimento||''));
+  items.sort((a,b)=>_cpDataRefIso(a).localeCompare(_cpDataRefIso(b)));
   return items;
 }
 // Mesmo filtro de _cpFilteredItems(), mas ignorando o dropdown de Status — usado pelos
@@ -16707,8 +16738,8 @@ function _cpItemsTodosStatus(){
     (!q||(c.fornecedor||'').toLowerCase().includes(q)||(c.despesaDesc||'').toLowerCase().includes(q))
     &&(!femp||c.empresa===femp)
     &&(!fcat||c.centroCusto===fcat)
-    &&(!!q||!di||(c.vencimento&&c.vencimento>=di))
-    &&(!!q||!df||(c.vencimento&&c.vencimento<=df))
+    &&(!!q||!di||(_cpDataRefIso(c)&&_cpDataRefIso(c)>=di))
+    &&(!!q||!df||(_cpDataRefIso(c)&&_cpDataRefIso(c)<=df))
   );
   return items;
 }
@@ -16760,7 +16791,7 @@ function renderContasPagar(){
     <thead><tr><th>Vencimento</th><th>Empresa</th><th>Fornecedor</th><th>Despesa</th><th>Centro de Custo</th><th>Parcela</th><th>Valor</th><th>Status</th><th></th></tr></thead>
     <tbody>${items.map(c=>`
       <tr>
-        <td style="white-space:nowrap">${fmtD(c.vencimento)}${c.origem==='fora_planejado'?' <span title="Despesa fora do planejado" style="color:#ea580c">📌</span>':''}</td>
+        <td style="white-space:nowrap">${fmtD(c.vencimento)}${c.origem==='fora_planejado'?' <span title="Despesa fora do planejado" style="color:#ea580c">📌</span>':''}${(c.statusCalc==='pago'&&c.dataPagamento)?`<div style="font-size:.66rem;color:#16a34a;font-weight:600;margin-top:2px">💰 Pago em ${fmtD(c.dataPagamento)}</div>`:''}</td>
         <td>${_capLabel(c.empresa)}</td>
         <td title="${(c.fornecedor||'').replace(/"/g,'&quot;')}" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.fornecedor||'—'}</td>
         <td title="${(c.despesaDesc||'').replace(/"/g,'&quot;')}" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.despesaDesc||'—'}</td>
@@ -17390,7 +17421,18 @@ async function confirmarImportacaoContasPagar(){
     // (categoria/formaPagamento) — só o que vem de fato da planilha.
     plano.syncs.forEach(({r,existente})=>{
       existente.status=r.status;
-      existente.dataPagamento=r.status==='pago'?new Date().toISOString().slice(0,10):null;
+      // FIX 2026-09-03 (planilha PAGAMENTOS_REALIZADOS_JULHO — usuário relatou total de
+      // julho "não bate" com a planilha; investigação mostrou que os R$ e a contagem batiam
+      // certinho pro Contas a Pagar filtrado por Vencimento, mas achei este bug separado no
+      // caminho de SYNC: uma conta que já existia e é atualizada numa reimportação (ex: virou
+      // "Pago" numa planilha posterior) gravava dataPagamento=HOJE (data da importação) em vez
+      // da data real de pagamento que já vem pronta na própria planilha (r.dataPagamento, coluna
+      // "Pagamento") — o caminho de conta NOVA (novaContaPagar acima) já usava r.dataPagamento
+      // certo, só o sync que estava errado. Isso não afeta o total por Vencimento (o que o
+      // usuário reportou), mas corrompe silenciosamente o regime Realizado do DRE e qualquer
+      // filtro por Data de Pagamento, jogando a despesa pro mês em que alguém reimportou a
+      // planilha em vez do mês em que ela foi paga de verdade.
+      existente.dataPagamento=r.status==='pago'?(r.dataPagamento||existente.dataPagamento||new Date().toISOString().slice(0,10)):null;
       existente.valor=r.valor;existente.juros=r.juros;existente.multa=r.multa;existente.desconto=r.desconto;
       existente.valorPagoParcial=r.valorPagoParcial;existente.statusOrigemPlanilha=r.statusOrigemPlanilha;
       existente.valorPrincipalOrigemPlanilha=r.valorPrincipalOrigemPlanilha;
@@ -29251,7 +29293,9 @@ function renderContasUnificado(){
     };
   });
   const linhasPagar=pagarItems.map(c=>{
-    const iso=c.vencimento||'';
+    // iso usa a mesma regra de _cpDataRefIso() (2026-09-03) — paga ordena/filtra pela data
+    // real de pagamento, não paga continua pelo vencimento (ver comentário grande na função).
+    const iso=_cpDataRefIso(c);
     const valorAdj=_cpValorAjustado(c);
     const statusLbl=c.statusCalc==='pago'?'<span class="dash-badge ok">✅ Pago</span>':c.statusCalc==='atrasado'?'<span class="dash-badge no">⚠️ Atrasado</span>':'<span class="dash-badge pend">⏳ Pendente</span>';
     let diasAtraso=0;
@@ -29264,8 +29308,15 @@ function renderContasUnificado(){
         :`<button onclick="marcarContaPagarPaga('${c.id}',true)" title="Marcar como pago" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:5px 9px;font-size:.7rem;font-weight:700;cursor:pointer">✅</button>`}
       <button onclick="abrirEditarContaPagar('${c.id}')" title="Editar" style="background:#fff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:6px;padding:5px 9px;font-size:.7rem;font-weight:700;cursor:pointer">✏️</button>
       <button onclick="excluirContaPagar('${c.id}')" title="Excluir" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:6px;padding:5px 9px;font-size:.7rem;font-weight:700;cursor:pointer">🗑️</button>`;
+    // Mostra o Vencimento sempre (é o dado da linha), e quando já foi pago acrescenta a
+    // data real de pagamento embaixo (2026-09-03, a pedido do usuário) — mesmo padrão já
+    // usado em Contas a Receber pra "↪ Nova previsão" acima, pra nunca ficar sem explicação
+    // o motivo de uma conta com vencimento num mês aparecer filtrada em outro mês.
+    const dataLabelPagar=(c.statusCalc==='pago'&&c.dataPagamento)
+      ?`${fmtD(c.vencimento)||'—'}<div style="font-size:.66rem;color:#16a34a;font-weight:600;margin-top:2px">💰 Pago em ${fmtD(c.dataPagamento)}</div>`
+      :(fmtD(c.vencimento)||'—');
     return{
-      iso,dataLabel:fmtD(c.vencimento)||'—',
+      iso,dataLabel:dataLabelPagar,
       tipoBadge:'<span style="background:#ffedd5;color:#c2410c;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">📤 Pagar</span>',
       quem:c.fornecedor||'—',quemSub:_capLabel(c.empresa),
       // Conta a pagar é despesa/fornecedor — não tem obra/pedido associado, então não tem
