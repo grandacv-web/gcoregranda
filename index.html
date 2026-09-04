@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-08-28.17';</script>
+<script>const APP_BUILD_VERSION='2026-09-04.1203';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -1600,6 +1600,17 @@ select.fc{cursor:pointer}
       </div>
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
         📦 Etapas de confecção de cada pedido — Medição Técnica, Projeto Executivo, Compras, Corte Galvanizado, ART, Adesivo, Produção, Embalagem, Frete e Instalação — calculadas automaticamente a partir do Prazo de Finalização, Estimativa de Instalação e Prazo Estimado de Frete preenchidos na Emissão. Vale pra pedidos emitidos pelo sistema a partir de Julho/2026.
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+        <label style="font-size:.72rem;font-weight:600;color:var(--ink3);white-space:nowrap">📅 Indicadores do mês</label>
+        <!-- Filtro rápido por mês (2026-09-04, a pedido do usuário), mesmo padrão de setinhas
+             usado no resto do sistema — filtra pelo Prazo Final (mesma data do campo "Data de
+             Finalização" do filtro entre datas abaixo). Ciclo inclui "Todos os meses". -->
+        <div class="dash-mes-nav" style="margin:0">
+          <button onclick="_lpMesMov(-1)" type="button">◀</button>
+          <div class="dash-mes-label" id="lp-mes-lbl" style="min-width:150px">Todos os meses</div>
+          <button onclick="_lpMesMov(1)" type="button">▶</button>
+        </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
         <input id="lp-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="lpRenderAtivo()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
@@ -11628,6 +11639,18 @@ initAuth();
 //  confirmação, só esperando o momento certo. O botão "Atualizar agora" do banner continua
 //  existindo pra quem quiser forçar na hora, ignorando essa checagem por conta própria.
 let _ultimaChecagemVersaoSistema=0;
+// Rede de segurança (2026-09-04, a pedido do usuário — depois de descobrir que várias
+// publicações seguidas saíram sem eu lembrar de atualizar o APP_BUILD_VERSION, e por isso o
+// banner abaixo nunca apareceu pra ninguém: "cuide pra nao ficarmos sem este botao mais senao
+// vamos ter problemas de novo... vai perder infos"). A checagem por APP_BUILD_VERSION continua
+// sendo a principal (rápida e exata), mas agora tem uma 2ª checagem TOTALMENTE AUTOMÁTICA, que
+// não depende de ninguém lembrar de editar nada: compara o TAMANHO em bytes do arquivo
+// publicado (Content-Length, que já vem de graça no cabeçalho da mesma resposta usada pra ler
+// o APP_BUILD_VERSION — não baixa nada a mais só por causa disso) com o tamanho da primeira
+// checagem feita nesta aba. Um arquivo de 2MB+ praticamente nunca fica com o MESMO tamanho
+// exato depois de uma edição de verdade, então mesmo que eu esqueça de bater o
+// APP_BUILD_VERSION de novo no futuro, essa 2ª checagem ainda vai pegar a mudança.
+let _tamanhoBaselineArquivoSistema=null;
 function _sistemaEstaSeguroPraRecarregar(){
   if(document.querySelector('.mov.open'))return false;
   const ae=document.activeElement;
@@ -11661,6 +11684,10 @@ async function _checarNovaVersaoSistema(){
   try{
     const resp=await fetch(location.pathname+'?_v='+Date.now(),{cache:'no-store'});
     if(!resp.ok||!resp.body)return;
+    // Rede de segurança por tamanho de arquivo (ver comentário em _tamanhoBaselineArquivoSistema
+    // acima) — lê o Content-Length do cabeçalho, que já veio junto de graça com esta mesma
+    // resposta, sem custo extra de rede nenhum.
+    const tamanhoRemoto=resp.headers.get('content-length');
     const reader=resp.body.getReader();
     const decoder=new TextDecoder('utf-8');
     let acumulado='';
@@ -11672,6 +11699,14 @@ async function _checarNovaVersaoSistema(){
       const m=acumulado.match(/APP_BUILD_VERSION\s*=\s*['"]([^'"]+)['"]/);
       if(m){versaoRemota=m[1];try{await reader.cancel();}catch(e){}break;}
       if(acumulado.length>200000)break; // segurança — a versão sempre fica bem no início do <head>
+    }
+    if(tamanhoRemoto){
+      if(_tamanhoBaselineArquivoSistema===null){
+        _tamanhoBaselineArquivoSistema=tamanhoRemoto; // 1ª checagem desta aba define a base
+      }else if(tamanhoRemoto!==_tamanhoBaselineArquivoSistema){
+        _tentarAutoAtualizar();
+        return;
+      }
     }
     if(versaoRemota&&typeof APP_BUILD_VERSION!=='undefined'&&versaoRemota!==APP_BUILD_VERSION){
       _tentarAutoAtualizar();
@@ -21857,6 +21892,14 @@ function prodAbrirDia(iso){
 // Um dia (ISO) está "dentro" do intervalo De/Até — De/Até vazios não restringem daquele lado
 // (só De = "a partir de"; só Até = "até"; os dois vazios nunca chama esta função porque quem
 // chama já confere antes).
+// Mês selecionado no filtro rápido "Indicadores do mês" da Lista de Pedidos (2026-09-04) —
+// '' = Todos os meses (estado inicial, pra não esconder nada que já era visível antes deste
+// filtro existir). Reaproveita _mesNavCiclo, mesmo ciclo usado no resto do sistema.
+let _lpMes='';
+function _lpMesMov(dir){
+  _lpMes=_mesNavCiclo(_lpMes,dir);
+  lpRenderAtivo();
+}
 function _lpDataNoIntervalo(iso,de,ate){
   if(!iso)return false;
   if(de&&iso<de)return false;
@@ -21882,6 +21925,7 @@ function _lpListaFiltrada(){
   infos=infos.filter(x=>!x.curto);
   if(busca)infos=infos.filter(({p})=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
   if(filEtapa)infos=infos.filter(x=>x.ok&&x.etapaAtual&&x.etapaAtual.key===filEtapa);
+  if(_lpMes)infos=infos.filter(x=>x.ok&&x.calc.prazoIso&&parseInt(x.calc.prazoIso.slice(5,7),10)===_lpMes);
   if(temFiltroData){
     if(filDataCampo==='emissao')infos=infos.filter(x=>x.ok&&_lpDataNoIntervalo(x.calc.emissaoIso,filDataDe,filDataAte));
     else if(filDataCampo==='final')infos=infos.filter(x=>x.ok&&_lpDataNoIntervalo(x.calc.prazoIso,filDataDe,filDataAte));
@@ -22034,6 +22078,8 @@ function lpSetTab(tab,btn){
   lpRenderAtivo();
 }
 function lpRenderAtivo(){
+  const lblEl=document.getElementById('lp-mes-lbl');
+  if(lblEl)lblEl.textContent=_lpMes?MESES_PT[_lpMes]:'Todos os meses';
   if(_lpTabAtiva==='kanban')renderListaPedidosKanban();
   else if(_lpTabAtiva==='calendario')renderListaPedidosDias();
   else if(_lpTabAtiva==='simulador'){
@@ -24133,9 +24179,19 @@ function _fgCalc(p){
   const fechadoInst=moneyToNum(fg.fechadoInst||0);
   const fechadoFrete=moneyToNum(fg.fechadoFrete||0);
   const fechadoMunque=moneyToNum(fg.fechadoMunque||0);
-  const saveInst=budgetInst-fechadoInst;
-  const saveFrete=budgetFrete-fechadoFrete;
-  const saveMunque=budgetMunque-fechadoMunque;
+  // Save só conta quando o fornecedor daquele papel já foi de fato CONTRATADO/lançado
+  // (2026-09-04, a pedido do usuário: "quero so o save, oq foi salvo efetivamente na pratica e
+  // ponto final" — antes, um pedido do mês sem NENHUM fornecedor lançado ainda mostrava Save =
+  // Budget inteiro, porque Fechado vinha 0 por padrão sem ninguém ter lançado nada; parecia
+  // economia enorme logo no dia 1 do mês, mas era só "ainda não lançamos nada nesse pedido".
+  // Agora, sem fornecedor daquele papel específico, o Save daquele papel fica 0 (nem positivo
+  // nem negativo — não tem nada de real fechado ainda pra comparar com o budget). Se o
+  // fornecedor JÁ foi escolhido e o valor fechado é genuinamente 0 (ex.: equipe própria, sem
+  // custo), aí sim o save cheio é real e continua contando normalmente.
+  const temInst=!!fg.instalador,temFrete=!!fg.transportadora,temMunque=!!fg.munque;
+  const saveInst=temInst?budgetInst-fechadoInst:0;
+  const saveFrete=temFrete?budgetFrete-fechadoFrete:0;
+  const saveMunque=temMunque?budgetMunque-fechadoMunque:0;
   return{
     r,fg,budgetInst,budgetFrete,budgetMunque,fechadoInst,fechadoFrete,fechadoMunque,
     saveInst,saveFrete,saveMunque,saveTotal:saveInst+saveFrete+saveMunque,
