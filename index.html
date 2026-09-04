@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-04.1837';</script>
+<script>const APP_BUILD_VERSION='2026-09-04.1900';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -3645,13 +3645,6 @@ select.fc{cursor:pointer}
      edição), sem precisar de clique nenhum. Esse banner serve pra: (1) avisar enquanto espera
      a hora segura de atualizar sozinho, e (2) dar a opção de forçar a atualização na hora, se
      a pessoa não se importar de perder o que estiver digitando. -->
-<!-- Botão só-admin pra avisar todo mundo na hora que publica no GitHub (2026-09-04, ver
-     _avisarNovaVersaoParaTodos()/_meuSinalVersaoBase) — clique único, sem precisar avisar
-     setor por setor. Visibilidade controlada por _atualizarBotaoAvisarVersao(). -->
-<button id="btn-avisar-versao-sistema" onclick="_avisarNovaVersaoParaTodos()" title="Avisar todos os usuários conectados que uma nova versão foi publicada"
-  style="display:none;position:fixed;bottom:16px;right:16px;z-index:340;background:linear-gradient(135deg,#00bac7,#0099a8);color:#fff;border:none;border-radius:10px;padding:10px 16px;font-size:.8rem;font-weight:800;cursor:pointer;box-shadow:0 6px 20px rgba(0,153,168,.35);align-items:center;gap:6px">
-  📢 Publiquei atualização
-</button>
 <div class="sys-update-banner" id="sys-update-banner">
   <div class="sub-txt">🔄 Nova versão disponível. Atualiza sozinho assim que você terminar o que estiver fazendo — ou clique para atualizar agora.</div>
   <button class="sub-btn" onclick="_aplicarNovaVersaoSistema()">Atualizar agora</button>
@@ -4278,9 +4271,6 @@ window._fbSaveCfg=(data)=>{
 };
 window._fbLoadCfg=()=>getDocs(collection(db,'sistema')).then(snap=>{const d=snap.docs.find(x=>x.id==='config');return d?d.data():null;});
 window._fbWatchCfg=(cb)=>onSnapshot(doc(db,'sistema','config'),snap=>{if(snap.exists())cb(snap.data());});
-// Sinal instantâneo de nova versão publicada — ver comentário grande em _meuSinalVersaoBase.
-window._fbWatchVersaoSistema=(cb)=>onSnapshot(doc(db,'sistema','versao'),snap=>{if(snap.exists())cb(snap.data());});
-window._fbAvisarVersaoSistema=()=>setDoc(doc(db,'sistema','versao'),{sinal:String(Date.now()),atualizadoEm:new Date().toISOString(),por:usuarioLogado?.nomeExibicao||usuarioLogado?.email||''});
 // Escrita ATÔMICA de um campo aninhado só (2026-08-04) — usada por setPagConf() pra confirmar
 // recebimento/comissão sem correr risco de perder confirmações de outras parcelas. Motivo:
 // _fbSaveCfg(cfg) faz setDoc SEM merge, reescrevendo o documento 'config' INTEIRO com o que
@@ -5180,13 +5170,6 @@ async function load(){
       if(remoteCfg) cfg=Object.assign(cfg,remoteCfg);
       // Listener em tempo real: se alguém mudar as configs, todos atualizam automaticamente
       window._fbWatchCfg(data=>{cfg=Object.assign(cfg,data);if(cfg.k)try{emailjs.init(cfg.k)}catch(e){}atualizarBotaoNovoPedido();});
-      // Sinal instantâneo de nova versão (ver _meuSinalVersaoBase) — reage na hora ao
-      // clique do admin em "Publiquei atualização", sem depender de cache/CDN.
-      if(window._fbWatchVersaoSistema)window._fbWatchVersaoSistema(data=>{
-        if(!data||!data.sinal)return;
-        if(_meuSinalVersaoBase===null){_meuSinalVersaoBase=data.sinal;return;}
-        if(data.sinal!==_meuSinalVersaoBase)_tentarAutoAtualizar();
-      });
     }catch(e){
       // Fallback para localStorage se Firestore não responder
       const cfg2=localStorage.getItem('gcore_cfg');
@@ -6182,19 +6165,11 @@ function _atualizarBotaoEmitirPedidoLPQualidade(){
   const btn=document.getElementById('btn-emitir-pedido-lp-qualidade');
   if(btn)btn.style.display=cat==='QUALIDADE'?'inline-flex':'none';
 }
-// Botão "Publiquei atualização" — só admin vê (ver comentário grande em _meuSinalVersaoBase).
-// Chamado de buildSidebarCats(), mesmo padrão de _atualizarBotaoGarantia().
-function _atualizarBotaoAvisarVersao(){
-  const{isAdm}=_getUserCat();
-  const btn=document.getElementById('btn-avisar-versao-sistema');
-  if(btn)btn.style.display=isAdm?'flex':'none';
-}
 function buildSidebarCats(){
   const container=document.getElementById('sb-cats');
   if(!container)return;
   _atualizarBotaoGarantia();
   _atualizarBotaoEmitirPedidoLPQualidade();
-  _atualizarBotaoAvisarVersao();
   // Menus reduzidos a pedido do usuário (2026-07-03): só Financeiro fica no menu além
   // de Visão Comercial. As demais categorias (RH, Compras, PCP, etc.) continuam existindo
   // como opção de cadastro de usuário, só não têm mais botão no sidebar.
@@ -11669,16 +11644,6 @@ let _ultimaChecagemVersaoSistema=0;
 // exato depois de uma edição de verdade, então mesmo que eu esqueça de bater o
 // APP_BUILD_VERSION de novo no futuro, essa 2ª checagem ainda vai pegar a mudança.
 let _tamanhoBaselineArquivoSistema=null;
-// AVISO INSTANTÂNEO (2026-09-04, a pedido do usuário — depois de o banner acima nunca
-// aparecer na prática por causa do cache/propagação do GitHub Pages: "cade o botao que
-// instalamos que atualiza o sistema quando detecta que eu upei no github"). Em vez de
-// esperar o polling por fetch (que depende de CDN/cache do GitHub Pages e pode demorar
-// minutos), o admin clica em "Publiquei atualização" depois de subir o index novo no
-// GitHub, e isso grava um sinal no Firestore (documento sistema/versao). TODAS as abas
-// abertas já têm um listener em tempo real (onSnapshot) nesse documento — o mesmo
-// mecanismo já usado e comprovado em várias partes deste sistema (_fbWatchCfg, etc) — e
-// reagem na hora, sem depender de cache HTTP nem de ninguém recarregar manualmente.
-let _meuSinalVersaoBase=null;
 function _sistemaEstaSeguroPraRecarregar(){
   if(document.querySelector('.mov.open'))return false;
   const ae=document.activeElement;
@@ -11744,21 +11709,10 @@ async function _checarNovaVersaoSistema(){
 function _aplicarNovaVersaoSistema(){
   location.replace(location.pathname+'?_v='+Date.now());
 }
-// Clique manual do admin depois de subir o index novo no GitHub — avisa todo mundo NA HORA,
-// sem depender de cache/propagação do GitHub Pages. Ver _meuSinalVersaoBase.
-function _avisarNovaVersaoParaTodos(){
-  if(!window._fbAvisarVersaoSistema){toast('Recurso indisponível no momento.','terr');return;}
-  if(!confirm('Confirma que já subiu o index.html atualizado no GitHub?\n\nIsso vai avisar TODOS os usuários conectados agora, na hora.'))return;
-  window._fbAvisarVersaoSistema().then(()=>{
-    toast('✅ Aviso enviado! Todo mundo conectado vai ser avisado/atualizado agora.','tok');
-  }).catch(e=>{
-    toast('Erro ao avisar: '+(e&&e.message||e),'terr');
-  });
-}
-setTimeout(_checarNovaVersaoSistema,60000);
-setInterval(_checarNovaVersaoSistema,5*60*1000);
+setTimeout(_checarNovaVersaoSistema,15000);
+setInterval(_checarNovaVersaoSistema,30000);
 document.addEventListener('visibilitychange',()=>{
-  if(document.visibilityState==='visible'&&Date.now()-_ultimaChecagemVersaoSistema>60000)_checarNovaVersaoSistema();
+  if(document.visibilityState==='visible'&&Date.now()-_ultimaChecagemVersaoSistema>20000)_checarNovaVersaoSistema();
 });
 
 // ══════════════════════════════════════════════
