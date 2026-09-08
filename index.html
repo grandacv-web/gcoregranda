@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-08.1';</script>
+<script>const APP_BUILD_VERSION='2026-09-08.3';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -6148,7 +6148,10 @@ function atualizarBotaoNovoPedido(){
 // por esta função, chamada de buildSidebarCats() (roda 1x no login).
 function _atualizarBotaoGarantia(){
   const{cat,isAdm}=_getUserCat();
-  const podeVer=isAdm||cat==='COMERCIAL'||cat==='PLANEJAMENTO';
+  // QUALIDADE entrou aqui em 2026-09-08 (a pedido do usuário, junto com o menu QUALIDADE
+  // novo) — vê o botão tanto no header do menu Qualidade (btn-garantia-geral, reaproveitado
+  // de sec-geral) quanto em qualquer outro lugar que o mesmo botão apareça.
+  const podeVer=isAdm||cat==='COMERCIAL'||cat==='PLANEJAMENTO'||cat==='QUALIDADE';
   const btnGeral=document.getElementById('btn-garantia-geral');
   if(btnGeral)btnGeral.style.display=podeVer?'':'none';
   const btnCat=document.getElementById('btn-garantia-cat');
@@ -6311,12 +6314,26 @@ function _temAcessoProspeccao(){return _temMenu('PROSPECCAO_CLIENTES');}
 // ENTRAR no menu QUALIDADE (ativo=true) quanto ao voltar pra 'geral' de verdade
 // (ativo=false, só restaura as sub-abas escondidas — só importa pro admin, único que
 // navega entre os dois; Comercial/Financeiro nunca entram em cat:QUALIDADE).
-// gtab-metas/gtab-produtos NÃO entram aqui de propósito — continuam só sob controle de
-// buildSidebarCats() (admin-only), pra não vazar acesso sem querer.
+// gtab-metas/gtab-produtos (Comissões/Produtos) TAMBÉM são escondidos aqui quando ativo=true
+// (ver bloco logo abaixo) — antes ficavam de fora de propósito por já serem admin-only em
+// buildSidebarCats(), mas isso rodava só 1x no login e deixava as duas abas visíveis pra
+// admin mesmo dentro do menu Qualidade (corrigido em 2026-09-08).
 function _aplicarModoConselhoQualidade(ativo){
   ['gtab-graficos','gtab-vendas','gtab-emissao'].forEach(id=>{
     const el=document.getElementById(id);
     if(el)el.style.display=ativo?'none':'';
+  });
+  // 2026-09-08 (correção a pedido do Guilherme: viu Comissões/Produtos aparecendo dentro
+  // do menu Qualidade mesmo logado como admin) — Comissões/Produtos são admin-only (regra
+  // em buildSidebarCats()), mas essa regra só roda 1x no login e não sabia nada sobre o
+  // modo Qualidade, então ficavam visíveis pra admin em QUALQUER seção, Qualidade incluída.
+  // Aqui força escondido sempre que entra no modo Qualidade (nem admin deveria ver — o
+  // Conselho de Qualidade não tem essas abas de jeito nenhum) e, ao sair, devolve
+  // exatamente a mesma regra de admin que buildSidebarCats() já aplica.
+  const _isAdmModoQualidade=_getUserCat().isAdm;
+  ['gtab-metas','gtab-produtos'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.style.display=ativo?'none':(_isAdmModoQualidade?'':'none');
   });
   if(ativo){
     const h2=document.getElementById('geral-hdr-h2'),p=document.getElementById('geral-hdr-p');
@@ -10856,6 +10873,14 @@ async function addUser(){
   if(pw.length<6){toast('Senha mínimo 6 caracteres!','terr');return;}
   if(pw!==pw2){toast('As senhas não coincidem!','terr');document.getElementById('nu-pass2')?.focus();return;}
   if(!cat){toast('Selecione a categoria do usuário!','terr');return;}
+  // 2026-09-08 (a pedido do Guilherme, depois do caso do usuário Luis que ficou com login
+  // no Firebase mas sem ficha no sistema) — bloqueia de cara se o e-mail já está
+  // cadastrado AQUI no sistema (cfg.usuarioCats), antes de mexer no Firebase Auth. Evita
+  // duplicar/sobrescrever sem querer e deixa claro pra quem está cadastrando o que já existe.
+  if(cfg.usuarioCats&&Object.prototype.hasOwnProperty.call(cfg.usuarioCats,em)){
+    toast('Esse e-mail já está cadastrado no sistema (categoria atual: '+cfg.usuarioCats[em]+'). Pra mudar algo dele, edite o usuário existente em vez de criar um novo.','terr');
+    return;
+  }
   let tipoCom='';
   if(cat==='COMERCIAL'){
     tipoCom=document.getElementById('nu-tipo-com')?.value;
@@ -10869,17 +10894,14 @@ async function addUser(){
     await window._fbCreateUser(em,pw);
   }catch(e){
     if(e.code==='auth/email-already-in-use'){
-      // E-mail já existe no Firebase Auth (ex: criado em outra tentativa).
-      // Tenta forçar a senha nova direto via Cloud Function (sem e-mail).
-      jaExistia=true;
-      try{
-        await window._fbAdminSetPassword(em,pw);
-        senhaForcada=true;
-      }catch(e2){
-        // Cloud Function ainda não publicada ou falhou — segue sem travar,
-        // o nome/categoria são salvos mesmo assim e avisamos do fallback por e-mail.
-        console.warn('adminSetPassword indisponível:',e2);
-      }
+      // 2026-09-08 (a pedido do Guilherme, depois do caso do Luis: e-mail já existia no
+      // Firebase Authentication mas nunca teve ficha aqui no sistema, e isso passou batido).
+      // Antes, aqui tentava forçar uma senha nova e seguia criando a ficha por baixo dos
+      // panos — o que deixava fácil um estado inconsistente passar sem ninguém perceber.
+      // Agora bloqueia e avisa: quem está cadastrando decide o que fazer.
+      toast('Esse e-mail já existe no login do sistema (Firebase Authentication). Não foi criado nada novo — se for pra mudar categoria/nome de alguém, use Editar; se essa conta antiga não devia mais existir, apague-a no Firebase Authentication antes de cadastrar de novo.','terr');
+      if(btn)btn.textContent='+ Criar Usuário';
+      return;
     } else {
       toast('Erro: '+(e.message||e),'terr');
       if(btn)btn.textContent='+ Criar Usuário';
