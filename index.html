@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-08.3';</script>
+<script>const APP_BUILD_VERSION='2026-09-08.11';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -641,6 +641,7 @@ select.fc{cursor:pointer}
   <div class="ui-info-bar" id="ui-bar-geral" onclick="_irParaTarefas()"></div>
   <div class="dash-tabs" style="margin:16px 20px 0">
     <button class="dash-tab" id="gtab-graficos" onclick="geralTab('graficos',this)">📈 Indicadores</button>
+    <button class="dash-tab" id="gtab-crm" onclick="geralTab('crm',this)">🎯 CRM</button>
     <button class="dash-tab active" id="gtab-vendas" onclick="geralTab('vendas',this)">📊 Vendas do Mês</button>
     <button class="dash-tab" id="gtab-conselho" onclick="geralTab('conselho',this)" style="display:none">🗳️ Conselho de Pedidos</button>
     <button class="dash-tab" id="gtab-emissao" onclick="geralTab('emissao',this)">📋 Lista de Emissão</button>
@@ -1027,6 +1028,61 @@ select.fc{cursor:pointer}
     </div>
   </div>
 
+
+    <!-- CRM COMERCIAL (2026-09-08) — clone do funil de Prospecção de Clientes, colocado
+         dentro de Visão Comercial como sub-aba (ver botão gtab-crm e geralTab()). Comentário
+         completo perto do bloco setupCrmSync() no fim dos scripts. -->
+    <div id="geral-tab-crm" style="display:none;padding:16px 20px">
+      <div class="dash-tabs" style="margin-bottom:14px" id="crm-main-tabs">
+        <button class="dash-tab active crm-main-tab" onclick="crmSetTab('kanban',this)">🗂️ Funil</button>
+        <button class="dash-tab crm-main-tab" onclick="crmSetTab('empresas',this)">🧑‍💼 Contatos</button>
+        <button class="dash-tab crm-main-tab" onclick="crmSetTab('indicadores',this)">📊 Indicadores<span id="crm-ind-badge" style="margin-left:6px;background:#dc2626;color:#fff;border-radius:20px;padding:1px 7px;font-size:.62rem;font-weight:700;display:none"></span></button>
+      </div>
+      <div id="crm-sec-kanban">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+          <input id="crm-kanban-busca" placeholder="🔍 Buscar empresa, segmento ou cidade..." oninput="renderCrmKanban()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button onclick="crmAbrirGerenciarEtapas()" class="dash-btn-conf" style="background:#64748b" type="button">⚙️ Etapas</button>
+            <button onclick="crmAbrirNovaEmpresa()" class="dash-btn-conf" style="background:#00bac7" type="button">+ NOVO NEGÓCIO</button>
+          </div>
+        </div>
+        <div id="crm-kanban-body" style="display:flex;gap:12px;overflow-x:auto;padding-bottom:10px"></div>
+      </div>
+      <div id="crm-sec-empresas" style="display:none">
+        <!-- Sub-abas Empresas/Contatos (2026-08-26, a pedido do usuário: menu "Contatos" com
+             submenus Empresas e Contatos — contatos são os decisores já cadastrados dentro de
+             cada empresa, listados aqui de forma agregada e pesquisável; nada de coleção nova
+             no Firestore, só uma visão que percorre crmEmpresas[].decisores). -->
+        <div class="dash-tabs" style="margin-bottom:14px;max-width:360px" id="crm-contatos-subtabs">
+          <button class="dash-tab active crm-contatos-subtab" id="crm-ct-tab-emp" onclick="crmContatosSubTab('empresas',this)">🏢 Empresas</button>
+          <button class="dash-tab crm-contatos-subtab" id="crm-ct-tab-cont" onclick="crmContatosSubTab('contatos',this)">🧑‍💼 Contatos</button>
+        </div>
+        <div id="crm-sub-empresas">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <input id="crm-emp-lista-busca" placeholder="🔍 Buscar por nome, segmento ou cidade..." oninput="renderCrmEmpresasLista()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button onclick="crmExportarEmpresas()" class="dash-btn-conf" style="background:#64748b" type="button">⬇️ Exportar Empresas</button>
+              <button onclick="crmAbrirNovaEmpresa()" class="dash-btn-conf" style="background:#00bac7" type="button">+ NOVO NEGÓCIO</button>
+            </div>
+          </div>
+          <div id="crm-emp-lista-body"></div>
+        </div>
+        <div id="crm-sub-contatos" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <input id="crm-ct-busca" placeholder="🔍 Buscar por nome, cargo ou empresa..." oninput="renderCrmContatosLista()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button onclick="crmExportarContatos('completo')" class="dash-btn-conf" style="background:#64748b" type="button">⬇️ Completo</button>
+              <button onclick="crmExportarContatos('email')" class="dash-btn-conf" style="background:#64748b" type="button">✉️ Só E-mails</button>
+              <button onclick="crmExportarContatos('telefone')" class="dash-btn-conf" style="background:#64748b" type="button">📞 Só Telefones</button>
+            </div>
+          </div>
+          <div id="crm-contatos-lista-body"></div>
+        </div>
+      </div>
+      <div id="crm-sec-indicadores" style="display:none">
+        <div id="crm-ind-body"></div>
+      </div>
+    </div>
 </div>
 
 </div><!-- /sec-geral -->
@@ -1067,24 +1123,29 @@ select.fc{cursor:pointer}
           <button class="dash-tab" id="tf-tab-conc" onclick="tarefasTab('concluidas',this)">✅ Concluídas</button>
           <button class="dash-tab" id="tf-tab-rel" onclick="tarefasTab('relatorio',this)">📊 Relatório</button>
         </div>
-        <div id="tf-add-wrap" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 12px;margin-bottom:12px">
-          <div style="font-size:.66rem;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">+ Nova tarefa</div>
-          <div style="display:grid;grid-template-columns:1.1fr 1fr .85fr .85fr auto;gap:8px;margin-bottom:8px">
-            <div style="position:relative">
-              <input type="hidden" id="tf-novo-pedido-id" value="">
-              <input id="tf-novo-pedido-busca" type="text" class="no-upper" autocomplete="off" placeholder="🔍 Buscar por OS ou cliente (ex: MOGI)..."
-                oninput="_tfPedidoBuscaInput(this.value)" onfocus="_tfPedidoBuscaInput(this.value)" onblur="_tfPedidoBuscaBlur()"
-                style="width:100%;padding:8px 10px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.8rem;font-family:inherit;box-sizing:border-box;background:#fff">
-              <div id="tf-novo-pedido-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:#fff;border:1.5px solid #bfdbfe;border-radius:8px;margin-top:3px;max-height:240px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.14)"></div>
-            </div>
-            <input id="tf-novo-tipo" type="text" placeholder="Título da tarefa..." class="no-upper" style="width:100%;padding:8px 10px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.8rem;font-family:inherit;box-sizing:border-box;background:#fff">
-            <select id="tf-novo-responsavel" style="width:100%;padding:8px 10px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.8rem;font-family:inherit;box-sizing:border-box;background:#fff">
-              <option value="">Sem responsável</option>
-            </select>
-            <input id="tf-novo-prazo" type="date" title="Prazo (opcional) — usado no Relatório pra medir atraso" style="width:100%;padding:8px 10px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.8rem;font-family:inherit;box-sizing:border-box;background:#fff;color:#475569">
-            <button onclick="_addTarefaAvulsaFromForm()" style="background:#1d4ed8;color:#fff;border:none;border-radius:7px;padding:8px 16px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap">Adicionar</button>
+        <div id="tf-add-wrap" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;margin-bottom:12px;overflow:hidden">
+          <div onclick="_tfToggleSecao('tf-add-body','tf-add-caret')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;user-select:none">
+            <div style="font-size:.66rem;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:.5px">➕ Nova tarefa</div>
+            <div id="tf-add-caret" style="color:#1d4ed8;font-size:.7rem;transition:transform .15s">▾</div>
           </div>
-          <textarea id="tf-novo-desc" class="no-upper" placeholder="Descrição da tarefa (opcional) — detalhe o que precisa ser feito..." rows="2" style="width:100%;padding:8px 10px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.8rem;font-family:inherit;box-sizing:border-box;background:#fff;resize:vertical"></textarea>
+          <div id="tf-add-body" style="display:none;padding:0 12px 12px">
+            <div style="display:grid;grid-template-columns:1.1fr 1fr .85fr .85fr auto;gap:8px;margin-bottom:8px">
+              <div style="position:relative">
+                <input type="hidden" id="tf-novo-pedido-id" value="">
+                <input id="tf-novo-pedido-busca" type="text" class="no-upper" autocomplete="off" placeholder="🔍 Buscar por OS ou cliente (ex: MOGI)..."
+                  oninput="_tfPedidoBuscaInput(this.value)" onfocus="_tfPedidoBuscaInput(this.value)" onblur="_tfPedidoBuscaBlur()"
+                  style="width:100%;padding:8px 10px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.8rem;font-family:inherit;box-sizing:border-box;background:#fff">
+                <div id="tf-novo-pedido-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:#fff;border:1.5px solid #bfdbfe;border-radius:8px;margin-top:3px;max-height:240px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.14)"></div>
+              </div>
+              <input id="tf-novo-tipo" type="text" placeholder="Título da tarefa..." class="no-upper" style="width:100%;padding:8px 10px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.8rem;font-family:inherit;box-sizing:border-box;background:#fff">
+              <select id="tf-novo-responsavel" style="width:100%;padding:8px 10px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.8rem;font-family:inherit;box-sizing:border-box;background:#fff">
+                <option value="">Sem responsável</option>
+              </select>
+              <input id="tf-novo-prazo" type="date" title="Prazo (opcional) — usado no Relatório pra medir atraso" style="width:100%;padding:8px 10px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.8rem;font-family:inherit;box-sizing:border-box;background:#fff;color:#475569">
+              <button onclick="_addTarefaAvulsaFromForm()" style="background:#1d4ed8;color:#fff;border:none;border-radius:7px;padding:8px 16px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap">Adicionar</button>
+            </div>
+            <textarea id="tf-novo-desc" class="no-upper" placeholder="Descrição da tarefa (opcional) — detalhe o que precisa ser feito..." rows="2" style="width:100%;padding:8px 10px;border:1.5px solid #bfdbfe;border-radius:7px;font-size:.8rem;font-family:inherit;box-sizing:border-box;background:#fff;resize:vertical"></textarea>
+          </div>
         </div>
         <!-- Busca por nome ou OS (2026-08-24, a pedido do usuário) — ao contrário do bloco de
              filtros logo abaixo (só admin), esta busca aparece pra todo mundo, já que qualquer
@@ -1093,44 +1154,52 @@ select.fc{cursor:pointer}
         <div id="tf-fil-busca-wrap" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
           <input id="tf-fil-busca" type="text" class="no-upper" oninput="renderTarefasComerciais()" placeholder="🔎 Buscar por nome da tarefa, cliente ou OS..." style="flex:1;min-width:220px;padding:7px 12px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2);box-sizing:border-box">
         </div>
-        <div id="tf-fil-wrap" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-          <label style="font-size:.72rem;font-weight:600;color:var(--ink3);white-space:nowrap">👤 Filtrar por responsável</label>
-          <select id="tf-fil-responsavel" onchange="renderTarefasComerciais()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)">
-            <option value="">Todos</option>
-          </select>
-          <label style="font-size:.72rem;font-weight:600;color:var(--ink3);white-space:nowrap;margin-left:6px">🏷️ Filtrar por categoria</label>
-          <select id="tf-fil-categoria" onchange="renderTarefasComerciais()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)">
-            <option value="">Todas</option>
-          </select>
-          <label style="font-size:.72rem;font-weight:600;color:var(--ink3);white-space:nowrap;margin-left:6px">⏰ Filtrar por atraso</label>
-          <select id="tf-fil-atraso" onchange="renderTarefasComerciais()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)">
-            <option value="">Todas</option>
-            <option value="atrasadas">Só atrasadas</option>
-          </select>
-        </div>
-        <!-- Exportação em PDF — independe da aba Pendentes/Concluídas em tela: monta a lista
-             na hora combinando pendentes+concluídas e aplicando os filtros abaixo (ver
-             exportarTarefasPDF()). Admin exporta de qualquer responsável (reaproveita
-             tf-fil-responsavel); usuário comum só exporta as próprias tarefas, igual à
-             listagem normal (ver _podeMexerNaTarefa()/renderTarefasComerciais()). -->
-        <div id="tf-pdf-wrap" style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:10px 12px">
-          <label style="font-size:.72rem;font-weight:700;color:var(--ink3);white-space:nowrap">📄 Exportar PDF</label>
-          <select id="tf-pdf-escopo" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)">
-            <option value="todas">Todas as tarefas</option>
-            <option value="pendentes">Só pendentes</option>
-            <option value="concluidas">Só concluídas</option>
-            <option value="atrasadas">Só atrasadas (vencidas, ainda pendentes)</option>
-          </select>
-          <select id="tf-pdf-database" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)" title="Qual data usar pra filtrar o período De/Até abaixo">
-            <option value="lancamento">Por data de lançamento</option>
-            <option value="prazo">Por prazo da tarefa</option>
-            <option value="conclusao">Por data de conclusão</option>
-          </select>
-          <span style="font-size:.72rem;color:#94a3b8;font-weight:600">De</span>
-          <input id="tf-pdf-data-ini" type="date" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem">
-          <span style="font-size:.72rem;color:#94a3b8;font-weight:600">Até</span>
-          <input id="tf-pdf-data-fim" type="date" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem">
-          <button onclick="exportarTarefasPDF()" style="background:#1d4ed8;color:#fff;border:none;border-radius:7px;padding:7px 14px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;margin-left:auto">📄 Gerar PDF</button>
+        <div id="tf-adv-wrap" style="background:#f8fafc;border:1px solid var(--border);border-radius:10px;margin-bottom:12px;overflow:hidden">
+          <div onclick="_tfToggleSecao('tf-adv-body','tf-adv-caret')" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer;user-select:none">
+            <div style="font-size:.72rem;font-weight:700;color:var(--ink3)">⚙️ Filtros avançados e exportação</div>
+            <div id="tf-adv-caret" style="color:var(--ink3);font-size:.7rem;transition:transform .15s">▾</div>
+          </div>
+          <div id="tf-adv-body" style="display:none;padding:0 12px 12px">
+            <div id="tf-fil-wrap" style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+              <label style="font-size:.72rem;font-weight:600;color:var(--ink3);white-space:nowrap">👤 Filtrar por responsável</label>
+              <select id="tf-fil-responsavel" onchange="renderTarefasComerciais()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)">
+                <option value="">Todos</option>
+              </select>
+              <label style="font-size:.72rem;font-weight:600;color:var(--ink3);white-space:nowrap;margin-left:6px">🏷️ Filtrar por categoria</label>
+              <select id="tf-fil-categoria" onchange="renderTarefasComerciais()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)">
+                <option value="">Todas</option>
+              </select>
+              <label style="font-size:.72rem;font-weight:600;color:var(--ink3);white-space:nowrap;margin-left:6px">⏰ Filtrar por atraso</label>
+              <select id="tf-fil-atraso" onchange="renderTarefasComerciais()" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)">
+                <option value="">Todas</option>
+                <option value="atrasadas">Só atrasadas</option>
+              </select>
+            </div>
+            <!-- Exportação em PDF — independe da aba Pendentes/Concluídas em tela: monta a lista
+                 na hora combinando pendentes+concluídas e aplicando os filtros abaixo (ver
+                 exportarTarefasPDF()). Admin exporta de qualquer responsável (reaproveita
+                 tf-fil-responsavel); usuário comum só exporta as próprias tarefas, igual à
+                 listagem normal (ver _podeMexerNaTarefa()/renderTarefasComerciais()). -->
+            <div id="tf-pdf-wrap" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <label style="font-size:.72rem;font-weight:700;color:var(--ink3);white-space:nowrap">📄 Exportar PDF</label>
+              <select id="tf-pdf-escopo" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)">
+                <option value="todas">Todas as tarefas</option>
+                <option value="pendentes">Só pendentes</option>
+                <option value="concluidas">Só concluídas</option>
+                <option value="atrasadas">Só atrasadas (vencidas, ainda pendentes)</option>
+              </select>
+              <select id="tf-pdf-database" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem;background:var(--surface);color:var(--ink2)" title="Qual data usar pra filtrar o período De/Até abaixo">
+                <option value="lancamento">Por data de lançamento</option>
+                <option value="prazo">Por prazo da tarefa</option>
+                <option value="conclusao">Por data de conclusão</option>
+              </select>
+              <span style="font-size:.72rem;color:#94a3b8;font-weight:600">De</span>
+              <input id="tf-pdf-data-ini" type="date" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem">
+              <span style="font-size:.72rem;color:#94a3b8;font-weight:600">Até</span>
+              <input id="tf-pdf-data-fim" type="date" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.78rem">
+              <button onclick="exportarTarefasPDF()" style="background:#1d4ed8;color:#fff;border:none;border-radius:7px;padding:7px 14px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap;margin-left:auto">📄 Gerar PDF</button>
+            </div>
+          </div>
         </div>
         <div id="tarefas-body"></div>
         <div id="tarefas-relatorio" style="display:none"></div>
@@ -4246,6 +4315,10 @@ window._fbWatchLixeira=(cb,errCb)=>onSnapshot(collection(db,'lixeira'),cb,errCb|
 window._fbSaveProspEmpresa=(e)=>setDoc(doc(db,'prospEmpresas',String(e.id)),e);
 window._fbDeleteProspEmpresa=(id)=>deleteDoc(doc(db,'prospEmpresas',String(id)));
 window._fbWatchProspEmpresas=(cb,errCb)=>onSnapshot(collection(db,'prospEmpresas'),cb,errCb||(e=>console.error('prospEmpresas watch error',e)));
+// CRM Comercial (2026-09-08) — coleção própria, não mistura com prospEmpresas acima.
+window._fbSaveCrmEmpresa=(e)=>setDoc(doc(db,'crmEmpresas',String(e.id)),e);
+window._fbDeleteCrmEmpresa=(id)=>deleteDoc(doc(db,'crmEmpresas',String(id)));
+window._fbWatchCrmEmpresas=(cb,errCb)=>onSnapshot(collection(db,'crmEmpresas'),cb,errCb||(e=>console.error('crmEmpresas watch error',e)));
 // Config global (compartilhada entre todos os usuários)
 // Blindado com try/catch (2026-08-19) — setDoc() valida os dados ANTES de mandar pra rede e
 // LANÇA UM ERRO SÍNCRONO (não uma promise rejeitada) quando algum campo é inválido pro
@@ -6309,17 +6382,25 @@ function _temAcessoFerramentas(){return _temMenu('FERRAMENTAS');}
 function _temAcessoHistorico(){return _temMenu('HISTORICO');}
 function _temAcessoProspeccao(){return _temMenu('PROSPECCAO_CLIENTES');}
 // Aplica/desfaz o "modo Qualidade" da tela Visão Comercial (2026-09-08): esconde as sub-
-// abas que não fazem sentido pro menu QUALIDADE (Vendas do Mês/Indicadores/Lista de
-// Emissão) e força a aba Conselho de Pedidos, com cabeçalho próprio. Chamada tanto ao
-// ENTRAR no menu QUALIDADE (ativo=true) quanto ao voltar pra 'geral' de verdade
-// (ativo=false, só restaura as sub-abas escondidas — só importa pro admin, único que
-// navega entre os dois; Comercial/Financeiro nunca entram em cat:QUALIDADE).
+// abas que não fazem sentido pro menu QUALIDADE (Vendas do Mês/Indicadores) e força a aba
+// Conselho de Pedidos, com cabeçalho próprio. Chamada tanto ao ENTRAR no menu QUALIDADE
+// (ativo=true) quanto ao voltar pra 'geral' de verdade (ativo=false, só restaura as sub-
+// abas escondidas — só importa pro admin, único que navega entre os dois; Comercial/
+// Financeiro nunca entram em cat:QUALIDADE). Lista de Emissão (gtab-emissao) ficou de fora
+// dessa lista de esconder desde 2026-09-08 (ver comentário mais abaixo, a pedido do
+// usuário: "deixe o menu lista de emissão para o usuario consultar as emissoes").
 // gtab-metas/gtab-produtos (Comissões/Produtos) TAMBÉM são escondidos aqui quando ativo=true
 // (ver bloco logo abaixo) — antes ficavam de fora de propósito por já serem admin-only em
 // buildSidebarCats(), mas isso rodava só 1x no login e deixava as duas abas visíveis pra
 // admin mesmo dentro do menu Qualidade (corrigido em 2026-09-08).
 function _aplicarModoConselhoQualidade(ativo){
-  ['gtab-graficos','gtab-vendas','gtab-emissao'].forEach(id=>{
+  // Lista de Emissão (gtab-emissao) NÃO entra mais nessa lista de "esconder" (2026-09-08, a
+  // pedido do usuário: "deixe o menu lista de emissão para o usuario consultar as
+  // emissoes... so aparece as emissoes pertinente ao que o usuario fez, admin aparece
+  // tudo"). O filtro "só vê os próprios, admin vê tudo" já existia de antes em
+  // pedidosKanban() (mesma regra usada pra vendedor comum) — não precisou de nenhuma lógica
+  // nova, só parar de esconder a aba.
+  ['gtab-graficos','gtab-vendas'].forEach(id=>{
     const el=document.getElementById(id);
     if(el)el.style.display=ativo?'none':'';
   });
@@ -6425,11 +6506,13 @@ function setSection(sec){
   // Menu QUALIDADE (2026-09-08, a pedido do usuário) — reaproveita 100% a tela/lógica do
   // Conselho de Pedidos já usada em Visão Comercial (sec-geral/geral-tab-conselho), só que
   // como menu PRÓPRIO da categoria QUALIDADE — esconde as sub-abas que não fazem sentido
-  // pro setor (Vendas do Mês/Indicadores/Lista de Emissão) e força a aba Conselho, ver
-  // _aplicarModoConselhoQualidade(). O Tipo do Pedido (ed.tipo) fica restrito a
-  // 'Garantia / Retrabalho' e 'Interno' pra esse usuário (ver seletor em getTabs()/render
-  // do passo 'dados') — como esses dois tipos já não tinham aba de Pagamento (2026-07-22,
-  // não têm cobrança do cliente), nada mais precisou mudar nessa parte.
+  // pro setor (Vendas do Mês/Indicadores) e força a aba Conselho, ver
+  // _aplicarModoConselhoQualidade(). Lista de Emissão continua visível, filtrada pros
+  // próprios pedidos do usuário (mesma regra de pedidosKanban() usada pra vendedor comum).
+  // O Tipo do Pedido (ed.tipo) fica restrito a 'Garantia / Retrabalho' e 'Interno' pra esse
+  // usuário (ver seletor em renderStep('conselho'), 1a pergunta do formulário desde
+  // 2026-09-08) — como esses dois tipos já não tinham aba de Pagamento (2026-07-22, não têm
+  // cobrança do cliente), nada mais precisou mudar nessa parte.
   const isQualidadeConselho=sec==='cat:QUALIDADE';
   const isGeral=sec==='geral'||isQualidadeConselho;
 
@@ -6599,12 +6682,14 @@ function geralTab(tab,btn){
   const elMetas=document.getElementById('geral-tab-metas');
   const elConselho=document.getElementById('geral-tab-conselho');
   const elProdutos=document.getElementById('geral-tab-produtos');
+  const elCrm=document.getElementById('geral-tab-crm');
   if(elVendas)elVendas.style.display=tab==='vendas'?'':'none';
   if(elEmissao)elEmissao.style.display=tab==='emissao'?'':'none';
   if(elGraficos)elGraficos.style.display=tab==='graficos'?'':'none';
   if(elMetas)elMetas.style.display=tab==='metas'?'':'none';
   if(elConselho)elConselho.style.display=tab==='conselho'?'':'none';
   if(elProdutos)elProdutos.style.display=tab==='produtos'?'':'none';
+  if(elCrm)elCrm.style.display=tab==='crm'?'':'none';
   const h2=document.getElementById('geral-hdr-h2'),p=document.getElementById('geral-hdr-p');
   if(tab==='vendas'){
     if(h2)h2.textContent='Vendas do Mês';
@@ -6653,6 +6738,10 @@ function geralTab(tab,btn){
       if(restrProd)restrProd.style.display='none';
       try{renderComercialProdutos();}catch(e){console.error('Erro ao abrir Produtos',e);}
     }
+  } else if(tab==='crm'){
+    if(h2)h2.textContent='CRM Comercial';
+    if(p)p.textContent='Funil de relacionamento e prospecção do time Comercial';
+    try{crmSetTab(_crmTabAtiva,document.querySelector('#crm-main-tabs .crm-main-tab.active'));}catch(e){console.error('Erro ao abrir CRM',e);}
   } else {
     if(h2)h2.textContent='Lista de Emissão';
     if(p)p.textContent='Todos os pedidos emitidos, de qualquer categoria';
@@ -6703,6 +6792,7 @@ function renderConselhoPedidos(){
       if(!p.conselhoEscopo)faltam.push('Reunião de Escopo (não respondida)');
       else if(p.conselhoEscopo!=='Sim')faltam.push('Reunião de Escopo (ainda não feita)');
       if(!p.conselhoAssinatura)faltam.push('Necessita Assinatura?');
+      if(!p.conselhoGrupoWpp)faltam.push('Grupo de WhatsApp com o cliente?');
       if(!p.cliente)faltam.push('Cliente');
       if(!p.os)faltam.push('Nº da OS');
       if(!p.vtotalPreenchido&&!(p.valores&&p.valores['Valor Bruto']))faltam.push('Valores');
@@ -7806,6 +7896,11 @@ function getTabs(){
   if(ed.medicao==='Sim')t.push({id:'medicao',l:'Medição'});
   if(ed.elevacoes==='Sim')t.push({id:'elevacoes',l:'Elevações'});
   t.push({id:'bases',l:'Bases/Fund.'});
+  // RNC (Relatório de Não Conformidade) — só existe pra pedidos de Garantia/Retrabalho
+  // (2026-09-08, a pedido do usuário: "ao selecionar o tipo de pedido GARANTIA/RETRABALHO tem
+  // que ter uma ultima janela depois de bases com nome RNC"). Não é obrigatório preencher
+  // (ver submit(), só avisa antes de emitir sem o relatório).
+  if(ed.tipo==='Garantia / Retrabalho')t.push({id:'rnc',l:'RNC'});
   if(ed.f_tipo==='Por nossa conta')t.push({id:'frete',l:'Frete'});
   return t;
 }
@@ -7920,21 +8015,24 @@ async function openEmissao(eid2){
       // fr['Prazo Estimado de Entrega'].
       prazo_frete_txt:fr['Prazo Estimado de Entrega']||'',
       fend:fr['Endereço de Entrega']||'',fie:fr['Inscrição Estadual']||'',chumbador:p.chumbador||'',arq_chumb:p.arq_chumb_url?'Arquivo já enviado':'',arq_chumb_url:p.arq_chumb_url||'',os_chumb:p.os_chumb||'',
+      // RNC (Relatório de Não Conformidade, 2026-09-08) — mesmo padrão de restauração do
+      // arq_chumb acima.
+      arq_rnc:p.arq_rnc_url?'Arquivo já enviado':'',arq_rnc_url:p.arq_rnc_url||'',
       // ftel lia 'Telefone Descarga' (nunca gravada; a chave real é 'Telefone da Descarga').
       facomp:fr['Quem Acompanhou a Descarga']||'',ftel:fr['Telefone da Descarga']||'',bases:p.bases||'',
       // Conselho de Pedidos (2026-08-07) — reconstrói a partir do que já foi salvo (rascunho
       // reaberto pra completar, ou pedido já emitido sendo editado).
       conselhoData:p.conselhoData||'',conselhoEscopo:p.conselhoEscopo||'',conselhoEscopoObs:p.conselhoEscopoObs||'',
-      conselhoAssin:p.conselhoAssinatura||'',conselhoWpp:p.conselhoLinkWpp||'',conselhoClienteProv:p.conselhoClienteProvisorio||''};
+      conselhoAssin:p.conselhoAssinatura||'',conselhoWpp:p.conselhoLinkWpp||'',conselhoGrupoWpp:p.conselhoGrupoWpp||'',conselhoClienteProv:p.conselhoClienteProvisorio||''};
   } else {
     ed={tipo:'',resp:usuarioLogado?.nomeExibicao||'',cli:'',emails:[],email_comprador:'',email_engenheiro:'',email_financeiro:'',job:'',prazo:'',os:'',obs:'',
-      conselhoData:'',conselhoEscopo:'',conselhoEscopoObs:'',conselhoAssin:'',conselhoWpp:'',conselhoClienteProv:'',
+      conselhoData:'',conselhoEscopo:'',conselhoEscopoObs:'',conselhoAssin:'',conselhoWpp:'',conselhoGrupoWpp:'',conselhoClienteProv:'',
       vtotal:'',i_tipo:'',vinst:'',vmob:'',vrem:'',remocao:'',f_tipo:'',fmod:'',vfrete:'',vmed:'',vart:'',vlaudo:'',
       elevacoes:'',elev_tipo:'',elevs:[],velev:'',elevBloqVia:'',remocoes:[],medicao:'',
       tem_oc:'',arq_oc:'',tem_ent:'Não tem entrada',vent:'',dent:'',fent:'',
       nparc:'Sem parcelamento',fparc:'',pdatas:[],pvals:[],nf:'',obsfin:'',art:'',cnpj_art:'',cnpj_art_url:'',arq_prod:'',layout_inst:'',fotos_orig:'',pasta_arquivos:'',laudo:'',
       iacomp:'',itel:'',icep:'',ilog:'',inum_e:'',icomp:'',ibairro:'',icidade:'',iuf:'',ihor:'Comercial',inum:'',idias:'',iinteg:'',iseg:'',vseg:'',ibloqenergia:'',pintubo:'',vpintub:'',icep_ok:false,
-      minfo:'',fcep:'',flog:'',fnum_e:'',fcomp:'',fbairro:'',fcidade:'',fuf:'',fend:'',fie:'',facomp:'',ftel:'',fdist:'',bases:'',chumbador:'',arq_chumb:'',os_chumb:'',fcep_ok:false};
+      minfo:'',fcep:'',flog:'',fnum_e:'',fcomp:'',fbairro:'',fcidade:'',fuf:'',fend:'',fie:'',facomp:'',ftel:'',fdist:'',bases:'',chumbador:'',arq_chumb:'',os_chumb:'',fcep_ok:false,arq_rnc:'',arq_rnc_url:''};
   }
   step=0;renderEM();openM('mo-em');
 }
@@ -7981,6 +8079,14 @@ function renderEM(){
 }
 
 function goStep(i){saveSt();step=i;renderEM()}
+function _tipoDispensaValores(tipo){
+  // Tipos que não geram cobrança nenhuma ao cliente (2026-09-08, a pedido do usuário:
+  // "Quando o pedido se tratar de Retrabalho/Garantia, interno, Amostra, brinde, não é
+  // obrigatorio ter valores") — mesma lista que já tira a aba Pagamento em getTabs(), só
+  // que aqui é o contrário: a aba Valores continua aparecendo (dá pra preencher se quiser),
+  // só deixa de ser bloqueante pra emitir.
+  return['Garantia / Retrabalho','Interno','Amostra','Brinde'].includes(tipo);
+}
 function validarAba(id){
   // Retorna lista de erros da aba atual
   const erros=[];
@@ -7990,18 +8096,24 @@ function validarAba(id){
   // não aqui (ver comentário lá): dá pra continuar preenchendo o resto do pedido pro
   // rascunho mesmo respondendo "Não" por enquanto.
   if(id==='conselho'){
-    // Nome do Cliente provisório (2026-08-08, a pedido do usuário) — só serve pra identificar
-    // o rascunho na lista de Conselho enquanto a Razão Social (ed.cli, aba Dados) e o JOB ainda
-    // não foram preenchidos; some da lista sozinho assim que p.cliente existir de verdade (ver
-    // renderConselhoPedidos()). Por isso é obrigatório aqui: sem ele a lista fica cheia de "—".
+    // Tipo do Pedido (2026-09-08, a pedido do usuário: "essa parte do print de tipo de pedido
+    // deve ser a primeira pergunta do formulario... que dai dependemos dessa resposta pra saber
+    // o rumo das outras perguntas") — decide a aba Pagamento (getTabs()) e se a aba Valores é
+    // obrigatória (ver _tipoDispensaValores()), por isso virou a 1a pergunta daqui, não mais da
+    // aba Dados.
+    if(!ed.tipo)erros.push('Tipo do pedido não selecionado');
+    // Nome do Cliente provisório (2026-08-08, a pedido do usuário) — vira o Cliente definitivo
+    // do pedido inteiro (ed.cli, ver saveSt()) e o JOB (aba Dados) — some da lista sozinho
+    // assim que p.cliente existir de verdade (ver renderConselhoPedidos()). Por isso é
+    // obrigatório aqui: sem ele a lista fica cheia de "—".
     if(!ed.conselhoClienteProv||!ed.conselhoClienteProv.trim())erros.push('Nome do Cliente (provisório) não informado');
     if(!ed.conselhoData)erros.push('Data em que fará o Conselho não informada');
     if(!ed.conselhoEscopo)erros.push('Informe se foi feita a reunião de escopo com o cliente');
     if(!ed.conselhoAssin)erros.push('Informe se o pedido necessita de assinatura (contrato)');
+    if(!ed.conselhoGrupoWpp)erros.push('Informe se foi criado grupo de WhatsApp com o cliente');
   }
   if(id==='geral'||id==='dados'){
     if(!ed.cli)erros.push('Cliente não informado');
-    if(!ed.tipo)erros.push('Tipo do pedido não selecionado');
     if(!ed.resp)erros.push('Responsável não informado');
     if(!ed.job)erros.push('Nome do job não informado');
     if(!ed.prazo)erros.push('Prazo de entrega não informado');
@@ -8028,7 +8140,7 @@ function validarAba(id){
     // foi de fato bloqueada aqui — dava pra emitir pedido sem categoria nenhuma.
     if(!ed.tipoPedido)erros.push('Categoria de Pedido não selecionada');
   }
-  if(id==='valores'){
+  if(id==='valores'&&!_tipoDispensaValores(ed.tipo)){
     if(!ed.vtotal)erros.push('Valor total do pedido não informado');
     if(!ed.i_tipo)erros.push('Instalação não selecionada');
     if(ed.i_tipo==='Por nossa conta'&&!ed.vinst)erros.push('Valor da instalação não informado');
@@ -8100,6 +8212,10 @@ function validarAba(id){
     if(!ed.elevBloqVia)erros.push('Informe se necessita de bloqueio da via para realização do trabalho');
   }
   if(id==='bases'){
+    // Tipo de Base/Fundação obrigatório pra QUALQUER tipo de pedido (2026-09-08, a pedido do
+    // usuário: "essa pergunta deve ser obrigatória em todos os tipos de pedido") — antes não
+    // tinha nenhuma validação aqui, dava pra emitir sem escolher nada.
+    if(!ed.bases)erros.push('Tipo de Base/Fundação não informado');
     if(!ed.chumbador)erros.push('Informe se esta obra tem chumbador');
     if(ed.chumbador==='Sim'&&!ed.os_chumb)erros.push('Informe o Nº da OS do Chumbador');
     if(ed.chumbador==='Sim'&&!ed.arq_chumb)erros.push('Anexe o PDF do Pedido de Chumbador');
@@ -8228,9 +8344,9 @@ function saveSt(){
   const gsel=cls=>document.querySelector('.'+cls+'.sel')?.dataset?.val||'';
   const gon=cls=>document.querySelector('.'+cls+'.on')?.dataset?.val||'';
   if(id==='conselho'){
-    ed.conselhoClienteProv=gv('em-cons-cliente-prov').trim();ed.conselhoData=gv('em-cons-data');ed.conselhoEscopoObs=gv('em-cons-obs');ed.conselhoWpp=gv('em-cons-wpp').trim();
+    ed.conselhoClienteProv=gv('em-cons-cliente-prov').trim();ed.cli=ed.conselhoClienteProv;ed.conselhoData=gv('em-cons-data');ed.conselhoEscopoObs=gv('em-cons-obs');
   }else if(id==='dados'){
-    ed.resp=gv('em-rsp');ed.cli=gv('em-cli');ed.job=gv('em-job');ed.prazo=gv('em-prazo');ed.obs=gv('em-obs');
+    ed.resp=gv('em-rsp');ed.job=gv('em-job');ed.prazo=gv('em-prazo');ed.obs=gv('em-obs');
     ed.email_comprador=gv('em-email-comprador').trim();ed.email_engenheiro=gv('em-email-engenheiro').trim();ed.email_financeiro=gv('em-email-financeiro').trim();
     ed.os=gv('em-os').trim();
     const osF=document.getElementById('em-pdf');if(osF&&osF.files[0])ed.arq_os=osF.files[0].name;
@@ -8541,7 +8657,7 @@ function selRC(el,cls){
 function rTG(cls,val,label,cur,yes){const on=cur===val;
   return`<button class="tgb${yes?' yes':' no'}${on?' on':''} ${cls}" data-val="${val}" onclick="togBtn(this,'${cls}')">${label}</button>`}
 function togBtn(el,cls){
-  const map={tg_oc:'tem_oc',tg_art:'art',tg_elv:'elevacoes',tg_med:'medicao',tg_itg:'iinteg',tg_seg:'iseg',tg_rem:'remocao',tg_chumb:'chumbador',tg_bloqenergia:'ibloqenergia',tg_bloqvia:'elevBloqVia',tg_laudo:'laudo',tg_pintub:'pintubo',tg_cons_escopo:'conselhoEscopo',tg_cons_assin:'conselhoAssin'};
+  const map={tg_oc:'tem_oc',tg_art:'art',tg_elv:'elevacoes',tg_med:'medicao',tg_itg:'iinteg',tg_seg:'iseg',tg_rem:'remocao',tg_chumb:'chumbador',tg_bloqenergia:'ibloqenergia',tg_bloqvia:'elevBloqVia',tg_laudo:'laudo',tg_pintub:'pintubo',tg_cons_escopo:'conselhoEscopo',tg_cons_assin:'conselhoAssin',tg_cons_wpp:'conselhoGrupoWpp'};
   el.closest('.tg-grp').querySelectorAll('button').forEach(b=>b.classList.remove('on'));
   el.classList.add('on');if(map[cls])ed[map[cls]]=el.dataset.val;
   if(cls==='tg_elv'||cls==='tg_med'){saveSt();renderEM();}else updCond();
@@ -8595,25 +8711,29 @@ function renderStep(id){
       <div class="fsec-t"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> CONSELHO DE PEDIDOS</div>
       <div style="border:1.5px solid #eef0f5;border-radius:12px;padding:16px;margin-bottom:14px">
         <div style="font-size:.76rem;color:var(--ink3);margin-bottom:14px">Este pedido só pode ser emitido de verdade (indo pra Lista de Vendas e disparando o e-mail) depois de passar pelo Conselho. Preencha o que já tiver aqui — o resto dá pra completar depois, reabrindo este mesmo rascunho.</div>
+        <div class="fg"><label>1. Tipo do Pedido <span class="r">*</span></label>
+          <div class="rc-list">${(_isSetorUser('QUALIDADE')&&!_getUserCat().isAdm?['Garantia / Retrabalho','Interno']:['Venda','Permuta','Garantia / Retrabalho','Amostra','Interno','Brinde']).map(t=>`<div class="rc" data-val="${t}" onclick="selTipo(this)" ${ed.tipo===t?'style="border-color:#00bac7;background:#e0f7fa"':''}><input type="radio" ${ed.tipo===t?'checked':''}><span>${t}</span></div>`).join('')}</div>
+          <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Essa resposta define o rumo do resto do formulário — Garantia/Retrabalho, Interno, Amostra e Brinde não cobram do cliente, não têm aba de Pagamento e não exigem a aba Valores preenchida.</div>
+        </div>
         <div class="fg"><label>Nome do Cliente <span class="r">*</span></label>
           <input class="fc" id="em-cons-cliente-prov" value="${(ed.conselhoClienteProv||'').replace(/"/g,'&quot;')}" placeholder="Ex: Padaria do João, Posto Estrela...">
-          <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Só pra identificar esse pedido na lista de Conselho enquanto a Razão Social e o JOB ainda não foram preenchidos (aba Dados) — assim que forem, a lista passa a mostrar eles no lugar deste nome.</div>
+          <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Vira o Cliente do pedido inteiro (aba Dados não pergunta de novo) — assim que o JOB também for preenchido lá, a lista de Conselho passa a mostrar os dois no lugar deste nome.</div>
         </div>
         <div class="fg"><label>Data em que fará o Conselho <span class="r">*</span></label>
           <input class="fc" type="date" id="em-cons-data" value="${ed.conselhoData||''}">
         </div>
-        <div class="fg"><label>1. Foi feita a reunião de escopo com o cliente? <span class="r">*</span></label>
+        <div class="fg"><label>2. Foi feita a reunião de escopo com o cliente? <span class="r">*</span></label>
           <div class="tg-grp">${rTG('tg_cons_escopo','Sim','Sim',ed.conselhoEscopo,true)}${rTG('tg_cons_escopo','Não','Não',ed.conselhoEscopo,false)}</div>
         </div>
         <div class="fg"><label>Observações sobre a reunião de escopo</label>
           <textarea class="fc" id="em-cons-obs" placeholder="Anotações sobre a reunião de escopo...">${ed.conselhoEscopoObs||''}</textarea>
         </div>
-        <div class="fg"><label>2. Pedido necessita de assinatura? (contrato) <span class="r">*</span></label>
+        <div class="fg"><label>3. Pedido necessita de assinatura? (contrato) <span class="r">*</span></label>
           <div class="tg-grp">${rTG('tg_cons_assin','Sim','Sim',ed.conselhoAssin,true)}${rTG('tg_cons_assin','Não','Não',ed.conselhoAssin,false)}</div>
         </div>
-        <div class="fg"><label>3. Link do grupo de WhatsApp dessa obra</label>
-          <input class="fc" id="em-cons-wpp" value="${(ed.conselhoWpp||'').replace(/"/g,'&quot;')}" placeholder="https://chat.whatsapp.com/..." style="text-transform:none">
-          <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Aparece como link clicável no e-mail de emissão, pra qualquer um do grupo entrar.</div>
+        <div class="fg"><label>4. Foi criado grupo de WhatsApp com o cliente? <span class="r">*</span></label>
+          <div class="tg-grp">${rTG('tg_cons_wpp','Sim','Sim',ed.conselhoGrupoWpp,true)}${rTG('tg_cons_wpp','Não','Não',ed.conselhoGrupoWpp,false)}</div>
+          <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Se ainda não foi criado, marque "Não" — não precisa de mais nada aqui.</div>
         </div>
       </div>
     </div>`;
@@ -8649,30 +8769,24 @@ function renderStep(id){
         <div id="os-check-result"></div>
         <div style="font-size:.72rem;color:var(--ink4);margin-top:8px">📎 Anexe o PDF primeiro — o sistema já tenta preencher sozinho o Nº da OS e os valores das próximas abas (Valores, Instalação) a partir dele.</div>
       </div>
-      <div class="fg"><label>1. Tipo do Pedido <span class="r">*</span></label>
-        <div class="rc-list">${(_isSetorUser('QUALIDADE')&&!_getUserCat().isAdm?['Garantia / Retrabalho','Interno']:['Venda','Permuta','Garantia / Retrabalho','Amostra','Interno','Brinde']).map(t=>`<div class="rc" data-val="${t}" onclick="selTipo(this)" ${ed.tipo===t?'style="border-color:#00bac7;background:#e0f7fa"':''}><input type="radio" ${ed.tipo===t?'checked':''}><span>${t}</span></div>`).join('')}</div>
-      </div>
-      <div class="g2">
-        <div class="fg"><label>2. Responsável pelo Pedido</label>
-          <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f0fdfe;border:1.5px solid #00bac7;border-radius:10px">
-            <span style="font-size:1rem">👤</span>
-            <span id="em-rsp-nome" style="font-size:.88rem;font-weight:700;color:#0f172a">${ed.resp||(usuarioLogado?.nomeExibicao||'—')}</span>
-            <input type="hidden" id="em-rsp" value="${ed.resp||(usuarioLogado?.nomeExibicao||'')}">
-          </div>
+      <div class="fg"><label>1. Responsável pelo Pedido</label>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f0fdfe;border:1.5px solid #00bac7;border-radius:10px">
+          <span style="font-size:1rem">👤</span>
+          <span id="em-rsp-nome" style="font-size:.88rem;font-weight:700;color:#0f172a">${ed.resp||(usuarioLogado?.nomeExibicao||'—')}</span>
+          <input type="hidden" id="em-rsp" value="${ed.resp||(usuarioLogado?.nomeExibicao||'')}">
         </div>
-        <div class="fg"><label>5. JOB <span class="r">*</span></label><input class="fc" id="em-job" value="${ed.job||''}" placeholder="Ex: TOTEM"></div>
       </div>
-      <div class="fg"><label>3. Nome do Cliente <span class="r">*</span></label><input class="fc" id="em-cli" value="${ed.cli||''}" placeholder="Nome do cliente"></div>
+      <div class="fg"><label>2. JOB <span class="r">*</span></label><input class="fc" id="em-job" value="${ed.job||''}" placeholder="Ex: TOTEM"></div>
       <div class="g2">
-        <div class="fg"><label>6. Prazo de Entrega / Finalização <span class="r">*</span></label><input class="fc" type="date" id="em-prazo" min="${new Date().toISOString().slice(0,10)}" value="${ed.prazo||''}"></div>
+        <div class="fg"><label>3. Prazo de Entrega / Finalização <span class="r">*</span></label><input class="fc" type="date" id="em-prazo" min="${new Date().toISOString().slice(0,10)}" value="${ed.prazo||''}"></div>
         </div>
       <div class="g2">
         <div class="fg"><label>4. E-mail do Comprador(a) <span class="r">*</span></label><input class="fc" type="email" id="em-email-comprador" autocomplete="off" value="${ed.email_comprador||''}" placeholder="comprador@exemplo.com" style="text-transform:none"></div>
         <div class="fg"><label>4b. E-mail do Engenheiro da Obra <span class="r">*</span></label><input class="fc" type="email" id="em-email-engenheiro" autocomplete="off" value="${ed.email_engenheiro||''}" placeholder="engenheiro@exemplo.com" style="text-transform:none"></div>
       </div>
       <div class="fg"><label>4c. E-mail Financeiro (envio de NF's)</label><input class="fc" type="email" id="em-email-financeiro" autocomplete="off" value="${ed.email_financeiro||''}" placeholder="financeiro@exemplo.com" style="text-transform:none"></div>
-      <div class="fg"><label>7. Observações</label><textarea class="fc" id="em-obs">${ed.obs||''}</textarea></div>
-      <div class="fg"><label>8. Categoria de Pedido <span class="r">*</span></label>
+      <div class="fg"><label>5. Observações</label><textarea class="fc" id="em-obs">${ed.obs||''}</textarea></div>
+      <div class="fg"><label>6. Categoria de Pedido <span class="r">*</span></label>
         <select class="fc" id="em-tped" onchange="ed.tipoPedido=this.value">
           <option value="">Selecione a categoria...</option>
           ${getTiposPedido().map(t=>`<option ${ed.tipoPedido===t?'selected':''}>${t}</option>`).join('')}
@@ -8956,7 +9070,7 @@ function renderStep(id){
   }else if(id==='bases'){
     bd.innerHTML=`<div class="fsec">
       <div class="fsec-t">&#127959; BASES E FUNDAÇÕES</div>
-      <div class="fg"><label>Tipo de Base/Fundação</label>
+      <div class="fg"><label>Tipo de Base/Fundação <span class="r">*</span></label>
         <select class="fc" id="em-bas"><option value="">Selecione...</option>${['NÃO TEM BASE NESTE PEDIDO','BASE POR NOSSA CONTA','BASE POR CONTA DO CLIENTE'].map(b=>`<option ${ed.bases===b?'selected':''}>${b}</option>`).join('')}</select>
       </div>
       <div class="fg" style="margin-top:6px"><label>Esta obra tem chumbador?</label>
@@ -8972,6 +9086,20 @@ function renderStep(id){
             ${ed.arq_chumb?`<div class="uz-file">✓ ${ed.arq_chumb}</div>`:''}
             <input type="file" accept=".pdf" id="em-arqc" style="display:none" onchange="ed.arq_chumb=this.files[0]?.name||'';setUpload('uz-chumb','',this,'arq_chumb')">
           </div>
+        </div>
+      </div>
+    </div>`;
+  }else if(id==='rnc'){
+    bd.innerHTML=`<div class="fsec">
+      <div class="fsec-t">&#128203; RNC — RELATÓRIO DE NÃO CONFORMIDADE</div>
+      <div style="font-size:.76rem;color:var(--ink3);margin-bottom:14px">Pedido de Garantia/Retrabalho — anexe aqui o relatório de não conformidade da Qualidade, com as informações da análise feita. Não é obrigatório pra emitir, mas o sistema avisa se estiver faltando.</div>
+      <div class="fg"><label>Inserir o Relatório de Não Conformidade</label>
+        <div class="upload-zone${ed.arq_rnc?' has-file':''}" id="uz-rnc" onclick="document.getElementById('em-rnc-file').click()">
+          <span class="uz-icon">${ed.arq_rnc?'✅':'📄'}</span>
+          <div class="uz-title">${ed.arq_rnc?'Relatório anexado':'Clique para selecionar ou arraste aqui'}</div>
+          <div class="uz-sub">PDF ou JPG · Máx. 10MB</div>
+          ${ed.arq_rnc?`<div class="uz-file">✓ ${ed.arq_rnc}${ed.arq_rnc_url?` &nbsp;<a href="${ed.arq_rnc_url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--brand);font-size:.7rem">[abrir]</a>`:''}</div>`:''}
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png" id="em-rnc-file" style="display:none" onchange="ed.arq_rnc=this.files[0]?.name||'';setUpload('uz-rnc','',this,'arq_rnc')">
         </div>
       </div>
     </div>`;
@@ -9472,18 +9600,6 @@ function buildEmissaoEmailContent(p){
     </tr></table>
   </td></tr>
 
-  <!-- GRUPO DE WHATSAPP DA OBRA (Conselho de Pedidos, 2026-08-07) — link clicável pro grupo
-       combinado no Conselho, pra quem receber o e-mail conseguir entrar direto. Só aparece se
-       o link foi preenchido (nem todo pedido tem grupo). -->
-  ${p.conselhoLinkWpp?`
-  <tr><td style="background:#f0fdf4;border-bottom:1px solid #dcfce7;padding:14px 40px">
-    <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td style="font-size:13px;color:#166534"><strong>💬 Grupo de WhatsApp da Obra</strong> &nbsp;·&nbsp;
-        <a href="${p.conselhoLinkWpp}" target="_blank" style="color:#16a34a;font-weight:700;text-decoration:underline">Entrar no grupo ↗</a>
-      </td>
-    </tr></table>
-  </td></tr>`:''}
-
   <!-- BODY -->
   <tr><td style="padding:32px 40px;background:#ffffff">
     <table width="100%" cellpadding="0" cellspacing="0">
@@ -9495,7 +9611,8 @@ function buildEmissaoEmailContent(p){
       ${fmtSec('Contatos',{
         ...(p.email_comprador?{"E-mail do Comprador(a)":p.email_comprador}:{}),
         ...(p.email_engenheiro?{"E-mail do Engenheiro da Obra":p.email_engenheiro}:{}),
-        ...(p.email_financeiro?{"E-mail Financeiro (envio de NF's)":p.email_financeiro}:{})
+        ...(p.email_financeiro?{"E-mail Financeiro (envio de NF's)":p.email_financeiro}:{}),
+        ...(p.conselhoGrupoWpp?{"Grupo de WhatsApp criado com o cliente?":p.conselhoGrupoWpp}:{})
       })}
       ${fmtSec('Valores',valEmail)}
       ${fmtSec('Pagamento',pagSemLiquido)}
@@ -9546,6 +9663,16 @@ function buildEmissaoEmailContent(p){
       ${p.os_chumb?`<tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">OS do Chumbador</td><td style="padding:10px 0;color:#111827;font-size:13px;font-weight:600">${p.os_chumb}</td></tr>`:''}
       ${p.arq_chumb_url?`<tr style="background:#fafafa"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Pedido de Chumbador</td><td style="padding:10px 0;font-size:13px;font-weight:600"><a href="${cldDownload(p.arq_chumb_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">Clique aqui para baixar ↗</a></td></tr>`:''}
       `:`<tr><td colspan="2" style="padding:10px 0;color:#9ca3af;font-size:13px;font-style:italic">Não tem base neste pedido.</td></tr>`}
+
+      <!-- RNC (RELATÓRIO DE NÃO CONFORMIDADE) — só pra pedidos de Garantia/Retrabalho, 2026-09-08,
+      a pedido do usuário: "Esse arquivo deve ir tambem no email no mesmo formato dos demais,
+      clicavel e para baixar ao clicar. Mesmo padrão." -->
+      ${p.tipo==='Garantia / Retrabalho'?`
+      <tr><td colspan="2" style="padding:20px 0 8px;border-bottom:2px solid #e91e63">
+        <span style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#111827">RNC — Relatório de Não Conformidade</span>
+      </td></tr>
+      ${p.arq_rnc_url?`<tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Relatório de Não Conformidade</td><td style="padding:10px 0;font-size:13px;font-weight:600"><a href="${cldDownload(p.arq_rnc_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">Clique aqui para baixar ↗</a></td></tr>`:`<tr><td colspan="2" style="padding:10px 0;color:#9ca3af;font-size:13px;font-style:italic">Nenhum relatório de não conformidade anexado.</td></tr>`}
+      `:''}
 
       <!-- PROJETOS — cabeçalho da seção sempre aparece: Pasta de Arquivos é obrigatória em
       todo pedido (ver validação em submit()), então não faz sentido a seção só existir
@@ -10183,6 +10310,36 @@ function _resolveAvisosOs(val){
   const m=document.getElementById('mo-avisos-os');if(m)m.style.display='none';
   if(_avisosOsResolve){const r=_avisosOsResolve;_avisosOsResolve=null;r(val);}
 }
+// RNC (Relatório de Não Conformidade) — mesmo padrão de modal de confirmação não-bloqueante
+// acima (_confirmarAvisosOs/_resolveAvisosOs), só que pro aviso de RNC ausente (2026-09-08).
+let _rncConfirmResolve=null;
+function _confirmarEmitirSemRNC(){
+  return new Promise(resolve=>{
+    _rncConfirmResolve=resolve;
+    let m=document.getElementById('mo-aviso-rnc');
+    if(!m){
+      m=document.createElement('div');m.id='mo-aviso-rnc';
+      m.style.cssText='position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);backdrop-filter:blur(3px)';
+      document.body.appendChild(m);
+    }
+    m.innerHTML=`<div style="background:#fff;border-radius:18px;padding:28px 28px 22px;max-width:480px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,.25);font-family:inherit">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div style="width:36px;height:36px;border-radius:50%;background:#fef3c7;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0">📋</div>
+        <div><div style="font-size:.95rem;font-weight:800;color:#111">Sem Relatório de Não Conformidade</div><div style="font-size:.75rem;color:#6b7280;margin-top:2px">Não é obrigatório, mas vale confirmar antes de emitir</div></div>
+      </div>
+      <div style="font-size:.82rem;color:#374151;padding:5px 0 5px 12px;border-left:2px solid #fbbf24;margin-bottom:4px">🟡 Este pedido de Garantia/Retrabalho está sendo emitido SEM o Relatório de Não Conformidade (RNC) anexado (aba RNC).</div>
+      <div style="display:flex;gap:10px;margin-top:18px">
+        <button onclick="_resolveAvisoRNC(false)" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid #e5e7eb;background:#fff;font-size:.82rem;font-weight:700;cursor:pointer;color:#374151">Voltar e anexar</button>
+        <button onclick="_resolveAvisoRNC(true)" style="flex:1;padding:10px;border-radius:10px;border:none;background:#e91e63;color:#fff;font-size:.82rem;font-weight:700;cursor:pointer">Emitir sem o RNC</button>
+      </div>
+    </div>`;
+    m.style.display='flex';
+  });
+}
+function _resolveAvisoRNC(val){
+  const m=document.getElementById('mo-aviso-rnc');if(m)m.style.display='none';
+  if(_rncConfirmResolve){const r=_rncConfirmResolve;_rncConfirmResolve=null;r(val);}
+}
 // ===================== FIM VERIFICADOR DA OS =====================
 
 // Monta o objeto do pedido (val/pag/inst/fr/proj + campos gerais) a partir do estado atual de
@@ -10298,7 +10455,7 @@ function _buildPedidoBaseDoEd(){
     // reconstruir o e-mail original de verdade (faltaria PDF da OS, OC, chumbador e a
     // cidade/UF do assunto). Sempre com fallback pra string vazia — nunca undefined,
     // porque undefined no objeto quebra o savePedidoFS (ver [[project_firestore_undefined_fields]]).
-    arq_os_url:ed.arq_os_url||'',arq_oc_url:ed.arq_oc_url||'',arq_chumb_url:ed.arq_chumb_url||'',
+    arq_os_url:ed.arq_os_url||'',arq_oc_url:ed.arq_oc_url||'',arq_chumb_url:ed.arq_chumb_url||'',arq_rnc_url:ed.arq_rnc_url||'',
     chumbador:ed.chumbador||'',os_chumb:ed.os_chumb||'',
     // Congela a config de Etapas de Pedidos (percentuais/removidas/extras) NO MOMENTO da
     // emissão — se for edição de um pedido que já tinha isso, mantém o snapshot antigo (nunca
@@ -10326,7 +10483,7 @@ function _buildPedidoBaseDoEd(){
     // de emitido, como prova de que o Conselho foi feito). criadoPor/criadoEm só são setados
     // na 1ª vez (preserva o do registro existente se já tinha).
     conselhoData:ed.conselhoData||'',conselhoEscopo:ed.conselhoEscopo||'',conselhoEscopoObs:ed.conselhoEscopoObs||'',
-    conselhoAssinatura:ed.conselhoAssin||'',conselhoLinkWpp:ed.conselhoWpp||'',
+    conselhoAssinatura:ed.conselhoAssin||'',conselhoLinkWpp:ed.conselhoWpp||'',conselhoGrupoWpp:ed.conselhoGrupoWpp||'',
     // Nome do Cliente provisório (2026-08-08) — só usado pra exibição na lista de Conselho
     // enquanto p.cliente (Razão Social, aba Dados) ainda não existe (ver renderConselhoPedidos()).
     conselhoClienteProvisorio:ed.conselhoClienteProv||'',
@@ -10507,6 +10664,7 @@ async function submit(){
   if(!ed.conselhoEscopo)erros.push({msg:'Informe se foi feita a reunião de escopo com o cliente',aba:idxConselho,label:'Conselho'});
   else if(ed.conselhoEscopo!=='Sim')erros.push({msg:'A reunião de escopo com o cliente precisa ter sido feita (resposta "Sim") antes de emitir este pedido',aba:idxConselho,label:'Conselho'});
   if(!ed.conselhoAssin)erros.push({msg:'Informe se o pedido necessita de assinatura (contrato)',aba:idxConselho,label:'Conselho'});
+  if(!ed.conselhoGrupoWpp)erros.push({msg:'Informe se foi criado grupo de WhatsApp com o cliente',aba:idxConselho,label:'Conselho'});
   // Pendências do Conselho (2026-08-08) — ANTES bloqueava a emissão enquanto tivesse pendência
   // aberta; removido a pedido do usuário ("mesmo tendo pendencias ele pode emitir") — agora dá
   // pra emitir com pendência aberta, e ela continua visível/cobrando depois de emitido (ver
@@ -10554,8 +10712,12 @@ async function submit(){
       erros.push({msg:'Nº da OS "'+ed.os+'" já está em uso por outra venda — use um número diferente',aba:idxDados,label:'Dados Gerais'});
     }
   }
-  // Aba valores
+  // Aba valores — Garantia/Retrabalho, Interno, Amostra e Brinde não cobram do cliente,
+  // então não é obrigatório preencher valores nestes tipos (2026-09-08, a pedido do usuário)
+  // — mesma trava já aplicada em validarAba('valores'), repetida aqui como segunda camada de
+  // defesa. Ver _tipoDispensaValores().
   const idxVal=idx('valores');
+  if(!_tipoDispensaValores(ed.tipo)){
   if(!ed.vtotal)erros.push({msg:'Valor total do pedido não informado',aba:idxVal,label:'Valores'});
   if(!ed.i_tipo)erros.push({msg:'Instalação não selecionada',aba:idxVal,label:'Valores'});
   if(ed.i_tipo==='Por nossa conta'&&!ed.vinst)erros.push({msg:'Valor da instalação não informado',aba:idxVal,label:'Valores'});
@@ -10586,6 +10748,7 @@ async function submit(){
   // ficar zerados/sem marcar (2026-08-20, a pedido do usuário) — segunda camada de defesa,
   // mesma checagem já feita em validarAba('valores')/stepNext(). Ver _custosPdfPendentes().
   _custosPdfPendentes(ed).forEach(msg=>erros.push({msg,aba:idxVal,label:'Valores'}));
+  }
   // Aba pagamento — só existe (e só é exigida) pra pedidos do tipo "Venda" ou "Permuta"
   // (2026-07-22); os demais tipos (Garantia/Retrabalho, Amostra, Interno, Brinde) não
   // cobram nada do cliente.
@@ -10614,6 +10777,11 @@ async function submit(){
   if(!ed.arq_prod)erros.push({msg:'Selecione os arquivos de produção',aba:idxProj,label:'Projetos'});
   if(!ed.layout_inst)erros.push({msg:'Selecione o layout de instalação',aba:idxProj,label:'Projetos'});
   if(!ed.fotos_orig)erros.push({msg:'Selecione as fotos originais',aba:idxProj,label:'Projetos'});
+  // Aba bases — Tipo de Base/Fundação obrigatório pra qualquer tipo de pedido (2026-09-08, a
+  // pedido do usuário) — segunda camada de defesa, mesma checagem já feita em
+  // validarAba('bases').
+  const idxBases=idx('bases');
+  if(!ed.bases)erros.push({msg:'Tipo de Base/Fundação não informado',aba:idxBases,label:'Bases/Fund.'});
   // Aba instalação
   const idxInst=idx('instalacao');
   if(ed.itel&&!validaTel(ed.itel))erros.push({msg:'Telefone da instalação inválido',aba:idxInst,label:'Instalação'});
@@ -10648,6 +10816,15 @@ async function submit(){
       const prosseguir=await _confirmarAvisosOs(itensOs);
       if(!prosseguir)return;
     }
+  }
+  // RNC (Relatório de Não Conformidade) — não é obrigatório anexar pra emitir um pedido de
+  // Garantia/Retrabalho (2026-09-08, a pedido do usuário: "Não precisa ser obrigatorio inserir
+  // este relatorio para emitir o pedido mas lembrar o usuario de que está sem este relatorio ao
+  // emitir e dai se quer emitir sem relatório mesmo"), só avisa e pede confirmação antes de
+  // deixar emitir sem ele.
+  if(ed.tipo==='Garantia / Retrabalho'&&!ed.arq_rnc_url){
+    const prosseguirSemRNC=await _confirmarEmitirSemRNC();
+    if(!prosseguirSemRNC)return;
   }
   const{p,_pedidoExistente}=_buildPedidoBaseDoEd();
   // Conselho de Pedidos (2026-08-07) — a decisão de "isso é uma emissão de verdade" não pode
@@ -11574,6 +11751,7 @@ function initAuth(tries){
         setupRhAtestadosAnexosSync();
         setupLixeiraSync();
         setupProspSync();
+        setupCrmSync();
         setupSimReservasSync();
         load().then(()=>{
           const nomeMap=cfg.usuarioNomes||{};
@@ -28145,6 +28323,7 @@ function _histPedidoEventos(p){
       p.conselhoData?`Conselho marcado pra ${fmtD(p.conselhoData)}`:'',
       p.conselhoEscopo?`Reunião de escopo: ${p.conselhoEscopo}`:'',
       p.conselhoAssinatura?`Necessita assinatura: ${p.conselhoAssinatura}`:'',
+      p.conselhoGrupoWpp?`Grupo de WhatsApp com o cliente: ${p.conselhoGrupoWpp}`:'',
       `registrado por ${p.conselhoCriadoPor||'—'}`
     ].filter(Boolean).join(' · ');
     add('🗳️','Conselho de Pedidos registrado',p.conselhoCriadoEm,detalheCons,'#7c3aed');
@@ -32053,11 +32232,11 @@ function abrirTarefasComerciais(){
   const addWrap=document.getElementById('tf-add-wrap');
   const filWrap=document.getElementById('tf-fil-wrap');
   const buscaWrap=document.getElementById('tf-fil-busca-wrap');
-  const pdfWrap=document.getElementById('tf-pdf-wrap');
+  const advWrap=document.getElementById('tf-adv-wrap');
   if(addWrap)addWrap.style.display=isAdm?'':'none';
   if(filWrap)filWrap.style.display=isAdm?'':'none';
   if(buscaWrap)buscaWrap.style.display='';
-  if(pdfWrap)pdfWrap.style.display='';
+  if(advWrap)advWrap.style.display='';
   const relEl=document.getElementById('tarefas-relatorio');if(relEl)relEl.style.display='none';
   const bodyEl=document.getElementById('tarefas-body');if(bodyEl)bodyEl.style.display='';
   if(isAdm){
@@ -32083,13 +32262,13 @@ function tarefasTab(tab,btn){
   const addWrap=document.getElementById('tf-add-wrap');
   const filWrap=document.getElementById('tf-fil-wrap');
   const buscaWrap=document.getElementById('tf-fil-busca-wrap');
-  const pdfWrap=document.getElementById('tf-pdf-wrap');
+  const advWrap=document.getElementById('tf-adv-wrap');
   const bodyEl=document.getElementById('tarefas-body');
   const relEl=document.getElementById('tarefas-relatorio');
   if(addWrap)addWrap.style.display=(isAdm&&!isRel)?'':'none';
   if(filWrap)filWrap.style.display=(isAdm&&!isRel)?'':'none';
   if(buscaWrap)buscaWrap.style.display=isRel?'none':'';
-  if(pdfWrap)pdfWrap.style.display=isRel?'none':'';
+  if(advWrap)advWrap.style.display=isRel?'none':'';
   if(bodyEl)bodyEl.style.display=isRel?'none':'';
   if(relEl)relEl.style.display=isRel?'':'none';
   if(isRel)renderRelatorioTarefas();
@@ -32144,61 +32323,72 @@ function renderTarefasComerciais(){
   // Guarda a lista renderizada (já com os dados de venda mesclados) pra abrirDetalheTarefa()
   // achar a tarefa pelo id sem precisar re-buscar em pedidos/cfg.tarefasGerais.
   _tarefasListaAtual=lista;
+  // Linha enxuta (2026-09-08, a pedido do usuário: "muita informação nesta janela, ruim de
+  // ler... aparece so o titulo, responsavel e datas... e o botao de concluir seja um check
+  // mais intuitivo... ao clicar nessa tarefa dai sim abrirá uma janelinha com mais informações
+  // completas") — categoria/Conselho/descrição/OS-cliente-job/rodapé e os botões de
+  // Adiar/Aprovar/Reprovar/Devolver/Excluir saíram da lista e foram morar só no detalhe
+  // (abrirDetalheTarefa(), que já mostrava tudo isso — não mudou nada lá). Só o check de
+  // Concluir/Reabrir continua na lista, pra não precisar abrir o detalhe pra ação mais comum.
   body.innerHTML=lista.map(t=>{
-    // Badge de prazo/atraso da TAREFA (diferente do prazo de entrega do pedido, mostrado
-    // logo abaixo) — ver _tarefaAtrasada(). Sem prazoTarefa não mostra nada aqui.
     const atrasada=_tarefaAtrasada(t);
-    let prazoBadge='';
-    if(t.prazoTarefa){
-      if(atrasada)prazoBadge=`<span style="background:#fee2e2;color:#dc2626;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">⚠️ Prazo ${fmtD(t.prazoTarefa)}${pendente?' (vencido)':' — concluída com atraso'}</span>`;
-      else prazoBadge=`<span style="background:${pendente?'#fef9c3':'#dcfce7'};color:${pendente?'#92400e':'#16a34a'};border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">${pendente?'📅 Prazo '+fmtD(t.prazoTarefa):'✅ No prazo'}</span>`;
-    }
-    const aguardandoBadge=aguardando?`<span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">🔍 Aguardando aprovação</span>`:'';
-    // Resumo da descrição na lista (até 2 linhas) — visualmente separado do título, em
-    // cinza mais claro; o texto completo só aparece ao clicar no card (abrirDetalheTarefa).
-    const descResumo=t.descricao?`<div style="font-size:.74rem;color:#64748b;margin-top:3px;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${t.descricao}</div>`:'';
-    const rodapeTexto=pendente?'Criada em '+_fmtDataHora(t.criadaEm)
-      :aguardando?'Enviada para aprovação em '+_fmtDataHora(t.concluidaEm)+(t.concluidoPor?' por '+t.concluidoPor:'')
-      :'Concluída em '+_fmtDataHora(t.concluidaEm)+(t.aprovadoPor&&t.aprovadoPor!==t.concluidoPor?' · Aprovada por '+t.aprovadoPor:'');
-    let acoesHtml='';
+    // Círculo de status/ação à esquerda: vazio e clicável (concluir) em Pendentes, preenchido
+    // e clicável (reabrir) em Concluídas, só um ícone estático (depende do admin decidir) em
+    // Aguardando Aprovação — ver _tfConcluirRapido().
+    let checkHtml;
     if(pendente){
-      acoesHtml=`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 14px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">✅ Concluir</button>`
-        +(!t.adiamentoPendente&&_podeMexerNaTarefa(t.responsavel)
-          ?`<button onclick="abrirAdiarTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">⏳ Adiar</button>`
-          :'')
-        +(t.adiamentoPendente&&isAdm
-          ?`<button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">✅ Aprovar</button><button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',false)" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">❌ Reprovar</button>`
-          :'');
+      checkHtml=`<div onclick="_tfConcluirRapido(event,this,'${t.pedidoId||''}','${t.id}',true)" title="Marcar como concluída" onmouseover="this.style.borderColor='#16a34a';this.style.background='#dcfce7'" onmouseout="this.style.borderColor='#cbd5e1';this.style.background='#fff'" style="width:20px;height:20px;border-radius:50%;border:1.5px solid #cbd5e1;background:#fff;flex-shrink:0;cursor:pointer;transition:all .15s"></div>`;
     } else if(aguardando){
-      acoesHtml=isAdm
-        ?`<button onclick="aprovarTarefaComercial('${t.pedidoId||''}','${t.id}')" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:7px 14px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">✅ Aprovar</button><button onclick="abrirDevolverTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:7px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">↩️ Devolver</button>`
-        :`<span style="font-size:.7rem;color:#94a3b8;white-space:nowrap">Aguardando aprovação do administrador</span>`;
+      checkHtml=`<div title="Aguardando aprovação do administrador" style="width:20px;height:20px;border-radius:50%;border:1.5px solid #7dd3fc;background:#e0f2fe;color:#0369a1;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:.6rem">🔍</div>`;
     } else {
-      acoesHtml=`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',false)" style="background:#f1f5f9;color:#475569;border:none;border-radius:7px;padding:7px 14px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">↩️ Reabrir</button>`;
+      checkHtml=`<div onclick="_tfConcluirRapido(event,this,'${t.pedidoId||''}','${t.id}',false)" title="Reabrir tarefa" onmouseover="this.style.opacity='.72'" onmouseout="this.style.opacity='1'" style="width:20px;height:20px;border-radius:50%;border:1.5px solid #16a34a;background:#16a34a;color:#fff;flex-shrink:0;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.58rem;font-weight:900;transition:opacity .15s">✓</div>`;
     }
-    acoesHtml+=_podeExcluirTarefa(t.criadoPor)
-      ?`<button onclick="excluirTarefaComercial('${t.pedidoId||''}','${t.id}')" title="Excluir tarefa — só quem lançou ou um administrador vê este botão" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:7px;padding:7px 10px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap">🗑️</button>`
-      :'';
+    // Data compacta: mistura prazo/atraso/adiamento (que antes eram 2-3 badges separados)
+    // numa frase só, igual responsável — mesma informação de sempre, só mais compacta.
+    let dataTxt,dataCor;
+    if(pendente){
+      if(t.adiamentoPendente){dataTxt=(t.prazoTarefa?'vencia '+fmtD(t.prazoTarefa)+' → ':'')+'novo prazo pedido: '+fmtD(t.adiamentoPendente.prazoSolicitado);dataCor='#92400e';}
+      else if(t.atrasoForcado){dataTxt='adiamento reprovado — conta atraso';dataCor='#dc2626';}
+      else if(t.prazoTarefa){dataTxt=atrasada?'vencida '+fmtD(t.prazoTarefa):'prazo '+fmtD(t.prazoTarefa);dataCor=atrasada?'#dc2626':'#92400e';}
+      else{dataTxt='sem prazo';dataCor='#94a3b8';}
+    } else if(aguardando){
+      dataTxt='enviada '+(t.concluidaEm?fmtD(t.concluidaEm.slice(0,10)):'—');dataCor='#0369a1';
+    } else {
+      dataTxt='concluída '+(t.concluidaEm?fmtD(t.concluidaEm.slice(0,10)):'—')+(atrasada?' (com atraso)':'');dataCor=atrasada?'#dc2626':'#16a34a';
+    }
     return`
-    <div onclick="abrirDetalheTarefa('${t.id}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid ${atrasada&&pendente?'#fecaca':'var(--border-lt)'};border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
-      <div style="min-width:0">
-        <div style="font-weight:700;font-size:.82rem;color:#1e293b;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          <span>${t.tipo}</span>
-          ${t.origemConselho?`<span style="background:#ede9fe;color:#7c3aed;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">🗳️ Conselho</span>`:''}
-          ${t.responsavel?`<span style="background:#dbeafe;color:#1d4ed8;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">👤 ${t.responsavel}</span>`:`<span style="background:#f1f5f9;color:#94a3b8;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:600;white-space:nowrap">Sem responsável</span>`}
-          ${aguardandoBadge}
-          ${prazoBadge}
-          ${_tarefaAdiamentoBadges(t,pendente)}
-        </div>
-        ${descResumo}
-        <div style="font-size:.72rem;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:3px">${t.avulsaGeral?'📌 Tarefa avulsa (sem venda vinculada)':'OS '+(t.os||'—')+' · '+(t.cliente||'—')+(t.job?' · JOB: '+t.job:'')+' · '+t.vendedor+(t.prazo?' · Prazo do pedido: '+fmtD(t.prazo):'')}</div>
-        <div style="font-size:.66rem;color:#94a3b8;margin-top:2px">${rodapeTexto}${t.criadoPor?' · Lançada por '+t.criadoPor:''}</div>
+    <div onclick="abrirDetalheTarefa('${t.id}')" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid ${atrasada&&pendente?'#fecaca':'var(--border-lt)'};border-radius:10px;margin-bottom:6px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+      ${checkHtml}
+      <div style="min-width:0;flex:1">
+        <div style="font-weight:700;font-size:.82rem;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.tipo}</div>
+        <div style="font-size:.72rem;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.responsavel?'👤 '+t.responsavel:'Sem responsável'} <span style="color:${dataCor};font-weight:600">· ${dataTxt}</span></div>
       </div>
-      <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;max-width:220px" onclick="event.stopPropagation()">
-        ${acoesHtml}
-      </div>
+      <div style="color:#cbd5e1;font-size:.9rem;flex-shrink:0">›</div>
     </div>`;
   }).join('');
+}
+// Check discreto da lista (2026-09-08) — marca/reabre direto sem passar pelo detalhe
+// (abrirDetalheTarefa continua com o botão "grande" de sempre, pra quem preferir usar de
+// lá). event.stopPropagation() é o que impede o clique no círculo de também abrir o
+// detalhe (a linha inteira também tem onclick="abrirDetalheTarefa(...)").
+function _tfConcluirRapido(ev,el,pedidoId,tarefaId,concluir){
+  ev.stopPropagation();
+  el.style.background=concluir?'#16a34a':'#fff';
+  el.style.borderColor=concluir?'#16a34a':'#cbd5e1';
+  el.style.transform='scale(1.15)';
+  marcarTarefaComercial(pedidoId,tarefaId,concluir);
+}
+// Colapsa/expande "+ Nova tarefa" e "Filtros avançados e exportação" (2026-09-08, a pedido
+// do usuário: "ta muita informação nesta janela... pensei de otimizar tudo... um botao pra
+// expandir ou recolher"). Ambos começam fechados (display:none já no HTML) — não precisa
+// lembrar estado entre sessões (fica igual até recarregar a página, que já é o suficiente).
+function _tfToggleSecao(bodyId,caretId){
+  const body=document.getElementById(bodyId);
+  if(!body)return;
+  const abrindo=body.style.display==='none';
+  body.style.display=abrindo?'':'none';
+  const caret=document.getElementById(caretId);
+  if(caret)caret.style.transform=abrindo?'rotate(180deg)':'';
 }
 // ── DETALHE DA TAREFA (clique no card, 2026-07-16) ──────────────────────────────
 let _tarefasListaAtual=[];
@@ -32234,22 +32424,22 @@ function abrirDetalheTarefa(tarefaId){
     :'Concluída em '+_fmtDataHora(t.concluidaEm)+(t.aprovadoPor&&t.aprovadoPor!==t.concluidoPor?' · Aprovada por '+t.aprovadoPor:'');
   let botoesHtml='';
   if(pendente){
-    botoesHtml=`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',true);closeM('mo-tarefa-detalhe')" style="flex:1;background:#16a34a;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">✅ Concluir</button>`
+    botoesHtml=`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',true);closeM('mo-tarefa-detalhe')" style="flex:1;background:#16a34a;color:#fff;border:none;border-radius:7px;padding:8px;font-size:.76rem;font-weight:700;cursor:pointer">✅ Concluir</button>`
       +(!t.adiamentoPendente&&_podeMexerNaTarefa(t.responsavel)
-        ?`<button onclick="abrirAdiarTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">⏳ Adiar</button>`
+        ?`<button onclick="abrirAdiarTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:7px;padding:8px 14px;font-size:.76rem;font-weight:700;cursor:pointer">⏳ Adiar</button>`
         :'')
       +(t.adiamentoPendente&&isAdm
-        ?`<button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">✅ Aprovar adiamento</button><button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',false)" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">❌ Reprovar</button>`
+        ?`<button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',true)" style="background:#16a34a;color:#fff;border:none;border-radius:7px;padding:8px 14px;font-size:.76rem;font-weight:700;cursor:pointer">✅ Aprovar adiamento</button><button onclick="decidirAdiamentoTarefa('${t.pedidoId||''}','${t.id}',false)" style="background:#fff;color:#dc2626;border:1px solid #fecaca;border-radius:7px;padding:8px 14px;font-size:.76rem;font-weight:700;cursor:pointer">❌ Reprovar</button>`
         :'');
   } else if(aguardando){
     botoesHtml=isAdm
-      ?`<button onclick="aprovarTarefaComercial('${t.pedidoId||''}','${t.id}');closeM('mo-tarefa-detalhe')" style="flex:1;background:#16a34a;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">✅ Aprovar</button><button onclick="abrirDevolverTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">↩️ Devolver</button>`
-      :`<div style="flex:1;font-size:.82rem;color:#94a3b8;padding:11px;text-align:center">Aguardando aprovação do administrador</div>`;
+      ?`<button onclick="aprovarTarefaComercial('${t.pedidoId||''}','${t.id}');closeM('mo-tarefa-detalhe')" style="flex:1;background:#16a34a;color:#fff;border:none;border-radius:7px;padding:8px;font-size:.76rem;font-weight:700;cursor:pointer">✅ Aprovar</button><button onclick="abrirDevolverTarefa('${t.pedidoId||''}','${t.id}')" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:7px;padding:8px 14px;font-size:.76rem;font-weight:700;cursor:pointer">↩️ Devolver</button>`
+      :`<div style="flex:1;font-size:.82rem;color:#94a3b8;padding:8px;text-align:center">Aguardando aprovação do administrador</div>`;
   } else {
-    botoesHtml=`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',false);closeM('mo-tarefa-detalhe')" style="flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer">↩️ Reabrir</button>`;
+    botoesHtml=`<button onclick="marcarTarefaComercial('${t.pedidoId||''}','${t.id}',false);closeM('mo-tarefa-detalhe')" style="flex:1;background:#f1f5f9;color:#475569;border:none;border-radius:7px;padding:8px;font-size:.76rem;font-weight:700;cursor:pointer">↩️ Reabrir</button>`;
   }
   botoesHtml+=_podeExcluirTarefa(t.criadoPor)
-    ?`<button onclick="closeM('mo-tarefa-detalhe');excluirTarefaComercial('${t.pedidoId||''}','${t.id}')" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:9px;padding:11px 16px;font-size:.85rem;font-weight:700;cursor:pointer">🗑️ Excluir</button>`
+    ?`<button onclick="closeM('mo-tarefa-detalhe');excluirTarefaComercial('${t.pedidoId||''}','${t.id}')" style="background:#fff;color:#dc2626;border:1px solid #fecaca;border-radius:7px;padding:8px 14px;font-size:.76rem;font-weight:700;cursor:pointer">🗑️ Excluir</button>`
     :'';
   const body=document.getElementById('td-body');if(!body)return;
   body.innerHTML=`
@@ -32268,7 +32458,7 @@ function abrirDetalheTarefa(tarefaId){
       <div>${t.avulsaGeral?'📌 Tarefa avulsa (sem venda vinculada)':'<strong>Pedido:</strong> OS '+(t.os||'—')+' · '+(t.cliente||'—')+(t.job?' · JOB: '+t.job:'')+' · '+t.vendedor+(t.prazo?' · Prazo do pedido: '+fmtD(t.prazo):'')}</div>
       <div style="font-size:.76rem;color:#94a3b8">${rodapeTexto}${t.criadoPor?' · Lançada por '+t.criadoPor:''}</div>
     </div>
-    <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
+    <div style="display:flex;gap:6px;margin-top:16px;flex-wrap:wrap">
       ${botoesHtml}
     </div>
   `;
@@ -36380,6 +36570,1535 @@ async function prospRemoverEtapa(key){
   await _prospSalvarEtapas(novasEtapas);
   _prospRenderEtapasModal();
   if(_prospTabAtiva==='kanban')renderProspKanban();
+  toast('Etapa removida','tok');
+}
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// CRM COMERCIAL (2026-09-08, a pedido do usuário — novo menu dentro de Visão Comercial, ao
+// lado de "📈 Indicadores"). Clone do funil de Prospecção de Clientes (mesma estrutura:
+// Kanban de empresas com etapas customizáveis, decisores, linha do tempo de comentários e
+// tarefas, aba de Indicadores) — só que com coleção PRÓPRIA no Firestore (crmEmpresas, ver
+// window._fbSaveCrmEmpresa perto de window._fbSaveProspEmpresa), pra não misturar dados com
+// o funil de Prospecção de Clientes original (que continua existindo do jeito que estava,
+// intocado). Pedido do usuário: copiar por enquanto, sugestões de mudança vêm depois, já
+// que os dois têm diferenças de verdade. Única adaptação feita já nesta cópia: "Responsável"
+// elegível aqui é categoria COMERCIAL (o time comercial inteiro) + admin, em vez de categoria
+// PROSPECÇÃO — copiar a regra original ao pé da letra deixaria a lista de responsáveis vazia
+// pra quem realmente vai usar este menu (ver _crmNomesEquipe() abaixo).
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+let crmEmpresas=[];
+let _crmTabAtiva='kanban';
+let _crmCalRef=new Date();
+let _crmCardAtualId=null;
+// Aba ativa dentro do card de empresa (2026-08-28, a pedido do usuário: "as informações tao
+// todas iguais, parece tudo a mesma coisa... confunde... sugiro mudarmos o design pra deixar
+// cada coisa separada"). Card virou abas (Visão Geral/Decisores/Tarefas/Atividade) em vez de
+// um scroll único — ver _crmCardSetTab()/_crmRenderCard(). Só é resetada pra 'visao' ao
+// ABRIR um card (crmAbrirCard); re-renders do MESMO card (depois de salvar um decisor, uma
+// tarefa etc.) preservam a aba em que o usuário estava, senão toda ação jogaria ele de volta
+// pro início.
+let _crmCardTabAtiva='visao';
+
+function setupCrmSync(){
+  if(!window._fbWatchCrmEmpresas)return;
+  window._fbWatchCrmEmpresas(function(snapshot){
+    crmEmpresas=snapshot.docs.map(d=>d.data());
+    const el=document.getElementById('geral-tab-crm');
+    const secGeralEl=document.getElementById('sec-geral');
+    if(el&&el.style.display!=='none'&&secGeralEl&&secGeralEl.style.display!=='none'){
+      if(_crmTabAtiva==='kanban')renderCrmKanban();
+      else if(_crmTabAtiva==='empresas')_crmRenderContatosSubtab();
+      else if(_crmTabAtiva==='indicadores')renderCrmIndicadores();
+    }
+    _crmAtualizarBadgeSaude();
+  },function(err){
+    console.error('Erro ao sincronizar crmEmpresas:',err);
+  });
+}
+
+// Etapas do funil — usa cfg.crmEtapas se o usuário já customizou (adicionou/removeu/
+// reordenou alguma etapa, ver crmAdicionarEtapa/crmRemoverEtapa/crmMoverEtapaOrdem),
+// senão cai no default abaixo. Só grava em cfg na primeira customização de verdade — evita
+// precisar de uma migração 1x-por-sessão só pra semear o default, igual o resto do sistema
+// já faz em vários lugares (ver comentários de migração em setupRealtimeSync).
+const CRM_ETAPAS_DEFAULT=[
+  {key:'pesquisa_inicial',label:'PESQUISA INICIAL'},
+  {key:'identificacao_decisores',label:'IDENTIFICAÇÃO DECISORES'},
+  {key:'confirmacao_decisores',label:'CONFIRMAÇÃO DECISORES'},
+  {key:'reuniao_apresentacao',label:'REUNIÃO DE APRESENTAÇÃO'},
+  {key:'acompanhamento',label:'ACOMPANHAMENTO'},
+  {key:'tem_demanda_proxima',label:'TEM DEMANDA PRÓXIMA'},
+  {key:'em_homologacao',label:'EM HOMOLOGAÇÃO'},
+  {key:'em_atendimento',label:'EM ATENDIMENTO'}
+];
+function _crmEtapas(){
+  return (cfg.crmEtapas&&cfg.crmEtapas.length)?cfg.crmEtapas:CRM_ETAPAS_DEFAULT;
+}
+async function _crmSalvarEtapas(etapas){
+  cfg.crmEtapas=etapas;
+  try{
+    if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['crmEtapas'],etapas);
+    else if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+    localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  }catch(e){console.error('Erro ao salvar etapas do CRM:',e);toast('Erro ao salvar etapas: '+(e.message||e),'terr');}
+}
+
+// REGIOES_BR/UF_BR (2026-09-08) — reaproveita a declaração original logo acima (mesma
+// função no clone de Prospecção de Clientes): lista de estados/regiões do Brasil não muda
+// de um menu pro outro, então NÃO redeclara aqui (evita 'Identifier already declared').
+const _CRM_TIPO_ICONE={ligar:'📞',email:'✉️',reuniao:'🤝',outro:'📌'};
+
+// Nomes elegíveis a "Responsável" no CRM Comercial — quem tem categoria COMERCIAL
+// (cfg.usuarioCats) + admin (Guilherme, que enxerga/mexe em tudo mas não passa pelo cadastro
+// normal de usuários). Diferente do clone original (CRM Comercial), que restringia
+// à categoria PROSPECÇÃO — aqui é o time Comercial inteiro, já que este menu vive dentro de
+// Visão Comercial (2026-09-08). CUIDADO: não confundir com getProspectores() (função bem mais
+// antiga e sem nenhuma relação com esta feature — nomes de categoria COMERCIAL cujo "Tipo
+// no Comercial" é PROSPECCAO sem acento, usado só no cálculo de comissão de vendedor).
+function _crmNomesEquipe(){
+  const cats=cfg.usuarioCats||{};
+  const nomes=cfg.usuarioNomes||{};
+  const set=new Set();
+  Object.entries(cats).forEach(([email,cat])=>{
+    if(cat==='COMERCIAL'){
+      const nome=(nomes[email]||email).toUpperCase().trim();
+      if(nome)set.add(nome);
+    }
+  });
+  set.add('GUILHERME CLABONDE');
+  return[...set].sort();
+}
+function _crmPopularResponsaveis(){
+  const sel=document.getElementById('crm-emp-responsavel');
+  if(!sel)return;
+  sel.innerHTML='<option value="">Sem responsável definido</option>'+_crmNomesEquipe().map(n=>`<option value="${n}">${n}</option>`).join('');
+}
+
+// ── SAÚDE DO FUNIL (2026-08-14) ─────────────────────────────────────────────────────
+// "Interação" = qualquer sinal real de que alguém trabalhou o card: comentário na linha
+// do tempo, tarefa concluída (ligou/mandou e-mail/reunião/outro) ou mudança de etapa
+// (também vira um evento automático na linha do tempo, ver crmMoverEtapa mais abaixo).
+// Sem nenhuma dessas, cai no criadoEm — cadastrar a empresa e nunca mais tocar já conta
+// como abandono, é exatamente o cenário que o usuário quer enxergar.
+function _crmUltimaInteracao(e){
+  let melhor={em:e.criadoEm||e.atualizadoEm||new Date().toISOString(),desc:'Empresa cadastrada'};
+  (e.timeline||[]).forEach(ev=>{if(ev.em&&ev.em>melhor.em)melhor={em:ev.em,desc:ev.texto||''};});
+  _crmTarefasDoCard(e.id).forEach(t=>{if(t.status==='concluida'&&t.concluidaEm&&t.concluidaEm>melhor.em)melhor={em:t.concluidaEm,desc:(_CRM_TIPO_ICONE[t.crmCategoria]||'📌')+' '+(t.tipo||'')};});
+  return melhor;
+}
+function _crmDiasSemInteracao(e){
+  return Math.max(0,Math.floor((Date.now()-new Date(_crmUltimaInteracao(e).em).getTime())/86400000));
+}
+// Limiares configuráveis (dias corridos sem nenhuma interação) — default 5/10, editável
+// em Indicadores → ⚙️ Limiares de Saúde, gravado em cfg.crmSaudeLimiares.
+function _crmLimiares(){
+  const l=cfg.crmSaudeLimiares;
+  return{amarelo:(l&&l.amarelo)||5,vermelho:(l&&l.vermelho)||10};
+}
+function _crmSaude(e){
+  const dias=_crmDiasSemInteracao(e);
+  const lim=_crmLimiares();
+  if(dias>=lim.vermelho)return{nivel:'vermelho',dias,cor:'#dc2626',bg:'#fee2e2',emoji:'🔴',label:'Desassistido'};
+  if(dias>=lim.amarelo)return{nivel:'amarelo',dias,cor:'#d97706',bg:'#fef3c7',emoji:'🟡',label:'Atenção'};
+  return{nivel:'verde',dias,cor:'#16a34a',bg:'#dcfce7',emoji:'🟢',label:'Saudável'};
+}
+async function _crmSalvarLimiares(amarelo,vermelho){
+  cfg.crmSaudeLimiares={amarelo,vermelho};
+  try{
+    if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['crmSaudeLimiares'],cfg.crmSaudeLimiares);
+    else if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }catch(e){console.error('Erro ao salvar limiares de saúde:',e);toast('Erro ao salvar limiares','terr');}
+}
+
+function crmSetTab(tab,btn){
+  _crmTabAtiva=tab;
+  document.querySelectorAll('#crm-main-tabs .crm-main-tab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  const sk=document.getElementById('crm-sec-kanban'),se=document.getElementById('crm-sec-empresas'),si=document.getElementById('crm-sec-indicadores');
+  if(sk)sk.style.display=tab==='kanban'?'':'none';
+  if(se)se.style.display=tab==='empresas'?'':'none';
+  if(si)si.style.display=tab==='indicadores'?'':'none';
+  if(tab==='kanban')renderCrmKanban();
+  else if(tab==='empresas')_crmRenderContatosSubtab();
+  else if(tab==='indicadores')renderCrmIndicadores();
+}
+// Sub-abas dentro do menu "Contatos" (Empresas / Contatos, 2026-08-26) — mesma ideia de
+// alternância de sub-abas usada em outros lugares do CRM, só alternando 2 divs internas.
+// Contatos é uma visão agregada e SOMENTE
+// LEITURA de crmEmpresas[].decisores (nenhuma coleção nova) — editar um contato continua
+// sendo feito abrindo a empresa dele (ver renderCrmContatosLista, onclick=crmAbrirCard).
+let _crmContatosSubTabAtiva='empresas';
+function crmContatosSubTab(tab,btn){
+  _crmContatosSubTabAtiva=tab;
+  document.querySelectorAll('#crm-contatos-subtabs .crm-contatos-subtab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  const se=document.getElementById('crm-sub-empresas'),sc=document.getElementById('crm-sub-contatos');
+  if(se)se.style.display=tab==='empresas'?'':'none';
+  if(sc)sc.style.display=tab==='contatos'?'':'none';
+  _crmRenderContatosSubtab();
+}
+function _crmRenderContatosSubtab(){
+  if(_crmContatosSubTabAtiva==='contatos')renderCrmContatosLista();
+  else renderCrmEmpresasLista();
+}
+
+// ── FUNIL (KANBAN) ──────────────────────────────────────────────────────────────────
+function _crmEmpresasFiltradas(busca){
+  const q=(busca||'').trim().toUpperCase();
+  if(!q)return crmEmpresas;
+  return crmEmpresas.filter(e=>
+    (e.nome||'').toUpperCase().includes(q)||
+    (e.segmento||'').toUpperCase().includes(q)||
+    (e.sedeCidade||'').toUpperCase().includes(q)
+  );
+}
+function _crmProximaTarefa(e){
+  const pend=_crmTarefasDoCard(e.id).filter(t=>t.status==='pendente').sort((a,b)=>(a.prazoTarefa||'').localeCompare(b.prazoTarefa||''));
+  return pend[0]||null;
+}
+function renderCrmKanban(){
+  const wrap=document.getElementById('crm-kanban-body');
+  if(!wrap)return;
+  if(!_podeVerVisaoComercial()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const busca=document.getElementById('crm-kanban-busca')?.value||'';
+  const empresas=_crmEmpresasFiltradas(busca);
+  const etapas=_crmEtapas();
+  wrap.innerHTML=etapas.map(et=>{
+    const itens=empresas.filter(e=>(e.etapa||etapas[0].key)===et.key);
+    return `<div class="crm-col" data-etapa="${et.key}" ondragover="crmDragOver(event)" ondragleave="crmDragLeave(event)" ondrop="crmDrop(event,'${et.key}')">
+      <div style="padding:10px 12px;border-bottom:2px solid var(--brand);font-size:.73rem;font-weight:800;color:var(--ink2);display:flex;justify-content:space-between;align-items:center;gap:6px">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${et.label}">${et.label}</span>
+        <span style="background:var(--brand);color:#fff;border-radius:20px;padding:1px 8px;font-size:.68rem;flex-shrink:0">${itens.length}</span>
+      </div>
+      <div style="padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px">
+        ${itens.length?itens.map(e=>_crmCardHtml(e)).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.72rem">Nenhuma empresa aqui.</div>'}
+      </div>
+    </div>`;
+  }).join('');
+}
+// Campos mínimos exigidos pra um card SAIR da 1ª etapa do funil (2026-08-20, a pedido do
+// usuário: "para avançar de fases não deixar o card andar pra frente sem ter tudo preenchido
+// ... travar na pesquisa caso o usuário não preencha os dados e avisar isso pra ele"). Card pode
+// nascer e ficar parado na Pesquisa Inicial totalmente vazio — só quando alguém tenta MOVER pra
+// fora dela (ver crmMoverEtapa) é que isso é cobrado. Telefone/e-mail do decisor ficam de
+// fora de propósito (usuário disse explicitamente "pode ser colocado depois").
+function _crmCamposFaltantes(e){
+  const faltando=[];
+  if(e.unidadesExistentes===undefined||e.unidadesExistentes===null||e.unidadesExistentes==='')faltando.push('unidades existentes');
+  if(e.unidadesAbrir===undefined||e.unidadesAbrir===null||e.unidadesAbrir==='')faltando.push('unidades que pretende abrir');
+  if(!(e.decisores||[]).some(d=>(d.nome||'').trim()))faltando.push('nome de ao menos 1 decisor');
+  if(!(e.regioes||[]).length)faltando.push('região(ões) de expansão');
+  return faltando;
+}
+function _crmCardHtml(e){
+  const prox=_crmProximaTarefa(e);
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const decisorPrincipal=(e.decisores||[])[0];
+  const saude=_crmSaude(e);
+  let tarefaBadge='';
+  if(prox){
+    const atrasada=prox.prazoTarefa&&prox.prazoTarefa<hojeIso;
+    tarefaBadge=`<div style="font-size:.66rem;font-weight:700;margin-top:5px;color:${atrasada?'#dc2626':'#0369a1'};background:${atrasada?'#fee2e2':'#e0f2fe'};border-radius:6px;padding:3px 7px;display:inline-block">${atrasada?'⚠️':'🗓️'} ${_CRM_TIPO_ICONE[prox.crmCategoria]||'📌'} ${fmtD(prox.prazoTarefa)}</div>`;
+  }
+  // Aviso de dados incompletos (2026-08-20) — só aparece pra card ainda na 1ª etapa do funil
+  // (etapas[0].key), avisando ANTES mesmo de alguém tentar arrastar (ver _crmCamposFaltantes
+  // e a trava correspondente em crmMoverEtapa).
+  const etapasCard=_crmEtapas();
+  const camposFaltando=e.etapa===etapasCard[0].key?_crmCamposFaltantes(e):[];
+  const incompletaBadge=camposFaltando.length?`<div title="Faltando: ${camposFaltando.join(', ').replace(/"/g,'&quot;')}" style="font-size:.62rem;font-weight:700;margin-top:5px;color:#b45309;background:#fef3c7;border-radius:6px;padding:3px 7px;display:inline-block">⚠️ Dados incompletos</div>`:'';
+  return `<div class="crm-card" draggable="true" ondragstart="crmDragStart(event,'${e.id}')" ondragend="crmDragEnd(event)" onclick="crmAbrirCard('${e.id}')" style="border-left:4px solid ${saude.cor}">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">
+      <div style="font-size:.82rem;font-weight:800;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0" title="${(e.nome||'').replace(/"/g,'&quot;')}">${e.nome||'—'}</div>
+      <span title="${saude.label} — ${saude.dias} dia${saude.dias===1?'':'s'} sem interação" style="flex-shrink:0;font-size:.8rem;line-height:1.1">${saude.emoji}</span>
+    </div>
+    ${e.segmento?`<div style="font-size:.7rem;color:var(--ink3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.segmento}</div>`:''}
+    ${(e.sedeCidade||e.sedeUf)?`<div style="font-size:.66rem;color:var(--ink4);margin-top:3px">📍 ${[e.sedeCidade,e.sedeUf].filter(Boolean).join('/')}</div>`:''}
+    ${decisorPrincipal?`<div style="font-size:.66rem;color:var(--ink4);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">👤 ${decisorPrincipal.nome||'—'}${decisorPrincipal.cargo?' — '+decisorPrincipal.cargo:''}</div>`:''}
+    ${e.responsavel?`<div style="font-size:.66rem;color:var(--ink4);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🧑‍💼 ${e.responsavel}</div>`:''}
+    ${Number(e.unidadesAbrir)>0?`<span class="crm-chip" style="margin-top:5px;pointer-events:none">+${e.unidadesAbrir} unid. planejada${Number(e.unidadesAbrir)>1?'s':''}</span>`:''}
+    <div style="font-size:.64rem;color:${saude.cor};font-weight:700;margin-top:5px">${saude.dias===0?'Interação hoje':saude.dias+'d sem interação'}</div>
+    ${tarefaBadge}
+    ${incompletaBadge}
+  </div>`;
+}
+
+// Drag and drop nativo (sem lib nenhuma) só pra mover card de coluna — fallback de precisão
+// pra quem preferir (mobile/teclado) é o seletor "Mover" dentro do detalhe do card.
+let _crmDragId=null;
+function crmDragStart(ev,id){_crmDragId=id;ev.target.classList.add('dragging');ev.dataTransfer.effectAllowed='move';try{ev.dataTransfer.setData('text/plain',id);}catch(e){}}
+function crmDragEnd(ev){ev.target.classList.remove('dragging');}
+function crmDragOver(ev){ev.preventDefault();ev.currentTarget.classList.add('drag-over');}
+function crmDragLeave(ev){ev.currentTarget.classList.remove('drag-over');}
+function crmDrop(ev,etapaKey){
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drag-over');
+  const id=_crmDragId||ev.dataTransfer.getData('text/plain');
+  _crmDragId=null;
+  if(id)crmMoverEtapa(id,etapaKey);
+}
+async function crmMoverEtapa(id,etapaKey){
+  const e=crmEmpresas.find(x=>x.id===id);
+  if(!e||e.etapa===etapaKey)return;
+  const etapas=_crmEtapas();
+  // Trava de avanço (2026-08-20, a pedido do usuário): "o card em pesquisa inicial [pode ficar]
+  // sem informações, mas para avançar de fases não deixar o card andar pra frente sem ter tudo
+  // preenchido... travar na pesquisa caso o usuário não preencha os dados e avisar isso pra
+  // ele". Só barra quem está SAINDO da 1ª etapa (etapas[0].key) — mover entre as etapas
+  // seguintes, ou voltar um card pra trás, nunca é bloqueado (o dado já foi cobrado na 1ª saída;
+  // regressão é sempre uma correção, não avanço). Cobre os 2 jeitos de mover card que existem
+  // (arrastar no Kanban via crmDrop, e o botão "Mover" do detalhe do card) porque os dois
+  // chamam esta função única.
+  if(e.etapa===etapas[0].key&&etapaKey!==etapas[0].key){
+    const faltando=_crmCamposFaltantes(e);
+    if(faltando.length){
+      toast('Preencha antes de avançar: '+faltando.join(', ')+'.','terr');
+      return;
+    }
+  }
+  // Mudança de etapa também vira um evento AUTOMÁTICO na linha do tempo (marcado com
+  // sistema:true, ver _crmRenderCard) — além de dar histórico completo do card sem a
+  // pessoa precisar digitar nada, isso conta como "interação" pra saúde do funil (ver
+  // _crmUltimaInteracao acima): avançar um card de etapa já prova que alguém está
+  // cuidando dele.
+  const labelAntiga=(etapas.find(x=>x.key===e.etapa)||{}).label||e.etapa||'—';
+  const labelNova=(etapas.find(x=>x.key===etapaKey)||{}).label||etapaKey;
+  e.etapa=etapaKey;
+  e.atualizadoEm=new Date().toISOString();
+  if(!e.timeline)e.timeline=[];
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:`Etapa alterada: ${labelAntiga} → ${labelNova}`,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:e.atualizadoEm,sistema:true});
+  renderCrmKanban();
+  try{
+    if(window._fbSaveCrmEmpresa)await window._fbSaveCrmEmpresa(e);
+  }catch(err){console.error('Erro ao mover etapa:',err);toast('Erro ao salvar a mudança de etapa','terr');}
+}
+
+// ── ABA EMPRESAS (lista/busca, fora do kanban) ──────────────────────────────────────
+function renderCrmEmpresasLista(){
+  const wrap=document.getElementById('crm-emp-lista-body');
+  if(!wrap)return;
+  if(!_podeVerVisaoComercial()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const busca=document.getElementById('crm-emp-lista-busca')?.value||'';
+  const etapas=_crmEtapas();
+  const etapaLabel=Object.fromEntries(etapas.map(x=>[x.key,x.label]));
+  const lista=[..._crmEmpresasFiltradas(busca)].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  if(!lista.length){wrap.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhuma empresa cadastrada ainda.</div>';return;}
+  wrap.innerHTML=lista.map(e=>{
+    const prox=_crmProximaTarefa(e);
+    const decisorPrincipal=(e.decisores||[])[0];
+    const saude=_crmSaude(e);
+    return `<div onclick="crmAbrirCard('${e.id}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border-lt);border-left:4px solid ${saude.cor};border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+      <div style="min-width:0;flex:1">
+        <div style="font-weight:700;font-size:.82rem;color:#1e293b;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span>${saude.emoji} ${e.nome||'—'}</span>
+          <span style="background:var(--brand-lt);color:var(--brand-d);border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700;white-space:nowrap">${etapaLabel[e.etapa]||'—'}</span>
+        </div>
+        <div style="font-size:.72rem;color:#64748b;margin-top:3px">${[e.segmento,[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'),decisorPrincipal?(decisorPrincipal.nome+(decisorPrincipal.cargo?' ('+decisorPrincipal.cargo+')':'')):'',e.responsavel?'🧑‍💼 '+e.responsavel:''].filter(Boolean).join(' · ')||'—'}</div>
+      </div>
+      <div style="font-size:.68rem;color:var(--ink4);text-align:right;flex-shrink:0;white-space:nowrap">
+        <div style="color:${saude.cor};font-weight:700">${saude.dias}d sem interação</div>
+        ${prox?`<div style="margin-top:2px">${_CRM_TIPO_ICONE[prox.tipo]||'📌'} ${fmtD(prox.data)}</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── ABA CONTATOS (agregada dos decisores de todas as empresas, 2026-08-26 — a pedido do
+// usuário: "no lugar do menu empresas... menu chamado CONTATOS... nos contatos as pessoas
+// linkadas com as empresas conforme cadastro"). Visão 100% derivada de
+// crmEmpresas[].decisores — sem coleção nova, sem duplicar dado. Editar um contato é
+// editar a empresa dele (crmAbrirCard abre o card da empresa de onde ele veio).
+function _crmTodosContatos(){
+  const out=[];
+  crmEmpresas.forEach(e=>{
+    (e.decisores||[]).forEach((d,idx)=>{
+      if((d.nome||'').trim())out.push(Object.assign({},d,{empresaId:e.id,empresaNome:e.nome||'—',_idx:idx}));
+    });
+  });
+  return out;
+}
+function _crmContatosFiltrados(busca){
+  const q=(busca||'').trim().toUpperCase();
+  const lista=_crmTodosContatos();
+  if(!q)return lista;
+  return lista.filter(c=>
+    (c.nome||'').toUpperCase().includes(q)||
+    (c.cargo||'').toUpperCase().includes(q)||
+    (c.empresaNome||'').toUpperCase().includes(q)||
+    _crmTelefonesDecisor(c).some(t=>(t.numero||'').toUpperCase().includes(q)||(t.tipo||'').toUpperCase().includes(q))||
+    (c.email||'').toUpperCase().includes(q)
+  );
+}
+function renderCrmContatosLista(){
+  const wrap=document.getElementById('crm-contatos-lista-body');
+  if(!wrap)return;
+  if(!_podeVerVisaoComercial()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const busca=document.getElementById('crm-ct-busca')?.value||'';
+  const lista=_crmContatosFiltrados(busca).sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  if(!lista.length){wrap.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhum contato cadastrado ainda — contatos aparecem aqui assim que forem adicionados como decisor dentro de uma empresa.</div>';return;}
+  wrap.innerHTML=lista.map(c=>`<div onclick="crmAbrirCard('${c.empresaId}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+      <div style="min-width:0;flex:1">
+        <div style="font-weight:700;font-size:.82rem;color:#1e293b;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span>👤 ${c.nome||'—'}</span>
+          ${c.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700">${c.cargo}</span>`:''}
+        </div>
+        <div style="font-size:.72rem;color:#64748b;margin-top:3px">${['🏢 '+(c.empresaNome||'—'),_crmTelefonesTexto(c),c.email].filter(Boolean).join(' · ')}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        ${c.linkedin?`<a href="${c.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:.66rem;font-weight:700;text-decoration:none;white-space:nowrap">🔗 LinkedIn ↗</a>`:''}
+      </div>
+    </div>`).join('');
+}
+// ── EXPORTAÇÃO (Empresas e Contatos, 2026-08-26 — a pedido do usuário: "exportar empresas e
+// exportar contatos... lista com dados completos ou só email ou só telefone pra mailing").
+// Reaproveita o mesmo _csvDownload()/_csvEscape() usado em todo o resto do sistema (ver
+// exportarExcelVendas etc.) — nada de lib nova. Respeita a busca digitada na tela (mesma
+// lógica de _vndFilteredRows: exporta o que está sendo visto, não a base inteira).
+function crmExportarEmpresas(){
+  const busca=document.getElementById('crm-emp-lista-busca')?.value||'';
+  const etapas=_crmEtapas();
+  const etapaLabel=Object.fromEntries(etapas.map(x=>[x.key,x.label]));
+  const lista=[..._crmEmpresasFiltradas(busca)].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  if(!lista.length){toast('Nenhuma empresa encontrada para exportar','terr');return;}
+  const headers=['Nome','Segmento','Etapa','Responsável','Cidade','UF','Regiões','Unidades Existentes','Unidades a Abrir','Decisores (Nome — Cargo)'];
+  const body=lista.map(e=>[
+    e.nome||'',
+    e.segmento||'',
+    etapaLabel[e.etapa]||e.etapa||'',
+    e.responsavel||'',
+    e.sedeCidade||'',
+    e.sedeUf||'',
+    (e.regioes||[]).join(', '),
+    e.unidadesExistentes!=null?String(e.unidadesExistentes):'',
+    e.unidadesAbrir!=null?String(e.unidadesAbrir):'',
+    (e.decisores||[]).map(d=>d.nome+(d.cargo?' — '+d.cargo:'')).join('; ')
+  ]);
+  _csvDownload(`crm_empresas_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+function crmExportarContatos(modo){
+  const busca=document.getElementById('crm-ct-busca')?.value||'';
+  let lista=[..._crmContatosFiltrados(busca)].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  let headers,body,sufixo;
+  if(modo==='email'){
+    lista=lista.filter(c=>c.email);
+    headers=['Nome','Cargo','E-mail','Empresa'];
+    body=lista.map(c=>[c.nome||'',c.cargo||'',c.email||'',c.empresaNome||'']);
+    sufixo='emails';
+  }else if(modo==='telefone'){
+    lista=lista.filter(c=>_crmTelefonesDecisor(c).length);
+    headers=['Nome','Cargo','Telefone','Empresa'];
+    body=lista.map(c=>[c.nome||'',c.cargo||'',_crmTelefonesTexto(c),c.empresaNome||'']);
+    sufixo='telefones';
+  }else{
+    headers=['Nome','Cargo','Empresa','Telefone','E-mail','LinkedIn'];
+    body=lista.map(c=>[c.nome||'',c.cargo||'',c.empresaNome||'',_crmTelefonesTexto(c),c.email||'',c.linkedin||'']);
+    sufixo='completo';
+  }
+  if(!lista.length){toast(modo==='email'?'Nenhum contato com e-mail cadastrado':modo==='telefone'?'Nenhum contato com telefone cadastrado':'Nenhum contato encontrado para exportar','terr');return;}
+  _csvDownload(`crm_contatos_${sufixo}_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+
+// ── TAREFAS DO CRM ── agora vivem em cfg.tarefasGerais (Ferramentas Comerciais > Tarefas),
+// não mais dentro de cada empresa (ver crmSalvarTarefa()/crmConcluirTarefa()/crmExcluirTarefa()
+// mais abaixo). Migração de 2026-09-08, a pedido do usuário: "tire a aba tarefas do CRM e
+// deixe que as tarefas criadas dentro do card sejam inseridas no mesmo menu tarefas em
+// ferramentas comerciais, pertinente ao usuario que a criou e administradores podem ver
+// tudo" — a aba própria "Tarefas" do CRM (agregada, por data/kanban/calendário) saiu de
+// cena; o card de cada empresa continua tendo sua própria sub-aba "Tarefas" (ver
+// _crmRenderCard()), só que lendo dessa nova origem. crmEmpresaId marca de qual empresa é
+// cada tarefa, pra _crmTarefasDoCard() filtrar; responsavel=criadoPor=quem criou, pra cair
+// automaticamente no filtro "só minhas tarefas" que renderTarefasComerciais() já aplica pra
+// usuário comum (admin sempre vê tudo, sem esse filtro).
+function _crmTarefasDoCard(empresaId){
+  return (cfg.tarefasGerais||[]).filter(t=>t.crmEmpresaId===empresaId);
+}
+function _crmTodasTarefas(){
+  return (cfg.tarefasGerais||[]).filter(t=>t.crmEmpresaId);
+}
+// ── DETALHE DO CARD (empresa) — linha do tempo + tarefas ───────────────────────────
+function crmAbrirCard(id){
+  const e=crmEmpresas.find(x=>x.id===id);
+  if(!e){toast('Empresa não encontrada (a lista pode ter mudado) — atualize e tente de novo','terr');return;}
+  _crmCardAtualId=id;
+  _crmCardTabAtiva='visao';
+  _crmRenderCard(e);
+  openM('mo-crm-card');
+}
+// Aviso "sem tarefa futura" ao tentar fechar o card (2026-08-26, a pedido do usuário: "quando
+// eu abrir o card de uma empresa e fechar ja quero que o sistema analise se esse card está
+// sem uma tarefa futura pra ser executada... entao neste caso ele nao deixa eu fechar sem
+// sugerir que eu crie uma tarefa para o negocio nao ficar parado"). "Futura" aqui inclui hoje
+// (t.data>=hojeIso) — o que importa é que ainda não passou e não foi concluída, mesmo padrão
+// de "atrasada" usado em tarefasHtml logo abaixo em _crmRenderCard. Só entra em ação pelo X
+// e pelo Esc do card (ver onclick do botão ✕ e o document.addEventListener('keydown',...)
+// mais acima) — fechar o card por causa de excluir/editar a empresa (crmExcluirEmpresa,
+// crmAbrirEditarEmpresa) continua chamando closeM('mo-crm-card') direto, sem esse aviso.
+function _crmTemTarefaFutura(e){
+  const hojeIso=new Date().toISOString().slice(0,10);
+  return _crmTarefasDoCard(e.id).some(t=>t.status==='pendente'&&t.prazoTarefa&&t.prazoTarefa>=hojeIso);
+}
+function crmTentarFecharCard(){
+  const id=_crmCardAtualId;
+  const e=id&&crmEmpresas.find(x=>x.id===id);
+  if(!e||_crmTemTarefaFutura(e)){closeM('mo-crm-card');return;}
+  document.getElementById('crm-sem-tarefa-empresa-id').value=id;
+  openM('mo-crm-sem-tarefa-aviso');
+}
+function crmFecharCardMesmoAssim(){
+  closeM('mo-crm-sem-tarefa-aviso');
+  closeM('mo-crm-card');
+}
+function crmCriarTarefaDoAviso(){
+  const id=document.getElementById('crm-sem-tarefa-empresa-id').value;
+  closeM('mo-crm-sem-tarefa-aviso');
+  crmAbrirNovaTarefa(id);
+}
+// Botão discreto de copiar telefone/e-mail dos decisores pro clipboard (2026-08-26, a
+// pedido do usuário — ver decisoresHtml logo abaixo em _crmRenderCard). Guarda o valor em
+// data-copy (não no onclick) pra não ter que escapar aspas/apóstrofo de telefone/e-mail.
+// Fallback com textarea+execCommand pro caso (raro) de navigator.clipboard não estar
+// disponível (contexto não-seguro/não-https, navegador antigo etc.).
+function _crmBtnCopiar(valor,titulo){
+  if(!valor)return'';
+  return `<button type="button" onclick="event.stopPropagation();_crmCopiarValor(this)" data-copy="${valor.replace(/"/g,'&quot;')}" title="${titulo}" aria-label="${titulo}" style="background:none;border:none;cursor:pointer;color:var(--ink4);opacity:.55;font-size:.72rem;padding:0 2px;line-height:1;vertical-align:middle" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.55">📋</button>`;
+}
+// Telefones do decisor — suporta o formato novo (d.telefones: [{tipo,numero}], vários
+// telefones com rótulo livre tipo "pessoal"/"comercial"/"fixo escritório") e o formato antigo
+// (d.telefone: string única) pra não quebrar decisores já cadastrados antes dessa mudança
+// (2026-08-28, a pedido do usuário: "poder adicionar mais de um telefone... e poder dizer
+// do que é cada telefone... escrita livre").
+function _crmTelefonesDecisor(d){
+  if(d&&Array.isArray(d.telefones)&&d.telefones.length)return d.telefones.filter(t=>t&&t.numero);
+  if(d&&d.telefone)return[{tipo:'',numero:d.telefone}];
+  return[];
+}
+function _crmTelefonesTexto(d){
+  return _crmTelefonesDecisor(d).map(t=>t.tipo?t.tipo+': '+t.numero:t.numero).join(' / ');
+}
+// HTML de uma linha "tipo + telefone + remover" reaproveitada nos dois lugares que editam
+// telefone de decisor: o modal rápido (mo-crm-decisor-add) e o form completo de empresa
+// (crmAddDecisorRow). Tipo é texto livre — sem lista fixa, o usuário digita o que fizer
+// sentido pra aquele contato.
+function _crmTelRowInnerHtml(tipo,numero){
+  return '<input class="fc no-upper crm-dec-tel-tipo" placeholder="Tipo (ex.: pessoal, comercial, fixo escritório)" value="'+(tipo||'').replace(/"/g,'&quot;')+'" style="font-size:.8rem;flex:1;text-transform:none">'
+    +'<input class="fc no-upper crm-dec-tel-num" placeholder="Telefone" value="'+(numero||'').replace(/"/g,'&quot;')+'" style="font-size:.8rem;flex:1;text-transform:none">'
+    +'<button type="button" onclick="this.closest(\'.crm-dec-tel-row\').remove()" title="Remover telefone" style="background:#fce4ec;color:#c62828;border:none;border-radius:6px;width:26px;height:26px;flex-shrink:0;cursor:pointer;font-size:.72rem">✕</button>';
+}
+function _crmDecisorAddTelRowQuick(tipo,numero){
+  const wrap=document.getElementById('crm-decisor-add-tels');
+  if(!wrap)return;
+  const row=document.createElement('div');
+  row.className='crm-dec-tel-row';
+  row.style.cssText='display:flex;gap:6px;align-items:center';
+  row.innerHTML=_crmTelRowInnerHtml(tipo,numero);
+  wrap.appendChild(row);
+}
+function _crmDecisorTelsDoFormQuick(){
+  return[...document.querySelectorAll('#crm-decisor-add-tels .crm-dec-tel-row')].map(row=>({
+    tipo:(row.querySelector('.crm-dec-tel-tipo')&&row.querySelector('.crm-dec-tel-tipo').value.trim())||'',
+    numero:(row.querySelector('.crm-dec-tel-num')&&row.querySelector('.crm-dec-tel-num').value.trim())||''
+  })).filter(t=>t.numero);
+}
+function _crmContatoComCopiar(d){
+  const partes=[];
+  _crmTelefonesDecisor(d).forEach(t=>{
+    const rotulo=t.tipo?t.tipo+': ':'';
+    partes.push(`<span style="display:inline-flex;align-items:center;gap:2px">${rotulo}${t.numero}${_crmBtnCopiar(t.numero,'Copiar telefone'+(t.tipo?' ('+t.tipo+')':''))}</span>`);
+  });
+  if(d.email)partes.push(`<span style="display:inline-flex;align-items:center;gap:2px">${d.email}${_crmBtnCopiar(d.email,'Copiar e-mail')}</span>`);
+  return partes.length?partes.join(' &nbsp;·&nbsp; '):'—';
+}
+function _crmCopiarValor(btn){
+  const valor=(btn&&btn.dataset&&btn.dataset.copy)||'';
+  if(!valor)return;
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(valor).then(()=>toast('Copiado!','tok')).catch(()=>_crmCopiarFallback(valor));
+  }else{
+    _crmCopiarFallback(valor);
+  }
+}
+function _crmCopiarFallback(valor){
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=valor;
+    ta.style.position='fixed';ta.style.opacity='0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    toast('Copiado!','tok');
+  }catch(err){toast('Não foi possível copiar','terr');}
+}
+function _crmRenderCard(e){
+  const etapas=_crmEtapas();
+  const etapaAtual=etapas.find(x=>x.key===e.etapa)||etapas[0];
+  document.getElementById('crm-card-nome').textContent=e.nome||'—';
+  const badges=[`<span style="background:var(--brand-lt);color:var(--brand-d);border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700">${etapaAtual.label}</span>`];
+  if(e.segmento)badges.push(`<span style="background:#f1f5f9;color:#475569;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700">${e.segmento}</span>`);
+  if(e.sedeCidade||e.sedeUf)badges.push(`<span style="background:#f1f5f9;color:#475569;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700">📍 ${[e.sedeCidade,e.sedeUf].filter(Boolean).join('/')}</span>`);
+  if(e.responsavel)badges.push(`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700">🧑‍💼 ${e.responsavel}</span>`);
+  document.getElementById('crm-card-badges').innerHTML=badges.join('');
+
+  // Banner de saúde do card (2026-08-14) — mesmo cálculo usado no Kanban/lista/Indicadores,
+  // ver _crmSaude()/_crmUltimaInteracao() — mostra logo de cara se esse card está sendo
+  // trabalhado ou ficou pra trás, e o que foi a última coisa registrada nele.
+  const saude=_crmSaude(e);
+  const ultInt=_crmUltimaInteracao(e);
+
+  const regioesHtml=(e.regioes||[]).length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${e.regioes.map(r=>`<span class="crm-chip">${r}</span>`).join('')}</div>`:'<div style="font-size:.78rem;color:var(--ink4)">—</div>';
+  const decisoresHtml=(e.decisores||[]).length?e.decisores.map((d,idx)=>`<div style="border:1px solid var(--border-lt);border-radius:8px;padding:8px 10px;font-size:.78rem">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div style="font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0">
+          <span>👤 ${d.nome||'—'}</span>
+          ${d.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700">${d.cargo}</span>`:''}
+          ${d.linkedin?`<a href="${d.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700;text-decoration:none">🔗 LinkedIn ↗</a>`:''}
+        </div>
+        <div style="display:flex;gap:2px;flex-shrink:0">
+          <button type="button" onclick="crmAbrirEditarDecisor('${e.id}',${idx})" title="Editar decisor" style="background:none;border:none;cursor:pointer;color:#64748b;font-size:.8rem;padding:3px 5px">✏️</button>
+          <button type="button" onclick="crmExcluirDecisor('${e.id}',${idx})" title="Excluir decisor" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.8rem;padding:3px 5px">🗑️</button>
+        </div>
+      </div>
+      <div style="color:var(--ink3);margin-top:2px">${_crmContatoComCopiar(d)}</div>
+    </div>`).join(''):'<div style="font-size:.78rem;color:var(--ink4)">Nenhum decisor cadastrado ainda.</div>';
+
+  const timeline=(e.timeline||[]).slice().sort((a,b)=>(b.em||'').localeCompare(a.em||''));
+  const timelineHtml=timeline.length?timeline.map(ev=>ev.tipoAtividade==='mensagem'?_crmMensagemTimelineHtml(ev,e.id):`
+    <div style="display:flex;gap:10px;margin-bottom:12px">
+      <div style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:${ev.sistema?'#f1f5f9':'var(--brand-lt)'};display:flex;align-items:center;justify-content:center;font-size:.85rem">${ev.sistema?'🔄':'💬'}</div>
+      <div style="min-width:0;flex:1;padding-bottom:2px;border-bottom:1px solid var(--border-lt)">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <div style="font-weight:700;color:var(--ink);font-size:.78rem">${ev.autor||'—'}</div>
+          <div style="font-size:.68rem;color:var(--ink4);white-space:nowrap">${_fmtDataHora(ev.em)}</div>
+        </div>
+        <div style="font-size:.78rem;color:${ev.sistema?'var(--ink4)':'var(--ink3)'};margin-top:2px;padding-bottom:8px;white-space:pre-wrap;${ev.sistema?'font-style:italic':''}">${(ev.texto||'').replace(/</g,'&lt;')}</div>
+      </div>
+    </div>`).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.78rem">Nenhum comentário ainda.</div>';
+
+  const tarefas=_crmTarefasDoCard(e.id).slice().sort((a,b)=>{
+    const concA=a.status==='concluida',concB=b.status==='concluida';
+    return concA===concB?(a.prazoTarefa||'').localeCompare(b.prazoTarefa||''):(concA?1:-1);
+  });
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const tarefasHtml=tarefas.length?tarefas.map(t=>{
+    const concluida=t.status==='concluida';
+    const aguardando=t.status==='aguardando_aprovacao';
+    const atrasada=!concluida&&!aguardando&&t.prazoTarefa&&t.prazoTarefa<hojeIso;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid ${atrasada?'#fecaca':'var(--border-lt)'};border-radius:8px;margin-bottom:6px;${concluida?'opacity:.6':''}">
+      <div style="min-width:0;font-size:.78rem">
+        <div style="font-weight:700;color:var(--ink)">${_CRM_TIPO_ICONE[t.crmCategoria]||'📌'} ${t.tipo||''}${aguardando?' <span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:1px 8px;font-size:.6rem;font-weight:700;margin-left:4px;white-space:nowrap">🔍 Aguardando aprovação</span>':''}</div>
+        <div style="color:var(--ink4);font-size:.7rem;margin-top:1px">${t.prazoTarefa?fmtD(t.prazoTarefa):'sem data'}${t.crmDecisorNome?' · 👤 '+t.crmDecisorNome:''}${concluida?' · concluída em '+_fmtDataHora(t.concluidaEm):''}</div>
+      </div>
+      <div style="display:flex;gap:5px;flex-shrink:0">
+        ${!concluida&&!aguardando?`<button onclick="crmConcluirTarefa('${e.id}','${t.id}',true)" title="Concluir" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:.7rem;cursor:pointer">✅</button>`:''}
+        ${concluida?`<button onclick="crmConcluirTarefa('${e.id}','${t.id}',false)" title="Reabrir" style="background:#f1f5f9;color:#475569;border:none;border-radius:6px;padding:5px 8px;font-size:.7rem;cursor:pointer">↩️</button>`:''}
+        <button onclick="crmExcluirTarefa('${e.id}','${t.id}')" title="Excluir" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:6px;padding:5px 8px;font-size:.7rem;cursor:pointer">🗑️</button>
+      </div>
+    </div>`;
+  }).join(''):'<div style="text-align:center;padding:12px;color:var(--ink4);font-size:.76rem">Nenhuma tarefa agendada.</div>';
+  // Contador de tarefas pendentes pro badge da aba "Tarefas" (2026-08-28 — card virou abas,
+  // ver _crmCardTabAtiva/_crmCardSetTab) — dá visibilidade de relance sem precisar clicar.
+  const tarefasPendentesCount=tarefas.filter(t=>t.status!=='concluida').length;
+
+  document.getElementById('crm-card-body').innerHTML=`
+    <div style="background:${saude.bg};border:1.5px solid ${saude.cor};border-radius:10px;padding:10px 12px;margin-bottom:14px">
+      <div style="font-weight:800;font-size:.8rem;color:${saude.cor}">${saude.emoji} ${saude.label}${saude.dias>0?' — '+saude.dias+' dia'+(saude.dias===1?'':'s')+' sem interação':' — interação hoje'}</div>
+      <div style="font-size:.7rem;color:var(--ink3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(ultInt.desc||'').replace(/"/g,'&quot;')}">Última: ${_fmtDataHora(ultInt.em)}${ultInt.desc?' — '+ultInt.desc:''}</div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:16px;margin-bottom:10px">
+      <button type="button" onclick="crmAbrirEditarEmpresa('${e.id}')" style="background:none;border:none;color:var(--ink4);opacity:.75;cursor:pointer;font-size:.72rem;font-weight:600;padding:2px 4px;display:inline-flex;align-items:center;gap:4px" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.75">✏️ Editar empresa</button>
+      ${_getUserCat().isAdm?`<button type="button" onclick="crmExcluirEmpresa('${e.id}')" style="background:none;border:none;color:#dc2626;opacity:.65;cursor:pointer;font-size:.72rem;font-weight:600;padding:2px 4px;display:inline-flex;align-items:center;gap:4px" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.65">🗑️ Excluir empresa</button>`:''}
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
+      <button type="button" id="crm-tabbtn-visao" onclick="_crmCardSetTab('visao')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">📋 Visão Geral</button>
+      <button type="button" id="crm-tabbtn-decisores" onclick="_crmCardSetTab('decisores')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">👤 Decisores${(e.decisores||[]).length?' ('+e.decisores.length+')':''}</button>
+      <button type="button" id="crm-tabbtn-tarefas" onclick="_crmCardSetTab('tarefas')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">🗓️ Tarefas${tarefasPendentesCount?' ('+tarefasPendentesCount+')':''}</button>
+      <button type="button" id="crm-tabbtn-atividade" onclick="_crmCardSetTab('atividade')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">💬 Atividade${timeline.length?' ('+timeline.length+')':''}</button>
+    </div>
+    <div id="crm-tab-visao">
+      <div class="fg">
+        <label>Etapa atual</label>
+        <div style="display:flex;gap:8px">
+          <select class="fc" id="crm-card-etapa-sel" style="flex:1">${etapas.map(et=>`<option value="${et.key}" ${et.key===etapaAtual.key?'selected':''}>${et.label}</option>`).join('')}</select>
+          <button onclick="crmMoverEtapa('${e.id}',document.getElementById('crm-card-etapa-sel').value);crmAbrirCard('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:9px;padding:0 16px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap">Mover</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+        <div><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">Unidades existentes</div><div style="font-size:.85rem;font-weight:700;color:var(--ink)">${e.unidadesExistentes||0}</div></div>
+        <div><div style="font-size:.68rem;color:var(--ink4);font-weight:700;text-transform:uppercase">Unidades a abrir</div><div style="font-size:.85rem;font-weight:700;color:var(--ink)">${e.unidadesAbrir||0}</div></div>
+      </div>
+      <div class="fg"><label>Regiões de interesse</label>${regioesHtml}</div>
+    </div>
+    <div id="crm-tab-decisores">
+      <div class="fg">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+          <label style="margin-bottom:0">Decisores / Compradores</label>
+          <button type="button" onclick="crmAbrirAdicionarDecisor('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">+ Adicionar Decisor</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">${decisoresHtml}</div>
+      </div>
+    </div>
+    <div id="crm-tab-tarefas">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:800;font-size:.85rem;color:var(--ink)">🗓️ Tarefas</div>
+        <button onclick="crmAbrirNovaTarefa('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:.74rem;font-weight:700;cursor:pointer">+ Nova Tarefa</button>
+      </div>
+      ${tarefasHtml}
+    </div>
+    <div id="crm-tab-atividade">
+      <div style="margin-bottom:14px">
+        <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:8px">📋 Registrar Atividade Realizada</div>
+        <div style="display:flex;gap:8px">
+          <button onclick="crmAbrirModalAtividade('ligacao','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">📞 Ligação</button>
+          <button onclick="crmAbrirModalAtividade('mensagem','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">💬 Mensagem</button>
+          <button onclick="crmAbrirModalAtividade('email','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">✉️ E-mail</button>
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--border-lt);padding-top:14px">
+        <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:8px">💬 Linha do Tempo</div>
+        <div style="margin-bottom:10px">
+          <textarea id="crm-comentario-novo" class="fc" rows="2" placeholder="Registre o que está fazendo com essa empresa..." style="text-transform:none;width:100%"></textarea>
+        </div>
+        <button onclick="crmAdicionarComentario('${e.id}')" style="width:100%;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer;margin-bottom:14px">+ Adicionar comentário</button>
+        ${timelineHtml}
+      </div>
+    </div>
+  `;
+  _crmCardSetTab(_crmCardTabAtiva);
+}
+// Controla qual aba do card de empresa está visível (2026-08-28, a pedido do usuário: "as
+// informações tao todas iguais... confunde... sugiro mudarmos o design pra deixar cada coisa
+// separada"). Chamado sempre que o card é (re)renderizado, com a aba atual (_crmCardTabAtiva)
+// — só alterna display:none/'' dos painéis já existentes no DOM, não recria HTML nem fecha o
+// modal, então a posição/rolagem do usuário não pula. Nenhuma outra função precisa saber em
+// qual aba o usuário está: elas só chamam _crmRenderCard(e), que reaplica a aba no final.
+function _crmCardSetTab(tab){
+  _crmCardTabAtiva=tab;
+  const cores={on:{bg:'var(--brand)',cor:'#fff'},off:{bg:'#f1f5f9',cor:'#334155'}};
+  ['visao','decisores','tarefas','atividade'].forEach(t=>{
+    const painel=document.getElementById('crm-tab-'+t);
+    if(painel)painel.style.display=t===tab?'':'none';
+    const btn=document.getElementById('crm-tabbtn-'+t);
+    if(btn){
+      const c=t===tab?cores.on:cores.off;
+      btn.style.background=c.bg;
+      btn.style.color=c.cor;
+    }
+  });
+}
+function _crmMensagemTimelineHtml(ev,empresaId){
+  const enviei=ev.direcao==='enviei';
+  const icone=enviei?'📤':'📥';
+  const direcaoLabel=enviei?'Mensagem enviada':'Mensagem recebida';
+  const respostaHtml=ev.resposta?`<div style="margin-top:8px;padding:8px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+        <div style="font-weight:700;color:#15803d;font-size:.74rem">↩️ Resposta${ev.respondidaPor?' — '+ev.respondidaPor:''}</div>
+        <div style="font-size:.66rem;color:var(--ink4);white-space:nowrap">${_fmtDataHora(ev.respondidaEm)}</div>
+      </div>
+      <div style="font-size:.78rem;color:var(--ink3);margin-top:2px;white-space:pre-wrap">${(ev.resposta||'').replace(/</g,'&lt;')}</div>
+    </div>`:'';
+  const btnResponderHtml=(enviei&&!ev.resposta)?`<button type="button" onclick="crmAbrirMensagemResposta('${empresaId}','${ev.id}')" style="margin-top:8px;background:#4338ca;color:#fff;border:none;border-radius:7px;padding:6px 10px;font-size:.7rem;font-weight:700;cursor:pointer">💬 Mensagem Respondida</button>`:'';
+  return `
+    <div style="display:flex;gap:10px;margin-bottom:12px">
+      <div style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--brand-lt);display:flex;align-items:center;justify-content:center;font-size:.85rem">${icone}</div>
+      <div style="min-width:0;flex:1;padding-bottom:2px;border-bottom:1px solid var(--border-lt)">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <div style="font-weight:700;color:var(--ink);font-size:.78rem">${ev.autor||'—'} <span style="font-weight:600;color:var(--ink4);font-size:.68rem">· ${direcaoLabel}</span></div>
+          <div style="font-size:.68rem;color:var(--ink4);white-space:nowrap">${_fmtDataHora(ev.em)}</div>
+        </div>
+        <div style="font-size:.78rem;color:var(--ink3);margin-top:2px;padding-bottom:8px;white-space:pre-wrap">${(ev.texto||'').replace(/</g,'&lt;')}</div>
+        ${respostaHtml}
+        ${btnResponderHtml}
+      </div>
+    </div>`;
+}
+async function _crmSalvarEmpresaObj(e){
+  try{
+    if(window._fbSaveCrmEmpresa)await window._fbSaveCrmEmpresa(e);
+  }catch(err){console.error('Erro ao salvar empresa do CRM:',err);toast('Erro ao salvar: '+(err.message||err),'terr');throw err;}
+}
+async function crmAdicionarComentario(empresaId){
+  const ta=document.getElementById('crm-comentario-novo');
+  const texto=(ta&&ta.value||'').trim();
+  if(!texto){toast('Escreva o comentário antes de adicionar','terr');return;}
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  if(!e.timeline)e.timeline=[];
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString()});
+  e.atualizadoEm=new Date().toISOString();
+  try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
+  toast('Comentário adicionado!','tok');
+  _crmRenderCard(e);
+}
+
+// ── ATIVIDADE REALIZADA (ligação/mensagem/e-mail, 2026-08-26 — a pedido do usuário: "quero
+// um menuzinho REGISTRAR ATIVIDADE REALIZADA... a pessoa dá um breve relato... pode
+// selecionar um decisor já cadastrado ou colocar uma pessoa que ainda não tava
+// cadastrada, que foi só uma ponte... aparece no histórico com data e horário"). Reaproveita
+// a mesma timeline de e.timeline (sem "sistema:true" — é relato manual, mesmo peso de um
+// comentário normal), só que com o ícone/rótulo do tipo de atividade prefixado no texto.
+// ── ADICIONAR DECISOR RÁPIDO (2026-08-26, a pedido do usuário: "ter um botao ADICIONAR
+// DECISOR, pra nao precisar a pessoa editar a empresa inteira pra add um decisor"). Reusa
+// _crmNormalizarLinkedin() (mesma normalização de link usada no form completo) e
+// _crmDecisorDadosTexto() (já criada pro diff de _crmLogDiffDecisores) pra manter o
+// mesmo texto de histórico "➕ Decisor adicionado: ..." usado quando o decisor é incluído
+// pela tela de editar empresa.
+function crmAbrirAdicionarDecisor(empresaId){
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  document.getElementById('crm-decisor-add-titulo').textContent='➕ Adicionar Decisor';
+  document.getElementById('crm-decisor-add-empresa-id').value=empresaId;
+  document.getElementById('crm-decisor-add-idx').value='-1';
+  document.getElementById('crm-decisor-add-nome').value='';
+  document.getElementById('crm-decisor-add-cargo').value='';
+  document.getElementById('crm-decisor-add-tels').innerHTML='';
+  _crmDecisorAddTelRowQuick();
+  document.getElementById('crm-decisor-add-email').value='';
+  document.getElementById('crm-decisor-add-linkedin').value='';
+  openM('mo-crm-decisor-add');
+}
+// Abre o MESMO modal de "Adicionar Decisor" pré-preenchido pro decisor de índice `idx` em
+// e.decisores (2026-08-28, a pedido do usuário: "preciso poder editar ou excluir um
+// decisor") — decisor não tem id próprio (ver comentário em _crmLogDiffDecisores), então
+// usa a posição no array, igual ao índice usado pra excluir (crmExcluirDecisor). Card é
+// sempre re-renderizado do zero a cada mudança, então a posição nunca fica desatualizada
+// entre o clique e a abertura do modal.
+function crmAbrirEditarDecisor(empresaId,idx){
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  const d=(e.decisores||[])[idx];
+  if(!d){toast('Decisor não encontrado — atualize e tente de novo','terr');return;}
+  document.getElementById('crm-decisor-add-titulo').textContent='✏️ Editar Decisor';
+  document.getElementById('crm-decisor-add-empresa-id').value=empresaId;
+  document.getElementById('crm-decisor-add-idx').value=idx;
+  document.getElementById('crm-decisor-add-nome').value=d.nome||'';
+  document.getElementById('crm-decisor-add-cargo').value=d.cargo||'';
+  const telsWrap=document.getElementById('crm-decisor-add-tels');
+  telsWrap.innerHTML='';
+  const tels=_crmTelefonesDecisor(d);
+  if(tels.length)tels.forEach(t=>_crmDecisorAddTelRowQuick(t.tipo,t.numero));
+  else _crmDecisorAddTelRowQuick();
+  document.getElementById('crm-decisor-add-email').value=d.email||'';
+  document.getElementById('crm-decisor-add-linkedin').value=d.linkedin||'';
+  openM('mo-crm-decisor-add');
+}
+// Exclui o decisor de índice `idx` (2026-08-28, a pedido do usuário) — confirma antes (mesmo
+// padrão de excluirTarefaComercial/excluirTarefaGeral) e loga no histórico do card, igual ao
+// que já acontecia ao remover um decisor pela tela de editar empresa (_crmLogDiffDecisores).
+async function crmExcluirDecisor(empresaId,idx){
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  const d=(e.decisores||[])[idx];
+  if(!d){toast('Decisor não encontrado — atualize e tente de novo','terr');return;}
+  if(!confirm('Excluir o decisor "'+(d.nome||'—')+'"? Essa ação não pode ser desfeita.'))return;
+  e.decisores.splice(idx,1);
+  if(!e.timeline)e.timeline=[];
+  const dados=_crmDecisorDadosTexto(d);
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'🗑️ Decisor removido: '+(d.nome||'—')+(dados?' — '+dados:''),autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString(),sistema:true});
+  e.atualizadoEm=new Date().toISOString();
+  try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
+  toast('Decisor excluído','tok');
+  if(_crmCardAtualId===empresaId)_crmRenderCard(e);
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
+  else if(_crmTabAtiva==='empresas')_crmRenderContatosSubtab();
+}
+async function crmSalvarDecisorRapido(){
+  const empresaId=document.getElementById('crm-decisor-add-empresa-id').value;
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e){toast('Empresa não encontrada','terr');return;}
+  const idx=parseInt(document.getElementById('crm-decisor-add-idx').value,10);
+  const ehEdicao=idx>=0&&!!(e.decisores||[])[idx];
+  const nome=(document.getElementById('crm-decisor-add-nome').value||'').trim();
+  const cargo=(document.getElementById('crm-decisor-add-cargo').value||'').trim();
+  if(!nome){toast('Preencha o nome do decisor','terr');return;}
+  if(!cargo){toast('Informe o cargo do decisor','terr');return;}
+  const d={
+    nome,cargo,
+    telefones:_crmDecisorTelsDoFormQuick(),
+    email:(document.getElementById('crm-decisor-add-email').value||'').trim(),
+    linkedin:_crmNormalizarLinkedin(document.getElementById('crm-decisor-add-linkedin').value)
+  };
+  if(!e.decisores)e.decisores=[];
+  if(!e.timeline)e.timeline=[];
+  const autor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  if(ehEdicao){
+    // Edição (2026-08-28, a pedido do usuário) — substitui na MESMA posição (nunca reordena
+    // a lista) e loga a mudança no histórico, mesmo espírito de _crmLogDiffDecisores mas
+    // pra edição em vez de add/remove.
+    const antigo=e.decisores[idx];
+    e.decisores[idx]=d;
+    const dadosAntigos=_crmDecisorDadosTexto(antigo);
+    const dadosNovos=_crmDecisorDadosTexto(d);
+    const trocouNome=(antigo.nome||'')!==d.nome;
+    e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'✏️ Decisor editado: '+(antigo.nome||'—')+(trocouNome?' → '+d.nome:'')+' — antes: '+(dadosAntigos||'—')+' · agora: '+(dadosNovos||'—'),autor,em:new Date().toISOString(),sistema:true});
+  } else {
+    e.decisores.push(d);
+    const dados=_crmDecisorDadosTexto(d);
+    e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'➕ Decisor adicionado: '+d.nome+(dados?' — '+dados:''),autor,em:new Date().toISOString(),sistema:true});
+  }
+  e.atualizadoEm=new Date().toISOString();
+  try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
+  closeM('mo-crm-decisor-add');
+  toast(ehEdicao?'Decisor atualizado!':'Decisor adicionado!','tok');
+  if(_crmCardAtualId===empresaId)_crmRenderCard(e);
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
+  else if(_crmTabAtiva==='empresas')_crmRenderContatosSubtab();
+}
+const _CRM_TIPO_ATIVIDADE={ligacao:{icone:'📞',label:'Ligação'},mensagem:{icone:'💬',label:'Mensagem'},email:{icone:'✉️',label:'E-mail'}};
+let _crmAtividadeStatusAtual='';
+function crmAbrirModalAtividade(tipo,empresaId){
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  const info=_CRM_TIPO_ATIVIDADE[tipo]||_CRM_TIPO_ATIVIDADE.ligacao;
+  document.getElementById('crm-atividade-modal-titulo').textContent=info.icone+' Registrar '+info.label;
+  document.getElementById('crm-atividade-empresa-id').value=empresaId;
+  document.getElementById('crm-atividade-tipo').value=tipo;
+  const sel=document.getElementById('crm-atividade-decisor');
+  sel.innerHTML='<option value="">Selecione um decisor cadastrado...</option>'
+    +(e.decisores||[]).map(d=>`<option value="${(d.nome||'').replace(/"/g,'&quot;')}">${d.nome||'—'}${d.cargo?' — '+d.cargo:''}</option>`).join('')
+    +'<option value="__outra__">➕ Outra pessoa (não cadastrada)</option>';
+  document.getElementById('crm-atividade-outra-nome').value='';
+  document.getElementById('crm-atividade-relato').value='';
+  document.getElementById('crm-atividade-status-wrap').style.display=tipo==='ligacao'?'':'none';
+  document.getElementById('crm-atividade-direcao-wrap').style.display=tipo==='mensagem'?'':'none';
+  _crmAtividadeSetStatus('');
+  _crmAtividadeSetDirecao('');
+  _crmAtividadeToggleOutraPessoa();
+  openM('mo-crm-atividade');
+}
+// Botões "Atendeu"/"Não Atendeu" (2026-08-26, a pedido do usuário: "ja ter um botao ali pra
+// clicar ATENDEU e outro NÃO ATENDEU, se atendeu escrever o que foi conversado, se nao
+// atendeu dai nao precisa o usuario escrever nada mas vai registrar a atividade no
+// historico") — só aparece pra tipo 'ligacao' (não faz sentido "atender" uma mensagem/
+// e-mail, ver o display:none condicional em crmAbrirModalAtividade acima). Marcando "Não
+// Atendeu" o relato vira opcional (some da tela); "Atendeu" volta a exigir relato, igual a
+// como já funcionava antes pra todos os tipos.
+function _crmAtividadeSetStatus(status){
+  _crmAtividadeStatusAtual=status;
+  document.getElementById('crm-atividade-status').value=status;
+  const btnA=document.getElementById('crm-atividade-btn-atendeu');
+  const btnN=document.getElementById('crm-atividade-btn-nao-atendeu');
+  if(btnA){btnA.style.background=status==='atendeu'?'#16a34a':'#f1f5f9';btnA.style.color=status==='atendeu'?'#fff':'#334155';}
+  if(btnN){btnN.style.background=status==='nao-atendeu'?'#dc2626':'#f1f5f9';btnN.style.color=status==='nao-atendeu'?'#fff':'#334155';}
+  const relatoWrap=document.getElementById('crm-atividade-relato-wrap');
+  if(relatoWrap)relatoWrap.style.display=status==='nao-atendeu'?'none':'';
+}
+function _crmAtividadeToggleOutraPessoa(){
+  const sel=document.getElementById('crm-atividade-decisor');
+  const wrap=document.getElementById('crm-atividade-outra-wrap');
+  if(!sel||!wrap)return;
+  wrap.style.display=sel.value==='__outra__'?'':'none';
+}
+// Botões "Eu enviei"/"Eu recebi" (2026-08-28, a pedido do usuário: "quando eu apontar uma
+// atividade de mensagem precisa perguntar pro usuario se ele mandou uma mensagem ou se
+// recebeu uma mensagem e dai colocar o conteudo") — só aparece pra tipo 'mensagem' (ver
+// display:none condicional em crmAbrirModalAtividade). Ao contrário do Atendeu/Não
+// Atendeu da ligação, aqui o relato NUNCA fica opcional — as duas direções sempre exigem o
+// conteúdo da mensagem; só o texto do rótulo muda pra deixar claro o que digitar.
+let _crmAtividadeDirecaoAtual='';
+function _crmAtividadeSetDirecao(direcao){
+  _crmAtividadeDirecaoAtual=direcao;
+  document.getElementById('crm-atividade-direcao').value=direcao;
+  const btnE=document.getElementById('crm-atividade-btn-enviei');
+  const btnR=document.getElementById('crm-atividade-btn-recebi');
+  if(btnE){btnE.style.background=direcao==='enviei'?'#00bac7':'#f1f5f9';btnE.style.color=direcao==='enviei'?'#fff':'#334155';}
+  if(btnR){btnR.style.background=direcao==='recebi'?'#4338ca':'#f1f5f9';btnR.style.color=direcao==='recebi'?'#fff':'#334155';}
+  const lbl=document.getElementById('crm-atividade-relato-label');
+  if(lbl)lbl.innerHTML=direcao==='recebi'?'O que a pessoa te mandou <span class="r">*</span>':direcao==='enviei'?'O que você mandou <span class="r">*</span>':'Relato <span class="r">*</span>';
+}
+async function crmSalvarAtividade(){
+  const empresaId=document.getElementById('crm-atividade-empresa-id').value;
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e){toast('Empresa não encontrada','terr');return;}
+  const tipo=document.getElementById('crm-atividade-tipo').value;
+  const info=_CRM_TIPO_ATIVIDADE[tipo]||_CRM_TIPO_ATIVIDADE.ligacao;
+  const selVal=document.getElementById('crm-atividade-decisor').value;
+  const outraNome=(document.getElementById('crm-atividade-outra-nome').value||'').trim();
+  const contato=selVal==='__outra__'?outraNome:selVal;
+  const relato=(document.getElementById('crm-atividade-relato').value||'').trim();
+  if(selVal==='__outra__'&&!outraNome){toast('Informe o nome da pessoa','terr');return;}
+  const ehLigacao=tipo==='ligacao';
+  const ehMensagem=tipo==='mensagem';
+  const naoAtendeu=ehLigacao&&_crmAtividadeStatusAtual==='nao-atendeu';
+  if(ehLigacao&&!_crmAtividadeStatusAtual){toast('Marque se atendeu ou não','terr');return;}
+  if(ehMensagem&&!_crmAtividadeDirecaoAtual){toast('Diga se você enviou ou recebeu a mensagem','terr');return;}
+  if(!naoAtendeu&&!relato){toast('Escreva um breve relato da atividade','terr');return;}
+  if(!e.timeline)e.timeline=[];
+  const direcaoTxt=ehMensagem?(_crmAtividadeDirecaoAtual==='recebi'?' (recebida)':' (enviada)'):'';
+  const texto=naoAtendeu
+    ?info.icone+' Ligação com '+(contato||'—')+': não atendeu'
+    :info.icone+' '+info.label+' com '+(contato||'—')+(ehLigacao?' (atendeu)':'')+direcaoTxt+': '+relato;
+  const entry={id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString()};
+  if(ehMensagem){
+    entry.tipoAtividade='mensagem';
+    entry.direcao=_crmAtividadeDirecaoAtual;
+    entry.contato=contato||'';
+    entry.textoMsg=relato;
+    entry.resposta=null;
+    entry.respondidaEm=null;
+    entry.respondidaPor='';
+  }
+  e.timeline.push(entry);
+  e.atualizadoEm=new Date().toISOString();
+  try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
+  closeM('mo-crm-atividade');
+  toast('Atividade registrada!','tok');
+  if(_crmCardAtualId===empresaId)_crmRenderCard(e);
+}
+function crmAbrirMensagemResposta(empresaId,eventoId){
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  const ev=(e.timeline||[]).find(x=>x.id===eventoId);
+  if(!ev)return;
+  document.getElementById('crm-msg-resposta-empresa-id').value=empresaId;
+  document.getElementById('crm-msg-resposta-evento-id').value=eventoId;
+  document.getElementById('crm-msg-resposta-original').textContent=ev.textoMsg||ev.texto||'';
+  document.getElementById('crm-msg-resposta-texto').value='';
+  openM('mo-crm-msg-resposta');
+}
+async function crmSalvarMensagemResposta(){
+  const empresaId=document.getElementById('crm-msg-resposta-empresa-id').value;
+  const eventoId=document.getElementById('crm-msg-resposta-evento-id').value;
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e){toast('Empresa não encontrada','terr');return;}
+  const ev=(e.timeline||[]).find(x=>x.id===eventoId);
+  if(!ev){toast('Mensagem não encontrada','terr');return;}
+  const resposta=(document.getElementById('crm-msg-resposta-texto').value||'').trim();
+  if(!resposta){toast('Escreva o que a pessoa respondeu','terr');return;}
+  ev.resposta=resposta;
+  ev.respondidaEm=new Date().toISOString();
+  ev.respondidaPor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  e.atualizadoEm=new Date().toISOString();
+  try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
+  closeM('mo-crm-msg-resposta');
+  toast('Resposta registrada!','tok');
+  if(_crmCardAtualId===empresaId)_crmRenderCard(e);
+}
+
+// ── TAREFAS (agendadas a partir de um card) ─────────────────────────────────────────
+function crmAbrirNovaTarefa(empresaId){
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  document.getElementById('crm-tarefa-modal-titulo').textContent='🗓️ Nova Tarefa';
+  document.getElementById('crm-tarefa-empresa-id').value=empresaId;
+  document.getElementById('crm-tarefa-id').value='';
+  document.getElementById('crm-tarefa-tipo').value='ligar';
+  const selDec=document.getElementById('crm-tarefa-decisor');
+  selDec.innerHTML='<option value="">Sem decisor específico</option>'+(e.decisores||[]).map(d=>`<option value="${(d.nome||'').replace(/"/g,'&quot;')}">${d.nome||'—'}${d.cargo?' — '+d.cargo:''}</option>`).join('');
+  document.getElementById('crm-tarefa-titulo').value='';
+  document.getElementById('crm-tarefa-data').value=new Date().toISOString().slice(0,10);
+  openM('mo-crm-tarefa');
+}
+async function crmSalvarTarefa(){
+  const empresaId=document.getElementById('crm-tarefa-empresa-id').value;
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e){toast('Empresa não encontrada','terr');return;}
+  const titulo=(document.getElementById('crm-tarefa-titulo').value||'').trim();
+  const data=document.getElementById('crm-tarefa-data').value;
+  if(!titulo){toast('Descreva o que precisa ser feito','terr');return;}
+  if(!data){toast('Selecione a data','terr');return;}
+  const categoria=document.getElementById('crm-tarefa-tipo').value;
+  const decisorNome=document.getElementById('crm-tarefa-decisor').value;
+  const meuNome=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  // Tarefa criada dentro de um card do CRM agora vai pro mesmo lugar de qualquer outra
+  // tarefa comercial (cfg.tarefasGerais, ver Ferramentas Comerciais > Tarefas) em vez de
+  // ficar presa dentro do documento da empresa — 2026-09-08, a pedido do usuário (ver
+  // comentário em _crmTarefasDoCard()). responsável=criadoPor=quem criou (auto-atribuída),
+  // pra aparecer pra essa pessoa em Ferramentas Comerciais e admin ver tudo, igual o resto
+  // do sistema já funciona.
+  const novaT=novaTarefaComercial(titulo,meuNome,data,meuNome,'');
+  novaT.crmEmpresaId=empresaId;
+  novaT.crmEmpresaNome=e.nome||'';
+  novaT.crmCategoria=categoria;
+  novaT.crmDecisorNome=decisorNome;
+  if(!cfg.tarefasGerais)cfg.tarefasGerais=[];
+  cfg.tarefasGerais.push(novaT);
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  closeM('mo-crm-tarefa');
+  toast('Tarefa agendada!','tok');
+  if(_crmCardAtualId===empresaId)_crmRenderCard(e);
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
+  _refreshTarefasBadge();
+}
+async function crmConcluirTarefa(empresaId,tarefaId,concluir){
+  // Tarefa agora vive em cfg.tarefasGerais — reaproveita a mesma mutação central de
+  // Ferramentas Comerciais (aprovação de não-admin incluída, ver _aplicarConclusaoTarefa()),
+  // só atualizando a visualização do CRM depois.
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  await marcarTarefaComercial('',tarefaId,concluir);
+  if(e&&_crmCardAtualId===empresaId)_crmRenderCard(e);
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
+}
+async function crmExcluirTarefa(empresaId,tarefaId){
+  // excluirTarefaGeral() já confirma com o usuário e já checa permissão (só quem criou
+  // ou admin) — não duplica o confirm() aqui.
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  await excluirTarefaComercial('',tarefaId);
+  if(e&&_crmCardAtualId===empresaId)_crmRenderCard(e);
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
+}
+
+// ── CADASTRO/EDIÇÃO DE EMPRESA ──────────────────────────────────────────────────────
+function _crmPopularUf(){
+  const sel=document.getElementById('crm-emp-uf');
+  if(sel&&sel.options.length<=1)UF_BR.forEach(uf=>{const o=document.createElement('option');o.value=uf;o.textContent=uf;sel.appendChild(o);});
+}
+function _crmPopularRegioes(selecionadas){
+  const wrap=document.getElementById('crm-emp-regioes');
+  if(!wrap)return;
+  const sel=selecionadas||[];
+  wrap.innerHTML=REGIOES_BR.map(r=>`<button type="button" class="crm-chip${sel.includes(r)?'':' off'}" onclick="crmToggleRegiao(this)">${r}</button>`).join('');
+}
+function crmToggleRegiao(btn){btn.classList.toggle('off');}
+function _crmRegioesSelecionadas(){
+  return[...document.querySelectorAll('#crm-emp-regioes .crm-chip')].filter(b=>!b.classList.contains('off')).map(b=>b.textContent);
+}
+function _crmAddTelRowToRow(btn){
+  const row=btn.closest('.crm-decisor-row');
+  const wrap=row&&row.querySelector('.crm-dec-tels-wrap');
+  if(!wrap)return;
+  const div=document.createElement('div');
+  div.className='crm-dec-tel-row';
+  div.style.cssText='display:flex;gap:6px;align-items:center';
+  div.innerHTML=_crmTelRowInnerHtml('','');
+  wrap.appendChild(div);
+}
+function crmAddDecisorRow(d){
+  const l=document.getElementById('crm-emp-decisores-l');
+  if(!l)return;
+  const row=document.createElement('div');
+  row.className='crm-decisor-row';
+  row.style.cssText='border:1px solid var(--border-lt);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;position:relative';
+  const tels=_crmTelefonesDecisor(d);
+  const telsHtml=(tels.length?tels:[{tipo:'',numero:''}]).map(t=>'<div class="crm-dec-tel-row" style="display:flex;gap:6px;align-items:center">'+_crmTelRowInnerHtml(t.tipo,t.numero)+'</div>').join('');
+  row.innerHTML='<button type="button" onclick="this.closest(\'.crm-decisor-row\').remove()" style="position:absolute;top:6px;right:6px;background:#fce4ec;color:#c62828;border:none;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:.75rem">✕</button>'
+    +'<input class="fc crm-dec-nome" placeholder="Nome do decisor/comprador" value="'+((d&&d.nome)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem;padding-right:30px">'
+    +'<input class="fc crm-dec-cargo" placeholder="Cargo (obrigatório) — ex.: Comprador, Gerente, Sócio..." value="'+((d&&d.cargo)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem">'
+    +'<div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">'
+    +'<label style="margin-bottom:0;font-size:.7rem;color:var(--ink4);font-weight:700">Telefone(s)</label>'
+    +'<button type="button" onclick="_crmAddTelRowToRow(this)" style="background:var(--brand);color:#fff;border:none;border-radius:6px;padding:2px 8px;font-size:.64rem;font-weight:700;cursor:pointer">+ Telefone</button>'
+    +'</div>'
+    +'<div class="crm-dec-tels-wrap" style="display:flex;flex-direction:column;gap:6px">'+telsHtml+'</div>'
+    +'</div>'
+    +'<input class="fc no-upper crm-dec-email" placeholder="E-mail" value="'+((d&&d.email)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem;text-transform:none">'
+    +'<input class="fc no-upper crm-dec-linkedin" placeholder="Link do perfil no LinkedIn" value="'+((d&&d.linkedin)||'').replace(/"/g,'&quot;')+'" style="font-size:.82rem;text-transform:none">';
+  l.appendChild(row);
+}
+// Aceita o link colado de qualquer jeito (com/sem https://, com/sem www.) e sempre devolve
+// uma URL completa e válida pra virar link clicável de verdade (ver crm-card-linkedin).
+function _crmNormalizarLinkedin(v){
+  const s=(v||'').trim();
+  if(!s)return'';
+  if(/^https?:\/\//i.test(s))return s;
+  return'https://'+s.replace(/^\/+/,'');
+}
+function _crmDecisoresDoForm(){
+  return[...document.querySelectorAll('#crm-emp-decisores-l .crm-decisor-row')].map(row=>({
+    nome:(row.querySelector('.crm-dec-nome')&&row.querySelector('.crm-dec-nome').value.trim())||'',
+    cargo:(row.querySelector('.crm-dec-cargo')&&row.querySelector('.crm-dec-cargo').value.trim())||'',
+    telefones:[...row.querySelectorAll('.crm-dec-tels-wrap .crm-dec-tel-row')].map(tr=>({
+      tipo:(tr.querySelector('.crm-dec-tel-tipo')&&tr.querySelector('.crm-dec-tel-tipo').value.trim())||'',
+      numero:(tr.querySelector('.crm-dec-tel-num')&&tr.querySelector('.crm-dec-tel-num').value.trim())||''
+    })).filter(t=>t.numero),
+    email:(row.querySelector('.crm-dec-email')&&row.querySelector('.crm-dec-email').value.trim())||'',
+    linkedin:_crmNormalizarLinkedin(row.querySelector('.crm-dec-linkedin')&&row.querySelector('.crm-dec-linkedin').value)
+  })).filter(d=>d.nome||d.telefones.length||d.email||d.linkedin);
+}
+function crmAbrirNovaEmpresa(){
+  document.getElementById('crm-emp-modal-titulo').textContent='🏢 Novo Negócio';
+  document.getElementById('crm-emp-id').value='';
+  document.getElementById('crm-emp-nome').value='';
+  document.getElementById('crm-emp-segmento').value='';
+  _crmPopularResponsaveis();
+  // Novo card já sugere o próprio usuário logado como responsável (se ele estiver na
+  // lista elegível) — economiza 1 clique no caso mais comum, sem travar quem quiser trocar.
+  document.getElementById('crm-emp-responsavel').value=(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
+  document.getElementById('crm-emp-unid-existentes').value='';
+  document.getElementById('crm-emp-unid-abrir').value='';
+  document.getElementById('crm-emp-cidade').value='';
+  _crmPopularUf();
+  document.getElementById('crm-emp-uf').value='';
+  _crmPopularRegioes([]);
+  const l=document.getElementById('crm-emp-decisores-l');if(l)l.innerHTML='';
+  crmAddDecisorRow();
+  openM('mo-crm-empresa');
+}
+function crmAbrirEditarEmpresa(id){
+  const e=crmEmpresas.find(x=>x.id===id);
+  if(!e){toast('Empresa não encontrada','terr');return;}
+  document.getElementById('crm-emp-modal-titulo').textContent='✏️ Editar Empresa';
+  document.getElementById('crm-emp-id').value=e.id;
+  document.getElementById('crm-emp-nome').value=e.nome||'';
+  document.getElementById('crm-emp-segmento').value=e.segmento||'';
+  _crmPopularResponsaveis();
+  document.getElementById('crm-emp-responsavel').value=e.responsavel||'';
+  document.getElementById('crm-emp-unid-existentes').value=e.unidadesExistentes||'';
+  document.getElementById('crm-emp-unid-abrir').value=e.unidadesAbrir||'';
+  document.getElementById('crm-emp-cidade').value=e.sedeCidade||'';
+  _crmPopularUf();
+  document.getElementById('crm-emp-uf').value=e.sedeUf||'';
+  _crmPopularRegioes(e.regioes||[]);
+  const l=document.getElementById('crm-emp-decisores-l');if(l)l.innerHTML='';
+  if((e.decisores||[]).length)e.decisores.forEach(d=>crmAddDecisorRow(d));
+  else crmAddDecisorRow();
+  closeM('mo-crm-card');
+  openM('mo-crm-empresa');
+}
+// Loga no histórico do card quando um decisor é adicionado/removido pela tela de editar
+// empresa (2026-08-26, a pedido do usuário: "quero poder excluir um decisor dali, mas quero
+// que essa decisão apareça no histórico ali do card como comentário... os dados dele
+// aparecer tbm pra gente poder recuperar depois... ao incluir tbm manter no histórico...").
+// Decisor não tem id próprio — diff feito pelo nome (trim+uppercase, mesmo padrão usado em
+// outros lugares do sistema tipo _rhFuncionarioPorNome) comparando a lista antes/depois do
+// salvar. Entradas ficam com sistema:true (mesmo estilo das de "Etapa alterada: X → Y").
+function _crmDecisorDadosTexto(d){
+  return[d.cargo,_crmTelefonesTexto(d),d.email,d.linkedin].filter(Boolean).join(' · ');
+}
+function _crmLogDiffDecisores(e,antigos,novos){
+  const porNome=lista=>{const m={};(lista||[]).forEach(d=>{if(d&&d.nome)m[d.nome.trim().toUpperCase()]=d;});return m;};
+  const antigosPorNome=porNome(antigos),novosPorNome=porNome(novos);
+  if(!e.timeline)e.timeline=[];
+  const autor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  (antigos||[]).forEach(d=>{
+    if(!d||!d.nome)return;
+    const k=d.nome.trim().toUpperCase();
+    if(!novosPorNome[k]){
+      const dados=_crmDecisorDadosTexto(d);
+      e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'🗑️ Decisor removido: '+d.nome+(dados?' — '+dados:''),autor,em:new Date().toISOString(),sistema:true});
+    }
+  });
+  (novos||[]).forEach(d=>{
+    if(!d||!d.nome)return;
+    const k=d.nome.trim().toUpperCase();
+    if(!antigosPorNome[k]){
+      const dados=_crmDecisorDadosTexto(d);
+      e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'➕ Decisor adicionado: '+d.nome+(dados?' — '+dados:''),autor,em:new Date().toISOString(),sistema:true});
+    }
+  });
+}
+async function crmSalvarEmpresa(){
+  const id=document.getElementById('crm-emp-id').value;
+  const nome=(document.getElementById('crm-emp-nome').value||'').trim();
+  if(!nome){toast('Preencha o nome da empresa!','terr');return;}
+  // Cargo é imprescindível pra todo decisor com nome preenchido (2026-08-26, a pedido do
+  // usuário) — validado ANTES de mexer no objeto "e" (que pra empresa já existente é a
+  // referência viva dentro de crmEmpresas[]), pra não deixar o card com dado parcial na
+  // tela se a validação falhar.
+  const decisoresForm=_crmDecisoresDoForm();
+  const semCargo=decisoresForm.filter(d=>d.nome&&!d.cargo);
+  if(semCargo.length){toast('Informe o cargo de: '+semCargo.map(d=>d.nome).join(', '),'terr');return;}
+  const isNova=!id;
+  const etapas=_crmEtapas();
+  const e=isNova?{
+    id:'pe_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    etapa:etapas[0].key,
+    timeline:[],
+    tarefas:[],
+    criadoPor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',
+    criadoEm:new Date().toISOString()
+  }:crmEmpresas.find(x=>x.id===id);
+  if(!e){toast('Empresa não encontrada','terr');return;}
+  e.nome=nome;
+  e.segmento=(document.getElementById('crm-emp-segmento').value||'').trim();
+  e.responsavel=document.getElementById('crm-emp-responsavel').value||'';
+  e.unidadesExistentes=document.getElementById('crm-emp-unid-existentes').value||'';
+  e.unidadesAbrir=document.getElementById('crm-emp-unid-abrir').value||'';
+  e.regioes=_crmRegioesSelecionadas();
+  e.sedeCidade=(document.getElementById('crm-emp-cidade').value||'').trim();
+  e.sedeUf=document.getElementById('crm-emp-uf').value||'';
+  const decisoresAntigos=isNova?[]:(e.decisores||[]).slice();
+  e.decisores=decisoresForm;
+  if(!isNova)_crmLogDiffDecisores(e,decisoresAntigos,decisoresForm);
+  e.atualizadoEm=new Date().toISOString();
+  try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
+  closeM('mo-crm-empresa');
+  toast(isNova?'Empresa cadastrada!':'Empresa atualizada!','tok');
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
+  else if(_crmTabAtiva==='empresas')_crmRenderContatosSubtab();
+  if(_crmCardAtualId===e.id)_crmRenderCard(e);
+}
+async function crmExcluirEmpresa(id){
+  // Só admin exclui empresa do funil (2026-08-19, pedido do usuário) — o botão já fica
+  // escondido pra quem não é admin em _crmRenderCard(), esta trava aqui é só rede de
+  // segurança (mesmo padrão usado em editarVendaLista/retirarComissaoLista) caso alguém
+  // chame a função direto.
+  const {isAdm}=_getUserCat();
+  if(!isAdm){toast('Apenas administradores podem excluir empresas do CRM','terr');return;}
+  const e=crmEmpresas.find(x=>x.id===id);
+  if(!e)return;
+  if(!confirm('Excluir "'+e.nome+'" do CRM? Isso apaga também a linha do tempo dela. Esta ação não pode ser desfeita. (As tarefas já criadas continuam em Ferramentas Comerciais > Tarefas.)'))return;
+  try{
+    if(window._fbDeleteCrmEmpresa)await window._fbDeleteCrmEmpresa(id);
+  }catch(err){console.error('Erro ao excluir empresa:',err);toast('Erro ao excluir: '+(err.message||err),'terr');return;}
+  closeM('mo-crm-card');
+  toast('Empresa removida do CRM','tok');
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
+  else if(_crmTabAtiva==='empresas')_crmRenderContatosSubtab();
+}
+
+
+// ── INDICADORES (saúde do funil + produtividade da equipe, 2026-08-14) ─────────────
+// Objetivo do usuário: enxergar se algum card está "desassistido" (ninguém ligou,
+// pesquisou ou mandou e-mail há muito tempo) e medir produtividade por pessoa da equipe
+// do CRM. Tudo calculado em cima do que já existe (timeline + tarefas concluídas),
+// sem precisar de outra coleção no Firestore — ver _crmSaude()/_crmUltimaInteracao()
+// mais acima.
+let crmIndCharts={};
+function _crmIndicadoresDados(){
+  const empresas=crmEmpresas;
+  const total=empresas.length;
+  const comSaude=empresas.map(e=>({e,s:_crmSaude(e)}));
+  const porNivel={verde:0,amarelo:0,vermelho:0};
+  comSaude.forEach(x=>porNivel[x.s.nivel]++);
+  const desassistidas=comSaude.filter(x=>x.s.nivel==='vermelho').sort((a,b)=>b.s.dias-a.s.dias);
+  const atencao=comSaude.filter(x=>x.s.nivel==='amarelo').sort((a,b)=>b.s.dias-a.s.dias);
+  const mediaDias=total?Math.round(comSaude.reduce((s,x)=>s+x.s.dias,0)/total):0;
+  const etapas=_crmEtapas();
+  const porEtapa=etapas.map(et=>({label:et.label,qtd:empresas.filter(e=>(e.etapa||etapas[0].key)===et.key).length}));
+  // Produtividade por responsável — inclui todo mundo elegível (equipe COMERCIAL+admin,
+  // ver _crmNomesEquipe()) mesmo com 0 empresas ainda, MAIS qualquer nome que já tenha
+  // empresa atribuída (cobre gente que trocou de categoria/saiu da equipe mas ainda tem
+  // cards em aberto).
+  const hojeIso=new Date().toISOString().slice(0,10);
+  const seteDiasAtrasIso=new Date(Date.now()-7*86400000).toISOString();
+  const nomes=new Set(_crmNomesEquipe());
+  empresas.forEach(e=>{if(e.responsavel)nomes.add(e.responsavel);});
+  const porResponsavel=[...nomes].map(nome=>{
+    const minhas=empresas.filter(e=>e.responsavel===nome);
+    // "Interações nos últimos 7 dias" = comentários manuais (exclui os automáticos de
+    // mudança de etapa, senão qualquer arrastar de card infla o número sem esforço real
+    // de contato) + tarefas concluídas nesse período.
+    const interacoes7=minhas.reduce((s,e)=>{
+      const c=(e.timeline||[]).filter(ev=>!ev.sistema&&ev.em>=seteDiasAtrasIso).length;
+      const t=_crmTarefasDoCard(e.id).filter(t=>t.status==='concluida'&&t.concluidaEm&&t.concluidaEm>=seteDiasAtrasIso).length;
+      return s+c+t;
+    },0);
+    const pendentes=minhas.reduce((s,e)=>s+_crmTarefasDoCard(e.id).filter(t=>t.status==='pendente').length,0);
+    const atrasadas=minhas.reduce((s,e)=>s+_crmTarefasDoCard(e.id).filter(t=>t.status==='pendente'&&t.prazoTarefa&&t.prazoTarefa<hojeIso).length,0);
+    const descount=minhas.filter(e=>_crmSaude(e).nivel==='vermelho').length;
+    return{nome,total:minhas.length,interacoes7,pendentes,atrasadas,desassistidas:descount};
+  }).filter(r=>r.total>0).sort((a,b)=>(b.desassistidas-a.desassistidas)||(b.total-a.total));
+  const semResponsavel=empresas.filter(e=>!e.responsavel).length;
+  const semTarefa=comSaude.filter(x=>!_crmTarefasDoCard(x.e.id).some(t=>t.status==='pendente')).sort((a,b)=>b.s.dias-a.s.dias);
+  // Panorama de tarefas pro indicador "📋 Tarefas" (2026-08-28, a pedido do usuário: "quero o
+  // titulo TAREFAS e dai o que vai aparecer nele: negocios sem tarefa programada, tarefas
+  // atrasadas etc") — mesmas categorias por prazo (Atrasadas/Hoje/Esta semana), calculadas aqui em cima de TODAS
+  // as tarefas pendentes do funil (não só as da empresa aberta), pra bater com o que o Kanban
+  // mostra. Fim de semana = sábado da semana atual (domingo→sábado, mesmo padrão do resto do
+  // sistema — ver fix de 2026-08-28 no Kanban do CRM).
+  const todasTarefas=_crmTodasTarefas();
+  const tarefasPendentes=todasTarefas.filter(t=>t.status==='pendente');
+  const tarefasAtrasadas=tarefasPendentes.filter(t=>t.prazoTarefa&&t.prazoTarefa<hojeIso).length;
+  const tarefasHoje=tarefasPendentes.filter(t=>t.prazoTarefa===hojeIso).length;
+  const diasAteSabadoInd=6-new Date().getDay();
+  const fimSemanaInd=new Date(new Date().getFullYear(),new Date().getMonth(),new Date().getDate()+diasAteSabadoInd).toISOString().slice(0,10);
+  const tarefasSemana=tarefasPendentes.filter(t=>t.prazoTarefa&&t.prazoTarefa>hojeIso&&t.prazoTarefa<=fimSemanaInd).length;
+  return{total,porNivel,desassistidas,atencao,mediaDias,porEtapa,porResponsavel,semResponsavel,semTarefa,tarefasAtrasadas,tarefasHoje,tarefasSemana};
+}
+function _crmAtualizarBadgeSaude(d){
+  const badge=document.getElementById('crm-ind-badge');
+  if(!badge)return;
+  const dados=d||_crmIndicadoresDados();
+  const n=dados.porNivel.vermelho;
+  if(n>0){badge.textContent=String(n);badge.style.display='';}
+  else badge.style.display='none';
+}
+async function _crmSalvarLimiaresForm(){
+  const a=parseInt(document.getElementById('crm-lim-amarelo').value,10)||5;
+  const v=parseInt(document.getElementById('crm-lim-vermelho').value,10)||10;
+  if(v<=a){toast('O limiar crítico precisa ser maior que o de atenção','terr');return;}
+  await _crmSalvarLimiares(a,v);
+  toast('Limiares de saúde atualizados!','tok');
+  renderCrmIndicadores();
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
+  else if(_crmTabAtiva==='empresas')_crmRenderContatosSubtab();
+}
+function _crmRenderCharts(d){
+  if(typeof Chart==='undefined')return;
+  if(crmIndCharts.etapas){try{crmIndCharts.etapas.destroy();}catch(e){}}
+  const elEt=document.getElementById('crm-ind-chart-etapas');
+  if(elEt){
+    crmIndCharts.etapas=new Chart(elEt,{type:'bar',
+      data:{labels:d.porEtapa.map(x=>x.label),datasets:[{data:d.porEtapa.map(x=>x.qtd),backgroundColor:'#00bac7',borderRadius:4}]},
+      options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,animation:false,
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>ctx.raw+' empresa'+(ctx.raw===1?'':'s')}}},
+        scales:{
+          x:{beginAtZero:true,ticks:{precision:0,font:{size:10},color:'#888'},grid:{display:false},border:{display:false}},
+          y:{ticks:{font:{size:9},color:'#888'},grid:{display:false},border:{display:false}}
+        }}});
+  }
+  if(crmIndCharts.saude){try{crmIndCharts.saude.destroy();}catch(e){}}
+  const elSa=document.getElementById('crm-ind-chart-saude');
+  if(elSa){
+    crmIndCharts.saude=new Chart(elSa,{type:'doughnut',
+      data:{labels:['Saudável','Atenção','Desassistido'],datasets:[{data:[d.porNivel.verde,d.porNivel.amarelo,d.porNivel.vermelho],backgroundColor:['#16a34a','#d97706','#dc2626'],borderWidth:0,hoverOffset:5}]},
+      options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{position:'bottom',labels:{font:{size:10},color:'#888',boxWidth:10}}}}});
+  }
+}
+function renderCrmIndicadores(){
+  const wrap=document.getElementById('crm-ind-body');
+  if(!wrap)return;
+  if(!_podeVerVisaoComercial()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const d=_crmIndicadoresDados();
+  _crmAtualizarBadgeSaude(d);
+  if(!d.total){
+    wrap.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Cadastre empresas no Funil pra ver os indicadores de saúde e produtividade aqui.</div>';
+    return;
+  }
+  const lim=_crmLimiares();
+  const pct=n=>d.total?Math.round(n/d.total*100):0;
+  const tiles=[
+    {label:'Empresas no Funil',val:String(d.total),sub:d.semResponsavel?`${d.semResponsavel} sem responsável`:'Todas com responsável',color:'#1a2b5e'},
+    {label:'🟢 Saudáveis',val:`${d.porNivel.verde} (${pct(d.porNivel.verde)}%)`,sub:`Interação em até ${lim.amarelo} dias`,color:'#16a34a'},
+    {label:'🟡 Em Atenção',val:`${d.porNivel.amarelo} (${pct(d.porNivel.amarelo)}%)`,sub:`${lim.amarelo} a ${lim.vermelho-1} dias sem interação`,color:'#d97706'},
+    {label:'🔴 Desassistidas',val:`${d.porNivel.vermelho} (${pct(d.porNivel.vermelho)}%)`,sub:`${lim.vermelho}+ dias sem interação`,color:'#dc2626'},
+    {label:'Média de dias sem interação',val:`${d.mediaDias}d`,sub:'Considerando todo o funil',color:'#7c3aed'},
+    {label:'📋 Tarefas',linhas:[
+      {texto:'Sem tarefa agendada',valor:`${d.semTarefa.length} (${pct(d.semTarefa.length)}%)`,color:'#0ea5e9'},
+      {texto:'Atrasadas',valor:String(d.tarefasAtrasadas),color:'#dc2626'},
+      {texto:'Hoje',valor:String(d.tarefasHoje),color:'#0369a1'},
+      {texto:'Esta semana',valor:String(d.tarefasSemana),color:'#7c3aed'}
+    ]},
+  ];
+  const tilesHtml=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px">
+    ${tiles.map(c=>c.linhas?`<div style="background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e5e7eb">
+      <div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:8px">${c.label}</div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        ${c.linhas.map(l=>`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+          <span style="font-size:.72rem;color:#64748b">${l.texto}</span>
+          <span style="font-size:.85rem;font-weight:800;color:${l.color};white-space:nowrap">${l.valor}</span>
+        </div>`).join('')}
+      </div>
+    </div>`:`<div style="background:#fff;border-radius:12px;padding:16px 18px;border:1px solid #e5e7eb">
+      <div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:6px">${c.label}</div>
+      <div style="font-size:1.25rem;font-weight:800;color:${c.color}">${c.val}</div>
+      <div style="font-size:.72rem;color:#94a3b8;margin-top:4px">${c.sub}</div>
+    </div>`).join('')}
+  </div>`;
+
+  const limiaresHtml=`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:10px 12px;margin-bottom:16px;font-size:.76rem;color:#475569">
+    <span style="font-weight:700">⚙️ Limiares de saúde:</span>
+    <span>Atenção a partir de <input type="number" min="1" id="crm-lim-amarelo" value="${lim.amarelo}" style="width:48px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:6px;font-family:inherit;font-size:.76rem"> dias</span>
+    <span>Crítico a partir de <input type="number" min="1" id="crm-lim-vermelho" value="${lim.vermelho}" style="width:48px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:6px;font-family:inherit;font-size:.76rem"> dias</span>
+    <button onclick="_crmSalvarLimiaresForm()" style="background:#00bac7;color:#fff;border:none;border-radius:7px;padding:5px 12px;font-size:.74rem;font-weight:700;cursor:pointer">Salvar</button>
+  </div>`;
+
+  const chartsHtml=`<div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:18px">
+    <div class="dash-card" style="margin-bottom:0">
+      <div class="dash-sec-title">🗂️ Empresas por Etapa</div>
+      <div style="height:220px;margin-top:10px"><canvas id="crm-ind-chart-etapas"></canvas></div>
+    </div>
+    <div class="dash-card" style="margin-bottom:0">
+      <div class="dash-sec-title">🩺 Distribuição de Saúde</div>
+      <div style="height:220px;margin-top:10px"><canvas id="crm-ind-chart-saude"></canvas></div>
+    </div>
+  </div>`;
+
+  const listaCard=(titulo,cor,itens,vazio)=>{
+    if(!itens.length)return`<div class="dash-card"><div class="dash-sec-title">${titulo}</div><div style="padding:14px 4px;color:#94a3b8;font-size:.8rem">${vazio}</div></div>`;
+    return`<div class="dash-card">
+      <div class="dash-sec-title">${titulo}</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;max-height:280px;overflow-y:auto">
+        ${itens.map(({e,s})=>`<div onclick="crmAbrirCard('${e.id}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;border:1px solid ${cor}55;border-radius:9px;cursor:pointer;background:${cor}12">
+          <div style="min-width:0">
+            <div style="font-weight:700;font-size:.8rem;color:#1e293b">${e.nome||'—'}</div>
+            <div style="font-size:.7rem;color:#64748b;margin-top:2px">${e.responsavel?'🧑‍💼 '+e.responsavel:'sem responsável'}${e.segmento?' · '+e.segmento:''}</div>
+          </div>
+          <div style="flex-shrink:0;font-weight:800;font-size:.78rem;color:${cor}">${s.dias}d</div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  };
+
+  const responsavelHtml=`<div class="dash-card">
+    <div class="dash-sec-title">👥 Produtividade da Equipe</div>
+    <div style="overflow-x:auto;margin-top:8px">
+      <table class="dash-table"><thead><tr><th>Responsável</th><th>Empresas</th><th>Interações (7d)</th><th>🔴 Desassistidas</th><th>Tarefas Pendentes</th><th>Tarefas Atrasadas</th></tr></thead>
+      <tbody>
+        ${d.porResponsavel.length?d.porResponsavel.map(r=>`<tr>
+          <td style="font-weight:600">${r.nome}</td>
+          <td>${r.total}</td>
+          <td>${r.interacoes7}</td>
+          <td style="color:${r.desassistidas>0?'#dc2626':'inherit'};font-weight:${r.desassistidas>0?700:400}">${r.desassistidas}</td>
+          <td>${r.pendentes}</td>
+          <td style="color:${r.atrasadas>0?'#dc2626':'inherit'};font-weight:${r.atrasadas>0?700:400}">${r.atrasadas}</td>
+        </tr>`).join(''):'<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:14px">Nenhuma empresa com responsável definido ainda.</td></tr>'}
+      </tbody></table>
+    </div>
+  </div>`;
+
+  wrap.innerHTML=tilesHtml+limiaresHtml+chartsHtml+
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+      ${listaCard('🔴 Empresas Desassistidas','#dc2626',d.desassistidas,'Nenhuma empresa desassistida — funil saudável! 🎉')}
+      ${listaCard('🟡 Empresas em Atenção','#d97706',d.atencao,'Nenhuma empresa em atenção no momento.')}
+    </div>`+
+    `<div style="margin-bottom:14px">
+      ${listaCard('📋 Negócios Sem Tarefa Agendada','#0ea5e9',d.semTarefa,'Todo negócio no funil tem uma próxima tarefa agendada — nada parado! 🎉')}
+    </div>`+
+    responsavelHtml;
+
+  _crmRenderCharts(d);
+}
+
+// ── GERENCIAR ETAPAS DO FUNIL ───────────────────────────────────────────────────────
+function crmAbrirGerenciarEtapas(){
+  _crmRenderEtapasModal();
+  openM('mo-crm-etapas');
+}
+function _crmRenderEtapasModal(){
+  const wrap=document.getElementById('crm-etapas-list');
+  if(!wrap)return;
+  const etapas=_crmEtapas();
+  wrap.innerHTML=etapas.map((et,i)=>{
+    const qtd=crmEmpresas.filter(e=>e.etapa===et.key).length;
+    return `<div style="display:flex;align-items:center;gap:8px;border:1px solid var(--border-lt);border-radius:8px;padding:8px 10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.8rem;color:var(--ink)">${et.label}</div>
+        <div style="font-size:.68rem;color:var(--ink4)">${qtd} empresa${qtd===1?'':'s'}</div>
+      </div>
+      <button onclick="crmMoverEtapaOrdem(${i},-1)" ${i===0?'disabled':''} title="Mover pra cima" style="background:#f1f5f9;color:#475569;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:.72rem;opacity:${i===0?.4:1}">▲</button>
+      <button onclick="crmMoverEtapaOrdem(${i},1)" ${i===etapas.length-1?'disabled':''} title="Mover pra baixo" style="background:#f1f5f9;color:#475569;border:none;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:.72rem;opacity:${i===etapas.length-1?.4:1}">▼</button>
+      <button onclick="crmRemoverEtapa('${et.key}')" title="Remover etapa" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:.72rem">🗑️</button>
+    </div>`;
+  }).join('');
+}
+async function crmMoverEtapaOrdem(i,dir){
+  const etapas=[..._crmEtapas()];
+  const j=i+dir;
+  if(j<0||j>=etapas.length)return;
+  const tmp=etapas[i];etapas[i]=etapas[j];etapas[j]=tmp;
+  await _crmSalvarEtapas(etapas);
+  _crmRenderEtapasModal();
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
+}
+async function crmAdicionarEtapa(){
+  const input=document.getElementById('crm-etapas-novo');
+  const label=((input&&input.value)||'').trim().toUpperCase();
+  if(!label){toast('Digite o nome da etapa','terr');return;}
+  const etapas=[..._crmEtapas()];
+  let key=label.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'');
+  if(!key)key='etapa';
+  let keyFinal=key,n=2;
+  while(etapas.some(e=>e.key===keyFinal)){keyFinal=key+'_'+n;n++;}
+  etapas.push({key:keyFinal,label});
+  await _crmSalvarEtapas(etapas);
+  if(input)input.value='';
+  _crmRenderEtapasModal();
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
+  toast('Etapa adicionada!','tok');
+}
+async function crmRemoverEtapa(key){
+  const etapas=_crmEtapas();
+  if(etapas.length<=1){toast('Precisa deixar pelo menos uma etapa no funil','terr');return;}
+  const qtd=crmEmpresas.filter(e=>e.etapa===key).length;
+  if(qtd>0){toast('Mova as '+qtd+' empresa'+(qtd===1?'':'s')+' desta etapa antes de removê-la','terr');return;}
+  const et=etapas.find(e=>e.key===key);
+  if(!confirm('Remover a etapa "'+((et&&et.label)||key)+'"?'))return;
+  const novasEtapas=etapas.filter(e=>e.key!==key);
+  await _crmSalvarEtapas(novasEtapas);
+  _crmRenderEtapasModal();
+  if(_crmTabAtiva==='kanban')renderCrmKanban();
   toast('Etapa removida','tok');
 }
 </script>
