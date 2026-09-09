@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-09.9';</script>
+<script>const APP_BUILD_VERSION='2026-09-09.15';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -102,6 +102,16 @@ body{font-family:'Inter',system-ui,sans-serif;background:#f4f6f8;color:var(--ink
 .dash-tabs{display:flex;gap:4px;margin-bottom:20px;background:#e5e7eb;padding:4px;border-radius:10px}
 .dash-tab{flex:1;padding:9px;border:none;border-radius:7px;background:transparent;font-size:.78rem;font-weight:600;color:#6b7280;cursor:pointer;font-family:inherit;transition:all .2s}
 .dash-tab.active{background:#fff;color:#111827;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+/* Wizard de 3 etapas do formulário de Novo Negócio (2026-09-09, build .14) — mesma ideia
+   visual do .dash-tabs/.dash-tab acima (segmented control), só que compacto o bastante pra
+   caber no cabeçalho do modal ao lado do título. Navegação livre (sem travar por etapa) —
+   ver _crmEmpWizardIrPara/_crmEmpWizardClicarChip/_crmEmpWizardAvancar. */
+.crm-emp-wtabs{display:flex;gap:2px;background:#e5e7eb;padding:3px;border-radius:9px;flex-shrink:0}
+.crm-emp-wtab{border:none;border-radius:6px;background:transparent;padding:5px 9px;font-size:.62rem;font-weight:700;letter-spacing:.2px;color:#6b7280;cursor:pointer;font-family:inherit;transition:all .2s;white-space:nowrap}
+.crm-emp-wtab:hover:not(.active){background:rgba(255,255,255,.6);color:#374151}
+.crm-emp-wtab.active{background:#fff;color:#00838f;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+@keyframes crmEmpWStepIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+.crm-emp-wstep-in{animation:crmEmpWStepIn .22s ease}
 .dash-card{background:#fff;border-radius:12px;padding:18px 20px;border:1px solid #e5e7eb;margin-bottom:16px}
 /* flex-wrap:wrap (2026-08-04) — sem isso, em telas menores o <select> de empresa e os
    botões de PDF/Excel ficavam espremidos pelos irmãos flex (que não encolhem por causa do
@@ -3103,12 +3113,18 @@ select.fc{cursor:pointer}
 <!-- CADASTRO/EDIÇÃO DE EMPRESA -->
 <div class="mov" id="mo-crm-empresa" onclick="cio(event,'mo-crm-empresa')">
 <div class="mvmod" style="width:640px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column">
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-shrink:0">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-shrink:0;gap:8px">
     <h3 style="margin-bottom:0" id="crm-emp-modal-titulo">🏢 Nova Empresa</h3>
-    <button onclick="fecharJanela('mo-crm-empresa')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+    <div id="crm-emp-wizard-chips" class="crm-emp-wtabs">
+      <button type="button" id="crm-emp-chip-geral" class="crm-emp-wtab" onclick="_crmEmpWizardClicarChip('geral')">GERAL</button>
+      <button type="button" id="crm-emp-chip-proposta" class="crm-emp-wtab" onclick="_crmEmpWizardClicarChip('proposta')">PROPOSTA</button>
+      <button type="button" id="crm-emp-chip-inteligencia" class="crm-emp-wtab" onclick="_crmEmpWizardClicarChip('inteligencia')">INTELIGÊNCIA</button>
+    </div>
+    <button onclick="fecharJanela('mo-crm-empresa')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
   </div>
   <div style="overflow-y:auto;flex:1;padding-right:4px">
     <input type="hidden" id="crm-emp-id">
+    <div id="crm-emp-step-geral">
     <div class="fg"><label>Nome da empresa <span class="r">*</span></label><input class="fc" id="crm-emp-nome" placeholder="Razão social ou nome fantasia"></div>
     <div class="fg"><label>Responsável pelo negócio</label><select class="fc" id="crm-emp-responsavel"><option value="">Sem responsável definido</option></select></div>
     <div class="fg">
@@ -3120,7 +3136,7 @@ select.fc{cursor:pointer}
     </div>
     <div class="fg">
       <label>Tipo de negócio <span class="r">*</span></label>
-      <select class="fc" id="crm-emp-tiponegocio">
+      <select class="fc" id="crm-emp-tiponegocio" onchange="_crmEmpAtualizarBotaoProposta()">
         <option value="">Selecione...</option>
         <option value="Venda">Venda</option>
         <option value="Permuta">Permuta</option>
@@ -3129,15 +3145,49 @@ select.fc{cursor:pointer}
         <option value="Interno">Interno</option>
         <option value="Brinde">Brinde</option>
       </select>
-      <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Cards do tipo Venda exigem valor da proposta preenchido pra avançar do funil; os demais tipos não.</div>
+      <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Cards do tipo Venda exigem valor bruto da proposta preenchido pra poder ser salvos; os demais tipos não.</div>
     </div>
     <div class="fg">
       <label>Decisores / Compradores</label>
       <div id="crm-emp-decisores-l" style="display:flex;flex-direction:column;gap:10px;margin-top:6px"></div>
       <button type="button" onclick="crmAddDecisorRow()" style="margin-top:8px;padding:7px 14px;border:1.5px dashed #d0d4e0;border-radius:8px;background:transparent;cursor:pointer;font-size:.78rem;font-weight:600;color:#6b7a99">+ Adicionar decisor</button>
     </div>
+    </div>
+    <div id="crm-emp-step-proposta" style="display:none">
+    <input type="hidden" id="crm-proposta-modal-empresa-id">
+    <div class="fg">
+      <label>Tipo de negócio</label>
+      <div id="crm-proposta-modal-tipo" style="font-size:.85rem;font-weight:700;color:var(--ink)">💼 Venda</div>
+    </div>
+    <div class="fg">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+        <label style="margin-bottom:0">Anexar nova proposta (PDF)</label>
+        <button type="button" onclick="document.getElementById('crm-proposta-modal-pdf-input').click()" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">📎 PROPOSTA ATUALIZADA</button>
+      </div>
+      <input type="file" id="crm-proposta-modal-pdf-input" accept="application/pdf,.pdf" style="display:none" onchange="crmPropostaModalPdfSelecionado(this)">
+      <div id="crm-proposta-modal-pdf-status" style="font-size:.72rem;color:var(--ink4);margin-top:4px"></div>
+    </div>
+    <div class="fg"><label>Valor Bruto (R$)<span class="r" id="crm-proposta-modal-bruto-req" style="display:none"> *</span></label><input class="fc no-upper" type="text" inputmode="numeric" id="crm-proposta-modal-bruto" oninput="fmtMoney(this)" placeholder="0,00"></div>
+    <div class="fg"><label>Operacionais (R$)</label><input class="fc no-upper" type="text" inputmode="numeric" id="crm-proposta-modal-operacionais" oninput="fmtMoney(this)" placeholder="0,00"></div>
+    <div class="fg"><label>Valor Líquido (R$)</label><input class="fc no-upper" type="text" inputmode="numeric" id="crm-proposta-modal-liquido" oninput="fmtMoney(this)" placeholder="0,00"></div>
+    <button type="button" onclick="crmSalvarValoresJanelaProposta()" style="width:100%;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer;margin-bottom:14px">💾 Salvar valores</button>
+    <div style="border-top:1px solid var(--border-lt);padding-top:12px">
+      <div style="font-weight:800;font-size:.8rem;color:var(--ink);margin-bottom:8px">📜 Histórico de propostas anexadas</div>
+      <div id="crm-proposta-modal-historico"></div>
+    </div>
+    </div>
+    <div id="crm-emp-step-inteligencia" style="display:none">
+      <div style="text-align:center;padding:24px 12px;color:var(--ink4);font-size:.8rem;line-height:1.5">
+        📋 Ligações, mensagens, e-mails, estratégias, linha do tempo e tarefas ficam disponíveis depois que o negócio for criado.<br><br>
+        Revise as etapas anteriores se precisar, e clique em "Criar Negócio" pra finalizar o cadastro.
+      </div>
+    </div>
   </div>
-  <button onclick="crmSalvarEmpresa()" style="width:100%;background:#00bac7;color:#fff;border:none;border-radius:9px;padding:12px;font-size:.85rem;font-weight:700;cursor:pointer;margin-top:12px;flex-shrink:0">💾 Salvar Empresa</button>
+  <div style="display:flex;gap:8px;margin-top:12px;flex-shrink:0">
+    <button type="button" id="crm-emp-btn-voltar" onclick="_crmEmpWizardVoltar()" style="flex:0 0 auto;background:#f1f5f9;color:#475569;border:none;border-radius:9px;padding:12px 18px;font-size:.85rem;font-weight:700;cursor:pointer;display:none">← Voltar</button>
+    <button type="button" id="crm-emp-btn-avancar" onclick="_crmEmpWizardAvancar()" style="flex:1;background:#00bac7;color:#fff;border:none;border-radius:9px;padding:12px;font-size:.85rem;font-weight:700;cursor:pointer">Avançar →</button>
+    <button onclick="crmSalvarEmpresa()" id="crm-emp-btn-salvar" style="flex:1;background:#00bac7;color:#fff;border:none;border-radius:9px;padding:12px;font-size:.85rem;font-weight:700;cursor:pointer;display:none">💾 Salvar Empresa</button>
+  </div>
 </div>
 </div>
 
@@ -5852,6 +5902,7 @@ let _reabrirProjetos27JulMigracaoFeita=false;
 let _centrosCustoExtraMigracaoFeita=false;
 let _centrosCustoExtra2RemocaoMigracaoFeita=false;
 let _centroFinanceiroSeedMigracaoFeita=false;
+let _crmEtapasNovoFunilMigracaoFeita=false;
 let _produtosBKSeedMigracaoFeita=false;
 let _produtosBKMedidaMigracaoFeita=false;
 let _produtosBKTipoMigracaoFeita=false;
@@ -6010,6 +6061,12 @@ function setupRealtimeSync(){
     if(!_centroFinanceiroSeedMigracaoFeita&&_getUserCat().isAdm){
       _centroFinanceiroSeedMigracaoFeita=true;
       _migrarSeedCentroFinanceiro().catch(e=>{_centroFinanceiroSeedMigracaoFeita=false;console.error('Erro ao cadastrar Centro de Custo "Custo Financeiro"',e);});
+    }
+    // Novo funil do CRM Comercial (2026-09-09, build .15, ver _migrarCrmEtapasNovoFunil
+    // acima) — mesmo padrão de flag PERSISTIDO, só admin.
+    if(!_crmEtapasNovoFunilMigracaoFeita&&_getUserCat().isAdm){
+      _crmEtapasNovoFunilMigracaoFeita=true;
+      _migrarCrmEtapasNovoFunil().catch(e=>{_crmEtapasNovoFunilMigracaoFeita=false;console.error('Erro ao migrar etapas do funil CRM Comercial',e);});
     }
     // Seed pontual (2026-08-25, a pedido do usuário) — cadastra os 217 produtos do Burger
     // King que ele mandou em planilha (ver _migrarSeedProdutosBK/PRODUTOS_BK_SEED). Mesmo
@@ -36981,14 +37038,34 @@ let crmEmpresas=[];
 let _crmTabAtiva='kanban';
 let _crmCalRef=new Date();
 let _crmCardAtualId=null;
-// Aba ativa dentro do card de empresa (2026-08-28, a pedido do usuário: "as informações tao
-// todas iguais, parece tudo a mesma coisa... confunde... sugiro mudarmos o design pra deixar
-// cada coisa separada"). Card virou abas (Visão Geral/Decisores/Tarefas/Atividade) em vez de
-// um scroll único — ver _crmCardSetTab()/_crmRenderCard(). Só é resetada pra 'visao' ao
-// ABRIR um card (crmAbrirCard); re-renders do MESMO card (depois de salvar um decisor, uma
-// tarefa etc.) preservam a aba em que o usuário estava, senão toda ação jogaria ele de volta
-// pro início.
-let _crmCardTabAtiva='visao';
+// Aba ativa dentro do card de empresa (2026-08-28, a pedido do usuário original; redesenhado
+// em 2026-09-09 build .12 — a pedido do usuário: "faça a janelinha dos cards tipo do lado e
+// nao embaixo... quero que tenham submenus dentro do card, primeiro menu é o GERAL, segundo
+// é o PROPOSTA, terceiro INTELIGENCIA DE VENDAS... uma janela do lado da outra clicando ali
+// vai pra outra janela como se fosse um avançar" — em vez de Proposta/Inteligência abrirem
+// como modal empilhado por cima do card (build .11, "ficou poluido demais"), viram 2 das 3
+// telas de nível superior do próprio card (GERAL/PROPOSTA/INTELIGÊNCIA DE VENDA), com
+// Decisores dentro de GERAL e Tarefas dentro de INTELIGÊNCIA DE VENDA (2 sub-abas cada, ver
+// _crmCardSetSubGeral()/_crmCardSetSubIntel()) — pedido explícito do usuário nessa mesma
+// conversa. Só são resetadas ao ABRIR um card (crmAbrirCard); re-renders do MESMO card
+// preservam onde o usuário estava.
+let _crmCardTabAtiva='geral';
+let _crmCardSubGeralAtiva='visao';
+let _crmCardSubIntelAtiva='ativ';
+// PDF de proposta anexado durante a CRIAÇÃO da empresa (2026-09-09, a pedido do
+// usuário) — a empresa ainda não tem id nesse momento, então o arquivo/valores lidos
+// ficam guardados aqui até crmSalvarEmpresa() gravar no objeto "e" de verdade.
+let _crmEmpPropostaPendente=null;
+// Wizard de 3 etapas do formulário de Novo Negócio/Editar Empresa (2026-09-09, build .13, a
+// pedido do usuário: "pra criar esse card tem essas 3 etapas que eu pedi pra serem
+// preenchidas"). Em modo 'criacao' as etapas são sequenciais e obrigatórias (não dá pra
+// pular sem preencher a anterior); em modo 'edicao' as 3 abinhas ficam livres, já que os
+// dados já existem (confirmado via AskUserQuestion). Ver crmAbrirNovaEmpresa/
+// crmAbrirEditarEmpresa (resetam esse estado) e _crmEmpWizardIrPara/_crmEmpWizardAvancar/
+// _crmEmpWizardVoltar/_crmEmpWizardClicarChip logo abaixo de _crmEmpAtualizarBotaoProposta.
+let _crmEmpWizardStep='geral';
+let _crmEmpWizardModo='criacao';
+let _crmEmpWizardVisitado={geral:true,proposta:false,inteligencia:false};
 
 function setupCrmSync(){
   if(!window._fbWatchCrmEmpresas)return;
@@ -37012,7 +37089,12 @@ function setupCrmSync(){
 // senão cai no default abaixo. Só grava em cfg na primeira customização de verdade — evita
 // precisar de uma migração 1x-por-sessão só pra semear o default, igual o resto do sistema
 // já faz em vários lugares (ver comentários de migração em setupRealtimeSync).
-const CRM_ETAPAS_DEFAULT=[
+// Funil trocado (2026-09-09, build .15, a pedido do usuário: "configura as etapas do
+// funil de crm vendas como: ATENDIMENTO / ORÇAMENTO / REVISÃO DE ORÇAMENTO / ORÇAMENTO
+// APROVADO / PROPOSTA APRESENTADA / FOLLOW-UP / QUENTES"). Lista antiga (8 etapas) guardada
+// em CRM_ETAPAS_ANTIGO_v14 só pra servir de referência à migração 1x logo abaixo
+// (_migrarCrmEtapasNovoFunil) — remapeia empresas já salvas pra não ficarem "órfãs".
+const CRM_ETAPAS_ANTIGO_v14=[
   {key:'pesquisa_inicial',label:'PESQUISA INICIAL'},
   {key:'identificacao_decisores',label:'IDENTIFICAÇÃO DECISORES'},
   {key:'confirmacao_decisores',label:'CONFIRMAÇÃO DECISORES'},
@@ -37021,6 +37103,15 @@ const CRM_ETAPAS_DEFAULT=[
   {key:'tem_demanda_proxima',label:'TEM DEMANDA PRÓXIMA'},
   {key:'em_homologacao',label:'EM HOMOLOGAÇÃO'},
   {key:'em_atendimento',label:'EM ATENDIMENTO'}
+];
+const CRM_ETAPAS_DEFAULT=[
+  {key:'atendimento',label:'ATENDIMENTO'},
+  {key:'orcamento',label:'ORÇAMENTO'},
+  {key:'revisao_orcamento',label:'REVISÃO DE ORÇAMENTO'},
+  {key:'orcamento_aprovado',label:'ORÇAMENTO APROVADO'},
+  {key:'proposta_apresentada',label:'PROPOSTA APRESENTADA'},
+  {key:'follow_up',label:'FOLLOW-UP'},
+  {key:'quentes',label:'QUENTES'}
 ];
 function _crmEtapas(){
   return (cfg.crmEtapas&&cfg.crmEtapas.length)?cfg.crmEtapas:CRM_ETAPAS_DEFAULT;
@@ -37032,6 +37123,45 @@ async function _crmSalvarEtapas(etapas){
     else if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
     localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   }catch(e){console.error('Erro ao salvar etapas do CRM:',e);toast('Erro ao salvar etapas: '+(e.message||e),'terr');}
+}
+// Migração 1x pro novo funil (2026-09-09, build .15) — mesmo padrão de flag PERSISTIDO
+// (cfg.migCrmEtapasNovoFunilFeita) das outras migrações deste arquivo (ver
+// _migrarSeedCentroFinanceiro). Só troca cfg.crmEtapas de verdade se ele ainda não existir
+// OU ainda for exatamente o conjunto de chaves do funil antigo (CRM_ETAPAS_ANTIGO_v14) — ou
+// seja, ninguém customizou etapa manualmente ainda pela tela "⚙️ Etapas do Funil". Se já
+// tiver sido customizado (chaves diferentes), NÃO mexe em nada — só marca como revisada, pra
+// não sobrescrever uma customização real. Remapeia e.etapa de cada empresa já salva pra uma
+// etapa nova equivalente, senão o card fica "órfão" (etapa sem coluna no Kanban).
+const CRM_ETAPAS_MAPA_MIGRACAO_v14={
+  pesquisa_inicial:'atendimento',
+  identificacao_decisores:'atendimento',
+  em_atendimento:'atendimento',
+  confirmacao_decisores:'orcamento',
+  reuniao_apresentacao:'orcamento',
+  em_homologacao:'proposta_apresentada',
+  acompanhamento:'follow_up',
+  tem_demanda_proxima:'quentes'
+};
+async function _migrarCrmEtapasNovoFunil(){
+  if(cfg.migCrmEtapasNovoFunilFeita)return;
+  const chavesAntigas=CRM_ETAPAS_ANTIGO_v14.map(x=>x.key).slice().sort().join(',');
+  const jaCustomizado=cfg.crmEtapas&&cfg.crmEtapas.length&&(cfg.crmEtapas.map(x=>x.key).slice().sort().join(',')!==chavesAntigas);
+  let remapeadas=0;
+  if(!jaCustomizado){
+    await _crmSalvarEtapas(CRM_ETAPAS_DEFAULT.map(x=>({...x})));
+    for(const e of crmEmpresas){
+      const novaChave=CRM_ETAPAS_MAPA_MIGRACAO_v14[e.etapa];
+      if(novaChave&&novaChave!==e.etapa){
+        e.etapa=novaChave;
+        remapeadas++;
+        try{await _crmSalvarEmpresaObj(e);}catch(err){console.error('Erro ao remapear etapa da empresa '+e.id,err);}
+      }
+    }
+  }
+  cfg.migCrmEtapasNovoFunilFeita=true;
+  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  if(remapeadas&&_crmTabAtiva==='kanban')renderCrmKanban();
 }
 
 // REGIOES_BR/UF_BR (2026-09-08) — reaproveita a declaração original logo acima (mesma
@@ -37418,7 +37548,9 @@ function crmAbrirCard(id){
   const e=crmEmpresas.find(x=>x.id===id);
   if(!e){toast('Empresa não encontrada (a lista pode ter mudado) — atualize e tente de novo','terr');return;}
   _crmCardAtualId=id;
-  _crmCardTabAtiva='visao';
+  _crmCardTabAtiva='geral';
+  _crmCardSubGeralAtiva='visao';
+  _crmCardSubIntelAtiva='ativ';
   _crmRenderCard(e);
   openM('mo-crm-card');
 }
@@ -37664,34 +37796,191 @@ function _crmExtrairValoresPropostaPdf(texto){
   out._confiavel=out.bruto!=null&&out.bruto>0;
   return out;
 }
-// Roda ao anexar/trocar o PDF da proposta (botão "📎 PROPOSTA ATUALIZADA") — lê o texto
-// localmente (_extrairTextoPDF), tenta extrair os 3 valores e, se conseguir, já pré-preenche
-// E salva os campos (o usuário pode corrigir manualmente depois, ver crmSalvarValoresProposta);
-// se não conseguir ler com confiança, só avisa e deixa os campos como estavam pro
-// preenchimento manual — em nenhum dos dois casos o card fica bloqueado. Em paralelo, faz o
-// upload do PDF pro Cloudinary (mesmo padrão de setUpload()) pra guardar o arquivo de
-// referência, mas isso nunca impede a leitura/gravação dos valores.
-async function crmPropostaPdfSelecionado(empresaId,input){
+// Ordena a timeline do card (mais recente primeiro) — extraído em função própria
+// (2026-09-09) pra poder ser reusada tanto pelo contador de badge quanto pela sub-aba
+// "Atividades" dentro de INTELIGÊNCIA DE VENDA (ver _crmRenderCard), sem duplicar a lógica.
+function _crmTimelineOrdenada(e){
+  return (e.timeline||[]).slice().sort((a,b)=>(b.em||'').localeCompare(a.em||''));
+}
+function _crmTimelineHtml(e,timelineParam){
+  const timeline=timelineParam||_crmTimelineOrdenada(e);
+  return timeline.length?timeline.map(ev=>ev.tipoAtividade==='mensagem'?_crmMensagemTimelineHtml(ev,e.id):`
+    <div style="display:flex;gap:10px;margin-bottom:12px">
+      <div style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:${ev.sistema?'#f1f5f9':'var(--brand-lt)'};display:flex;align-items:center;justify-content:center;font-size:.85rem">${ev.sistema?'🔄':'💬'}</div>
+      <div style="min-width:0;flex:1;padding-bottom:2px;border-bottom:1px solid var(--border-lt)">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+          <div style="font-weight:700;color:var(--ink);font-size:.78rem">${ev.autor||'—'}</div>
+          <div style="font-size:.68rem;color:var(--ink4);white-space:nowrap">${_fmtDataHora(ev.em)}</div>
+        </div>
+        <div style="font-size:.78rem;color:${ev.sistema?'var(--ink4)':'var(--ink3)'};margin-top:2px;padding-bottom:8px;white-space:pre-wrap;${ev.sistema?'font-style:italic':''}">${(ev.texto||'').replace(/</g,'&lt;')}</div>
+      </div>
+    </div>`).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.78rem">Nenhum comentário ainda.</div>';
+}
+// Atualiza o "⚠️" do botão "💰 Gerenciar Proposta" no formulário de cadastro/edição
+// (2026-09-09) — chamado ao trocar o Tipo de negócio e sempre que _crmEmpPropostaPendente
+// muda (anexar PDF ou salvar valores na janela de Proposta em modo "pendente").
+function _crmEmpAtualizarBotaoProposta(){
+  _crmEmpWizardAtualizarChips();
+}
+// Pinta os 3 chips do header (ativo = etapa atual; já visitado = clicável mas "apagado";
+// ainda não visitado, só em modo 'criacao' = bloqueado/cinza — não dá pra pular etapa).
+// Chip PROPOSTA ganha "⚠️" quando o tipo de negócio é Venda e ainda não tem valor bruto
+// (mesmo aviso que existia no antigo botão "Gerenciar Proposta").
+// Segmented control de 2 estados (ativo/inativo) — build .14, a pedido do usuário: "NAO
+// PRecisa preencher a etapa atual pra avançar". As 3 abas ficam sempre clicáveis (a única
+// trava que resta é crmSalvarEmpresa() no final, que segue exigindo tudo preenchido).
+function _crmEmpWizardAtualizarChips(){
+  const ordem=['geral','proposta','inteligencia'];
+  const labels={geral:'📋 GERAL',proposta:'💰 PROPOSTA',inteligencia:'🧠 INTELIGÊNCIA'};
+  const tipoSel=document.getElementById('crm-emp-tiponegocio');
+  const tipo=tipoSel?tipoSel.value:'';
+  const necessitaValor=tipo==='Venda'&&!((_crmEmpPropostaPendente&&_crmEmpPropostaPendente.propostaValorBruto)>0);
+  ordem.forEach(s=>{
+    const btn=document.getElementById('crm-emp-chip-'+s);
+    if(!btn)return;
+    const warn=(s==='proposta'&&necessitaValor)?' ⚠️':'';
+    btn.textContent=labels[s]+warn;
+    btn.classList.toggle('active',_crmEmpWizardStep===s);
+  });
+}
+// Mostra só a etapa "step" e ajusta rodapé (Voltar/Avançar/Salvar). Ao entrar em
+// 'proposta' recarrega os campos a partir de _crmEmpPropostaPendente (mesma lógica que
+// crmAbrirJanelaProposta tinha antes de virar etapa inline).
+function _crmEmpWizardIrPara(step){
+  _crmEmpWizardStep=step;
+  ['geral','proposta','inteligencia'].forEach(s=>{
+    const div=document.getElementById('crm-emp-step-'+s);
+    if(!div)return;
+    if(s===step){
+      div.style.display='';
+      // re-dispara a animação CSS toda vez que a etapa é mostrada (build .14, "mais
+      // dinamico") — remover+forçar reflow+adicionar a classe de novo, senão o navegador
+      // não re-anima uma classe que já estava aplicada.
+      div.classList.remove('crm-emp-wstep-in');
+      void div.offsetWidth;
+      div.classList.add('crm-emp-wstep-in');
+    }else{
+      div.style.display='none';
+    }
+  });
+  const btnVoltar=document.getElementById('crm-emp-btn-voltar');
+  const btnAvancar=document.getElementById('crm-emp-btn-avancar');
+  const btnSalvar=document.getElementById('crm-emp-btn-salvar');
+  if(btnVoltar)btnVoltar.style.display=(step==='geral')?'none':'';
+  if(btnAvancar)btnAvancar.style.display=(step==='inteligencia')?'none':'';
+  if(btnSalvar)btnSalvar.style.display=(step==='inteligencia')?'':'none';
+  if(step==='proposta'&&_crmEmpPropostaPendente){
+    const tipoSel=document.getElementById('crm-emp-tiponegocio');
+    if(tipoSel)_crmEmpPropostaPendente.tipoNegocio=tipoSel.value||'Venda';
+    _crmRenderJanelaProposta(_crmEmpPropostaPendente);
+  }
+  _crmEmpWizardAtualizarChips();
+}
+// Clique direto num chip: sempre livre, em qualquer modo (2026-09-09, build .14, a
+// pedido do usuário — antes travava etapas ainda não visitadas em modo criação; a única
+// validação que resta é a final, em crmSalvarEmpresa()).
+function _crmEmpWizardClicarChip(step){
+  _crmEmpWizardIrPara(step);
+}
+function _crmEmpValidarStepGeral(){
+  const nome=(document.getElementById('crm-emp-nome').value||'').trim();
+  if(!nome){toast('Preencha o nome da empresa!','terr');return false;}
+  const decisoresForm=_crmDecisoresDoForm();
+  const semCargo=decisoresForm.filter(d=>d.nome&&!d.cargo);
+  if(semCargo.length){toast('Informe o cargo de: '+semCargo.map(d=>d.nome).join(', '),'terr');return false;}
+  const semContato=decisoresForm.filter(d=>d.nome&&!d.telefones.length&&!d.email);
+  if(semContato.length){toast('Informe telefone ou e-mail de: '+semContato.map(d=>d.nome).join(', '),'terr');return false;}
+  const cidadeInst=(document.getElementById('crm-emp-cidade').value||'').trim();
+  const ufInst=document.getElementById('crm-emp-uf').value||'';
+  if(!cidadeInst||!ufInst){toast('Preencha onde será a instalação (cidade e UF)!','terr');return false;}
+  const tipoNegocio=document.getElementById('crm-emp-tiponegocio').value||'';
+  if(!tipoNegocio){toast('Selecione o tipo de negócio!','terr');return false;}
+  return true;
+}
+function _crmEmpValidarStepProposta(){
+  const tipoNegocio=document.getElementById('crm-emp-tiponegocio').value||'';
+  const propostaBruto=(_crmEmpPropostaPendente&&_crmEmpPropostaPendente.propostaValorBruto)||0;
+  if(tipoNegocio==='Venda'&&!(propostaBruto>0)){toast('Informe o valor bruto da proposta — obrigatório para negócios do tipo Venda! Use "💾 Salvar valores".','terr');return false;}
+  return true;
+}
+// "Avançar" só troca de etapa (2026-09-09, build .14, a pedido do usuário: "NAO
+// PRecisa preencher a etapa atual pra avançar") — validação por etapa (_crmEmpValidarStep
+// Geral/Proposta, definidas acima) não é mais chamada daqui; só crmSalvarEmpresa() no fim
+// segue exigindo tudo certo antes de salvar de verdade.
+function _crmEmpWizardAvancar(){
+  const ordem=['geral','proposta','inteligencia'];
+  const i=ordem.indexOf(_crmEmpWizardStep);
+  if(i>=0&&i<ordem.length-1)_crmEmpWizardIrPara(ordem[i+1]);
+}
+function _crmEmpWizardVoltar(){
+  const ordem=['geral','proposta','inteligencia'];
+  const i=ordem.indexOf(_crmEmpWizardStep);
+  if(i>0)_crmEmpWizardIrPara(ordem[i-1]);
+}
+// Janela de Proposta (2026-09-09, a pedido do usuário — ver comentário na definição do
+// modal mo-crm-proposta acima). empresaId vazio = modo "pendente" (formulário de
+// cadastro/edição, opera em _crmEmpPropostaPendente); empresaId real = modo "ao vivo"
+// (card já salvo, grava direto no Firestore a cada ação, igual ao comportamento anterior).
+function crmAbrirJanelaProposta(empresaId){
+  const alvo=empresaId?crmEmpresas.find(x=>x.id===empresaId):_crmEmpPropostaPendente;
+  if(!alvo)return;
+  if(!empresaId){
+    const tipoSel=document.getElementById('crm-emp-tiponegocio');
+    if(tipoSel)alvo.tipoNegocio=tipoSel.value||'Venda';
+  }
+  document.getElementById('crm-proposta-modal-empresa-id').value=empresaId||'';
+  _crmRenderJanelaProposta(alvo);
+  openM('mo-crm-proposta');
+}
+function _crmRenderJanelaProposta(alvo){
+  const tipoDiv=document.getElementById('crm-proposta-modal-tipo');
+  if(tipoDiv)tipoDiv.textContent='💼 '+(alvo.tipoNegocio||'Venda');
+  const req=document.getElementById('crm-proposta-modal-bruto-req');
+  if(req)req.style.display=((alvo.tipoNegocio||'Venda')==='Venda')?'':'none';
+  document.getElementById('crm-proposta-modal-bruto').value=alvo.propostaValorBruto?_fmtValorPdf(alvo.propostaValorBruto):'';
+  document.getElementById('crm-proposta-modal-operacionais').value=alvo.propostaOperacionais?_fmtValorPdf(alvo.propostaOperacionais):'';
+  document.getElementById('crm-proposta-modal-liquido').value=alvo.propostaValorLiquido?_fmtValorPdf(alvo.propostaValorLiquido):'';
+  const status=document.getElementById('crm-proposta-modal-pdf-status');
+  if(status)status.textContent='';
+  const histDiv=document.getElementById('crm-proposta-modal-historico');
+  if(histDiv)histDiv.innerHTML=_crmPropostaHistoricoHtml(alvo);
+}
+// Histórico de propostas anexadas em HTML (2026-09-09) — extraído em função própria (build
+// .12) pra ser reusada tanto pelo modal de Proposta em modo "pendente" (cadastro de empresa
+// nova, ver _crmRenderJanelaProposta acima) quanto pela aba PROPOSTA inline dentro do card
+// (ver _crmRenderCard), sem duplicar a lógica de montagem da lista.
+function _crmPropostaHistoricoHtml(alvo){
+  const hist=(alvo.propostaHistorico||[]).slice().reverse();
+  return hist.length?hist.map(item=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border-lt);border-radius:8px;margin-bottom:6px;font-size:.76rem">
+        <div style="min-width:0">
+          <div style="font-weight:700;color:var(--ink)">📄 ${item.arquivoNome||'Valor lançado manualmente'}</div>
+          <div style="color:var(--ink4);font-size:.7rem;margin-top:1px">${_fmtDataHora(item.anexadoEm)}${item.anexadoPor?' — '+item.anexadoPor:''} · Bruto R$ ${_fmtValorPdf(item.valorBruto||0)}</div>
+        </div>
+        ${item.arquivoUrl?`<a href="${item.arquivoUrl}" target="_blank" style="flex-shrink:0;color:var(--brand);font-weight:700;white-space:nowrap;font-size:.72rem">baixar ↗</a>`:''}
+      </div>`).join(''):'<div style="font-size:.76rem;color:var(--ink4)">Nenhuma proposta anexada ainda.</div>';
+}
+// Anexar PDF de proposta e salvar valores manualmente DENTRO do card já salvo (2026-09-09
+// build .12) — equivalentes a crmPropostaModalPdfSelecionado/crmSalvarValoresJanelaProposta
+// (que continuam servindo só o modo "pendente" do cadastro, ver comentário acima de
+// mo-crm-proposta), mas sempre operando sobre a empresa do card aberto (_crmCardAtualId, aqui
+// sempre real) e ids próprios (crm-card-proposta-*, ver a aba PROPOSTA em _crmRenderCard) —
+// re-renderiza o card inteiro no final (_crmRenderCard já reaplica a aba/sub-aba ativa).
+async function crmCardPropostaPdfSelecionado(input){
   const f=input.files[0];
   if(!f)return;
+  const empresaId=_crmCardAtualId;
   const e=crmEmpresas.find(x=>x.id===empresaId);
   if(!e)return;
-  const status=document.getElementById('crm-proposta-pdf-status');
+  const status=document.getElementById('crm-card-proposta-pdf-status');
   if(status)status.textContent='🔍 Lendo a proposta em PDF...';
-  let confiavel=false;
+  let confiavel=false,vals={};
   try{
     const texto=await _extrairTextoPDF(f);
-    const vals=_crmExtrairValoresPropostaPdf(texto);
+    vals=_crmExtrairValoresPropostaPdf(texto);
     confiavel=!!vals._confiavel;
-    if(confiavel){
-      e.propostaValorBruto=vals.bruto;
-      e.propostaOperacionais=vals.operacionais||0;
-      e.propostaValorLiquido=vals.liquido||0;
-      if(status)status.textContent='✅ Valores lidos automaticamente da proposta — confira antes de considerar final.';
-    }else{
-      if(status)status.textContent='⚠️ Não foi possível ler os valores da proposta automaticamente — preencha manualmente abaixo.';
-      toast('Não foi possível ler o orçamento automaticamente — preencha os valores manualmente','twar');
-    }
+    if(status)status.textContent=confiavel?'✅ Valores lidos automaticamente da proposta — confira antes de salvar.':'⚠️ Não foi possível ler os valores da proposta automaticamente — preencha manualmente abaixo.';
+    if(!confiavel)toast('Não foi possível ler o orçamento automaticamente — preencha os valores manualmente','twar');
   }catch(err){
     console.error('Erro ao ler PDF da proposta:',err);
     if(status)status.textContent='⚠️ Não foi possível ler os valores da proposta automaticamente — preencha manualmente abaixo.';
@@ -37706,27 +37995,178 @@ async function crmPropostaPdfSelecionado(empresaId,input){
       url=d.secure_url||'';
     }catch(err){console.error('Erro ao enviar PDF da proposta:',err);}
   }
-  e.propostaArquivoNome=f.name;
+  const bruto=confiavel?(vals.bruto||0):0;
+  const operacionais=confiavel?(vals.operacionais||0):0;
+  const liquido=confiavel?(vals.liquido||0):0;
+  const item={
+    id:'ppz_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    arquivoNome:f.name,
+    arquivoUrl:url,
+    anexadoEm:new Date().toISOString(),
+    anexadoPor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',
+    valorBruto:bruto,
+    valorOperacionais:operacionais,
+    valorLiquido:liquido,
+    confiavel
+  };
+  if(!e.propostaHistorico)e.propostaHistorico=[];
+  e.propostaHistorico.push(item);
+  e.propostaValorBruto=bruto;
+  e.propostaOperacionais=operacionais;
+  e.propostaValorLiquido=liquido;
+  e.propostaArquivoNome=item.arquivoNome;
   if(url)e.propostaArquivoUrl=url;
-  e.propostaAtualizadoEm=new Date().toISOString();
-  e.atualizadoEm=new Date().toISOString();
+  e.propostaAtualizadoEm=item.anexadoEm;
   if(!e.timeline)e.timeline=[];
-  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'📎 Proposta atualizada: '+f.name+(confiavel?' — valores lidos automaticamente do PDF (Bruto R$ '+_fmtValorPdf(e.propostaValorBruto)+')':' — não foi possível ler os valores automaticamente, preenchimento manual necessário'),autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString(),sistema:true});
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'📎 Proposta atualizada: '+f.name+(confiavel?' — valores lidos automaticamente do PDF (Bruto R$ '+_fmtValorPdf(bruto)+')':' — não foi possível ler os valores automaticamente, preenchimento manual necessário'),autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString(),sistema:true});
+  e.atualizadoEm=new Date().toISOString();
   try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
-  if(_crmCardAtualId===empresaId)_crmRenderCard(e);
+  _crmRenderCard(e);
 }
-// Salva manualmente os 3 campos de valor da aba Proposta (o usuário pode ter corrigido o que
-// o PDF leu errado, ou preenchido do zero quando a leitura automática falhou).
-async function crmSalvarValoresProposta(empresaId){
+async function crmCardSalvarValoresProposta(){
+  const empresaId=_crmCardAtualId;
   const e=crmEmpresas.find(x=>x.id===empresaId);
   if(!e)return;
-  e.propostaValorBruto=moneyToNum(document.getElementById('crm-proposta-bruto').value);
-  e.propostaOperacionais=moneyToNum(document.getElementById('crm-proposta-operacionais').value);
-  e.propostaValorLiquido=moneyToNum(document.getElementById('crm-proposta-liquido').value);
+  const bruto=moneyToNum(document.getElementById('crm-card-proposta-bruto').value);
+  const operacionais=moneyToNum(document.getElementById('crm-card-proposta-operacionais').value);
+  const liquidoInformado=moneyToNum(document.getElementById('crm-card-proposta-liquido').value);
+  const liquido=liquidoInformado||Math.max(0,bruto-operacionais);
+  if(!e.propostaHistorico)e.propostaHistorico=[];
+  if(e.propostaHistorico.length){
+    const ultima=e.propostaHistorico[e.propostaHistorico.length-1];
+    ultima.valorBruto=bruto;
+    ultima.valorOperacionais=operacionais;
+    ultima.valorLiquido=liquido;
+  }else{
+    e.propostaHistorico.push({
+      id:'ppz_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+      arquivoNome:'',arquivoUrl:'',
+      anexadoEm:new Date().toISOString(),
+      anexadoPor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',
+      valorBruto:bruto,valorOperacionais:operacionais,valorLiquido:liquido,confiavel:false
+    });
+  }
+  e.propostaValorBruto=bruto;
+  e.propostaOperacionais=operacionais;
+  e.propostaValorLiquido=liquido;
   e.atualizadoEm=new Date().toISOString();
   try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
   toast('Valores da proposta salvos!','tok');
-  if(_crmCardAtualId===empresaId)_crmRenderCard(e);
+  _crmRenderCard(e);
+}
+// Roda ao anexar/trocar o PDF da proposta na janela (botão "📎 PROPOSTA ATUALIZADA") — lê o
+// texto localmente (_extrairTextoPDF), tenta extrair os 3 valores e SEMPRE cria uma nova
+// entrada em propostaHistorico[] com data/hora e o arquivo (2026-09-09, a pedido do
+// usuário: "anexar o pdf que foi enviado para o usuario poder clicar e baixar com a data e
+// horario que foi anexada gerando assim um historico de propostas anexadas") — se a leitura
+// falhar, a entrada fica com valores zerados até o usuário corrigir manualmente (ver
+// crmSalvarValoresJanelaProposta, que corrige a ÚLTIMA entrada em vez de criar outra). Os
+// campos de nível superior (propostaValorBruto etc, usados por _crmCamposFaltantes/badges/
+// crmSalvarEmpresa/exportação) sempre espelham a ÚLTIMA entrada ("os valores sempre ler da
+// ultima anexada"). Em paralelo, sobe o PDF pro Cloudinary (mesmo padrão de setUpload())
+// pra gerar o link de download do histórico.
+async function crmPropostaModalPdfSelecionado(input){
+  const f=input.files[0];
+  if(!f)return;
+  const empresaId=document.getElementById('crm-proposta-modal-empresa-id').value;
+  const alvo=empresaId?crmEmpresas.find(x=>x.id===empresaId):_crmEmpPropostaPendente;
+  if(!alvo)return;
+  const status=document.getElementById('crm-proposta-modal-pdf-status');
+  if(status)status.textContent='🔍 Lendo a proposta em PDF...';
+  let confiavel=false,vals={};
+  try{
+    const texto=await _extrairTextoPDF(f);
+    vals=_crmExtrairValoresPropostaPdf(texto);
+    confiavel=!!vals._confiavel;
+    if(status)status.textContent=confiavel?'✅ Valores lidos automaticamente da proposta — confira antes de salvar.':'⚠️ Não foi possível ler os valores da proposta automaticamente — preencha manualmente abaixo.';
+    if(!confiavel)toast('Não foi possível ler o orçamento automaticamente — preencha os valores manualmente','twar');
+  }catch(err){
+    console.error('Erro ao ler PDF da proposta:',err);
+    if(status)status.textContent='⚠️ Não foi possível ler os valores da proposta automaticamente — preencha manualmente abaixo.';
+    toast('Não foi possível ler o orçamento automaticamente — preencha os valores manualmente','twar');
+  }
+  let url='';
+  if(cfg.cld_cloud&&cfg.cld_preset){
+    try{
+      const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_crm_propostas');
+      const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/raw/upload`,{method:'POST',body:fd});
+      const d=await r.json();
+      url=d.secure_url||'';
+    }catch(err){console.error('Erro ao enviar PDF da proposta:',err);}
+  }
+  const bruto=confiavel?(vals.bruto||0):0;
+  const operacionais=confiavel?(vals.operacionais||0):0;
+  const liquido=confiavel?(vals.liquido||0):0;
+  const item={
+    id:'ppz_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    arquivoNome:f.name,
+    arquivoUrl:url,
+    anexadoEm:new Date().toISOString(),
+    anexadoPor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',
+    valorBruto:bruto,
+    valorOperacionais:operacionais,
+    valorLiquido:liquido,
+    confiavel
+  };
+  if(!alvo.propostaHistorico)alvo.propostaHistorico=[];
+  alvo.propostaHistorico.push(item);
+  alvo.propostaValorBruto=bruto;
+  alvo.propostaOperacionais=operacionais;
+  alvo.propostaValorLiquido=liquido;
+  alvo.propostaArquivoNome=item.arquivoNome;
+  if(url)alvo.propostaArquivoUrl=url;
+  alvo.propostaAtualizadoEm=item.anexadoEm;
+  if(empresaId){
+    if(!alvo.timeline)alvo.timeline=[];
+    alvo.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'📎 Proposta atualizada: '+f.name+(confiavel?' — valores lidos automaticamente do PDF (Bruto R$ '+_fmtValorPdf(bruto)+')':' — não foi possível ler os valores automaticamente, preenchimento manual necessário'),autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString(),sistema:true});
+    alvo.atualizadoEm=new Date().toISOString();
+    try{await _crmSalvarEmpresaObj(alvo);}catch(err){return;}
+    if(_crmCardAtualId===empresaId)_crmRenderCard(alvo);
+  }else{
+    _crmEmpAtualizarBotaoProposta();
+  }
+  _crmRenderJanelaProposta(alvo);
+}
+// Salva manualmente os 3 campos de valor da janela de Proposta — corrige a ÚLTIMA entrada
+// do histórico (não cria uma nova; uma nova entrada só nasce ao anexar um PDF novo, ver
+// crmPropostaModalPdfSelecionado) ou, se nunca anexou PDF nenhum, cria a primeira entrada
+// (sem arquivo) pra manter o "sempre ler da última" válido mesmo pra quem só digita valor.
+async function crmSalvarValoresJanelaProposta(){
+  const empresaId=document.getElementById('crm-proposta-modal-empresa-id').value;
+  const alvo=empresaId?crmEmpresas.find(x=>x.id===empresaId):_crmEmpPropostaPendente;
+  if(!alvo)return;
+  const bruto=moneyToNum(document.getElementById('crm-proposta-modal-bruto').value);
+  const operacionais=moneyToNum(document.getElementById('crm-proposta-modal-operacionais').value);
+  const liquidoInformado=moneyToNum(document.getElementById('crm-proposta-modal-liquido').value);
+  const liquido=liquidoInformado||Math.max(0,bruto-operacionais);
+  if(!alvo.propostaHistorico)alvo.propostaHistorico=[];
+  if(alvo.propostaHistorico.length){
+    const ultima=alvo.propostaHistorico[alvo.propostaHistorico.length-1];
+    ultima.valorBruto=bruto;
+    ultima.valorOperacionais=operacionais;
+    ultima.valorLiquido=liquido;
+  }else{
+    alvo.propostaHistorico.push({
+      id:'ppz_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+      arquivoNome:'',arquivoUrl:'',
+      anexadoEm:new Date().toISOString(),
+      anexadoPor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',
+      valorBruto:bruto,valorOperacionais:operacionais,valorLiquido:liquido,confiavel:false
+    });
+  }
+  alvo.propostaValorBruto=bruto;
+  alvo.propostaOperacionais=operacionais;
+  alvo.propostaValorLiquido=liquido;
+  if(empresaId){
+    alvo.atualizadoEm=new Date().toISOString();
+    try{await _crmSalvarEmpresaObj(alvo);}catch(err){return;}
+    toast('Valores da proposta salvos!','tok');
+    if(_crmCardAtualId===empresaId)_crmRenderCard(alvo);
+  }else{
+    toast('Valores da proposta atualizados!','tok');
+    _crmEmpAtualizarBotaoProposta();
+  }
+  _crmRenderJanelaProposta(alvo);
 }
 function _crmRenderCard(e){
   const etapas=_crmEtapas();
@@ -37760,18 +38200,7 @@ function _crmRenderCard(e){
       <div style="color:var(--ink3);margin-top:2px">${_crmContatoComCopiar(d)}</div>
     </div>`).join(''):'<div style="font-size:.78rem;color:var(--ink4)">Nenhum decisor cadastrado ainda.</div>';
 
-  const timeline=(e.timeline||[]).slice().sort((a,b)=>(b.em||'').localeCompare(a.em||''));
-  const timelineHtml=timeline.length?timeline.map(ev=>ev.tipoAtividade==='mensagem'?_crmMensagemTimelineHtml(ev,e.id):`
-    <div style="display:flex;gap:10px;margin-bottom:12px">
-      <div style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:${ev.sistema?'#f1f5f9':'var(--brand-lt)'};display:flex;align-items:center;justify-content:center;font-size:.85rem">${ev.sistema?'🔄':'💬'}</div>
-      <div style="min-width:0;flex:1;padding-bottom:2px;border-bottom:1px solid var(--border-lt)">
-        <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
-          <div style="font-weight:700;color:var(--ink);font-size:.78rem">${ev.autor||'—'}</div>
-          <div style="font-size:.68rem;color:var(--ink4);white-space:nowrap">${_fmtDataHora(ev.em)}</div>
-        </div>
-        <div style="font-size:.78rem;color:${ev.sistema?'var(--ink4)':'var(--ink3)'};margin-top:2px;padding-bottom:8px;white-space:pre-wrap;${ev.sistema?'font-style:italic':''}">${(ev.texto||'').replace(/</g,'&lt;')}</div>
-      </div>
-    </div>`).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.78rem">Nenhum comentário ainda.</div>';
+  const timeline=_crmTimelineOrdenada(e);
 
   const tarefas=_crmTarefasDoCard(e.id).slice().sort((a,b)=>{
     const concA=a.status==='concluida',concB=b.status==='concluida';
@@ -37808,13 +38237,16 @@ function _crmRenderCard(e){
       ${_getUserCat().isAdm?`<button type="button" onclick="crmExcluirEmpresa('${e.id}')" style="background:none;border:none;color:#dc2626;opacity:.65;cursor:pointer;font-size:.72rem;font-weight:600;padding:2px 4px;display:inline-flex;align-items:center;gap:4px" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.65">🗑️ Excluir empresa</button>`:''}
     </div>
     <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">
-      <button type="button" id="crm-tabbtn-visao" onclick="_crmCardSetTab('visao')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">📋 Visão Geral</button>
-      <button type="button" id="crm-tabbtn-proposta" onclick="_crmCardSetTab('proposta')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">💰 Proposta${((e.tipoNegocio||'Venda')==='Venda'&&!(e.propostaValorBruto>0))?' ⚠️':''}</button>
-      <button type="button" id="crm-tabbtn-decisores" onclick="_crmCardSetTab('decisores')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">👤 Decisores${(e.decisores||[]).length?' ('+e.decisores.length+')':''}</button>
-      <button type="button" id="crm-tabbtn-tarefas" onclick="_crmCardSetTab('tarefas')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">🗓️ Tarefas${tarefasPendentesCount?' ('+tarefasPendentesCount+')':''}</button>
-      <button type="button" id="crm-tabbtn-atividade" onclick="_crmCardSetTab('atividade')" style="flex:1;min-width:76px;border:none;border-radius:8px;padding:7px 4px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">💬 Atividade${timeline.length?' ('+timeline.length+')':''}</button>
+      <button type="button" id="crm-tabbtn-geral" onclick="_crmCardSetTab('geral')" style="flex:1;min-width:96px;border:none;border-radius:8px;padding:8px 4px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">📋 GERAL</button>
+      <button type="button" id="crm-tabbtn-proposta" onclick="_crmCardSetTab('proposta')" style="flex:1;min-width:96px;border:none;border-radius:8px;padding:8px 4px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">💰 PROPOSTA${((e.tipoNegocio||'Venda')==='Venda'&&!(e.propostaValorBruto>0))?' ⚠️':''}</button>
+      <button type="button" id="crm-tabbtn-inteligencia" onclick="_crmCardSetTab('inteligencia')" style="flex:1;min-width:96px;border:none;border-radius:8px;padding:8px 4px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">🧠 INTELIGÊNCIA DE VENDA${timeline.length?' ('+timeline.length+')':''}</button>
     </div>
-    <div id="crm-tab-visao">
+    <div id="crm-tab-geral">
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button type="button" id="crm-subtabbtn-geral-visao" onclick="_crmCardSetSubGeral('visao')" style="flex:1;border:none;border-radius:7px;padding:6px 4px;font-size:.68rem;font-weight:700;cursor:pointer">📄 Visão Geral</button>
+      <button type="button" id="crm-subtabbtn-geral-decisores" onclick="_crmCardSetSubGeral('decisores')" style="flex:1;border:none;border-radius:7px;padding:6px 4px;font-size:.68rem;font-weight:700;cursor:pointer">👤 Decisores${(e.decisores||[]).length?' ('+e.decisores.length+')':''}</button>
+    </div>
+    <div id="crm-subtab-geral-visao">
       <div class="fg">
         <label>Etapa atual</label>
         <div style="display:flex;gap:8px">
@@ -37824,29 +38256,7 @@ function _crmRenderCard(e){
       </div>
       <div class="fg"><label>Onde será a instalação</label><div style="font-size:.85rem;font-weight:700;color:var(--ink)">📍 ${[e.sedeCidade,e.sedeUf].filter(Boolean).join('/')||'—'}</div></div>
     </div>
-    <div id="crm-tab-proposta">
-      <div class="fg">
-        <label>Tipo de negócio</label>
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div style="font-size:.85rem;font-weight:700;color:var(--ink)">💼 ${e.tipoNegocio||'Venda'}</div>
-          <button type="button" onclick="crmAbrirEditarEmpresa('${e.id}')" style="background:none;border:none;color:var(--brand);cursor:pointer;font-size:.72rem;font-weight:700">alterar</button>
-        </div>
-      </div>
-      <div class="fg">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
-          <label style="margin-bottom:0">Proposta em PDF</label>
-          <button type="button" onclick="document.getElementById('crm-proposta-pdf-input').click()" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">📎 PROPOSTA ATUALIZADA</button>
-        </div>
-        <input type="file" id="crm-proposta-pdf-input" accept="application/pdf,.pdf" style="display:none" onchange="crmPropostaPdfSelecionado('${e.id}',this)">
-        ${e.propostaArquivoNome?`<div style="font-size:.76rem;color:var(--ink3)">📄 ${e.propostaArquivoNome}${e.propostaArquivoUrl?` &nbsp;<a href="${e.propostaArquivoUrl}" target="_blank" style="color:var(--brand)">[abrir]</a>`:''}${e.propostaAtualizadoEm?' — atualizada em '+_fmtDataHora(e.propostaAtualizadoEm):''}</div>`:'<div style="font-size:.76rem;color:var(--ink4)">Nenhuma proposta anexada ainda.</div>'}
-        <div id="crm-proposta-pdf-status" style="font-size:.72rem;color:var(--ink4);margin-top:4px"></div>
-      </div>
-      <div class="fg"><label>Valor Bruto (R$)${(e.tipoNegocio||'Venda')==='Venda'?' <span class="r">*</span>':''}</label><input class="fc no-upper" type="text" inputmode="numeric" id="crm-proposta-bruto" oninput="fmtMoney(this)" placeholder="0,00" value="${e.propostaValorBruto?_fmtValorPdf(e.propostaValorBruto):''}"></div>
-      <div class="fg"><label>Operacionais (R$)</label><input class="fc no-upper" type="text" inputmode="numeric" id="crm-proposta-operacionais" oninput="fmtMoney(this)" placeholder="0,00" value="${e.propostaOperacionais?_fmtValorPdf(e.propostaOperacionais):''}"></div>
-      <div class="fg"><label>Valor Líquido (R$)</label><input class="fc no-upper" type="text" inputmode="numeric" id="crm-proposta-liquido" oninput="fmtMoney(this)" placeholder="0,00" value="${e.propostaValorLiquido?_fmtValorPdf(e.propostaValorLiquido):''}"></div>
-      <button type="button" onclick="crmSalvarValoresProposta('${e.id}')" style="width:100%;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer">💾 Salvar valores da proposta</button>
-    </div>
-    <div id="crm-tab-decisores">
+    <div id="crm-subtab-geral-decisores">
       <div class="fg">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
           <label style="margin-bottom:0">Decisores / Compradores</label>
@@ -37855,20 +38265,42 @@ function _crmRenderCard(e){
         <div style="display:flex;flex-direction:column;gap:6px">${decisoresHtml}</div>
       </div>
     </div>
-    <div id="crm-tab-tarefas">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:800;font-size:.85rem;color:var(--ink)">🗓️ Tarefas</div>
-        <button onclick="crmAbrirNovaTarefa('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:.74rem;font-weight:700;cursor:pointer">+ Nova Tarefa</button>
-      </div>
-      ${tarefasHtml}
     </div>
-    <div id="crm-tab-atividade">
+    <div id="crm-tab-proposta">
+      <div class="fg">
+        <label>Tipo de negócio</label>
+        <div style="font-size:.85rem;font-weight:700;color:var(--ink)">💼 ${e.tipoNegocio||'Venda'}</div>
+      </div>
+      <div class="fg">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+          <label style="margin-bottom:0">Anexar nova proposta (PDF)</label>
+          <button type="button" onclick="document.getElementById('crm-card-proposta-pdf-input').click()" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">📎 PROPOSTA ATUALIZADA</button>
+        </div>
+        <input type="file" id="crm-card-proposta-pdf-input" accept="application/pdf,.pdf" style="display:none" onchange="crmCardPropostaPdfSelecionado(this)">
+        <div id="crm-card-proposta-pdf-status" style="font-size:.72rem;color:var(--ink4);margin-top:4px"></div>
+      </div>
+      <div class="fg"><label>Valor Bruto (R$)<span class="r" style="${(e.tipoNegocio||'Venda')==='Venda'?'':'display:none'}"> *</span></label><input class="fc no-upper" type="text" inputmode="numeric" id="crm-card-proposta-bruto" oninput="fmtMoney(this)" value="${e.propostaValorBruto?_fmtValorPdf(e.propostaValorBruto):''}" placeholder="0,00"></div>
+      <div class="fg"><label>Operacionais (R$)</label><input class="fc no-upper" type="text" inputmode="numeric" id="crm-card-proposta-operacionais" oninput="fmtMoney(this)" value="${e.propostaOperacionais?_fmtValorPdf(e.propostaOperacionais):''}" placeholder="0,00"></div>
+      <div class="fg"><label>Valor Líquido (R$)</label><input class="fc no-upper" type="text" inputmode="numeric" id="crm-card-proposta-liquido" oninput="fmtMoney(this)" value="${e.propostaValorLiquido?_fmtValorPdf(e.propostaValorLiquido):''}" placeholder="0,00"></div>
+      <button type="button" onclick="crmCardSalvarValoresProposta()" style="width:100%;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer;margin-bottom:14px">💾 Salvar valores</button>
+      <div style="border-top:1px solid var(--border-lt);padding-top:12px">
+        <div style="font-weight:800;font-size:.8rem;color:var(--ink);margin-bottom:8px">📜 Histórico de propostas anexadas</div>
+        <div>${_crmPropostaHistoricoHtml(e)}</div>
+      </div>
+    </div>
+    <div id="crm-tab-inteligencia">
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button type="button" id="crm-subtabbtn-intel-ativ" onclick="_crmCardSetSubIntel('ativ')" style="flex:1;border:none;border-radius:7px;padding:6px 4px;font-size:.68rem;font-weight:700;cursor:pointer">🧠 Atividades</button>
+      <button type="button" id="crm-subtabbtn-intel-tarefas" onclick="_crmCardSetSubIntel('tarefas')" style="flex:1;border:none;border-radius:7px;padding:6px 4px;font-size:.68rem;font-weight:700;cursor:pointer">🗓️ Tarefas${tarefasPendentesCount?' ('+tarefasPendentesCount+')':''}</button>
+    </div>
+    <div id="crm-subtab-intel-ativ">
       <div style="margin-bottom:14px">
         <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:8px">📋 Registrar Atividade Realizada</div>
-        <div style="display:flex;gap:8px">
-          <button onclick="crmAbrirModalAtividade('ligacao','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">📞 Ligação</button>
-          <button onclick="crmAbrirModalAtividade('mensagem','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">💬 Mensagem</button>
-          <button onclick="crmAbrirModalAtividade('email','${e.id}')" style="flex:1;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">✉️ E-mail</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button onclick="crmAbrirModalAtividade('ligacao','${e.id}')" style="flex:1;min-width:100px;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">📞 Ligação</button>
+          <button onclick="crmAbrirModalAtividade('mensagem','${e.id}')" style="flex:1;min-width:100px;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">💬 Mensagem</button>
+          <button onclick="crmAbrirModalAtividade('email','${e.id}')" style="flex:1;min-width:100px;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">✉️ E-mail</button>
+          <button onclick="crmAbrirModalAtividade('estrategia','${e.id}')" style="flex:1;min-width:100px;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px 4px;font-size:.74rem;font-weight:700;cursor:pointer">🎯 Estratégia</button>
         </div>
       </div>
       <div style="border-top:1px solid var(--border-lt);padding-top:14px">
@@ -37877,11 +38309,21 @@ function _crmRenderCard(e){
           <textarea id="crm-comentario-novo" class="fc" rows="2" placeholder="Registre o que está fazendo com essa empresa..." style="text-transform:none;width:100%"></textarea>
         </div>
         <button onclick="crmAdicionarComentario('${e.id}')" style="width:100%;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer;margin-bottom:14px">+ Adicionar comentário</button>
-        ${timelineHtml}
+        <div id="crm-inteligencia-timeline">${_crmTimelineHtml(e,timeline)}</div>
       </div>
+    </div>
+    <div id="crm-subtab-intel-tarefas">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:800;font-size:.85rem;color:var(--ink)">🗓️ Tarefas</div>
+        <button onclick="crmAbrirNovaTarefa('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:.74rem;font-weight:700;cursor:pointer">+ Nova Tarefa</button>
+      </div>
+      ${tarefasHtml}
+    </div>
     </div>
   `;
   _crmCardSetTab(_crmCardTabAtiva);
+  _crmCardSetSubGeral(_crmCardSubGeralAtiva);
+  _crmCardSetSubIntel(_crmCardSubIntelAtiva);
 }
 // Controla qual aba do card de empresa está visível (2026-08-28, a pedido do usuário: "as
 // informações tao todas iguais... confunde... sugiro mudarmos o design pra deixar cada coisa
@@ -37892,12 +38334,46 @@ function _crmRenderCard(e){
 function _crmCardSetTab(tab){
   _crmCardTabAtiva=tab;
   const cores={on:{bg:'var(--brand)',cor:'#fff'},off:{bg:'#f1f5f9',cor:'#334155'}};
-  ['visao','proposta','decisores','tarefas','atividade'].forEach(t=>{
+  ['geral','proposta','inteligencia'].forEach(t=>{
     const painel=document.getElementById('crm-tab-'+t);
     if(painel)painel.style.display=t===tab?'':'none';
     const btn=document.getElementById('crm-tabbtn-'+t);
     if(btn){
       const c=t===tab?cores.on:cores.off;
+      btn.style.background=c.bg;
+      btn.style.color=c.cor;
+    }
+  });
+}
+// Sub-abas dentro de GERAL (2026-09-09 build .12, a pedido do usuário: "decisores fica no
+// geral") — Visão Geral / Decisores, mesmo mecanismo de _crmCardSetTab, só que escopado aos
+// 2 painéis internos de crm-tab-geral.
+function _crmCardSetSubGeral(sub){
+  _crmCardSubGeralAtiva=sub;
+  const cores={on:{bg:'var(--brand)',cor:'#fff'},off:{bg:'#f1f5f9',cor:'#334155'}};
+  ['visao','decisores'].forEach(t=>{
+    const painel=document.getElementById('crm-subtab-geral-'+t);
+    if(painel)painel.style.display=t===sub?'':'none';
+    const btn=document.getElementById('crm-subtabbtn-geral-'+t);
+    if(btn){
+      const c=t===sub?cores.on:cores.off;
+      btn.style.background=c.bg;
+      btn.style.color=c.cor;
+    }
+  });
+}
+// Sub-abas dentro de INTELIGÊNCIA DE VENDA (2026-09-09 build .12, a pedido do usuário:
+// "tarefas fica no inteligencia de vendas") — Atividades (registrar ligação/mensagem/
+// e-mail/estratégia + Linha do Tempo) / Tarefas.
+function _crmCardSetSubIntel(sub){
+  _crmCardSubIntelAtiva=sub;
+  const cores={on:{bg:'var(--brand)',cor:'#fff'},off:{bg:'#f1f5f9',cor:'#334155'}};
+  ['ativ','tarefas'].forEach(t=>{
+    const painel=document.getElementById('crm-subtab-intel-'+t);
+    if(painel)painel.style.display=t===sub?'':'none';
+    const btn=document.getElementById('crm-subtabbtn-intel-'+t);
+    if(btn){
+      const c=t===sub?cores.on:cores.off;
       btn.style.background=c.bg;
       btn.style.color=c.cor;
     }
@@ -38067,7 +38543,7 @@ async function crmSalvarDecisorRapido(){
   if(_crmTabAtiva==='kanban')renderCrmKanban();
   else if(_crmTabAtiva==='empresas')_crmRenderContatosSubtab();
 }
-const _CRM_TIPO_ATIVIDADE={ligacao:{icone:'📞',label:'Ligação'},mensagem:{icone:'💬',label:'Mensagem'},email:{icone:'✉️',label:'E-mail'}};
+const _CRM_TIPO_ATIVIDADE={ligacao:{icone:'📞',label:'Ligação'},mensagem:{icone:'💬',label:'Mensagem'},email:{icone:'✉️',label:'E-mail'},estrategia:{icone:'🎯',label:'Estratégia'}};
 let _crmAtividadeStatusAtual='';
 function crmAbrirModalAtividade(tipo,empresaId){
   const e=crmEmpresas.find(x=>x.id===empresaId);
@@ -38342,8 +38818,17 @@ function crmAbrirNovaEmpresa(){
   _crmPopularUf();
   document.getElementById('crm-emp-uf').value='';
   document.getElementById('crm-emp-tiponegocio').value='Venda';
+  // Proposta (2026-09-09, a pedido do usuário) — agora é uma janela própria (ver
+  // crmAbrirJanelaProposta/mo-crm-proposta), não mais embutida aqui; começa "pendente" e só
+  // vira de vez parte da empresa quando crmSalvarEmpresa() rodar.
+  _crmEmpPropostaPendente={propostaHistorico:[],propostaValorBruto:0,propostaOperacionais:0,propostaValorLiquido:0,propostaArquivoNome:'',propostaArquivoUrl:'',propostaAtualizadoEm:'',tipoNegocio:'Venda'};
+  _crmEmpAtualizarBotaoProposta();
   const l=document.getElementById('crm-emp-decisores-l');if(l)l.innerHTML='';
   crmAddDecisorRow();
+  _crmEmpWizardModo='criacao';
+  _crmEmpWizardVisitado={geral:true,proposta:false,inteligencia:false};
+  const btnSalvarEmpN=document.getElementById('crm-emp-btn-salvar');if(btnSalvarEmpN)btnSalvarEmpN.textContent='💾 Criar Negócio';
+  _crmEmpWizardIrPara('geral');
   openM('mo-crm-empresa');
 }
 function crmAbrirEditarEmpresa(id){
@@ -38358,9 +38843,27 @@ function crmAbrirEditarEmpresa(id){
   _crmPopularUf();
   document.getElementById('crm-emp-uf').value=e.sedeUf||'';
   document.getElementById('crm-emp-tiponegocio').value=e.tipoNegocio||'Venda';
+  // Proposta (2026-09-09) — clona os dados atuais da empresa pra _crmEmpPropostaPendente;
+  // mudanças feitas na janela de Proposta durante a edição só viram de vez parte de "e"
+  // quando crmSalvarEmpresa() rodar (mesmo espírito do resto do formulário de edição).
+  _crmEmpPropostaPendente={
+    propostaHistorico:JSON.parse(JSON.stringify(e.propostaHistorico||[])),
+    propostaValorBruto:e.propostaValorBruto||0,
+    propostaOperacionais:e.propostaOperacionais||0,
+    propostaValorLiquido:e.propostaValorLiquido||0,
+    propostaArquivoNome:e.propostaArquivoNome||'',
+    propostaArquivoUrl:e.propostaArquivoUrl||'',
+    propostaAtualizadoEm:e.propostaAtualizadoEm||'',
+    tipoNegocio:e.tipoNegocio||'Venda'
+  };
+  _crmEmpAtualizarBotaoProposta();
   const l=document.getElementById('crm-emp-decisores-l');if(l)l.innerHTML='';
   if((e.decisores||[]).length)e.decisores.forEach(d=>crmAddDecisorRow(d));
   else crmAddDecisorRow();
+  _crmEmpWizardModo='edicao';
+  _crmEmpWizardVisitado={geral:true,proposta:true,inteligencia:true};
+  const btnSalvarEmpE=document.getElementById('crm-emp-btn-salvar');if(btnSalvarEmpE)btnSalvarEmpE.textContent='💾 Salvar Alterações';
+  _crmEmpWizardIrPara('geral');
   closeM('mo-crm-card');
   openM('mo-crm-empresa');
 }
@@ -38422,6 +38925,15 @@ async function crmSalvarEmpresa(){
   // obrigatorio") — mesmas opções de "Tipo do Pedido" da Emissão, obrigatório selecionar.
   const tipoNegocio=document.getElementById('crm-emp-tiponegocio').value||'';
   if(!tipoNegocio){toast('Selecione o tipo de negócio!','terr');return;}
+  // Valor da proposta — bloqueia o SALVAMENTO em si (criação ou edição), não só o avanço de
+  // etapa (2026-09-09, a pedido do usuário: "nao é permitido criar um card dentro do crm
+  // comercial sem informar o valor caso o tipo do card seja venda"). Lido de
+  // _crmEmpPropostaPendente (preenchido pela janela "💰 Gerenciar Proposta", ver
+  // crmAbrirJanelaProposta/crmSalvarValoresJanelaProposta) — não existe mais campo de valor
+  // direto neste formulário. _crmCamposFaltantes() continua existindo como rede de
+  // segurança pra dados legados que já existiam sem valor.
+  const propostaBruto=(_crmEmpPropostaPendente&&_crmEmpPropostaPendente.propostaValorBruto)||0;
+  if(tipoNegocio==='Venda'&&!(propostaBruto>0)){toast('Informe o valor bruto da proposta — obrigatório para negócios do tipo Venda! Use o botão "💰 Gerenciar Proposta".','terr');return;}
   const isNova=!id;
   const etapas=_crmEtapas();
   const e=isNova?{
@@ -38438,6 +38950,15 @@ async function crmSalvarEmpresa(){
   e.sedeCidade=cidadeInst;
   e.sedeUf=ufInst;
   e.tipoNegocio=tipoNegocio;
+  if(_crmEmpPropostaPendente){
+    e.propostaHistorico=_crmEmpPropostaPendente.propostaHistorico||[];
+    e.propostaValorBruto=_crmEmpPropostaPendente.propostaValorBruto||0;
+    e.propostaOperacionais=_crmEmpPropostaPendente.propostaOperacionais||0;
+    e.propostaValorLiquido=_crmEmpPropostaPendente.propostaValorLiquido||0;
+    if(_crmEmpPropostaPendente.propostaArquivoNome)e.propostaArquivoNome=_crmEmpPropostaPendente.propostaArquivoNome;
+    if(_crmEmpPropostaPendente.propostaArquivoUrl)e.propostaArquivoUrl=_crmEmpPropostaPendente.propostaArquivoUrl;
+    if(_crmEmpPropostaPendente.propostaAtualizadoEm)e.propostaAtualizadoEm=_crmEmpPropostaPendente.propostaAtualizadoEm;
+  }
   const decisoresAntigos=isNova?[]:(e.decisores||[]).slice();
   e.decisores=decisoresForm;
   if(!isNova)_crmLogDiffDecisores(e,decisoresAntigos,decisoresForm);
