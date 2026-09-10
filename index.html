@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-09.16';</script>
+<script>const APP_BUILD_VERSION='2026-09-10.1';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -1523,6 +1523,19 @@ select.fc{cursor:pointer}
               <span style="font-size:.72rem;color:var(--ink4)">Pedidos finalizados, por mês da Data de Finalização</span>
             </div>
             <div id="fg-dash-comparativo-mensal"></div>
+          </div>
+          <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px;margin-top:14px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+              <div>
+                <h3 style="margin:0;font-size:.85rem;font-weight:700">📋 Lista de Pedidos — Instalação / Frete / Munque / Gastos Extras</h3>
+                <span style="font-size:.72rem;color:var(--ink4)">Vendido, Budget (70% do vendido) e Realizado por categoria, mais gastos extras e setor responsável — mesmo período filtrado acima</span>
+              </div>
+              <div style="display:flex;gap:6px;flex-shrink:0">
+                <button type="button" onclick="fgExportarListaPlanejamentoExcel()" style="background:#f1f5f9;color:#334155;border:none;border-radius:8px;padding:7px 12px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">📊 Excel</button>
+                <button type="button" onclick="fgExportarListaPlanejamentoPDF()" style="background:#f1f5f9;color:#334155;border:none;border-radius:8px;padding:7px 12px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">📄 PDF</button>
+              </div>
+            </div>
+            <div id="fg-dash-lista-planejamento" style="overflow-x:auto"></div>
           </div>
         </div>
         <div id="pl-ind-sub-fornecedores" style="display:none">
@@ -25314,7 +25327,7 @@ function renderFgDashboard(){
       ['Frete','🚚 Frete / Deslocamento'],
       ['Munque','🏗️ Munque / Elevação']
     ];
-    catEl.innerHTML=cards.map(([key,label])=>{
+    const categoriasHtml=cards.map(([key,label])=>{
       const vendido=soma('budget'+key),realizado=soma('fechado'+key),save=vendido-realizado;
       const saveCor=save>=0?'#0E7A45':'#C1440E';
       const bloco=(rotulo,valor,cor)=>`<div onclick="fgAbrirListaCategoria('${key}')" style="cursor:pointer;flex:1;min-width:88px">
@@ -25330,8 +25343,20 @@ function renderFgDashboard(){
         </div>
       </div>`;
     }).join('');
+    // Gastos Extras (2026-09-10, a pedido do usuário: "quero um indicador clicavel de
+    // gastos extras... igual tem os outros instalação etc.") — card próprio, sem Vendido/
+    // Budget (gasto extra é avulso, por setor, sem meta) — só o Total do período filtrado,
+    // clicável (abre fgAbrirListaGastosExtras, com motivo+setor por pedido).
+    const gastosExtrasTotal=soma('gastosExtras');
+    const gastosExtrasHtml=`<div onclick="fgAbrirListaGastosExtras()" style="cursor:pointer;background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
+      <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">🧾 Gastos Extras</h3>
+      <div style="font-size:.62rem;color:var(--ink4);text-transform:uppercase;letter-spacing:.02em">Total do período</div>
+      <div style="font-size:.92rem;font-weight:800;color:#C1440E">${fmtR(gastosExtrasTotal)}</div>
+    </div>`;
+    catEl.innerHTML=categoriasHtml+gastosExtrasHtml;
   }
   _fgRenderComparativoMensal();
+  _fgRenderListaPlanejamento();
 }
 // Rótulos das categorias de planejamento, reaproveitados pelos cards clicáveis acima e pela
 // listinha de drill-down abaixo.
@@ -25409,6 +25434,207 @@ function fgAbrirListaCategoria(catKey){
     ${corpo}
   </div>`;
   document.body.appendChild(modal);
+}
+// Listinha dos gastos extras do período filtrado (2026-09-10, a pedido do usuário: "quero um
+// indicador clicavel de gastos extras... igual tem os outros instalação etc.") — mesmo padrão
+// visual de fgAbrirListaMetrica/fgAbrirListaCategoria, só que 1 card por LANÇAMENTO de gasto
+// extra (não por pedido — um mesmo pedido pode ter mais de um), mostrando motivo, setor
+// responsável e a OS/cliente de origem (clicável -> planAbrirDetalhePedido).
+function fgAbrirListaGastosExtras(){
+  const linhas=[];
+  _fgFiltradosBase().forEach(p=>{
+    const extras=Array.isArray((p.fornGestao||{}).gastosExtras)?p.fornGestao.gastosExtras:[];
+    extras.forEach(e=>{
+      const valor=moneyToNum(e.valor)||0;
+      if(Math.abs(valor)<0.005)return;
+      linhas.push({p,valor,motivo:e.motivo||'—',setor:e.setor||'—'});
+    });
+  });
+  linhas.sort((a,b)=>String(a.p.os||'').localeCompare(String(b.p.os||''),'pt-BR',{numeric:true}));
+  const old=document.getElementById('fg-extras-lista-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='fg-extras-lista-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  _dynModalSemFechaClique(modal);
+  const total=linhas.reduce((s,x)=>s+x.valor,0);
+  const corpoGE=linhas.length?linhas.map(x=>`<div onclick="document.getElementById('fg-extras-lista-modal').remove();planAbrirDetalhePedido('${x.p.id}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${x.p.cliente||'—'}</div>
+        <div style="font-size:.72rem;color:var(--ink4);margin-top:1px">${x.motivo} <span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:1px 8px;font-size:.64rem;font-weight:700;margin-left:4px">${x.setor}</span></div>
+      </div>
+      <div style="font-size:.82rem;font-weight:800;color:#dc2626;white-space:nowrap">${fmtR(x.valor)}</div>
+    </div>`).join(''):'<div style="text-align:center;padding:30px;color:var(--ink4);font-size:.85rem">Nenhum gasto extra neste período.</div>';
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:560px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:10px">
+      <div style="font-size:1rem;font-weight:800;color:#1a1f36">🧾 Gastos Extras (${linhas.length})</div>
+      <button onclick="document.getElementById('fg-extras-lista-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
+    </div>
+    <div style="font-size:.76rem;color:var(--ink4);margin-bottom:14px">Total: <b style="color:#dc2626">${fmtR(total)}</b></div>
+    ${corpoGE}
+  </div>`;
+  document.body.appendChild(modal);
+}
+// Linhas da nova tabela "Lista de Pedidos" (2026-09-10, a pedido do usuário — ver topo do
+// build script pro pedido verbatim) — 1 linha por pedido elegível no filtro atual de
+// Indicadores de Planejamento (_fgFiltradosBase, mesmo filtro de mês/fornecedor/status de
+// toda a tela). "Vendido" é o valor cheio (100%) já lançado na Emissão pra cada componente;
+// "Budget" é a meta com redução de 30% (Vendido×0.7 — mesma fórmula de _fgCalc, só exposta
+// aqui como número próprio em vez de só aparecer reduzida); "Realizado" é o Valor Fechado já
+// lançado em Gestão de Fornecedores. Gastos Extras/Setor(es) vêm direto de
+// p.fornGestao.gastosExtras (mesmo array do modal de detalhe do pedido e do Diário de Obra).
+// Função central reaproveitada pela renderização em tela E pelas 2 exportações (Excel/PDF) —
+// nunca diverge entre o que aparece na tela e o que é exportado.
+function _fgLinhasListaPlanejamento(){
+  const forn=document.getElementById('fg-fil-fornecedor')?.value||'';
+  return _fgFiltradosBase().map(p=>{
+    const c=_fgCalc(p);
+    const ca=_fgCalcAtribuido(c,p.fornGestao||{},forn);
+    const r=c.r;
+    const vendidoInst=(r.mo||0)+(r.vi||0)+(r.rem||0)+(r.pintub||0);
+    const vendidoFrete=r.ft||0;
+    const vendidoMunque=r.el||0;
+    const extras=Array.isArray((p.fornGestao||{}).gastosExtras)?p.fornGestao.gastosExtras:[];
+    const gastosExtras=extras.reduce((s,e)=>s+(moneyToNum(e.valor)||0),0);
+    const setores=[...new Set(extras.map(e=>e.setor).filter(Boolean))];
+    return{
+      p,
+      vendidoInst,budgetInst:ca.budgetInst,realizadoInst:ca.fechadoInst,
+      vendidoFrete,budgetFrete:ca.budgetFrete,realizadoFrete:ca.fechadoFrete,
+      vendidoMunque,budgetMunque:ca.budgetMunque,realizadoMunque:ca.fechadoMunque,
+      gastosExtras,setores
+    };
+  }).sort((a,b)=>String(a.p.os||'').localeCompare(String(b.p.os||''),'pt-BR',{numeric:true}));
+}
+// Renderiza a tabela em tela (#fg-dash-lista-planejamento), chamada ao final de
+// renderFgDashboard() — atualiza automaticamente com qualquer troca de mês/filtro, igual o
+// resto do dashboard.
+function _fgRenderListaPlanejamento(){
+  const el=document.getElementById('fg-dash-lista-planejamento');
+  if(!el)return;
+  const linhas=_fgLinhasListaPlanejamento();
+  if(!linhas.length){el.innerHTML='<div style="text-align:center;padding:24px;color:var(--ink4);font-size:.82rem">Nenhum pedido neste período.</div>';return;}
+  const cel=(v,forte)=>`<td style="text-align:right;white-space:nowrap;padding:6px 8px;${forte?'font-weight:700':''}">${v?fmtR(v):'<span style="color:var(--ink4)">—</span>'}</td>`;
+  const linhasHtml=linhas.map(x=>{
+    const setoresTxt=x.setores.length?x.setores.join(', '):'—';
+    return `<tr>
+      <td style="cursor:pointer;font-weight:700;color:var(--brand-d);white-space:nowrap;padding:6px 8px" onclick="planAbrirDetalhePedido('${x.p.id}')">OS ${x.p.os||'—'} · ${String(x.p.cliente||'—').replace(/</g,'&lt;')}</td>
+      ${cel(x.vendidoInst)}${cel(x.budgetInst)}${cel(x.realizadoInst,true)}
+      ${cel(x.vendidoFrete)}${cel(x.budgetFrete)}${cel(x.realizadoFrete,true)}
+      ${cel(x.vendidoMunque)}${cel(x.budgetMunque)}${cel(x.realizadoMunque,true)}
+      <td style="text-align:right;white-space:nowrap;padding:6px 8px;font-weight:700;color:${x.gastosExtras?'#dc2626':'var(--ink4)'}">${x.gastosExtras?fmtR(x.gastosExtras):'—'}</td>
+      <td style="font-size:.72rem;color:var(--ink4);padding:6px 8px">${setoresTxt}</td>
+    </tr>`;
+  }).join('');
+  const tot=campo=>linhas.reduce((s,x)=>s+(x[campo]||0),0);
+  el.innerHTML=`<table style="width:100%;border-collapse:collapse;font-size:.78rem;min-width:900px">
+    <thead>
+    <tr style="border-bottom:2px solid var(--border)">
+      <th style="text-align:left;padding:6px 8px"></th>
+      <th colspan="3" style="text-align:center;padding:6px 8px;border-left:1px solid var(--border-lt)">🔧 Instalação</th>
+      <th colspan="3" style="text-align:center;padding:6px 8px;border-left:1px solid var(--border-lt)">🚚 Frete</th>
+      <th colspan="3" style="text-align:center;padding:6px 8px;border-left:1px solid var(--border-lt)">🏗️ Munque</th>
+      <th colspan="2" style="text-align:center;padding:6px 8px;border-left:1px solid var(--border-lt)">🧾 Gastos Extras</th>
+    </tr>
+    <tr style="border-bottom:1px solid var(--border);font-size:.68rem;color:var(--ink4);text-transform:uppercase">
+      <th style="text-align:left;padding:4px 8px">Pedido</th>
+      <th style="text-align:right;padding:4px 8px;border-left:1px solid var(--border-lt)">Vendido</th><th style="text-align:right;padding:4px 8px">Budget</th><th style="text-align:right;padding:4px 8px">Realizado</th>
+      <th style="text-align:right;padding:4px 8px;border-left:1px solid var(--border-lt)">Vendido</th><th style="text-align:right;padding:4px 8px">Budget</th><th style="text-align:right;padding:4px 8px">Realizado</th>
+      <th style="text-align:right;padding:4px 8px;border-left:1px solid var(--border-lt)">Vendido</th><th style="text-align:right;padding:4px 8px">Budget</th><th style="text-align:right;padding:4px 8px">Realizado</th>
+      <th style="text-align:right;padding:4px 8px;border-left:1px solid var(--border-lt)">Valor</th><th style="text-align:left;padding:4px 8px">Setor</th>
+    </tr>
+    </thead>
+    <tbody>${linhasHtml}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--border);font-weight:800">
+      <td style="padding:8px">TOTAL (${linhas.length})</td>
+      <td style="text-align:right;padding:8px">${fmtR(tot('vendidoInst'))}</td><td style="text-align:right;padding:8px">${fmtR(tot('budgetInst'))}</td><td style="text-align:right;padding:8px">${fmtR(tot('realizadoInst'))}</td>
+      <td style="text-align:right;padding:8px">${fmtR(tot('vendidoFrete'))}</td><td style="text-align:right;padding:8px">${fmtR(tot('budgetFrete'))}</td><td style="text-align:right;padding:8px">${fmtR(tot('realizadoFrete'))}</td>
+      <td style="text-align:right;padding:8px">${fmtR(tot('vendidoMunque'))}</td><td style="text-align:right;padding:8px">${fmtR(tot('budgetMunque'))}</td><td style="text-align:right;padding:8px">${fmtR(tot('realizadoMunque'))}</td>
+      <td style="text-align:right;padding:8px;color:#dc2626">${fmtR(tot('gastosExtras'))}</td><td></td>
+    </tr></tfoot>
+  </table>`;
+}
+// ===================== EXPORTAÇÕES (Excel/PDF) — LISTA DE PLANEJAMENTO (2026-09-10) ========
+// Mesmo padrão já usado em Lista de Pedidos/Kanban (ver lpExportarListaExcel/
+// lpExportarListaPDF): Excel = CSV via _csvDownload (abre direto no Excel, sem biblioteca
+// nenhuma); PDF = jsPDF+autoTable, mesma marca (logo, NAVY/PINK) — aqui em landscape por ter
+// mais colunas que o normal. Reaproveita _fgLinhasListaPlanejamento() — nunca diverge do que
+// a tabela em tela mostra, sempre respeitando o filtro de mês ativo (ou "Todos os meses"). A
+// pedido do usuário: "TAMBEM quero o usuario possa exportar em pdf e excel essa lista".
+function fgExportarListaPlanejamentoExcel(){
+  const linhas=_fgLinhasListaPlanejamento();
+  if(!linhas.length){toast('Nenhum pedido encontrado com esses filtros para exportar','terr');return;}
+  const headers=['OS','Cliente','Inst. Vendido','Inst. Budget','Inst. Realizado','Frete Vendido','Frete Budget','Frete Realizado','Munque Vendido','Munque Budget','Munque Realizado','Gastos Extras','Setor(es)'];
+  const body=linhas.map(x=>[
+    x.p.os||'',x.p.cliente||'',
+    x.vendidoInst,x.budgetInst,x.realizadoInst,
+    x.vendidoFrete,x.budgetFrete,x.realizadoFrete,
+    x.vendidoMunque,x.budgetMunque,x.realizadoMunque,
+    x.gastosExtras,x.setores.join(', ')
+  ]);
+  _csvDownload(`lista_planejamento_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+async function fgExportarListaPlanejamentoPDF(){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const linhas=_fgLinhasListaPlanejamento();
+  if(!linhas.length){toast('Nenhum pedido encontrado com esses filtros para gerar o PDF.','terr');return;}
+  const doc=new jsPDF({orientation:'landscape'});
+  const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const filtroLbl=_fgMes?MESES_PT[_fgMes]:'Todos os meses';
+  const drawnFooterPages=new Set();
+  function drawHeader(titulo){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+    doc.text(titulo,pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    doc.text('Período: '+filtroLbl,pageW-14,26.5,{align:'right'});
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,29,pageW-14,29);
+    doc.setFont('helvetica','normal');
+    return 35;
+  }
+  function drawFooter(pageNum){
+    if(drawnFooterPages.has(pageNum))return;
+    drawnFooterPages.add(pageNum);
+    doc.setPage(pageNum);
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
+  }
+  const curY=drawHeader('LISTA DE PLANEJAMENTO');
+  const head=['OS','Cliente','Inst. Vendido','Inst. Budget','Inst. Realiz.','Frete Vendido','Frete Budget','Frete Realiz.','Munque Vendido','Munque Budget','Munque Realiz.','Gastos Extras','Setor(es)'];
+  const bodyPdf=linhas.map(x=>[
+    x.p.os||'—',x.p.cliente||'—',
+    x.vendidoInst?fmtR(x.vendidoInst):'—',x.budgetInst?fmtR(x.budgetInst):'—',x.realizadoInst?fmtR(x.realizadoInst):'—',
+    x.vendidoFrete?fmtR(x.vendidoFrete):'—',x.budgetFrete?fmtR(x.budgetFrete):'—',x.realizadoFrete?fmtR(x.realizadoFrete):'—',
+    x.vendidoMunque?fmtR(x.vendidoMunque):'—',x.budgetMunque?fmtR(x.budgetMunque):'—',x.realizadoMunque?fmtR(x.realizadoMunque):'—',
+    x.gastosExtras?fmtR(x.gastosExtras):'—',x.setores.join(', ')||'—'
+  ]);
+  const totCol=campo=>linhas.reduce((s,x)=>s+(x[campo]||0),0);
+  const footPdf=['TOTAL ('+linhas.length+')','',
+    fmtR(totCol('vendidoInst')),fmtR(totCol('budgetInst')),fmtR(totCol('realizadoInst')),
+    fmtR(totCol('vendidoFrete')),fmtR(totCol('budgetFrete')),fmtR(totCol('realizadoFrete')),
+    fmtR(totCol('vendidoMunque')),fmtR(totCol('budgetMunque')),fmtR(totCol('realizadoMunque')),
+    fmtR(totCol('gastosExtras')),''
+  ];
+  doc.autoTable({
+    startY:curY,head:[head],body:bodyPdf,foot:[footPdf],theme:'grid',
+    styles:{fontSize:6.6,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.4},
+    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:6.8},
+    footStyles:{fillColor:LIGHT,textColor:[26,27,54],fontStyle:'bold',fontSize:6.8},
+    alternateRowStyles:{fillColor:LIGHT},
+    margin:{top:38,left:14,right:14,bottom:20},
+    didDrawPage:()=>{drawFooter(doc.internal.getNumberOfPages());}
+  });
+  drawFooter(doc.internal.getNumberOfPages());
+  doc.save(`lista_planejamento_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('PDF gerado!','tok');
 }
 // Aba "Indicadores de Fornecedores" (2026-09-04, a pedido do usuário) — quanto foi
 // CONTRATADO (valor fechado, mesmo critério do ranking da aba Fornecedores) de cada
