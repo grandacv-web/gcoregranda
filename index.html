@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-10.17';</script>
+<script>const APP_BUILD_VERSION='2026-09-11.1';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -2001,6 +2001,7 @@ select.fc{cursor:pointer}
         <button class="dash-tab active prod-main-tab" onclick="prodSetTab('lista',this)">📋 Lista</button>
         <button class="dash-tab prod-main-tab" onclick="prodSetTab('dias',this)">🗂️ Kanban</button>
         <button class="dash-tab prod-main-tab" onclick="prodSetTab('calendario',this)">📅 Calendário</button>
+        <button class="dash-tab prod-main-tab" onclick="prodSetTab('indicadores',this)">📊 Indicadores</button>
       </div>
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
         🏭 Cada pedido passa por um checklist de 3 subtarefas — Recebimento de Corte Galvanizado, Recebimento de Adesivos e Produzir — antes de ser considerado pronto. Clique em "Iniciar Produção" pra abrir; cada baixa continua indo pro Histórico do pedido, igual sempre foi. A Produção é distribuída em fatias de até <strong id="prod-cap-valor">—</strong> por dia útil, recuando a partir do prazo — a aba 🗂️ Kanban mostra dia a dia quais já estão ocupados, quais estão livres pra novas vendas, e o total líquido a produzir no período (dia/semana/mês/todos os meses) selecionado.
@@ -2074,6 +2075,29 @@ select.fc{cursor:pointer}
           </div>
         </div>
         <div id="prod-cal-body"></div>
+      </div>
+      <div id="prod-sec-indicadores" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+          <div id="prod-ind-nav-mes" class="dash-mes-nav" style="margin:0;flex:1;min-width:220px">
+            <button onclick="prodIndNav(-1)" type="button">◀</button>
+            <div class="dash-mes-label" id="prod-ind-lbl" style="flex:1;min-width:130px"></div>
+            <button onclick="prodIndNav(1)" type="button">▶</button>
+          </div>
+          <div id="prod-ind-nav-periodo" style="display:none;align-items:center;gap:8px;flex-wrap:wrap">
+            <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">De
+              <input type="date" id="prod-ind-de" onchange="prodIndDataChange()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
+            </label>
+            <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">Até
+              <input type="date" id="prod-ind-ate" onchange="prodIndDataChange()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
+            </label>
+          </div>
+          <select id="prod-ind-modo" onchange="prodIndSetModo(this.value)" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
+            <option value="mes">Por mês</option>
+            <option value="periodo">Período personalizado</option>
+          </select>
+        </div>
+        <div style="font-size:.72rem;color:var(--ink4);margin-bottom:14px">Considera o Prazo de Produção (mesma data usada no 🗂️ Kanban/📅 Calendário) de todos os pedidos elegíveis, incluindo os já concluídos — é o relatório de quanto foi/será produzido no período.</div>
+        <div id="prod-ind-body"></div>
       </div>
     </div>
     <!-- HISTÓRICO DE PEDIDOS (consulta, aberto pra qualquer usuário logado) -->
@@ -6955,8 +6979,8 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
     if(isProducaoSetor)setTimeout(()=>{try{
       document.querySelectorAll('.prod-main-tab').forEach(b=>b.classList.remove('active'));
       document.getElementById('prod-main-tabs')?.querySelector('.prod-main-tab')?.classList.add('active');
-      const sl=document.getElementById('prod-sec-lista'),sd=document.getElementById('prod-sec-dias'),sc=document.getElementById('prod-sec-calendario');
-      if(sl)sl.style.display='';if(sd)sd.style.display='none';if(sc)sc.style.display='none';
+      const sl=document.getElementById('prod-sec-lista'),sd=document.getElementById('prod-sec-dias'),sc=document.getElementById('prod-sec-calendario'),si=document.getElementById('prod-sec-indicadores');
+      if(sl)sl.style.display='';if(sd)sd.style.display='none';if(sc)sc.style.display='none';if(si)si.style.display='none';
       _prodTabAtiva='lista';
       prodRenderAtivo();
     }catch(e){console.error('Erro ao abrir Produção',e);}},120);
@@ -22112,10 +22136,11 @@ let _prodTabAtiva='lista';
 function prodSetTab(tab,btn){
   document.querySelectorAll('.prod-main-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  const sl=document.getElementById('prod-sec-lista'),sd=document.getElementById('prod-sec-dias'),sc=document.getElementById('prod-sec-calendario');
+  const sl=document.getElementById('prod-sec-lista'),sd=document.getElementById('prod-sec-dias'),sc=document.getElementById('prod-sec-calendario'),si=document.getElementById('prod-sec-indicadores');
   if(sl)sl.style.display=tab==='lista'?'':'none';
   if(sd)sd.style.display=tab==='dias'?'':'none';
   if(sc)sc.style.display=tab==='calendario'?'':'none';
+  if(si)si.style.display=tab==='indicadores'?'':'none';
   _prodTabAtiva=tab;
   prodRenderAtivo();
 }
@@ -22124,6 +22149,7 @@ function prodRenderAtivo(){
   if(capEl)capEl.textContent=fmtR(_lpCapProducaoDia());
   if(_prodTabAtiva==='dias')renderProdDias();
   else if(_prodTabAtiva==='calendario')renderProdCalendario();
+  else if(_prodTabAtiva==='indicadores')renderProdIndicadores();
   else renderProdLista();
 }
 function renderProdLista(){
@@ -22297,6 +22323,107 @@ function prodDiasNav(dir){
 }
 function prodDiasHoje(){_prodDiasView.refIso=new Date().toISOString().slice(0,10);renderProdDias();}
 function prodDiasSetPeriodo(p){_prodDiasView.periodo=p;renderProdDias();}
+// ===================== INDICADORES — PRODUÇÃO (2026-09-11, a pedido do usuário) =====================
+// "crie um menu INDICADORES que mostre uma lista dai por mes ou pelo periodo que o usuario
+// quiser, com essas informações tiradas ali do sistema e tal, parecido com esse que to
+// mandando mas nao copia real, seguir conforme o sistem amesmo" — reaproveita 100% do motor de
+// cálculo que a Lista já usa (_lpPedidosElegiveis+_prodInfo, mesmo valorLiquidoTotal/pctValor/
+// valorLiquidoProduzido da coluna 💰 Valor Produzido, build .14), só soma/filtra por período.
+let _prodIndView={modo:'mes',refIso:new Date().toISOString().slice(0,10),de:'',ate:''};
+function _prodIndRange(){
+  if(_prodIndView.modo==='periodo'){
+    return{ini:_prodIndView.de||'0000-01-01',fim:_prodIndView.ate||'9999-12-31',label:(_prodIndView.de||_prodIndView.ate)?'Período personalizado':'Selecione o período'};
+  }
+  const ref=new Date(_prodIndView.refIso+'T00:00:00');
+  const ini=new Date(ref.getFullYear(),ref.getMonth(),1),fim=new Date(ref.getFullYear(),ref.getMonth()+1,0);
+  return{ini:fmtISOLocal(ini),fim:fmtISOLocal(fim),label:MESES_PT[ref.getMonth()+1]+'/'+ref.getFullYear()};
+}
+function prodIndNav(dir){
+  if(_prodIndView.modo!=='mes')return;
+  const d=new Date(_prodIndView.refIso+'T00:00:00');
+  d.setMonth(d.getMonth()+dir);
+  _prodIndView.refIso=fmtISOLocal(d);
+  renderProdIndicadores();
+}
+function prodIndSetModo(modo){
+  _prodIndView.modo=modo;
+  const elMes=document.getElementById('prod-ind-nav-mes'),elPer=document.getElementById('prod-ind-nav-periodo');
+  if(elMes)elMes.style.display=modo==='mes'?'':'none';
+  if(elPer)elPer.style.display=modo==='periodo'?'flex':'none';
+  renderProdIndicadores();
+}
+function prodIndDataChange(){
+  _prodIndView.de=document.getElementById('prod-ind-de')?.value||'';
+  _prodIndView.ate=document.getElementById('prod-ind-ate')?.value||'';
+  renderProdIndicadores();
+}
+// Sempre inclui concluídos (diferente da Lista, que some eles por padrão) — é um relatório de
+// "quanto já foi/será produzido no período", não uma fila de trabalho pendente.
+function _prodIndDados(){
+  const hojeIso=new Date().toISOString().slice(0,10);
+  _lpMapaProducaoPorDia();
+  const{ini,fim}=_prodIndRange();
+  let infos=_lpPedidosElegiveis().map(p=>_prodInfo(p,hojeIso)).filter(x=>x.ok);
+  infos=infos.filter(x=>x.etapa.iso&&x.etapa.iso>=ini&&x.etapa.iso<=fim);
+  infos.sort((a,b)=>String(a.etapa.iso||'9999').localeCompare(b.etapa.iso||'9999'));
+  const projecao=infos.reduce((s,x)=>s+x.valorLiquidoTotal,0);
+  const produzido=infos.reduce((s,x)=>s+x.valorLiquidoProduzido,0);
+  return{infos,projecao,produzido,aProduzir:projecao-produzido,qtd:infos.length};
+}
+function renderProdIndicadores(){
+  const wrap=document.getElementById('prod-ind-body');
+  if(!wrap)return;
+  if(!_isSetorUser('PRODUÇÃO')){
+    wrap.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700;font-size:.85rem">🔒 ACESSO NÃO PERMITIDO — apenas Produção ou Administrador podem ver os Indicadores.</div>';
+    return;
+  }
+  const lblEl=document.getElementById('prod-ind-lbl');
+  const r=_prodIndRange();
+  if(lblEl)lblEl.textContent=r.label;
+  const d=_prodIndDados();
+  const tilesHtml=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">
+    <div style="background:#dbeafe;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#1e40af">💰 Projeção</div><div style="font-size:1.05rem;font-weight:800;color:#1e40af">${fmtR(d.projecao)}</div></div>
+    <div style="background:#dcfce7;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#166534">✅ Produzido</div><div style="font-size:1.05rem;font-weight:800;color:#166534">${fmtR(d.produzido)}</div></div>
+    <div style="background:#fef3c7;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#92400e">🔧 À Produzir</div><div style="font-size:1.05rem;font-weight:800;color:#92400e">${fmtR(d.aProduzir)}</div></div>
+    <div style="background:#f1f5f9;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#475569">📦 Pedidos</div><div style="font-size:1.05rem;font-weight:800;color:#475569">${d.qtd}</div></div>
+  </div>`;
+  if(!d.infos.length){
+    wrap.innerHTML=tilesHtml+'<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum pedido com Prazo de Produção no período selecionado.</div>';
+    return;
+  }
+  const linhas=d.infos.map(x=>{
+    const p=x.p;
+    const aProduzirPedido=x.valorLiquidoTotal-x.valorLiquidoProduzido;
+    return`<tr>
+      <td style="padding:8px 10px">${p.os||'—'}</td>
+      <td style="padding:8px 10px">${p.cliente||'—'}</td>
+      <td style="padding:8px 10px;white-space:nowrap">${p.tipo||'—'}</td>
+      <td style="padding:8px 10px;text-align:right;white-space:nowrap">${fmtR(x.valorLiquidoTotal)}</td>
+      <td style="padding:8px 10px;text-align:right">${x.pctValor.toFixed(0)}%</td>
+      <td style="padding:8px 10px;text-align:right;white-space:nowrap;color:#16a34a">${fmtR(x.valorLiquidoProduzido)}</td>
+      <td style="padding:8px 10px;text-align:right;white-space:nowrap;color:${aProduzirPedido>0.005?'#dc2626':'#94a3b8'}">${fmtR(aProduzirPedido)}</td>
+      <td style="padding:8px 10px;white-space:nowrap">${fmtD(x.etapa.iso)}</td>
+      <td style="padding:8px 10px;white-space:nowrap">${x.calc.prazoIso?fmtD(x.calc.prazoIso):'—'}</td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML=tilesHtml+`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.82rem">
+    <thead><tr style="background:#f8fafc;text-align:left">
+      <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">Tipo</th>
+      <th style="padding:8px 10px;text-align:right">R$ Líquido</th><th style="padding:8px 10px;text-align:right">% Produzido</th>
+      <th style="padding:8px 10px;text-align:right">R$ Produzido</th><th style="padding:8px 10px;text-align:right">R$ à Produzir</th>
+      <th style="padding:8px 10px">Data Produção</th><th style="padding:8px 10px">Prazo Final</th>
+    </tr></thead>
+    <tbody>${linhas}</tbody>
+    <tfoot><tr style="background:#f1f5f9;font-weight:800">
+      <td colspan="3" style="padding:8px 10px">TOTAL</td>
+      <td style="padding:8px 10px;text-align:right;white-space:nowrap">${fmtR(d.projecao)}</td>
+      <td></td>
+      <td style="padding:8px 10px;text-align:right;white-space:nowrap;color:#166534">${fmtR(d.produzido)}</td>
+      <td style="padding:8px 10px;text-align:right;white-space:nowrap;color:#dc2626">${fmtR(d.aProduzir)}</td>
+      <td colspan="2"></td>
+    </tr></tfoot>
+  </table></div>`;
+}
 function _prodDiaCardHtml(ev){
   // Cards de tamanho fixo (2026-09-10, a pedido do usuário: "ainda tem card no kanban fora do
   // padrão, preciso de todos no mesmo padrão e tamanho pra ficar visualmente bom") — altura
