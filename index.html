@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-15.14';</script>
+<script>const APP_BUILD_VERSION='2026-09-15.15';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -6757,6 +6757,33 @@ function _avisosAutomaticos(){
       }
     });
   }
+  // Tarefas pendentes do dia (2026-09-15, a pedido do usuário: "crie um aviso diario todo dia
+  // as 08h00 com as tarefas pendentes de cada usuario... se nao tiver tarefas para cumprir
+  // dai nao precisa avisar") — só a partir das 08h; conta por RESPONSÁVEL (mesmo campo usado
+  // em renderTarefasComerciais() pra "minhas tarefas") juntando tarefa de pedido + avulsa
+  // geral via getTarefasComerciaisPendentes(), e usa _tarefaAtrasada() (mesma lógica do badge
+  // de prazo da lista de tarefas) pra contar quantas já venceram. ID leva a data de hoje —
+  // aviso novo por dia, some ao ser lido, some pra sempre se a pessoa zerar as pendências.
+  if(new Date().getHours()>=8&&typeof getTarefasComerciaisPendentes==='function'){
+    const porRespTarefasDiarias={};
+    getTarefasComerciaisPendentes().forEach(t=>{
+      if(!t.responsavel)return;
+      if(!porRespTarefasDiarias[t.responsavel])porRespTarefasDiarias[t.responsavel]={total:0,atrasadas:0};
+      porRespTarefasDiarias[t.responsavel].total++;
+      if(_tarefaAtrasada(t))porRespTarefasDiarias[t.responsavel].atrasadas++;
+    });
+    const hojeIsoTarefasDiarias=new Date().toISOString().slice(0,10);
+    Object.keys(porRespTarefasDiarias).forEach(nomeResp=>{
+      const{total,atrasadas}=porRespTarefasDiarias[nomeResp];
+      out.push({
+        id:'tarefas_diarias_'+nomeResp+'_'+hojeIsoTarefasDiarias,
+        automatico:true,tipoAuto:'tarefas_diarias',
+        assunto:'⏰ Tarefas do dia',
+        texto:`ATENÇÃO! Você tem ${total} tarefa${total===1?'':'s'} a fazer${atrasadas?', sendo '+atrasadas+' atrasada'+(atrasadas===1?'':'s'):''}.`,
+        destinatarioTipo:'nome',destinatarioValor:nomeResp
+      });
+    });
+  }
   return out;
 }
 // Admin vê tudo (mesmo padrão de bypass usado em _temMenu/_getUserCat pro resto do sistema).
@@ -6824,14 +6851,16 @@ function _renderPainelAvisos(){
   body.innerHTML=lista.map(av=>{
     const cor=av.automatico?'#f59e0b':'#0ea5e9';
     const destTxt=av.destinatarioTipo==='todos'?'Todos':av.destinatarioTipo==='setor'?('Setor: '+av.destinatarioValor):av.destinatarioTipo==='nome'?('Pessoa: '+av.destinatarioValor):('Pessoa: '+((cfg.usuarioNomes&&cfg.usuarioNomes[(av.destinatarioValor||'').toLowerCase()])||av.destinatarioValor||''));
-    return `<div style="border:1.5px solid ${cor};background:${av.automatico?'#fffbeb':'#f0f9ff'};border-radius:12px;padding:12px 14px;position:relative">
+    const vaiParaTarefas=av.tipoAuto==='tarefas_diarias';
+    return `<div ${vaiParaTarefas?'onclick="_avisosIrParaTarefas()" ':''}style="border:1.5px solid ${cor};background:${av.automatico?'#fffbeb':'#f0f9ff'};border-radius:12px;padding:12px 14px;position:relative${vaiParaTarefas?';cursor:pointer':''}">
       <span style="position:absolute;top:10px;right:12px;background:${cor};color:#fff;font-size:.6rem;font-weight:800;padding:2px 7px;border-radius:20px">NOVO</span>
       <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:4px;padding-right:46px">${av.assunto||'(sem assunto)'}</div>
       <div style="font-size:.78rem;color:var(--ink2);line-height:1.4;white-space:pre-wrap">${(av.texto||'').replace(/</g,'&lt;')}</div>
       ${av.imagem?`<img src="${av.imagem}" style="display:block;max-width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin-top:8px;border:1px solid var(--border-lt)">`:''}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
         <span style="font-size:.66rem;color:var(--ink4)">${av.automatico?'🤖 Automático · '+destTxt:'📌 '+(av.criadoPorNome||'Admin')+' · '+destTxt}</span>
-        ${(!av.automatico&&isAdm)?`<button onclick="_avisosExcluirManual('${av.id}')" title="Excluir" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.75rem;padding:2px 4px">🗑</button>`:''}
+        ${vaiParaTarefas?'<span style="font-size:.72rem;font-weight:800;color:#b45309">Ver tarefas ▶️</span>':''}
+        ${(!av.automatico&&isAdm)?`<button onclick="event.stopPropagation();_avisosExcluirManual('${av.id}')" title="Excluir" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.75rem;padding:2px 4px">🗑</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -6862,6 +6891,10 @@ function abrirAvisosLidos(){
 function _avisosExcluirManualLido(id){
   removeAvisoManual(id);
   _renderAvisosLidosPanel();
+}
+function _avisosIrParaTarefas(){
+  closeM('mo-avisos');
+  setSection('cat:FERRAMENTAS');
 }
 function abrirPainelAvisos(){
   _renderPainelAvisos();
@@ -12845,6 +12878,10 @@ setTimeout(_checarNovaVersaoSistema,15000);
 setInterval(_checarNovaVersaoSistema,30000);
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible'&&Date.now()-_ultimaChecagemVersaoSistema>20000)_checarNovaVersaoSistema();
+});
+setInterval(()=>{try{_atualizarBadgeAvisos();}catch(e){}},60000);
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible')try{_atualizarBadgeAvisos();}catch(e){}
 });
 
 // ══════════════════════════════════════════════
