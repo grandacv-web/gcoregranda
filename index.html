@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-15.2';</script>
+<script>const APP_BUILD_VERSION='2026-09-15.3';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -36308,6 +36308,68 @@ function _prospPopularResponsaveis(){
   sel.innerHTML='<option value="">Sem responsável definido</option>'+_prospNomesEquipe().map(n=>`<option value="${n}">${n}</option>`).join('');
 }
 
+// ── FERIADOS (nacionais + regionais de Ponta Grossa/PR) — 2026-09-15, a pedido do usuário:
+// dias sem interação (Saúde do Funil, Prospecção e CRM Comercial) não deve contar fim de
+// semana nem feriado. Nacionais fixos e móveis (Páscoa calculada pelo algoritmo de Gauss,
+// então funciona pra qualquer ano sem precisar atualizar a lista à mão) + os 2 feriados
+// municipais de Ponta Grossa: 26/07 (Santa Ana, padroeira) e 15/09 (emancipação política
+// do município).
+function _pascoaData(ano){
+  const a=ano%19,b=Math.floor(ano/100),c=ano%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),
+        g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,
+        l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),
+        mes=Math.floor((h+l-7*m+114)/31),dia=((h+l-7*m+114)%31)+1;
+  return new Date(ano,mes-1,dia);
+}
+function _isoData(dt){return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;}
+function _feriadosDoAno(ano){
+  const pascoa=_pascoaData(ano);
+  const offPascoa=(dias)=>{const dt=new Date(pascoa);dt.setDate(dt.getDate()+dias);return _isoData(dt);};
+  return new Set([
+    `${ano}-01-01`, // Confraternização Universal
+    offPascoa(-47), // Segunda de Carnaval
+    offPascoa(-46), // Terça de Carnaval
+    offPascoa(-2),  // Sexta-feira Santa
+    offPascoa(60),  // Corpus Christi
+    `${ano}-04-21`, // Tiradentes
+    `${ano}-05-01`, // Dia do Trabalho
+    `${ano}-07-26`, // Santa Ana — padroeira de Ponta Grossa (municipal)
+    `${ano}-09-07`, // Independência do Brasil
+    `${ano}-09-15`, // Emancipação política de Ponta Grossa (municipal)
+    `${ano}-10-12`, // Nossa Senhora Aparecida
+    `${ano}-11-02`, // Finados
+    `${ano}-11-15`, // Proclamação da República
+    `${ano}-11-20`, // Consciência Negra
+    `${ano}-12-25`, // Natal
+  ]);
+}
+const _feriadosCachePorAno={};
+function _isFeriado(dataIso){
+  const ano=Number(dataIso.slice(0,4));
+  if(!_feriadosCachePorAno[ano])_feriadosCachePorAno[ano]=_feriadosDoAno(ano);
+  return _feriadosCachePorAno[ano].has(dataIso);
+}
+function _isDiaUtil(dataIso){
+  const [y,m,d]=dataIso.split('-').map(Number);
+  const dow=new Date(y,m-1,d).getDay(); // 0=domingo, 6=sábado
+  return dow!==0&&dow!==6&&!_isFeriado(dataIso);
+}
+// Conta quantos dias ÚTEIS já se passaram desde `desdeIso` (data/hora ISO) até agora, pulando
+// fim de semana e feriado nacional/regional — usado pela Saúde do Funil (ver
+// _prospDiasSemInteracao e _crmDiasSemInteracao).
+function _diasUteisDesde(desdeIso){
+  const inicio=new Date(desdeIso);
+  const hoje=new Date();
+  const cursor=new Date(inicio.getFullYear(),inicio.getMonth(),inicio.getDate());
+  const fim=new Date(hoje.getFullYear(),hoje.getMonth(),hoje.getDate());
+  let dias=0;
+  while(cursor<fim){
+    cursor.setDate(cursor.getDate()+1);
+    if(_isDiaUtil(_isoData(cursor)))dias++;
+  }
+  return dias;
+}
+
 // ── SAÚDE DO FUNIL (2026-08-14) ─────────────────────────────────────────────────────
 // "Interação" = qualquer sinal real de que alguém trabalhou o card: comentário na linha
 // do tempo, tarefa concluída (ligou/mandou e-mail/reunião/outro) ou mudança de etapa
@@ -36321,9 +36383,11 @@ function _prospUltimaInteracao(e){
   return melhor;
 }
 function _prospDiasSemInteracao(e){
-  return Math.max(0,Math.floor((Date.now()-new Date(_prospUltimaInteracao(e).em).getTime())/86400000));
+  return _diasUteisDesde(_prospUltimaInteracao(e).em);
 }
-// Limiares configuráveis (dias corridos sem nenhuma interação) — default 5/10, editável
+// Limiares configuráveis (dias ÚTEIS sem nenhuma interação, 2026-09-15: não conta fim de
+// semana nem feriado nacional/regional de Ponta Grossa/PR — ver _diasUteisDesde acima) —
+// default 5/10, editável
 // em Indicadores → ⚙️ Limiares de Saúde, gravado em cfg.prospSaudeLimiares.
 function _prospLimiares(){
   const l=cfg.prospSaudeLimiares;
@@ -38176,9 +38240,11 @@ function _crmUltimaInteracao(e){
   return melhor;
 }
 function _crmDiasSemInteracao(e){
-  return Math.max(0,Math.floor((Date.now()-new Date(_crmUltimaInteracao(e).em).getTime())/86400000));
+  return _diasUteisDesde(_crmUltimaInteracao(e).em);
 }
-// Limiares configuráveis (dias corridos sem nenhuma interação) — default 5/10, editável
+// Limiares configuráveis (dias ÚTEIS sem nenhuma interação, 2026-09-15: não conta fim de
+// semana nem feriado nacional/regional de Ponta Grossa/PR — ver _diasUteisDesde acima) —
+// default 5/10, editável
 // em Indicadores → ⚙️ Limiares de Saúde, gravado em cfg.crmSaudeLimiares.
 function _crmLimiares(){
   const l=cfg.crmSaudeLimiares;
