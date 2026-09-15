@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-15.10';</script>
+<script>const APP_BUILD_VERSION='2026-09-15.14';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -1111,6 +1111,7 @@ select.fc{cursor:pointer}
               <button id="crm-funil-view-kanban" onclick="crmSetFunilView('kanban')" type="button" style="border:none;border-radius:6px;padding:6px 10px;font-size:.76rem;font-weight:700;cursor:pointer;background:#00bac7;color:#fff">🗂️ Kanban</button>
               <button id="crm-funil-view-lista" onclick="crmSetFunilView('lista')" type="button" style="border:none;border-radius:6px;padding:6px 10px;font-size:.76rem;font-weight:700;cursor:pointer;background:transparent;color:#64748b">📋 Lista</button>
             </div>
+            <button id="crm-ordem-etapa-btn" onclick="crmToggleOrdemEtapa()" title="Ordem das etapas na Lista e nas exportações (Excel/PDF)" class="dash-btn-conf" style="background:#475569" type="button">⬆️ Etapa: Crescente</button>
             <button id="crm-btn-etapas" onclick="crmAbrirGerenciarEtapas()" class="dash-btn-conf" style="background:#64748b" type="button">⚙️ Etapas</button>
             <button onclick="crmExportarEmpresas()" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Excel</button>
             <button onclick="crmExportarFunilPDF()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 PDF</button>
@@ -38374,6 +38375,30 @@ function _crmDiasNaEtapa(e){
 // pelo arquivo), pra nunca esquecer de atualizar a lista quando ela é a view ativa no
 // momento de uma mudança (mover card, salvar empresa, etc.).
 let _crmFunilView='kanban';
+let _crmListaOrdemEtapa='asc';
+// Ordenação da Lista do Funil por ETAPA (não por nome) — usa a ORDEM das etapas
+// configuradas em ⚙️ Etapas do Funil (_crmEtapas(), mesma ordem das colunas do Kanban:
+// Atendimento, Orçamento etc.) como critério, com 'asc' = 1ª etapa primeiro e 'desc' =
+// inverso. Empate na mesma etapa cai pro nome (sempre A→Z, nas duas direções, só pra manter
+// legível). Usada tanto pela Lista (renderCrmListaFunil) quanto pelas exportações
+// (crmExportarEmpresas/crmExportarFunilPDF), pra exportar sempre na mesma ordem da tela.
+function _crmOrdenarPorEtapa(lista,ordem){
+  const etapas=_crmEtapas();
+  const idxEtapa=Object.fromEntries(etapas.map((et,i)=>[et.key,i]));
+  const dir=ordem==='desc'?-1:1;
+  return lista.slice().sort((a,b)=>{
+    const ia=(a.etapa in idxEtapa)?idxEtapa[a.etapa]:etapas.length;
+    const ib=(b.etapa in idxEtapa)?idxEtapa[b.etapa]:etapas.length;
+    if(ia!==ib)return(ia-ib)*dir;
+    return(a.nome||'').localeCompare(b.nome||'','pt-BR');
+  });
+}
+function crmToggleOrdemEtapa(){
+  _crmListaOrdemEtapa=_crmListaOrdemEtapa==='asc'?'desc':'asc';
+  const btn=document.getElementById('crm-ordem-etapa-btn');
+  if(btn)btn.innerHTML=_crmListaOrdemEtapa==='asc'?'⬆️ Etapa: Crescente':'⬇️ Etapa: Decrescente';
+  _crmRenderFunilAtivo();
+}
 function _crmRenderFunilAtivo(){
   if(_crmFunilView==='lista')renderCrmListaFunil();
   else renderCrmKanban();
@@ -38399,7 +38424,7 @@ function renderCrmListaFunil(){
   if(!_podeVerVisaoComercial()){wrap.innerHTML='<tr><td colspan="7" style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</td></tr>';return;}
   const busca=document.getElementById('crm-kanban-busca')?.value||'';
   const etapaLabelLista=Object.fromEntries(_crmEtapas().map(x=>[x.key,x.label]));
-  const empresasLista=_crmEmpresasFiltradas(busca).slice().sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  const empresasLista=_crmOrdenarPorEtapa(_crmEmpresasFiltradas(busca),_crmListaOrdemEtapa);
   if(!empresasLista.length){wrap.innerHTML='<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:20px">Nenhuma empresa encontrada.</td></tr>';return;}
   wrap.innerHTML=empresasLista.map(e=>{
     const saude=_crmSaude(e);
@@ -38594,6 +38619,7 @@ async function _crmCriarTarefaEnvioProposta(e){
 async function crmMoverEtapa(id,etapaKey){
   const e=crmEmpresas.find(x=>x.id===id);
   if(!e||e.etapa===etapaKey)return;
+  _crmCardPropostaSincronizar(e);
   const etapas=_crmEtapas();
   // Trava de PROPOSTA por etapa (2026-09-14, a pedido do usuário): mover um card do tipo Venda
   // PARA a etapa ORÇAMENTO APROVADO (ou qualquer etapa a partir dela, ver
@@ -38811,7 +38837,7 @@ function crmExportarEmpresas(){
   const busca=document.getElementById('crm-kanban-busca')?.value||'';
   const etapas=_crmEtapas();
   const etapaLabel=Object.fromEntries(etapas.map(x=>[x.key,x.label]));
-  const lista=[..._crmEmpresasFiltradas(busca)].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  const lista=_crmOrdenarPorEtapa(_crmEmpresasFiltradas(busca),_crmListaOrdemEtapa);
   if(!lista.length){toast('Nenhuma empresa encontrada para exportar','terr');return;}
   const headers=['Nome','Etapa','Responsável','Cidade da Instalação','UF da Instalação','Tipo de Negócio','Valor Bruto','Operacionais','Valor Líquido','Decisores (Nome — Cargo)'];
   const body=lista.map(e=>[
@@ -38838,7 +38864,7 @@ async function crmExportarFunilPDF(){
   const {jsPDF}=window.jspdf;
   const busca=document.getElementById('crm-kanban-busca')?.value||'';
   const etapaLabelPdf=Object.fromEntries(_crmEtapas().map(x=>[x.key,x.label]));
-  const lista=[..._crmEmpresasFiltradas(busca)].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  const lista=_crmOrdenarPorEtapa(_crmEmpresasFiltradas(busca),_crmListaOrdemEtapa);
   if(!lista.length){toast('Nenhuma empresa encontrada para gerar o PDF','terr');return;}
 
   const totalLiqPdf=lista.reduce((s,e)=>s+(e.propostaValorLiquido||0),0);
@@ -38968,6 +38994,8 @@ function crmAbrirCard(id){
   _crmCardTabAtiva='inteligencia';
   _crmCardSubGeralAtiva='visao';
   _crmCardSubIntelAtiva='ativ';
+  _crmCardDecisoresExpandido=false;
+  _crmCardHistoricoExpandido=false;
   _crmRenderCard(e);
   openM('mo-crm-card');
 }
@@ -39370,7 +39398,35 @@ function _crmEmpValidarStepGeral(){
   if(!tipoNegocio){toast('Selecione o tipo de negócio!','terr');return false;}
   return true;
 }
+// Sincroniza os campos digitados na aba PROPOSTA (Bruto/Operacionais/Desconto/Líquido) pra
+// dentro de _crmEmpPropostaPendente ANTES de validar/salvar o negócio (2026-09-15, a pedido
+// do usuário: "ele nao ta deixando eu salvar o negocio mesmo eu colocando o valor bruto
+// manualmente, pq eu inseri planilha") — causa raiz: digitar os valores só atualizava o
+// campo Líquido na tela (_crmPropostaRecalcLiquido, só recalcula o display); só passava a
+// valer de verdade pra validação depois de clicar "💾 Salvar valores"
+// (crmSalvarValoresJanelaProposta) — um passo extra fácil de esquecer antes de clicar
+// Avançar/Criar Negócio/Salvar, especialmente quando o arquivo anexado não é PDF (sem
+// leitura automática, só o Líquido calculado na tela dá a falsa impressão de que já está
+// tudo salvo). Agora isso roda sozinho sempre que a etapa Proposta é validada, sem precisar
+// do clique extra — que continua funcionando normal (ele também grava no histórico e
+// confirma com toast). Só sincroniza quando há bruto digitado (>0), pra nunca sobrescrever
+// com zero um valor já salvo antes.
+function _crmPropostaSincronizarPendente(){
+  if(!_crmEmpPropostaPendente)return;
+  const elB=document.getElementById('crm-proposta-modal-bruto');
+  if(!elB)return;
+  const bruto=moneyToNum(elB.value);
+  if(!(bruto>0))return;
+  const operacionais=moneyToNum(document.getElementById('crm-proposta-modal-operacionais')?.value);
+  const desconto=moneyToNum(document.getElementById('crm-proposta-modal-desconto')?.value);
+  const liquidoInformado=moneyToNum(document.getElementById('crm-proposta-modal-liquido')?.value);
+  _crmEmpPropostaPendente.propostaValorBruto=bruto;
+  _crmEmpPropostaPendente.propostaOperacionais=operacionais||0;
+  _crmEmpPropostaPendente.propostaDesconto=desconto||0;
+  _crmEmpPropostaPendente.propostaValorLiquido=liquidoInformado||Math.max(0,bruto-(operacionais||0)-(desconto||0));
+}
 function _crmEmpValidarStepProposta(){
+  _crmPropostaSincronizarPendente();
   const tipoNegocio=document.getElementById('crm-emp-tiponegocio').value||'';
   const propostaBruto=(_crmEmpPropostaPendente&&_crmEmpPropostaPendente.propostaValorBruto)||0;
   if(tipoNegocio==='Venda'&&_crmEtapaExigeProposta(_crmEmpEtapaAtualForm())&&!(propostaBruto>0)){toast('Informe o valor bruto da proposta — obrigatório a partir da etapa ORÇAMENTO APROVADO! Use "💾 Salvar valores".','terr');return false;}
@@ -39576,6 +39632,50 @@ async function crmCardSalvarCaminhoPasta(empresaId){
   try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
   toast('Caminho da pasta salvo!','tok');
 }
+// Sincroniza os campos da aba Proposta do CARD ABERTO (Bruto/Operacionais/Desconto/
+// Líquido) direto pro objeto `e`, sem exigir o clique em "💾 Salvar valores" antes
+// (2026-09-15, a pedido do usuário: "ao mudar de etapa editando o card, nao quero que
+// se perca os valores que eu ja preenchi, manter ali ate eu alterar") — chamada no
+// início de crmMoverEtapa(), ANTES do _crmRenderCard(e) disparado por crmAbrirCard()
+// logo em seguida no botão "Mover", que senão reconstrói os inputs a partir dos
+// valores antigos já persistidos em `e` e descarta o que o usuário acabou de digitar
+// (mesmo bug do assistente de Novo Negócio corrigido em _crmPropostaSincronizarPendente,
+// aqui só que no card já existente em vez do rascunho do wizard). Só age se o card
+// aberto agora É o mesmo que está sendo movido (_crmCardAtualId===e.id) — no drag-and-
+// -drop do Kanban, sem card aberto, os inputs nem existem, então não faz nada. Só
+// sincroniza quando o Bruto digitado é válido (>0): campo vazio/zerado nunca apaga um
+// valor já salvo.
+function _crmCardPropostaSincronizar(e){
+  if(!e||_crmCardAtualId!==e.id)return;
+  const elB=document.getElementById('crm-card-proposta-bruto');
+  if(!elB)return;
+  const bruto=moneyToNum(elB.value);
+  if(!(bruto>0))return;
+  const operacionais=moneyToNum(document.getElementById('crm-card-proposta-operacionais')?.value)||0;
+  const desconto=moneyToNum(document.getElementById('crm-card-proposta-desconto')?.value)||0;
+  const liquidoInformado=moneyToNum(document.getElementById('crm-card-proposta-liquido')?.value);
+  const liquido=liquidoInformado||Math.max(0,bruto-operacionais-desconto);
+  if(!e.propostaHistorico)e.propostaHistorico=[];
+  if(e.propostaHistorico.length){
+    const ultima=e.propostaHistorico[e.propostaHistorico.length-1];
+    ultima.valorBruto=bruto;
+    ultima.valorOperacionais=operacionais;
+    ultima.valorDesconto=desconto;
+    ultima.valorLiquido=liquido;
+  }else{
+    e.propostaHistorico.push({
+      id:'ppz_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+      arquivoNome:'',arquivoUrl:'',
+      anexadoEm:new Date().toISOString(),
+      anexadoPor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',
+      valorBruto:bruto,valorOperacionais:operacionais,valorDesconto:desconto,valorLiquido:liquido,confiavel:false
+    });
+  }
+  e.propostaValorBruto=bruto;
+  e.propostaOperacionais=operacionais;
+  e.propostaDesconto=desconto;
+  e.propostaValorLiquido=liquido;
+}
 async function crmCardSalvarValoresProposta(){
   const empresaId=_crmCardAtualId;
   const e=crmEmpresas.find(x=>x.id===empresaId);
@@ -39735,6 +39835,66 @@ async function crmSalvarValoresJanelaProposta(){
   }
   _crmRenderJanelaProposta(alvo);
 }
+// Decisores do card aberto agora entram RECOLHIDOS por padrão, mostrando só o
+// principal (2026-09-15, a pedido do usuário: "muito complexo, muita
+// informação pro vendedor ler... que sugestão vc da pra ficar mais
+// intuitivo") — a lista completa (cargo/empresa/LinkedIn/telefone de cada
+// um) só aparece ao clicar em "+N outros". Alternar NÃO passa por
+// _crmRenderCard(e) (que reconstrói o card inteiro e reaplicaria por cima os
+// valores já salvos em `e`, o que reabriria o mesmo tipo de bug corrigido em
+// _crmCardPropostaSincronizar caso o vendedor esteja com algo digitado e
+// ainda não salvo na aba Proposta) — só troca o innerHTML do próprio
+// contêiner da lista de decisores.
+let _crmCardDecisoresExpandido=false;
+function _crmCardDecisorItemHtml(e,d,idx){
+  return `<div style="border:1px solid var(--border-lt);border-radius:8px;padding:8px 10px;font-size:.78rem">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div style="font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0">
+          <span>👤 ${d.nome||'—'}</span>
+          ${d.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700">${d.cargo}</span>`:''}
+          ${d.empresa?`<span style="background:#ecfdf5;color:#047857;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700">🏢 ${d.empresa}</span>`:''}
+          ${d.linkedin?`<a href="${d.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700;text-decoration:none">🔗 LinkedIn ↗</a>`:''}
+        </div>
+        <div style="display:flex;gap:2px;flex-shrink:0">
+          <button type="button" onclick="crmAbrirEditarDecisor('${e.id}',${idx})" title="Editar decisor" style="background:none;border:none;cursor:pointer;color:#64748b;font-size:.8rem;padding:3px 5px">✏️</button>
+          <button type="button" onclick="crmExcluirDecisor('${e.id}',${idx})" title="Excluir decisor" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.8rem;padding:3px 5px">🗑️</button>
+        </div>
+      </div>
+      <div style="color:var(--ink3);margin-top:2px">${_crmContatoComCopiar(d)}</div>
+    </div>`;
+}
+function _crmCardDecisoresHtml(e){
+  const decisores=e.decisores||[];
+  if(!decisores.length)return '<div style="font-size:.78rem;color:var(--ink4)">Nenhum decisor cadastrado ainda.</div>';
+  if(_crmCardDecisoresExpandido||decisores.length===1){
+    let html=decisores.map((d,idx)=>_crmCardDecisorItemHtml(e,d,idx)).join('');
+    if(decisores.length>1)html+=`<button type="button" onclick="crmCardToggleDecisores('${e.id}')" style="background:none;border:none;color:var(--brand);font-size:.72rem;font-weight:700;cursor:pointer;padding:4px 2px;text-align:left">▲ Mostrar menos</button>`;
+    return html;
+  }
+  const extras=decisores.length-1;
+  return _crmCardDecisorItemHtml(e,decisores[0],0)+`<button type="button" onclick="crmCardToggleDecisores('${e.id}')" style="background:none;border:none;color:var(--brand);font-size:.72rem;font-weight:700;cursor:pointer;padding:4px 2px;text-align:left">+ ${extras} outro${extras>1?'s':''} decisor${extras>1?'es':''} ▾</button>`;
+}
+function crmCardToggleDecisores(empresaId){
+  _crmCardDecisoresExpandido=!_crmCardDecisoresExpandido;
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  const wrap=document.getElementById('crm-card-decisores-lista');
+  if(wrap)wrap.innerHTML=_crmCardDecisoresHtml(e);
+}
+// Histórico de propostas do card aberto também vira recolhível por padrão
+// (mesmo pedido acima) — a lista de anexos com data/hora só aparece ao
+// clicar no link, sem re-renderizar o card (mesmo cuidado de não mexer nos
+// valores da aba Proposta ainda não salvos).
+let _crmCardHistoricoExpandido=false;
+function crmCardToggleHistorico(empresaId){
+  _crmCardHistoricoExpandido=!_crmCardHistoricoExpandido;
+  const e=crmEmpresas.find(x=>x.id===empresaId);
+  if(!e)return;
+  const wrap=document.getElementById('crm-card-historico-wrap');
+  if(wrap)wrap.style.display=_crmCardHistoricoExpandido?'':'none';
+  const btn=document.getElementById('crm-card-historico-toggle');
+  if(btn)btn.textContent=(_crmCardHistoricoExpandido?'▲ ':'▼ ')+'Histórico de propostas ('+(e.propostaHistorico||[]).length+')';
+}
 function _crmRenderCard(e){
   const etapas=_crmEtapas();
   const etapaAtual=etapas.find(x=>x.key===e.etapa)||etapas[0];
@@ -39751,22 +39911,6 @@ function _crmRenderCard(e){
   // trabalhado ou ficou pra trás, e o que foi a última coisa registrada nele.
   const saude=_crmSaude(e);
   const ultInt=_crmUltimaInteracao(e);
-
-  const decisoresHtml=(e.decisores||[]).length?e.decisores.map((d,idx)=>`<div style="border:1px solid var(--border-lt);border-radius:8px;padding:8px 10px;font-size:.78rem">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
-        <div style="font-weight:700;color:var(--ink);display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0">
-          <span>👤 ${d.nome||'—'}</span>
-          ${d.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700">${d.cargo}</span>`:''}
-          ${d.empresa?`<span style="background:#ecfdf5;color:#047857;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700">🏢 ${d.empresa}</span>`:''}
-          ${d.linkedin?`<a href="${d.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:2px 9px;font-size:.66rem;font-weight:700;text-decoration:none">🔗 LinkedIn ↗</a>`:''}
-        </div>
-        <div style="display:flex;gap:2px;flex-shrink:0">
-          <button type="button" onclick="crmAbrirEditarDecisor('${e.id}',${idx})" title="Editar decisor" style="background:none;border:none;cursor:pointer;color:#64748b;font-size:.8rem;padding:3px 5px">✏️</button>
-          <button type="button" onclick="crmExcluirDecisor('${e.id}',${idx})" title="Excluir decisor" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.8rem;padding:3px 5px">🗑️</button>
-        </div>
-      </div>
-      <div style="color:var(--ink3);margin-top:2px">${_crmContatoComCopiar(d)}</div>
-    </div>`).join(''):'<div style="font-size:.78rem;color:var(--ink4)">Nenhum decisor cadastrado ainda.</div>';
 
   const timeline=_crmTimelineOrdenada(e);
 
@@ -39805,7 +39949,13 @@ function _crmRenderCard(e){
       <button type="button" onclick="crmAbrirEditarEmpresa('${e.id}')" style="background:none;border:none;color:var(--ink4);opacity:.75;cursor:pointer;font-size:.72rem;font-weight:600;padding:2px 4px;display:inline-flex;align-items:center;gap:4px" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.75">✏️ EDITAR NEGÓCIO</button>
       ${_getUserCat().isAdm?`<button type="button" onclick="crmExcluirEmpresa('${e.id}')" style="background:none;border:none;color:#dc2626;opacity:.65;cursor:pointer;font-size:.72rem;font-weight:600;padding:2px 4px;display:inline-flex;align-items:center;gap:4px" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.65">🗑️ EXCLUIR NEGÓCIO</button>`:''}
     </div>
-    <div id="crm-tab-geral" class="dash-card" style="margin-bottom:14px">
+    <div class="crm-card-tabs">
+      <button type="button" id="crm-tabbtn-geral" class="crm-card-tab" onclick="_crmCardSetTab('geral')">📋 GERAL</button>
+      <button type="button" id="crm-tabbtn-inteligencia" class="crm-card-tab" onclick="_crmCardSetTab('inteligencia')">🧠 PROCESSO${timeline.length?' ('+timeline.length+')':''}</button>
+      <button type="button" id="crm-tabbtn-proposta" class="crm-card-tab" onclick="_crmCardSetTab('proposta')">💰 PROPOSTA${((e.tipoNegocio||'Venda')==='Venda'&&_crmEtapaExigeProposta(e.etapa)&&!(e.propostaValorBruto>0))?' ⚠️':''}</button>
+      <button type="button" id="crm-tabbtn-fechamento" class="crm-card-tab" onclick="_crmCardSetTab('fechamento')">🏁 FECHAMENTO${e.fechamento?(e.fechamento.status==='ganho'?' 🏆':' ❌'):''}</button>
+    </div>
+    <div id="crm-tab-geral" class="dash-card">
       <div class="fg">
         <label>Etapa atual</label>
         <div style="display:flex;gap:8px">
@@ -39826,13 +39976,8 @@ function _crmRenderCard(e){
           <label style="margin-bottom:0">Decisores / Compradores</label>
           <button type="button" onclick="crmAbrirAdicionarDecisor('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap">+ Adicionar Decisor</button>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px">${decisoresHtml}</div>
+        <div id="crm-card-decisores-lista" style="display:flex;flex-direction:column;gap:6px">${_crmCardDecisoresHtml(e)}</div>
       </div>
-    </div>
-    <div class="crm-card-tabs">
-      <button type="button" id="crm-tabbtn-inteligencia" class="crm-card-tab" onclick="_crmCardSetTab('inteligencia')">🧠 PROCESSO${timeline.length?' ('+timeline.length+')':''}</button>
-      <button type="button" id="crm-tabbtn-proposta" class="crm-card-tab" onclick="_crmCardSetTab('proposta')">💰 PROPOSTA${((e.tipoNegocio||'Venda')==='Venda'&&_crmEtapaExigeProposta(e.etapa)&&!(e.propostaValorBruto>0))?' ⚠️':''}</button>
-      <button type="button" id="crm-tabbtn-fechamento" class="crm-card-tab" onclick="_crmCardSetTab('fechamento')">🏁 FECHAMENTO${e.fechamento?(e.fechamento.status==='ganho'?' 🏆':' ❌'):''}</button>
     </div>
     <div id="crm-tab-proposta" class="dash-card">
       <div class="fg">
@@ -39854,8 +39999,8 @@ function _crmRenderCard(e){
       <div class="fg"><label>Valor Líquido (R$)</label><input class="fc no-upper" type="text" inputmode="numeric" id="crm-card-proposta-liquido" oninput="fmtMoney(this)" value="${e.propostaValorLiquido?_fmtValorPdf(e.propostaValorLiquido):''}" placeholder="0,00"></div>
       <button type="button" onclick="crmCardSalvarValoresProposta()" style="width:100%;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer;margin-bottom:14px">💾 Salvar valores</button>
       <div style="border-top:1px solid var(--border-lt);padding-top:12px">
-        <div style="font-weight:800;font-size:.8rem;color:var(--ink);margin-bottom:8px">📜 Histórico de propostas anexadas</div>
-        <div>${_crmPropostaHistoricoHtml(e)}</div>
+        <button type="button" id="crm-card-historico-toggle" onclick="crmCardToggleHistorico('${e.id}')" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;font-weight:800;font-size:.8rem;color:var(--ink);padding:0;margin-bottom:8px">${_crmCardHistoricoExpandido?'▲ ':'▼ '}Histórico de propostas (${(e.propostaHistorico||[]).length})</button>
+        <div id="crm-card-historico-wrap" style="${_crmCardHistoricoExpandido?'':'display:none'}">${_crmPropostaHistoricoHtml(e)}</div>
       </div>
     </div>
     <div id="crm-tab-fechamento" class="dash-card">${fechamentoHtml}</div>
@@ -39903,7 +40048,7 @@ function _crmRenderCard(e){
 // qual aba o usuário está: elas só chamam _crmRenderCard(e), que reaplica a aba no final.
 function _crmCardSetTab(tab){
   _crmCardTabAtiva=tab;
-  ['proposta','inteligencia','fechamento'].forEach(t=>{
+  ['geral','proposta','inteligencia','fechamento'].forEach(t=>{
     const painel=document.getElementById('crm-tab-'+t);
     if(painel){
       painel.style.display=t===tab?'':'none';
@@ -40898,6 +41043,11 @@ async function crmSalvarEmpresa(){
   // crmAbrirJanelaProposta/crmSalvarValoresJanelaProposta) — não existe mais campo de valor
   // direto neste formulário. _crmCamposFaltantes() continua existindo como rede de
   // segurança pra dados legados que já existiam sem valor.
+  // Sincroniza o que está digitado na aba Proposta agora, caso o usuário tenha preenchido
+  // Bruto/Operacionais/Desconto manualmente (arquivo não-PDF, sem leitura automática) e
+  // clicado direto em Criar Negócio/Salvar sem passar pelo botão "💾 Salvar valores" antes
+  // (2026-09-15, a pedido do usuário — ver _crmPropostaSincronizarPendente).
+  _crmPropostaSincronizarPendente();
   const propostaBruto=(_crmEmpPropostaPendente&&_crmEmpPropostaPendente.propostaValorBruto)||0;
   // Etapa alvo pra decidir se a proposta já é obrigatória (2026-09-14, a pedido do usuário):
   // na criação, é a etapa escolhida no seletor "Etapa inicial do funil"; na edição, é a etapa
