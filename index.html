@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-14.5';</script>
+<script>const APP_BUILD_VERSION='2026-09-15.2';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -3444,6 +3444,24 @@ select.fc{cursor:pointer}
   </div>
   <p style="font-size:.72rem;color:var(--ink4);margin-bottom:12px">Avisos automáticos do sistema e mensagens cadastradas para você ou seu setor.</p>
   <div id="avisos-lista-body" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:10px;padding-right:2px"></div>
+  <button onclick="abrirAvisosLidos()" style="margin-top:12px;background:none;border:none;color:var(--ink3);font-size:.72rem;font-weight:600;cursor:pointer;text-decoration:underline;align-self:center">👁️ Ver avisos já lidos<span id="avisos-lidos-count"></span></button>
+</div>
+</div>
+<!-- Avisos já lidos (2026-09-15) — janela separada da principal, a pedido do usuário: assim
+     que o usuário abre #mo-avisos, tudo que estava visível vira "lido" e sai da tela
+     principal (ver abrirPainelAvisos) — sem essa segunda janela, o aviso lido ficaria
+     misturado com os novos e não "criaria novidade" ao surgir um aviso de verdade novo. Some
+     definitivamente só quando um admin exclui o aviso manual (automático some sozinho quando
+     deixa de se aplicar, ex.: passou o aniversário). -->
+<div class="mov" id="mo-avisos-lidos">
+<div class="mvmod" style="width:520px;max-width:96vw;max-height:82vh;display:flex;flex-direction:column">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+    <h3 style="margin-bottom:0">✓ Avisos já lidos</h3>
+    <button onclick="closeM('mo-avisos-lidos')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+  </div>
+  <p style="font-size:.72rem;color:var(--ink4);margin-bottom:12px">Histórico do que você já visualizou.</p>
+  <div id="avisos-lidos-body" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:10px;padding-right:2px"></div>
+  <button onclick="closeM('mo-avisos-lidos');abrirPainelAvisos()" style="margin-top:12px;background:none;border:none;color:var(--brand);font-size:.75rem;font-weight:700;cursor:pointer;align-self:center">← Voltar pros avisos novos</button>
 </div>
 </div>
 <div class="mov" id="mo-crm-decisor-add">
@@ -4456,6 +4474,13 @@ select.fc{cursor:pointer}
           <input class="fc" id="cfg-aviso-assunto" placeholder="Ex: Reunião de Comercial amanhã" style="width:100%;margin-bottom:10px">
           <label style="font-size:.68rem;font-weight:600;color:var(--ink4);display:block;margin-bottom:4px">Mensagem</label>
           <textarea class="fc" id="cfg-aviso-texto" rows="3" placeholder="Escreva o texto do aviso..." style="width:100%;margin-bottom:10px"></textarea>
+          <label style="font-size:.68rem;font-weight:600;color:var(--ink4);display:block;margin-bottom:4px">Imagem <span style="font-weight:400;color:var(--ink4)">(opcional)</span></label>
+          <input type="file" id="cfg-aviso-img-file" accept="image/jpeg,image/png" style="display:none" onchange="uploadAvisoImagem(this)">
+          <div id="cfg-aviso-img-preview" style="display:none;margin-bottom:10px;position:relative;width:fit-content">
+            <img id="cfg-aviso-img-preview-img" style="max-width:160px;max-height:120px;border-radius:8px;border:1.5px solid var(--border-lt);display:block">
+            <button type="button" onclick="removerAvisoImagem()" title="Remover imagem" style="position:absolute;top:-8px;right:-8px;background:#dc2626;color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:.7rem;line-height:1">✕</button>
+          </div>
+          <button type="button" id="cfg-aviso-img-btn" onclick="document.getElementById('cfg-aviso-img-file').click()" style="width:100%;background:#f8fafc;border:1.5px dashed var(--border-lt);border-radius:8px;padding:9px;font-size:.72rem;font-weight:600;color:var(--ink3);cursor:pointer;margin-bottom:10px">🖼️ Adicionar imagem (JPG ou PNG, até 1MB)</button>
           <label style="font-size:.68rem;font-weight:600;color:var(--ink4);display:block;margin-bottom:4px">Destinatário</label>
           <div style="display:flex;gap:6px;margin-bottom:10px">
             <select class="fc" id="cfg-aviso-desttipo" onchange="_cfgAvisoDestTipoChanged()" style="flex:1">
@@ -6747,6 +6772,23 @@ function _avisosNaoLidosCount(){
   const lidos=new Set(_avisosLidosDoUsuario());
   return _avisosParaUsuarioAtual().filter(av=>!lidos.has(av.id)).length;
 }
+// Separação novo/lido (2026-09-15) — painel principal só mostra o que ainda não foi visto;
+// o que já foi visto vai pra _renderAvisosLidosPanel() (janela própria), pra abrir um aviso
+// de verdade novo continuar chamando atenção em vez de se perder junto com o histórico.
+function _avisosNaoLidosParaUsuarioAtual(){
+  const lidos=new Set(_avisosLidosDoUsuario());
+  return _avisosParaUsuarioAtual().filter(av=>!lidos.has(av.id));
+}
+function _avisosLidosParaUsuarioAtual(){
+  const lidos=new Set(_avisosLidosDoUsuario());
+  return _avisosParaUsuarioAtual().filter(av=>lidos.has(av.id));
+}
+function _atualizarLinkAvisosLidos(){
+  const el=document.getElementById('avisos-lidos-count');
+  if(!el)return;
+  const n=_avisosLidosParaUsuarioAtual().length;
+  el.textContent=n>0?' ('+n+')':'';
+}
 function _atualizarBadgeAvisos(){
   const n=_avisosNaoLidosCount();
   ['geral','cat'].forEach(suf=>{
@@ -6759,24 +6801,51 @@ function _atualizarBadgeAvisos(){
 function _renderPainelAvisos(){
   const body=document.getElementById('avisos-lista-body');
   if(!body)return;
-  const lista=_avisosParaUsuarioAtual();
-  if(!lista.length){body.innerHTML='<div style="text-align:center;padding:30px 10px;color:var(--ink4)"><div style="font-size:2rem;margin-bottom:8px">🔕</div>Nenhum aviso por enquanto.</div>';return;}
-  const lidosAntes=new Set(_avisosLidosDoUsuario());
+  _atualizarLinkAvisosLidos();
+  const lista=_avisosNaoLidosParaUsuarioAtual();
+  if(!lista.length){body.innerHTML='<div style="text-align:center;padding:30px 10px;color:var(--ink4)"><div style="font-size:2rem;margin-bottom:8px">🔕</div>Nenhum aviso novo no momento.</div>';return;}
   const{isAdm}=_getUserCat();
   body.innerHTML=lista.map(av=>{
-    const novo=!lidosAntes.has(av.id);
     const cor=av.automatico?'#f59e0b':'#0ea5e9';
     const destTxt=av.destinatarioTipo==='todos'?'Todos':av.destinatarioTipo==='setor'?('Setor: '+av.destinatarioValor):av.destinatarioTipo==='nome'?('Pessoa: '+av.destinatarioValor):('Pessoa: '+((cfg.usuarioNomes&&cfg.usuarioNomes[(av.destinatarioValor||'').toLowerCase()])||av.destinatarioValor||''));
-    return `<div style="border:1.5px solid ${novo?cor:'var(--border-lt)'};background:${novo?(av.automatico?'#fffbeb':'#f0f9ff'):'#fff'};border-radius:12px;padding:12px 14px;position:relative">
-      ${novo?`<span style="position:absolute;top:10px;right:12px;background:${cor};color:#fff;font-size:.6rem;font-weight:800;padding:2px 7px;border-radius:20px">NOVO</span>`:''}
-      <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:4px;padding-right:${novo?'46px':'0'}">${av.assunto||'(sem assunto)'}</div>
+    return `<div style="border:1.5px solid ${cor};background:${av.automatico?'#fffbeb':'#f0f9ff'};border-radius:12px;padding:12px 14px;position:relative">
+      <span style="position:absolute;top:10px;right:12px;background:${cor};color:#fff;font-size:.6rem;font-weight:800;padding:2px 7px;border-radius:20px">NOVO</span>
+      <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:4px;padding-right:46px">${av.assunto||'(sem assunto)'}</div>
       <div style="font-size:.78rem;color:var(--ink2);line-height:1.4;white-space:pre-wrap">${(av.texto||'').replace(/</g,'&lt;')}</div>
+      ${av.imagem?`<img src="${av.imagem}" style="display:block;max-width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin-top:8px;border:1px solid var(--border-lt)">`:''}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
         <span style="font-size:.66rem;color:var(--ink4)">${av.automatico?'🤖 Automático · '+destTxt:'📌 '+(av.criadoPorNome||'Admin')+' · '+destTxt}</span>
         ${(!av.automatico&&isAdm)?`<button onclick="_avisosExcluirManual('${av.id}')" title="Excluir" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.75rem;padding:2px 4px">🗑</button>`:''}
       </div>
     </div>`;
   }).join('');
+}
+function _renderAvisosLidosPanel(){
+  const body=document.getElementById('avisos-lidos-body');
+  if(!body)return;
+  const lista=_avisosLidosParaUsuarioAtual();
+  if(!lista.length){body.innerHTML='<div style="text-align:center;padding:30px 10px;color:var(--ink4)"><div style="font-size:2rem;margin-bottom:8px">📭</div>Nenhum aviso lido ainda.</div>';return;}
+  const{isAdm}=_getUserCat();
+  body.innerHTML=lista.map(av=>{
+    const destTxt=av.destinatarioTipo==='todos'?'Todos':av.destinatarioTipo==='setor'?('Setor: '+av.destinatarioValor):av.destinatarioTipo==='nome'?('Pessoa: '+av.destinatarioValor):('Pessoa: '+((cfg.usuarioNomes&&cfg.usuarioNomes[(av.destinatarioValor||'').toLowerCase()])||av.destinatarioValor||''));
+    return `<div style="border:1.5px solid var(--border-lt);background:#fff;border-radius:12px;padding:12px 14px">
+      <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:4px">${av.assunto||'(sem assunto)'}</div>
+      <div style="font-size:.78rem;color:var(--ink2);line-height:1.4;white-space:pre-wrap">${(av.texto||'').replace(/</g,'&lt;')}</div>
+      ${av.imagem?`<img src="${av.imagem}" style="display:block;max-width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin-top:8px;border:1px solid var(--border-lt)">`:''}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+        <span style="font-size:.66rem;color:var(--ink4)">${av.automatico?'🤖 Automático · '+destTxt:'📌 '+(av.criadoPorNome||'Admin')+' · '+destTxt}</span>
+        ${(!av.automatico&&isAdm)?`<button onclick="_avisosExcluirManualLido('${av.id}')" title="Excluir" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.75rem;padding:2px 4px">🗑</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+function abrirAvisosLidos(){
+  _renderAvisosLidosPanel();
+  openM('mo-avisos-lidos');
+}
+function _avisosExcluirManualLido(id){
+  removeAvisoManual(id);
+  _renderAvisosLidosPanel();
 }
 function abrirPainelAvisos(){
   _renderPainelAvisos();
@@ -6819,6 +6888,46 @@ function _cfgAvisoDestTipoChanged(){
 // pra tudo) sobrescrevia cfg.avisos com aquele texto toda vez, destruindo esta lista e
 // quebrando o sidebar inteiro (_avisosManuais() lançava TypeError, interrompendo
 // buildSidebarCats() no meio). Não reaproveitar "avisos" sozinho de novo.
+// Imagem opcional no aviso manual (2026-09-15, a pedido do usuário) — sobe pro Cloudinary
+// igual ao resto do sistema (ver fazerUploadLogo/uploadFinalizacaoArquivo) e só a URL curta
+// fica salva em cfg.avisosCentral. NUNCA guardar a imagem em base64 dentro de cfg: é um
+// único documento no Firestore com limite rígido de 1MB pra TUDO (ver _cfgTamanhoResumo/
+// LIMITE_CFG) — uma imagem em base64 sozinha já estouraria isso. Limite de 1MB no arquivo
+// original e só JPG/PNG (pedido explícito do usuário, "para não ficar pesado").
+let _avisoImgUrl='';
+const _AVISO_IMG_MAX_BYTES=1024*1024;
+async function uploadAvisoImagem(input){
+  const f=input.files[0];if(!f)return;
+  if(f.type!=='image/jpeg'&&f.type!=='image/png'){toast('Só JPG ou PNG!','terr');input.value='';return;}
+  if(f.size>_AVISO_IMG_MAX_BYTES){toast('Imagem maior que 1MB — escolha um arquivo menor.','terr');input.value='';return;}
+  if(!cfg.cld_cloud||!cfg.cld_preset){toast('Configure o Cloudinary primeiro (Configurações)!','terr');input.value='';return;}
+  const btn=document.getElementById('cfg-aviso-img-btn');
+  if(btn){btn.textContent='⏳ Enviando...';btn.disabled=true;}
+  try{
+    const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_avisos');
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/image/upload`,{method:'POST',body:fd});
+    const d=await r.json();
+    if(d.secure_url){
+      _avisoImgUrl=d.secure_url;
+      if(typeof _cldRegistrarUpload==='function')_cldRegistrarUpload(f.size);
+      const prev=document.getElementById('cfg-aviso-img-preview');
+      const img=document.getElementById('cfg-aviso-img-preview-img');
+      if(img)img.src=_avisoImgUrl;
+      if(prev)prev.style.display='';
+      if(btn)btn.style.display='none';
+      toast('Imagem anexada!','tok');
+    }else{toast('Erro no upload da imagem','terr');}
+  }catch(e){toast('Erro no upload: '+e.message,'terr');}
+  if(btn){btn.textContent='🖼️ Adicionar imagem (JPG ou PNG, até 1MB)';btn.disabled=false;}
+  input.value='';
+}
+function removerAvisoImagem(){
+  _avisoImgUrl='';
+  const prev=document.getElementById('cfg-aviso-img-preview');
+  const btn=document.getElementById('cfg-aviso-img-btn');
+  if(prev)prev.style.display='none';
+  if(btn)btn.style.display='';
+}
 function addAvisoManual(){
   const assunto=(document.getElementById('cfg-aviso-assunto')?.value||'').trim();
   const texto=(document.getElementById('cfg-aviso-texto')?.value||'').trim();
@@ -6829,12 +6938,13 @@ function addAvisoManual(){
   const{email}=_getUserCat();
   const nomeAdm=(cfg.usuarioNomes&&cfg.usuarioNomes[email])||usuarioLogado?.nomeExibicao||'Admin';
   const avisos=(Array.isArray(cfg.avisosCentral)?cfg.avisosCentral:[]).slice();
-  avisos.push({id:uid(),assunto,texto,destinatarioTipo,destinatarioValor:destinatarioTipo==='todos'?'':destinatarioValor,criadoPorNome:nomeAdm,criadoPorEmail:email,criadoEm:new Date().toISOString()});
+  avisos.push({id:uid(),assunto,texto,imagem:_avisoImgUrl||'',destinatarioTipo,destinatarioValor:destinatarioTipo==='todos'?'':destinatarioValor,criadoPorNome:nomeAdm,criadoPorEmail:email,criadoEm:new Date().toISOString()});
   cfg.avisosCentral=avisos;
   if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   const elA=document.getElementById('cfg-aviso-assunto');if(elA)elA.value='';
   const elT=document.getElementById('cfg-aviso-texto');if(elT)elT.value='';
+  removerAvisoImagem();
   renderCentralAvisos();
   _atualizarBadgeAvisos();
   toast('Aviso publicado!','tok');
@@ -6861,6 +6971,7 @@ function renderCentralAvisos(){
         <div style="font-size:.72rem;color:var(--ink3);margin-top:2px;white-space:pre-wrap">${a.texto}</div>
         <div style="font-size:.68rem;margin-top:4px"><span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:2px 9px;font-weight:700">${destTxt}</span></div>
       </div>
+      ${a.imagem?`<img src="${a.imagem}" title="Imagem anexada" style="width:40px;height:40px;object-fit:cover;border-radius:6px;flex-shrink:0;border:1px solid #e5e7eb">`:''}
       <button onclick="removeAvisoManual('${a.id}')" title="Remover" style="background:#fff;border:1px solid #e5e7eb;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:.7rem;color:#dc2626;padding:0;line-height:1;flex-shrink:0">✕</button>
     </div>`;
   }).join('');
