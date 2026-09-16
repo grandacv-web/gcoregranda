@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-16.11';</script>
+<script>const APP_BUILD_VERSION='2026-09-16.13';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -12969,6 +12969,11 @@ function initDashComercial(){
 let dashQuinzena='I';
 let dashComissaoVendFil='';
 let dashComissaoBusca='';
+// Aba ativa (1ª ou 2ª Quinzena) da tela de Metas & Comissões (2026-09-16, redesenho visual a
+// pedido do usuário: "muita informação e tudo muito igual, pesado de ler e entender... como
+// podemos deixar mais atrativo e fácil de mexer sem perder o que já construímos"). Ver
+// _comQuinzenaSetTab() e o uso dentro de renderDashComissoes().
+let _comQuinzenaTab='I';
 let dashMetasUnlocked=false;
 // 🔎 Comissão Paga por Período (2026-08-13, a pedido do usuário) — busca INDEPENDENTE do mês
 // ativo (dashMesAtual/dashMov) dentro de Recebimentos & Comissões: filtra comissão já PAGA
@@ -16612,6 +16617,14 @@ function dashComissaoVend(v){
   if(!dashMetasUnlocked)return;
   dashComissaoVendFil=v;
   renderDashComissoes();
+}
+function _comQuinzenaSetTab(half){
+  _comQuinzenaTab=half;
+  const wI=document.getElementById('com-qz-I'),wII=document.getElementById('com-qz-II');
+  if(wI)wI.style.display=half==='I'?'':'none';
+  if(wII)wII.style.display=half==='II'?'':'none';
+  document.getElementById('com-qz-tab-I')?.classList.toggle('active',half==='I');
+  document.getElementById('com-qz-tab-II')?.classList.toggle('active',half==='II');
 }
 function dashComissaoBuscaInput(v){
   if(!dashMetasUnlocked)return;
@@ -33121,7 +33134,12 @@ function renderDashComissoes(){
   function mkConsRow(i,acaoHtml,dia){
     const com=i.valor*i.pct/100;
     const dataConf=i.confirmedAt?new Date(i.confirmedAt).toLocaleDateString('pt-BR'):'—';
-    return`<tr style="background:#f0fdf4">
+    // Cor da linha (2026-09-16, pedido do usuário: "corzinha amarelinha como alerta as
+    // comissoes a confirmar pagamento e um verdinho claro sem poluir as pagas") — mesmo par
+    // de cores já usado nos badges ⏳/✅ (.dash-badge.pend/.dash-badge.ok) pra ficar
+    // consistente com o resto da tela.
+    const _rowBg=i.comissaoQuitada?'#f0fdf4':'#fef9c3';
+    return`<tr style="background:${_rowBg}">
       <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${i.mesPedido||'—'}</td>
       <td style="font-size:.72rem;color:#64748b;white-space:nowrap">${pedidoDisplay(i.pedidoOs)||'—'}</td>
       <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:130px">${i.cliente}</td>
@@ -33207,7 +33225,7 @@ function renderDashComissoes(){
         const acao=`<div style="white-space:nowrap"><span style="font-size:.68rem;color:#16a34a;font-weight:700">✅ Pago em ${dataQ}</span><button onclick="desfazerComissaoQuitada('${ck}')" style="background:none;border:1px solid #e5e7eb;border-radius:6px;padding:3px 8px;font-size:.62rem;color:#64748b;cursor:pointer;margin-left:6px" title="Desfazer — volta pra 'a confirmar'">↩ Desfazer</button><div style="font-size:.62rem;color:#94a3b8;margin-top:2px">por ${(q.por||'—')}</div></div>`;
         return mkConsRow(i,acao,dia);
       }).join('');
-      out+=`<details style="margin:6px 0 16px">
+      out+=`<details open style="margin:6px 0 16px">
         <summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:.5px;padding:6px 0">✅ Comissão já paga ao vendedor nesta quinzena (${pagos.length} ${pagos.length===1?'item':'itens'}) — Líquido: ${fmtR(totalValP)} · Comissão: ${fmtR(totalComP)}</summary>
         <div style="overflow-x:auto;margin-top:8px"><table class="dash-table">
           <thead><tr>${CONS_HEAD}</tr></thead>
@@ -33438,25 +33456,45 @@ function renderDashComissoes(){
   const consII=itemsIIView.filter(i=>i.status==='confirmado');
   const pendII=itemsIIView.filter(i=>i.status!=='confirmado'&&!_quinzenaJaFechou(i.qy,i.qm,i.qhalf));
 
+  // Contador de itens já confirmados pelo cliente mas ainda faltando ação (vendedor e/ou
+  // gerente) em cada quinzena — vira o "badge" da aba, pra dar pra ver de cara qual das duas
+  // quinzenas ainda precisa de atenção sem abrir nenhuma tabela.
+  const acaoPendI=consI.filter(i=>!i.comissaoQuitada||!i.comissaoQuitadaGerente).length;
+  const acaoPendII=consII.filter(i=>!i.comissaoQuitada||!i.comissaoQuitadaGerente).length;
+  const _comTabBadge=n=>n?` <span style="background:#fbbf24;color:#78350f;border-radius:99px;padding:1px 7px;font-size:.66rem;font-weight:800;margin-left:5px">${n}</span>`:'';
+  const tabsHtml=`<div class="dash-tabs" id="com-qz-tabs">
+    <button class="dash-tab${_comQuinzenaTab==='I'?' active':''}" id="com-qz-tab-I" onclick="_comQuinzenaSetTab('I')">1ª Quinzena · dia 5${_comTabBadge(acaoPendI)}</button>
+    <button class="dash-tab${_comQuinzenaTab==='II'?' active':''}" id="com-qz-tab-II" onclick="_comQuinzenaSetTab('II')">2ª Quinzena · dia 15${_comTabBadge(acaoPendII)}</button>
+  </div>`;
+  const legendaHtml=`<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:.68rem;color:#64748b;margin:-4px 0 14px;padding:0 2px">
+    <span><span style="background:#fbbf24;color:#78350f;border-radius:99px;padding:1px 6px;font-weight:800">nº</span> na aba = itens já pagos pelo cliente aguardando sua confirmação</span>
+    <span>⏳ falta confirmar · ✅ já pago</span>
+    <span>Pra fechar: marque o(s) checkbox(es) da linha e clique no botão "Confirmar" — só marcar não paga nada ainda.</span>
+  </div>`;
   el.innerHTML=
     periodoBox+
     filterBar+
-    // Barra de título de quinzena virou fundo escuro sólido, de ponta a ponta (2026-08-04, a
-    // pedido do usuário: só a borda esquerda fina não separava bem as duas seções visualmente).
-    `<div style="background:#111827;padding:10px 16px;border-radius:8px;margin-bottom:16px;margin-top:4px">
-       <div style="font-size:.85rem;font-weight:700;color:#fff;letter-spacing:.3px">1ª Quinzena · pagar dia 5</div>
+    tabsHtml+
+    legendaHtml+
+    // Redesenho visual (2026-09-16, a pedido do usuário: "muita informação e tudo muito
+    // igual, pesado de ler e entender... como podemos deixar mais atrativo e fácil de mexer
+    // sem perder o que já construímos") — as duas quinzenas ficavam sempre as duas abertas,
+    // uma embaixo da outra, com o mesmo conjunto de tabelas repetido 2x na tela. Agora só a
+    // quinzena da aba ativa fica visível (tabsHtml acima); nada do que já existia (Extras,
+    // Removidas, Cards-resumo, Resumo por vendedor, Consolidado) foi removido, só escondido
+    // atrás da aba da outra quinzena.
+    `<div id="com-qz-I" style="display:${_comQuinzenaTab==='I'?'':'none'}">
+       ${mkExtras(5)}
+       ${mkRemovidas(5)}
+       ${mkCards(itemsIView,'I')}${mkVendResume(itemsIView,5)}
+       ${mkConsolidado(consI,5)}
      </div>
-     ${mkExtras(5)}
-     ${mkRemovidas(5)}
-     ${mkCards(itemsIView,'I')}${mkVendResume(itemsIView,5)}
-     ${mkConsolidado(consI,5)}
-     <div style="background:#4338ca;padding:10px 16px;border-radius:8px;margin:24px 0 16px">
-       <div style="font-size:.85rem;font-weight:700;color:#fff;letter-spacing:.3px">2ª Quinzena · pagar dia 15</div>
-     </div>
-     ${mkExtras(15)}
-     ${mkRemovidas(15)}
-     ${mkCards(itemsIIView,'II')}${mkVendResume(itemsIIView,15)}
-     ${mkConsolidado(consII,15)}`;
+     <div id="com-qz-II" style="display:${_comQuinzenaTab==='II'?'':'none'}">
+       ${mkExtras(15)}
+       ${mkRemovidas(15)}
+       ${mkCards(itemsIIView,'II')}${mkVendResume(itemsIIView,15)}
+       ${mkConsolidado(consII,15)}
+     </div>`;
 }
 
 // ════════════════════════════════════════
