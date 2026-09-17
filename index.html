@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-17.3';</script>
+<script>const APP_BUILD_VERSION='2026-09-17.4';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -1167,7 +1167,7 @@ select.fc{cursor:pointer}
         <div id="crm-lista-wrap" style="display:none">
           <div style="overflow-x:auto;border:1px solid var(--border-lt);border-radius:10px">
             <table class="dash-table" style="width:100%;min-width:760px">
-              <thead><tr><th>Empresa</th><th>Etapa</th><th>Responsável</th><th>Cidade/UF</th><th>Decisor Principal</th><th>Saúde</th><th>Valor Líquido</th><th>Situação</th></tr></thead>
+              <thead><tr><th>Empresa</th><th>Etapa</th><th>Responsável</th><th>Cidade/UF</th><th>Decisor Principal</th><th>Saúde</th><th>Valor Líquido</th><th>Situação</th><th>Próxima Tarefa</th></tr></thead>
               <tbody id="crm-lista-body"></tbody>
             </table>
           </div>
@@ -38989,15 +38989,27 @@ function crmSetFunilView(view){
 function renderCrmListaFunil(){
   const wrap=document.getElementById('crm-lista-body');
   if(!wrap)return;
-  if(!_podeVerVisaoComercial()){wrap.innerHTML='<tr><td colspan="8" style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</td></tr>';return;}
+  if(!_podeVerVisaoComercial()){wrap.innerHTML='<tr><td colspan="9" style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</td></tr>';return;}
   const busca=document.getElementById('crm-kanban-busca')?.value||'';
   const etapaLabelLista=Object.fromEntries(_crmEtapas().map(x=>[x.key,x.label]));
   const empresasLista=_crmOrdenarPorEtapa(_crmEmpresasFiltradas(busca),_crmListaOrdemEtapa);
-  if(!empresasLista.length){wrap.innerHTML='<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:20px">Nenhuma empresa encontrada.</td></tr>';return;}
+  if(!empresasLista.length){wrap.innerHTML='<tr><td colspan="9" style="text-align:center;color:#94a3b8;padding:20px">Nenhuma empresa encontrada.</td></tr>';return;}
   wrap.innerHTML=empresasLista.map(e=>{
     const saude=_crmSaude(e);
     const decisorPrincipalLista=(e.decisores||[])[0];
     const situacaoLista=e.fechamento?(e.fechamento.status==='ganho'?'<span style="color:#0e7a45;font-weight:700">🏆 Ganho</span>':'<span style="color:#dc2626;font-weight:700">❌ Perdido</span>'):'<span style="color:#94a3b8">Em aberto</span>';
+    const proxTarefaLista=_crmProximaTarefaCard(e.id);
+    let celTarefaLista;
+    if(proxTarefaLista){
+      const atrasadaTarefaLista=_tarefaAtrasada(proxTarefaLista);
+      celTarefaLista=`<div onclick="event.stopPropagation();_crmListaConcluirTarefa('${proxTarefaLista.id}')" title="Clique pra marcar esta tarefa como concluída" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;max-width:210px;background:${atrasadaTarefaLista?'#fee2e2':'#e0f2fe'};color:${atrasadaTarefaLista?'#dc2626':'#0369a1'};border-radius:20px;padding:3px 9px;font-size:.68rem;font-weight:700;white-space:nowrap">
+        <span>${atrasadaTarefaLista?'⚠️':'🗓️'}</span>
+        <span style="overflow:hidden;text-overflow:ellipsis;max-width:120px">${proxTarefaLista.tipo||'—'}</span>
+        <span style="opacity:.8;font-weight:600">· ${fmtDH(proxTarefaLista.prazoTarefa,proxTarefaLista.horaTarefa)||'—'}</span>
+      </div>`;
+    }else{
+      celTarefaLista='<span style="color:#94a3b8;font-size:.72rem">Sem tarefa</span>';
+    }
     return `<tr onclick="crmAbrirCard('${e.id}')" style="cursor:pointer">
       <td style="font-weight:700">${e.nome||'—'}</td>
       <td>${etapaLabelLista[e.etapa]||e.etapa||'—'}</td>
@@ -39007,8 +39019,38 @@ function renderCrmListaFunil(){
       <td><span style="background:${saude.bg};color:${saude.cor};border-radius:20px;padding:2px 9px;font-size:.7rem;font-weight:700;white-space:nowrap">${saude.emoji} ${saude.dias}d</span></td>
       <td style="font-weight:700">${e.propostaValorLiquido?fmtR(e.propostaValorLiquido):'—'}</td>
       <td>${situacaoLista}</td>
+      <td>${celTarefaLista}</td>
     </tr>`;
   }).join('');
+}
+// Tarefa pendente mais próxima do prazo, dentre as tarefas deste card do CRM (2026-09-17, a
+// pedido do usuário — ver renderCrmListaFunil() acima). Mesmo critério de ordenação de
+// getTarefasComerciaisPendentes() (prazo mais curto primeiro, hora desempata no mesmo dia,
+// sem prazo fica por último) só que restrito às tarefas DESTE negócio (_crmTarefasDoCard).
+function _crmProximaTarefaCard(empresaId){
+  const pend=_crmTarefasDoCard(empresaId).filter(t=>(t.status||'pendente')==='pendente').sort((a,b)=>{
+    const pa=a.prazoTarefa||'',pb=b.prazoTarefa||'';
+    if(!pa&&!pb)return 0;
+    if(!pa)return 1;
+    if(!pb)return-1;
+    const c=pa.localeCompare(pb);
+    if(c!==0)return c;
+    return(a.horaTarefa||'99:99').localeCompare(b.horaTarefa||'99:99');
+  });
+  return pend[0]||null;
+}
+// Concluir a tarefa direto da coluna "Próxima Tarefa" da Lista do CRM, sem precisar abrir o
+// card (2026-09-17, a pedido do usuário: "ele pode clicar nessa tarefa e concluir ela dali da
+// lista tambem caso ele queira"). Reaproveita marcarTarefaGeral() — mesma permissão (só o
+// responsável ou admin, ver _podeMexerNaTarefa()) e mesma persistência atômica (ver
+// window._fbTxTarefasGerais) já usadas em qualquer outro lugar que conclui tarefa; tarefa
+// oriunda do CRM (crmEmpresaId) já cai direto em "concluída" sem passar por aprovação (ver
+// _aplicarConclusaoTarefa(), 2026-09-16). Reconstrói só a Lista depois — marcarTarefaGeral()
+// já atualiza Ferramentas Comerciais > Tarefas e o badge sozinho.
+async function _crmListaConcluirTarefa(tarefaId){
+  if(!confirm('Marcar esta tarefa como concluída?'))return;
+  await marcarTarefaGeral(tarefaId,true);
+  if(_crmTabAtiva==='lista'&&typeof renderCrmListaFunil==='function')renderCrmListaFunil();
 }
 function renderCrmKanban(){
   const wrap=document.getElementById('crm-kanban-body');
