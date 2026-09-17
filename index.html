@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-17.1';</script>
+<script>const APP_BUILD_VERSION='2026-09-17.2';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -1182,10 +1182,9 @@ select.fc{cursor:pointer}
         <div id="crm-sub-contatos">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
             <input id="crm-ct-busca" placeholder="🔍 Buscar por nome, cargo ou empresa..." oninput="renderCrmContatosLista()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button onclick="crmExportarContatos('completo')" class="dash-btn-conf" style="background:#64748b" type="button">⬇️ Completo</button>
-              <button onclick="crmExportarContatos('email')" class="dash-btn-conf" style="background:#64748b" type="button">✉️ Só E-mails</button>
-              <button onclick="crmExportarContatos('telefone')" class="dash-btn-conf" style="background:#64748b" type="button">📞 Só Telefones</button>
+            <div id="crm-ct-export-wrap" style="display:flex;gap:8px;flex-wrap:wrap">
+              <button onclick="crmExportarContatos('pdf')" class="dash-btn-conf" style="background:#64748b" type="button">📄 PDF</button>
+              <button onclick="crmExportarContatos('excel')" class="dash-btn-conf" style="background:#64748b" type="button">📊 Excel</button>
             </div>
           </div>
           <div id="crm-contatos-lista-body"></div>
@@ -2443,10 +2442,9 @@ select.fc{cursor:pointer}
         <div id="prosp-sub-contatos" style="display:none">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
             <input id="prosp-ct-busca" placeholder="🔍 Buscar por nome, cargo ou empresa..." oninput="renderProspContatosLista()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button onclick="prospExportarContatos('completo')" class="dash-btn-conf" style="background:#64748b" type="button">⬇️ Completo</button>
-              <button onclick="prospExportarContatos('email')" class="dash-btn-conf" style="background:#64748b" type="button">✉️ Só E-mails</button>
-              <button onclick="prospExportarContatos('telefone')" class="dash-btn-conf" style="background:#64748b" type="button">📞 Só Telefones</button>
+            <div id="prosp-ct-export-wrap" style="display:flex;gap:8px;flex-wrap:wrap">
+              <button onclick="prospExportarContatos('pdf')" class="dash-btn-conf" style="background:#64748b" type="button">📄 PDF</button>
+              <button onclick="prospExportarContatos('excel')" class="dash-btn-conf" style="background:#64748b" type="button">📊 Excel</button>
             </div>
           </div>
           <div id="prosp-contatos-lista-body"></div>
@@ -36949,21 +36947,30 @@ function renderProspContatosLista(){
   const wrap=document.getElementById('prosp-contatos-lista-body');
   if(!wrap)return;
   if(!_temAcessoProspeccao()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const exportWrapProsp=document.getElementById('prosp-ct-export-wrap');
+  if(exportWrapProsp)exportWrapProsp.style.display=_getUserCat().isAdm?'flex':'none';
   const busca=document.getElementById('prosp-ct-busca')?.value||'';
-  const lista=_prospContatosFiltrados(busca).sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  // Contatos unificados (2026-09-17) — mesma lista de _contatosUnificadosFiltrados() que
+  // aparece na aba Contatos do CRM Comercial (ver renderCrmContatosLista), incluindo também
+  // os contatos de lá aqui.
+  const lista=_contatosUnificadosFiltrados(busca).sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
   if(!lista.length){wrap.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhum contato cadastrado ainda — contatos aparecem aqui assim que forem adicionados como decisor dentro de uma empresa.</div>';return;}
-  wrap.innerHTML=lista.map(c=>`<div onclick="prospAbrirCard('${c.empresaId}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+  wrap.innerHTML=lista.map(c=>{
+    const ehProsp=c._origem==='Prospecção';
+    return `<div onclick="${ehProsp?`prospAbrirCard('${c.empresaId}')`:`crmAbrirCard('${c.empresaId}')`}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <div style="min-width:0;flex:1">
         <div style="font-weight:700;font-size:.82rem;color:#1e293b;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
           <span>👤 ${c.nome||'—'}</span>
           ${c.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700">${c.cargo}</span>`:''}
+          <span style="background:${ehProsp?'#e0f2fe':'#dcfce7'};color:${ehProsp?'#0369a1':'#166534'};border-radius:20px;padding:1px 9px;font-size:.6rem;font-weight:700">${ehProsp?'Prospecção':'CRM'}</span>
         </div>
         <div style="font-size:.72rem;color:#64748b;margin-top:3px">${['🏢 '+(c.empresaNome||'—'),_prospTelefonesTexto(c),c.email].filter(Boolean).join(' · ')}</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
         ${c.linkedin?`<a href="${c.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:.66rem;font-weight:700;text-decoration:none;white-space:nowrap">🔗 LinkedIn ↗</a>`:''}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 // ── EXPORTAÇÃO (Empresas e Contatos, 2026-08-26 — a pedido do usuário: "exportar empresas e
 // exportar contatos... lista com dados completos ou só email ou só telefone pra mailing").
@@ -36992,28 +36999,8 @@ function prospExportarEmpresas(){
   _csvDownload(`prospeccao_empresas_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
 }
-function prospExportarContatos(modo){
-  const busca=document.getElementById('prosp-ct-busca')?.value||'';
-  let lista=[..._prospContatosFiltrados(busca)].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
-  let headers,body,sufixo;
-  if(modo==='email'){
-    lista=lista.filter(c=>c.email);
-    headers=['Nome','Cargo','E-mail','Empresa'];
-    body=lista.map(c=>[c.nome||'',c.cargo||'',c.email||'',c.empresaNome||'']);
-    sufixo='emails';
-  }else if(modo==='telefone'){
-    lista=lista.filter(c=>_prospTelefonesDecisor(c).length);
-    headers=['Nome','Cargo','Telefone','Empresa'];
-    body=lista.map(c=>[c.nome||'',c.cargo||'',_prospTelefonesTexto(c),c.empresaNome||'']);
-    sufixo='telefones';
-  }else{
-    headers=['Nome','Cargo','Empresa','Telefone','E-mail','LinkedIn'];
-    body=lista.map(c=>[c.nome||'',c.cargo||'',c.empresaNome||'',_prospTelefonesTexto(c),c.email||'',c.linkedin||'']);
-    sufixo='completo';
-  }
-  if(!lista.length){toast(modo==='email'?'Nenhum contato com e-mail cadastrado':modo==='telefone'?'Nenhum contato com telefone cadastrado':'Nenhum contato encontrado para exportar','terr');return;}
-  _csvDownload(`prospeccao_contatos_${sufixo}_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
-  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+function prospExportarContatos(formato){
+  _exportarContatosUnificados(formato,document.getElementById('prosp-ct-busca')?.value||'','contatos');
 }
 
 // ── ABA TAREFAS (agregada de todas as empresas, organizada por data) ───────────────
@@ -37641,6 +37628,27 @@ async function prospSalvarDecisorRapido(){
     email:(document.getElementById('prosp-decisor-add-email').value||'').trim(),
     linkedin:_prospNormalizarLinkedin(document.getElementById('prosp-decisor-add-linkedin').value)
   };
+  // Bloqueio de contato duplicado por telefone/e-mail/nome (2026-09-17, a pedido do usuário:
+  // "confira se deu certo a regra de nao deixar o usuario cadastrar contatos duplicados" —
+  // faltava aqui, só existia do lado CRM Comercial — mesmo texto/lógica de
+  // crmSalvarDecisorRapido() acima, reaproveitando _crmAcharContatoDuplicado/
+  // _crmContatoChave, que já comparam contra os dois funis).
+  const antigoParaComparar=ehEdicao?(e.decisores||[])[idx]:null;
+  const contatoMudou=!antigoParaComparar||_crmContatoChave(antigoParaComparar)!==_crmContatoChave(d);
+  if(contatoMudou){
+    const dup=_crmAcharContatoDuplicado(d,c=>c._origem==='Prospecção'&&c.empresaId===empresaId&&c._idx===idx);
+    if(dup){
+      const usar=confirm('🚫 Contato duplicado — "'+(dup.nome||'—')+'" já está cadastrado com esse '+dup._motivo+' em '+(dup.empresaNome||dup.empresa||'—')+' ('+dup._origem+').\n\nUsar os dados desse contato já existente? (Cancelar pra revisar manualmente, sem salvar)');
+      if(usar){
+        const dadosDup={nome:dup.nome||'',cargo:dup.cargo||'',telefones:_crmTelefonesDecisor(dup),email:dup.email||'',linkedin:dup.linkedin||''};
+        const naoSobrescritosDup=_prospPreencherDecisorDeDados(dadosDup,null);
+        toast(naoSobrescritosDup.length?('Dados do contato existente preenchidos — '+naoSobrescritosDup.join(', ')+' já tinha valor diferente e não foi sobrescrito. Revise e clique em Salvar de novo.'):'Dados do contato existente preenchidos — revise e clique em Salvar de novo.','tok');
+      }else{
+        toast('Cadastro não salvo — ajuste o nome/telefone/e-mail pra não conflitar com o contato existente, ou confirme pra usar os dados dele.','terr');
+      }
+      return;
+    }
+  }
   if(!e.decisores)e.decisores=[];
   if(!e.timeline)e.timeline=[];
   const autor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
@@ -37916,8 +37924,8 @@ function _prospNormalizarLinkedin(v){
   if(/^https?:\/\//i.test(s))return s;
   return'https://'+s.replace(/^\/+/,'');
 }
-function _prospDecisoresDoForm(){
-  return[...document.querySelectorAll('#prosp-emp-decisores-l .prosp-decisor-row')].map(row=>({
+function _prospDecisorRowParaObj(row){
+  return{
     nome:(row.querySelector('.prosp-dec-nome')&&row.querySelector('.prosp-dec-nome').value.trim())||'',
     cargo:(row.querySelector('.prosp-dec-cargo')&&row.querySelector('.prosp-dec-cargo').value.trim())||'',
     telefones:[...row.querySelectorAll('.prosp-dec-tels-wrap .prosp-dec-tel-row')].map(tr=>({
@@ -37926,7 +37934,60 @@ function _prospDecisoresDoForm(){
     })).filter(t=>t.numero),
     email:(row.querySelector('.prosp-dec-email')&&row.querySelector('.prosp-dec-email').value.trim())||'',
     linkedin:_prospNormalizarLinkedin(row.querySelector('.prosp-dec-linkedin')&&row.querySelector('.prosp-dec-linkedin').value)
-  })).filter(d=>d.nome||d.telefones.length||d.email||d.linkedin);
+  };
+}
+function _prospDecisoresDoForm(){
+  return[...document.querySelectorAll('#prosp-emp-decisores-l .prosp-decisor-row')].map(_prospDecisorRowParaObj).filter(d=>d.nome||d.telefones.length||d.email||d.linkedin);
+}
+// Preenche um decisor (linha do form completo, ou o modal rápido quando row=null) com os
+// dados de um contato já existente encontrado como duplicado (2026-09-17, mesmo padrão de
+// _crmPreencherDecisorDeDados) — só completa campo vazio, nunca sobrescreve o que o usuário
+// já tinha digitado diferente (devolve a lista do que não foi sobrescrito, pra avisar na
+// tela).
+function _prospPreencherDecisorDeDados(dados,row){
+  const naoSobrescritos=[];
+  const nomeEl=row?row.querySelector('.prosp-dec-nome'):document.getElementById('prosp-decisor-add-nome');
+  if(nomeEl&&dados.nome){
+    const nomeAtual=(nomeEl.value||'').trim();
+    const nomeAtualU=nomeAtual.toUpperCase(),nomeSugU=dados.nome.toUpperCase();
+    if(nomeAtual&&nomeAtualU!==nomeSugU){
+      if(nomeSugU.startsWith(nomeAtualU))nomeEl.value=dados.nome;
+      else naoSobrescritos.push('nome');
+    }
+  }
+  const setCampo=(campo,valor,rotulo)=>{
+    if(!campo)return;
+    const atual=(campo.value||'').trim();
+    if(!atual){campo.value=valor||'';}
+    else if(valor&&atual.toUpperCase()!==valor.toUpperCase()){naoSobrescritos.push(rotulo);}
+  };
+  const preencherTelsVazio=(telsWrap,montarLinha)=>{
+    if(!telsWrap||!dados.telefones||!dados.telefones.length)return;
+    const telsAtuais=[...telsWrap.querySelectorAll('.prosp-dec-tel-num')].map(i=>(i.value||'').trim()).filter(Boolean);
+    if(telsAtuais.length){naoSobrescritos.push('telefone');return;}
+    telsWrap.innerHTML='';
+    dados.telefones.forEach(t=>montarLinha(telsWrap,t.tipo,t.numero));
+  };
+  if(row){
+    setCampo(row.querySelector('.prosp-dec-cargo'),dados.cargo,'cargo');
+    setCampo(row.querySelector('.prosp-dec-email'),dados.email,'e-mail');
+    setCampo(row.querySelector('.prosp-dec-linkedin'),dados.linkedin,'LinkedIn');
+    preencherTelsVazio(row.querySelector('.prosp-dec-tels-wrap'),(wrap,tipo,numero)=>{
+      const div=document.createElement('div');
+      div.className='prosp-dec-tel-row';
+      div.style.cssText='display:flex;gap:6px;align-items:center';
+      div.innerHTML=_prospTelRowInnerHtml(tipo,numero);
+      wrap.appendChild(div);
+    });
+  }else{
+    setCampo(document.getElementById('prosp-decisor-add-cargo'),dados.cargo,'cargo');
+    setCampo(document.getElementById('prosp-decisor-add-email'),dados.email,'e-mail');
+    setCampo(document.getElementById('prosp-decisor-add-linkedin'),dados.linkedin,'LinkedIn');
+    preencherTelsVazio(document.getElementById('prosp-decisor-add-tels'),(wrap,tipo,numero)=>{
+      _prospDecisorAddTelRowQuick(tipo,numero);
+    });
+  }
+  return naoSobrescritos;
 }
 function prospAbrirNovaEmpresa(){
   document.getElementById('prosp-emp-modal-titulo').textContent='🏢 Nova Empresa';
@@ -38031,6 +38092,28 @@ async function prospSalvarEmpresa(){
   e.sedeCidade=(document.getElementById('prosp-emp-cidade').value||'').trim();
   e.sedeUf=document.getElementById('prosp-emp-uf').value||'';
   const decisoresAntigos=isNova?[]:(e.decisores||[]).slice();
+  // Bloqueio de contato duplicado por telefone/e-mail/nome (2026-09-17, mesmo padrão do
+  // form completo do CRM Comercial — ver crmSalvarEmpresa acima) — faltava aqui, só existia
+  // do lado CRM. Só verifica decisor novo ou que mudou nome/e-mail/telefone nesta edição.
+  const linhasDecisoresFormProsp=[...document.querySelectorAll('#prosp-emp-decisores-l .prosp-decisor-row')];
+  for(const rowAtualProsp of linhasDecisoresFormProsp){
+    const dFormProsp=_prospDecisorRowParaObj(rowAtualProsp);
+    if(!dFormProsp.nome||(!dFormProsp.telefones.length&&!dFormProsp.email))continue;
+    const jaEraAssimProsp=decisoresAntigos.some(dAntigo=>_crmContatoChave(dAntigo)===_crmContatoChave(dFormProsp));
+    if(jaEraAssimProsp)continue;
+    const dupProsp=_crmAcharContatoDuplicado(dFormProsp,c=>c._origem==='Prospecção'&&c.empresaId===id);
+    if(dupProsp){
+      const usarProsp=confirm('🚫 Contato duplicado — "'+dFormProsp.nome+'" tem o mesmo '+dupProsp._motivo+' de "'+(dupProsp.nome||'—')+'" já cadastrado em '+(dupProsp.empresaNome||dupProsp.empresa||'—')+' ('+dupProsp._origem+').\n\nUsar os dados desse contato já existente nessa linha? (Cancelar pra revisar manualmente, sem salvar)');
+      if(usarProsp){
+        const dadosDupProsp={nome:dupProsp.nome||'',cargo:dupProsp.cargo||'',telefones:_crmTelefonesDecisor(dupProsp),email:dupProsp.email||'',linkedin:dupProsp.linkedin||''};
+        const naoSobrescritosDupProsp=_prospPreencherDecisorDeDados(dadosDupProsp,rowAtualProsp);
+        toast(naoSobrescritosDupProsp.length?('Dados do contato existente preenchidos nessa linha — '+naoSobrescritosDupProsp.join(', ')+' já tinha valor diferente e não foi sobrescrito. Revise e clique em Salvar de novo.'):'Dados do contato existente preenchidos nessa linha — revise e clique em Salvar de novo.','tok');
+      }else{
+        toast('Cadastro não salvo — ajuste o nome/telefone/e-mail pra não conflitar com o contato existente, ou confirme pra usar os dados dele.','terr');
+      }
+      return;
+    }
+  }
   e.decisores=decisoresForm;
   if(!isNova)_prospLogDiffDecisores(e,decisoresAntigos,decisoresForm);
   e.atualizadoEm=new Date().toISOString();
@@ -39250,28 +39333,43 @@ function renderCrmContatosLista(){
   const wrap=document.getElementById('crm-contatos-lista-body');
   if(!wrap)return;
   if(!_podeVerVisaoComercial()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  const isAdmCt=_getUserCat().isAdm;
+  const exportWrapCrm=document.getElementById('crm-ct-export-wrap');
+  if(exportWrapCrm)exportWrapCrm.style.display=isAdmCt?'flex':'none';
   const busca=document.getElementById('crm-ct-busca')?.value||'';
-  const lista=_crmContatosFiltrados(busca).sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  // Contatos unificados (2026-09-17, a pedido do usuário: "os contatos de prospecção de
+  // clientes e os contatos de funil crm vendas quero que sejam os mesmos, compartilhados, a
+  // mesma lista") — a MESMA lista de _contatosUnificadosFiltrados() aparece aqui e na aba
+  // Contatos da Prospecção (ver renderProspContatosLista); cada aba só muda o que deixa
+  // fazer com um contato de origem diferente da sua (ver isAdmCt/ehCrm abaixo).
+  const lista=_contatosUnificadosFiltrados(busca).sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
   if(!lista.length){wrap.innerHTML='<div style="padding:24px 4px;color:#94a3b8;font-size:.85rem">Nenhum contato cadastrado ainda — contatos aparecem aqui assim que forem adicionados como decisor dentro de uma empresa.</div>';return;}
   // Editar/excluir contato direto da lista (2026-09-11, a pedido do usuário: "adm pode
-  // editar ou excluir contato do menu contatos") — só admin; reusa crmAbrirEditarDecisor/
-  // crmExcluirDecisor, já existentes e usados dentro do card completo da empresa desde
-  // 2026-08-28 (mesmo modal mo-crm-decisor-add, independente do card).
-  const isAdmCt=_getUserCat().isAdm;
-  wrap.innerHTML=lista.map(c=>`<div onclick="${isAdmCt?`crmAbrirEditarDecisor('${c.empresaId}',${c._idx})`:`crmAbrirCard('${c.empresaId}')`}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+  // editar ou excluir contato do menu contatos") — só admin, e só pra contato de ORIGEM CRM
+  // Comercial (2026-09-17: a lista agora inclui contatos de Prospecção também — editar um
+  // desses precisa do card/modal de lá, ver renderProspContatosLista; clicando num contato
+  // de outra origem aqui, abre o card de origem dele pra visualizar). Reusa
+  // crmAbrirEditarDecisor/crmExcluirDecisor, já existentes desde 2026-08-28.
+  wrap.innerHTML=lista.map(c=>{
+    const ehCrm=c._origem==='CRM Comercial';
+    const podeEditar=isAdmCt&&ehCrm;
+    const onclickRow=podeEditar?`crmAbrirEditarDecisor('${c.empresaId}',${c._idx})`:(ehCrm?`crmAbrirCard('${c.empresaId}')`:`prospAbrirCard('${c.empresaId}')`);
+    return `<div onclick="${onclickRow}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <div style="min-width:0;flex:1">
         <div style="font-weight:700;font-size:.82rem;color:#1e293b;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
           <span>👤 ${c.nome||'—'}</span>
           ${c.cargo?`<span style="background:#eef2ff;color:#4338ca;border-radius:20px;padding:1px 9px;font-size:.64rem;font-weight:700">${c.cargo}</span>`:''}
+          <span style="background:${ehCrm?'#dcfce7':'#e0f2fe'};color:${ehCrm?'#166534':'#0369a1'};border-radius:20px;padding:1px 9px;font-size:.6rem;font-weight:700">${ehCrm?'CRM':'Prospecção'}</span>
         </div>
         <div style="font-size:.72rem;color:#64748b;margin-top:3px">${['🏢 '+(c.empresaNome||'—'),_crmTelefonesTexto(c),c.email].filter(Boolean).join(' · ')}</div>
       </div>
       <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
         ${c.linkedin?`<a href="${c.linkedin.replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;background:#e0f2fe;color:#0369a1;border-radius:20px;padding:3px 10px;font-size:.66rem;font-weight:700;text-decoration:none;white-space:nowrap">🔗 LinkedIn ↗</a>`:''}
-        ${isAdmCt?`<button type="button" onclick="event.stopPropagation();crmAbrirEditarDecisor('${c.empresaId}',${c._idx})" style="background:none;border:none;color:#2563eb;cursor:pointer;font-size:.85rem;padding:2px" title="Editar contato">✏️</button>`:''}
-        ${isAdmCt?`<button type="button" onclick="event.stopPropagation();crmExcluirDecisor('${c.empresaId}',${c._idx})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.85rem;padding:2px" title="Excluir contato">🗑️</button>`:''}
+        ${podeEditar?`<button type="button" onclick="event.stopPropagation();crmAbrirEditarDecisor('${c.empresaId}',${c._idx})" style="background:none;border:none;color:#2563eb;cursor:pointer;font-size:.85rem;padding:2px" title="Editar contato">✏️</button>`:''}
+        ${podeEditar?`<button type="button" onclick="event.stopPropagation();crmExcluirDecisor('${c.empresaId}',${c._idx})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.85rem;padding:2px" title="Excluir contato">🗑️</button>`:''}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 // ── EXPORTAÇÃO (Empresas e Contatos, 2026-08-26 — a pedido do usuário: "exportar empresas e
 // exportar contatos... lista com dados completos ou só email ou só telefone pra mailing").
@@ -39414,28 +39512,8 @@ async function crmExportarFunilPDF(){
   doc.save(`crm_funil_${new Date().toISOString().slice(0,10)}.pdf`);
   toast('PDF gerado!','tok');
 }
-function crmExportarContatos(modo){
-  const busca=document.getElementById('crm-ct-busca')?.value||'';
-  let lista=[..._crmContatosFiltrados(busca)].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
-  let headers,body,sufixo;
-  if(modo==='email'){
-    lista=lista.filter(c=>c.email);
-    headers=['Nome','Cargo','E-mail','Empresa'];
-    body=lista.map(c=>[c.nome||'',c.cargo||'',c.email||'',c.empresaNome||'']);
-    sufixo='emails';
-  }else if(modo==='telefone'){
-    lista=lista.filter(c=>_crmTelefonesDecisor(c).length);
-    headers=['Nome','Cargo','Telefone','Empresa'];
-    body=lista.map(c=>[c.nome||'',c.cargo||'',_crmTelefonesTexto(c),c.empresaNome||'']);
-    sufixo='telefones';
-  }else{
-    headers=['Nome','Cargo','Empresa','Telefone','E-mail','LinkedIn'];
-    body=lista.map(c=>[c.nome||'',c.cargo||'',c.empresaNome||'',_crmTelefonesTexto(c),c.email||'',c.linkedin||'']);
-    sufixo='completo';
-  }
-  if(!lista.length){toast(modo==='email'?'Nenhum contato com e-mail cadastrado':modo==='telefone'?'Nenhum contato com telefone cadastrado':'Nenhum contato encontrado para exportar','terr');return;}
-  _csvDownload(`crm_contatos_${sufixo}_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
-  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+function crmExportarContatos(formato){
+  _exportarContatosUnificados(formato,document.getElementById('crm-ct-busca')?.value||'','contatos');
 }
 
 // ── TAREFAS DO CRM ── agora vivem em cfg.tarefasGerais (Ferramentas Comerciais > Tarefas),
@@ -41417,6 +41495,121 @@ function _crmAcharContatoDuplicado(decisor,ignorarFn){
   const porNome=nome&&candidatos.find(c=>_normSemAcento(c.nome||'').trim()===nome);
   if(porNome)return Object.assign({},porNome,{_motivo:'nome'});
   return null;
+}
+// ── CONTATOS UNIFICADOS (2026-09-17, a pedido do usuário: "os contatos de prospecção de
+// clientes e os contatos de funil crm vendas quero que sejam os mesmos, compartilhados, a
+// mesma lista, mas aparece nos dois menus como esta hoje") — união ao vivo dos decisores de
+// CRM Comercial + Prospecção, mesmo padrão 100%-derivado (sem coleção nova) já usado por
+// _crmTodosContatos/_prospTodosContatos/_crmAcharContatoDuplicado acima. A MESMA lista
+// aparece nas duas abas "Contatos" (CRM e Prospecção) — só muda o que cada aba deixa fazer
+// com um contato de origem diferente da sua (ver renderCrmContatosLista/
+// renderProspContatosLista). Um contato com a MESMA chave (_crmContatoChave —
+// nome+e-mail+telefones) nos dois funis aparece uma vez só (mantém a 1ª ocorrência, CRM
+// primeiro).
+function _contatosUnificados(){
+  const crm=(typeof _crmTodosContatos==='function'?_crmTodosContatos():[]).map(c=>Object.assign({},c,{_origem:'CRM Comercial'}));
+  const prosp=(typeof _prospTodosContatos==='function'?_prospTodosContatos():[]).map(c=>Object.assign({},c,{_origem:'Prospecção'}));
+  const vistos=new Set();
+  const out=[];
+  [...crm,...prosp].forEach(c=>{
+    const chave=_crmContatoChave(c);
+    if(vistos.has(chave))return;
+    vistos.add(chave);
+    out.push(c);
+  });
+  return out;
+}
+function _contatosUnificadosFiltrados(busca){
+  const q=(busca||'').trim().toUpperCase();
+  const lista=_contatosUnificados();
+  if(!q)return lista;
+  return lista.filter(c=>
+    (c.nome||'').toUpperCase().includes(q)||
+    (c.cargo||'').toUpperCase().includes(q)||
+    (c.empresaNome||'').toUpperCase().includes(q)||
+    _crmTelefonesDecisor(c).some(t=>(t.numero||'').toUpperCase().includes(q)||(t.tipo||'').toUpperCase().includes(q))||
+    (c.email||'').toUpperCase().includes(q)
+  );
+}
+// ── EXPORTAÇÃO DE CONTATOS (2026-09-17, a pedido do usuário: "somente adm pode exportar
+// lista de contatos, usuario comum nao" + "melhore esse menu de exportação, deixa ele
+// completo mesmo, so exporta completo e exporta em pdf ou excel, da as duas opções") —
+// substitui os 3 botões antigos de CSV (Completo/Só E-mails/Só Telefones) por só 2, PDF ou
+// Excel, sempre com os dados completos, sempre da lista UNIFICADA (_contatosUnificados
+// acima), e só pra admin (checado aqui de verdade — o botão já fica escondido pra quem não
+// é admin, ver renderCrmContatosLista/renderProspContatosLista). PDF reaproveita o mesmo
+// padrão visual (logo, cabeçalho navy/rosa, rodapé com página) de crmExportarFunilPDF/
+// gerarPDFVendas; Excel usa a mesma lib xlsx.full.min.js já carregada (até agora só usada
+// pra IMPORTAR planilha — XLSX.writeFile também gera, sem lib nova).
+function _exportarContatosUnificados(formato,busca,prefixoArquivo){
+  const {isAdm}=_getUserCat();
+  if(!isAdm){toast('Apenas administradores podem exportar a lista de contatos','terr');return;}
+  const lista=[..._contatosUnificadosFiltrados(busca)].sort((a,b)=>(a.nome||'').localeCompare(b.nome||'','pt-BR'));
+  if(!lista.length){toast('Nenhum contato encontrado para exportar','terr');return;}
+  if(formato==='excel')_exportarContatosExcel(lista,prefixoArquivo);
+  else _exportarContatosPDF(lista,prefixoArquivo);
+}
+function _exportarContatosExcel(lista,prefixo){
+  if(!window.XLSX){toast('Biblioteca Excel não carregada. Verifique sua conexão.','terr');return;}
+  const rows=lista.map(c=>({
+    'Nome':c.nome||'',
+    'Cargo':c.cargo||'',
+    'Empresa':c.empresaNome||'',
+    'Telefone':_crmTelefonesTexto(c),
+    'E-mail':c.email||'',
+    'LinkedIn':c.linkedin||'',
+    'Origem':c._origem||''
+  }));
+  const ws=XLSX.utils.json_to_sheet(rows);
+  ws['!cols']=[{wch:26},{wch:22},{wch:26},{wch:24},{wch:26},{wch:30},{wch:14}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Contatos');
+  XLSX.writeFile(wb,`${prefixo}_${new Date().toISOString().slice(0,10)}.xlsx`);
+  toast('Excel gerado!','tok');
+}
+async function _exportarContatosPDF(lista,prefixo){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const drawnFooterPages=new Set();
+  function drawHeader(){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+    doc.text('LISTA DE CONTATOS',pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,25,pageW-14,25);
+    doc.setFont('helvetica','normal');
+    return 31;
+  }
+  function drawFooter(pageNum){
+    if(drawnFooterPages.has(pageNum))return;
+    drawnFooterPages.add(pageNum);
+    doc.setPage(pageNum);
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
+  }
+  const curY=drawHeader();
+  doc.setTextColor(0,0,0);doc.setFont('helvetica','normal');
+  const head=['Nome','Cargo','Empresa','Telefone','E-mail','Origem'];
+  const body=lista.map(c=>[c.nome||'—',c.cargo||'—',c.empresaNome||'—',_crmTelefonesTexto(c)||'—',c.email||'—',c._origem||'—']);
+  doc.autoTable({
+    startY:curY,head:[head],body,theme:'grid',
+    styles:{fontSize:7.5,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.8},
+    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:8},
+    alternateRowStyles:{fillColor:LIGHT},
+    margin:{top:32,left:14,right:14,bottom:20},
+    didDrawPage:()=>{drawFooter(doc.internal.getNumberOfPages());}
+  });
+  drawFooter(doc.internal.getNumberOfPages());
+  doc.save(`${prefixo}_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('PDF gerado!','tok');
 }
 function crmAbrirNovaEmpresa(){
   document.getElementById('crm-emp-modal-titulo').textContent='🏢 Novo Negócio';
