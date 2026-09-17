@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-17.2';</script>
+<script>const APP_BUILD_VERSION='2026-09-17.3';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -4981,6 +4981,31 @@ window._fbUpdateCfgField=(parts,value)=>{
     return Promise.reject(e);
   }
 };
+// Escrita ATÔMICA de cfg.tarefasGerais via transação (2026-09-17, a pedido do usuário: "revise
+// pra nao perder mais nenhuma tarefa" — usuário relatou tarefas já lançadas sumindo). Mesmo
+// motivo/padrão de _fbUpdatePagConf/_fbUpdateUsuario/_fbUpdateCfgField acima, mas
+// tarefasGerais é uma LISTA (não um objeto chave→valor), então uma escrita atômica de campo
+// único não basta sozinha: se duas tarefas forem adicionadas/alteradas quase ao mesmo tempo
+// (duas abas, dois usuários, ou uma tarefa avulsa e uma criada de dentro de um card do CRM —
+// ou até só outra tela qualquer disparando _fbSaveCfg(cfg) nesse meio-tempo), cada uma
+// calcula o array novo em cima da própria cópia LOCAL desatualizada — a que salvar por
+// último sobrescreve a lista inteira sem a tarefa que a outra acabou de adicionar/alterar, e
+// ela "some" sem erro nenhum (era exatamente o bug relatado). runTransaction (mesmo usado por
+// window._fbTx pra tarefasComerciais de pedido) lê o array FRESCO do servidor dentro da
+// transação, aplica a mutação em cima dele — nunca da cópia local em memória — e grava de
+// volta, com retry automático do SDK se o documento mudar durante a transação. mutatorFn
+// recebe uma CÓPIA do array atual do servidor e devolve o array novo (push/splice/filter à
+// vontade). Usada por toda ação que cria, atualiza ou remove uma tarefa de cfg.tarefasGerais
+// (avulsa de Ferramentas + CRM Comercial) — a mutação local (cfg.tarefasGerais.push/find/
+// filter) continua acontecendo igual antes, só pra a TELA atualizar na hora; quem persiste de
+// verdade agora é sempre esta função, nunca mais o _fbSaveCfg(cfg) do documento inteiro.
+window._fbTxTarefasGerais=(mutatorFn)=>runTransaction(db,async(tx)=>{
+  const ref=doc(db,'sistema','config');
+  const snap=await tx.get(ref);
+  const atuais=(snap.exists()&&snap.data().tarefasGerais)||[];
+  const novas=mutatorFn(atuais.slice());
+  tx.update(ref,{tarefasGerais:novas});
+});
 // Funções administrativas (Cloud Functions) — definir senha / apagar usuário direto no Firebase Auth, sem e-mail.
 window._fbAdminSetPassword=(email,newPassword)=>httpsCallable(functions,'adminSetPassword')({email,newPassword});
 window._fbAdminDeleteUser=(email)=>httpsCallable(functions,'adminDeleteUser')({email});
@@ -5340,7 +5365,10 @@ async function solicitarAdiamentoTarefaGeral(tarefaId,novoPrazo,justificativa,no
   const t=(cfg.tarefasGerais||[]).find(x=>x.id===tarefaId);
   if(!t)return;
   if(!_aplicarSolicitacaoAdiamento(t,novoPrazo,justificativa,novaHora))return;
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais) em vez de _fbSaveCfg(cfg)
+  // do documento inteiro.
+  try{await window._fbTxTarefasGerais(tarefas=>{const idx=tarefas.findIndex(x=>x.id===t.id);if(idx>=0)tarefas[idx]=t;else tarefas.push(t);return tarefas;});}
+  catch(e){toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a alteração NÃO foi salva, tente de novo.','terr');console.error(e);return;}
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderTarefasComerciais();
   closeM('mo-tarefa-adiar');closeM('mo-tarefa-detalhe');
@@ -5389,7 +5417,10 @@ async function decidirAdiamentoTarefaGeral(tarefaId,aprovado){
   const t=(cfg.tarefasGerais||[]).find(x=>x.id===tarefaId);
   if(!t)return;
   if(!_aplicarDecisaoAdiamento(t,aprovado))return;
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais) em vez de _fbSaveCfg(cfg)
+  // do documento inteiro.
+  try{await window._fbTxTarefasGerais(tarefas=>{const idx=tarefas.findIndex(x=>x.id===t.id);if(idx>=0)tarefas[idx]=t;else tarefas.push(t);return tarefas;});}
+  catch(e){toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a alteração NÃO foi salva, tente de novo.','terr');console.error(e);return;}
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderTarefasComerciais();
   closeM('mo-tarefa-detalhe');
@@ -5491,7 +5522,11 @@ async function adicionarTarefaGeralAvulsa(tipo,responsavel,prazoTarefa,descricao
   const novaT=novaTarefaComercial(tipo.trim(),responsavel||'',prazoTarefa||'',usuarioLogado?.nomeExibicao||'',(descricao||'').trim(),horaTarefa||'');
   novaT.avulsa=true; // ver comentário em adicionarTarefaComercialAvulsa()
   cfg.tarefasGerais.push(novaT);
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais acima) — evita que essa
+  // tarefa suma se outra ação salvar cfg (qualquer campo) entre o push acima e o servidor
+  // confirmar.
+  try{await window._fbTxTarefasGerais(tarefas=>{tarefas.push(novaT);return tarefas;});}
+  catch(e){toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a tarefa NÃO foi salva, tente de novo.','terr');console.error(e);return;}
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   _irParaAbaTarefasPendentes();
   _refreshTarefasBadge();
@@ -5530,7 +5565,10 @@ async function excluirTarefaGeral(tarefaId){
   if(!_podeExcluirTarefa(t.criadoPor)){toast('Só quem lançou a tarefa (ou um administrador) pode excluí-la','terr');return;}
   if(!confirm('Excluir esta tarefa? Essa ação não pode ser desfeita.'))return;
   cfg.tarefasGerais=(cfg.tarefasGerais||[]).filter(x=>x.id!==tarefaId);
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais) em vez de _fbSaveCfg(cfg)
+  // do documento inteiro.
+  try{await window._fbTxTarefasGerais(tarefas=>tarefas.filter(x=>x.id!==tarefaId));}
+  catch(e){toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a exclusão NÃO foi salva, tente de novo.','terr');console.error(e);return;}
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderTarefasComerciais();
   _refreshTarefasBadge();
@@ -5664,7 +5702,10 @@ async function marcarTarefaGeral(tarefaId,concluida){
   const t=(cfg.tarefasGerais||[]).find(x=>x.id===tarefaId);
   if(!t)return;
   if(!_aplicarConclusaoTarefa(t,concluida))return;
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais) em vez de _fbSaveCfg(cfg)
+  // do documento inteiro.
+  try{await window._fbTxTarefasGerais(tarefas=>{const idx=tarefas.findIndex(x=>x.id===t.id);if(idx>=0)tarefas[idx]=t;else tarefas.push(t);return tarefas;});}
+  catch(e){toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a alteração NÃO foi salva, tente de novo.','terr');console.error(e);return;}
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderTarefasComerciais();
   _refreshTarefasBadge();
@@ -5728,7 +5769,10 @@ async function aprovarTarefaGeral(tarefaId){
   const t=(cfg.tarefasGerais||[]).find(x=>x.id===tarefaId);
   if(!t)return;
   if(!_aplicarAprovacaoTarefa(t,true))return;
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais) em vez de _fbSaveCfg(cfg)
+  // do documento inteiro.
+  try{await window._fbTxTarefasGerais(tarefas=>{const idx=tarefas.findIndex(x=>x.id===t.id);if(idx>=0)tarefas[idx]=t;else tarefas.push(t);return tarefas;});}
+  catch(e){toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a alteração NÃO foi salva, tente de novo.','terr');console.error(e);return;}
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderTarefasComerciais();
   _refreshTarefasBadge();
@@ -5759,7 +5803,10 @@ async function devolverTarefaGeral(tarefaId,novoPrazo,motivo,novaHora){
   const t=(cfg.tarefasGerais||[]).find(x=>x.id===tarefaId);
   if(!t)return;
   if(!_aplicarAprovacaoTarefa(t,false,novoPrazo,motivo,novaHora))return;
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais) em vez de _fbSaveCfg(cfg)
+  // do documento inteiro.
+  try{await window._fbTxTarefasGerais(tarefas=>{const idx=tarefas.findIndex(x=>x.id===t.id);if(idx>=0)tarefas[idx]=t;else tarefas.push(t);return tarefas;});}
+  catch(e){toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a alteração NÃO foi salva, tente de novo.','terr');console.error(e);return;}
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderTarefasComerciais();
   closeM('mo-tarefa-devolver');closeM('mo-tarefa-detalhe');
@@ -39138,8 +39185,11 @@ async function _crmCriarTarefaEnvioProposta(e){
   novaT.crmCategoria='outro';
   if(!cfg.tarefasGerais)cfg.tarefasGerais=[];
   cfg.tarefasGerais.push(novaT);
+  // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais) — essa tarefa automática
+  // é criada toda vez que um negócio entra em ORÇAMENTO APROVADO; sem isso, corria risco de
+  // sumir se qualquer outra tela salvasse cfg nesse meio-tempo.
   try{
-    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+    await window._fbTxTarefasGerais(tarefas=>{tarefas.push(novaT);return tarefas;});
     localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   }catch(err){console.error('Erro ao criar tarefa automática de envio de proposta:',err);}
   _refreshTarefasBadge();
@@ -41340,7 +41390,10 @@ async function crmSalvarTarefa(){
   novaT.crmDecisorNome=decisorNome;
   if(!cfg.tarefasGerais)cfg.tarefasGerais=[];
   cfg.tarefasGerais.push(novaT);
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais) em vez de _fbSaveCfg(cfg)
+  // do documento inteiro.
+  try{await window._fbTxTarefasGerais(tarefas=>{tarefas.push(novaT);return tarefas;});}
+  catch(e){toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a tarefa NÃO foi salva, tente de novo.','terr');console.error(e);return;}
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   closeM('mo-crm-tarefa');
   toast('Tarefa agendada!','tok');
@@ -41879,8 +41932,10 @@ async function crmExcluirEmpresa(id){
   }catch(err){console.error('Erro ao excluir empresa:',err);toast('Erro ao excluir: '+(err.message||err),'terr');return;}
   if(tarefasDoCard.length){
     cfg.tarefasGerais=(cfg.tarefasGerais||[]).filter(t=>t.crmEmpresaId!==id);
+    // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais) em vez de
+    // _fbSaveCfg(cfg) do documento inteiro.
     try{
-      if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+      await window._fbTxTarefasGerais(tarefas=>tarefas.filter(t=>t.crmEmpresaId!==id));
       localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
     }catch(err){console.error('Erro ao excluir tarefas do negócio excluído:',err);}
     _refreshTarefasBadge();
