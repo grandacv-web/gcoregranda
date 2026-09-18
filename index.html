@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-17.4';</script>
+<script>const APP_BUILD_VERSION='2026-09-18.3';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -4889,14 +4889,48 @@ window._fbWatchCrmEmpresas=(cb,errCb)=>onSnapshot(collection(db,'crmEmpresas'),c
 // qualquer erro de validação vira um toast vermelho explicando o problema, e a função sempre
 // devolve uma promise (nunca lança na hora), então quem encadeia .catch() nela também nunca
 // mais quebra por causa disso.
+// Blindagem contra sobrescrever campos já protegidos por escrita atômica (2026-09-18, a
+// pedido do usuário: "as tarefas que o usuario coloca somem... so as minhas adm ficam...
+// preciso que nao sejam perdidas nenhuma tarefas" + "confira tambem se ta correta a baixa,
+// quando um usuario dar baixa dizer que conclui ela não pode voltar para a lista de serem
+// feitas"). Causa raiz: mesmo depois do patch de 2026-09-17 ter movido as 8 funções que
+// MEXEM em tarefas pra escrita atômica via transação (ver window._fbTxTarefasGerais
+// abaixo), ainda existem 141 chamadas de _fbSaveCfg(cfg) espalhadas pelo sistema inteiro —
+// uma pra CADA tela/ação que salva QUALQUER outra configuração (motivo de adiamento,
+// centro de custo, extra de gráfico, etc.), sem relação nenhuma com tarefas — e TODAS elas
+// passam o `cfg` inteiro como está na memória local daquele navegador naquele instante,
+// incluindo cfg.tarefasGerais. Se o navegador do admin (aberto o dia inteiro) ainda não
+// tiver recebido via onSnapshot a tarefa que outro usuário acabou de criar/concluir noutra
+// aba, e QUALQUER uma dessas 141 ações disparar logo depois, o setDoc SEM merge reescrevia
+// o documento inteiro com a versão desatualizada — apagando a tarefa nova ou devolvendo pra
+// "pendente" uma que tinha acabado de ser concluída. Por isso só as tarefas do próprio
+// admin "ficavam": eram as únicas que o cfg local dele já continha atualizadas.
+// Correção: tarefasGerais/pagConf/usuarioNomes/usuarioCats/usuarioMenus já têm caminho de
+// escrita atômica dedicado (ver _fbTxTarefasGerais/_fbUpdatePagConf/_fbUpdateUsuario/
+// _fbRemoveUsuario) — então _fbSaveCfg passa a rodar dentro de uma TRANSAÇÃO que lê o valor
+// atual do SERVIDOR pra esses 5 campos e regrava eles (nunca o que está na memória local,
+// não importa quão desatualizado esteja). Os outros ~150 campos de cfg continuam sendo
+// salvos exatamente como antes — mesmo setDoc do documento inteiro com o que está no `data`
+// recebido, preservando inclusive deleções de chave aninhada feitas localmente antes de
+// chamar isso aqui (ex.: delete cfg.comissaoPagaFora[confKey]) — só os 5 campos já
+// blindados saem da jogada.
 window._fbSaveCfg=(data)=>{
-  try{
-    return setDoc(doc(db,'sistema','config'),data);
-  }catch(e){
-    console.error('_fbSaveCfg: setDoc() lançou erro síncrono (dado inválido pro Firestore) — nada foi salvo no servidor',e);
+  return runTransaction(db,async(tx)=>{
+    const ref=doc(db,'sistema','config');
+    const snap=await tx.get(ref);
+    const atual=(snap.exists()&&snap.data())||{};
+    const safeData={...data};
+    safeData.tarefasGerais=atual.tarefasGerais||[];
+    safeData.pagConf=atual.pagConf||{};
+    safeData.usuarioNomes=atual.usuarioNomes||{};
+    safeData.usuarioCats=atual.usuarioCats||{};
+    safeData.usuarioMenus=atual.usuarioMenus||{};
+    tx.set(ref,safeData);
+  }).catch(e=>{
+    console.error('_fbSaveCfg: falhou (dado inválido pro Firestore, ou erro de transação) — nada foi salvo no servidor',e);
     if(typeof toast==='function')toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — sua alteração pode não ter sido salva pra todo mundo, avise o Guilherme.','terr');
     return Promise.reject(e);
-  }
+  });
 };
 window._fbLoadCfg=()=>getDocs(collection(db,'sistema')).then(snap=>{const d=snap.docs.find(x=>x.id==='config');return d?d.data():null;});
 window._fbWatchCfg=(cb)=>onSnapshot(doc(db,'sistema','config'),snap=>{if(snap.exists())cb(snap.data());});
@@ -34011,7 +34045,7 @@ function renderTarefasComerciais(){
   // Adiar/Aprovar/Reprovar/Devolver/Excluir saíram da lista e foram morar só no detalhe
   // (abrirDetalheTarefa(), que já mostrava tudo isso — não mudou nada lá). Só o check de
   // Concluir/Reabrir continua na lista, pra não precisar abrir o detalhe pra ação mais comum.
-  body.innerHTML=lista.map(t=>{
+  const renderLinhaTarefa=(t)=>{
     const atrasada=_tarefaAtrasada(t);
     // Quadradinho de status/ação à esquerda (2026-09-16, a pedido do usuário: "quero um
     // check quadradinho" — antes era um círculo): vazio e clicável (concluir) em Pendentes,
@@ -34055,7 +34089,28 @@ function renderTarefasComerciais(){
       </div>
       <div style="color:#cbd5e1;font-size:.9rem;flex-shrink:0">›</div>
     </div>`;
-  }).join('');
+  };
+  // Agrupamento visual ATRASADAS / PRÓXIMAS (2026-09-18, a pedido do usuário: "lista de
+  // tarefas, fazer um titulo para ATRASADAS e outro para PRÓXIMAS ajudando o usuario a
+  // organizar melhor visualmente") — só faz sentido na aba Pendentes: é a única em que
+  // "atrasada" x "a vencer" descreve o que ainda falta fazer (em Aguardando Aprovação e
+  // Concluídas a tarefa já foi cumprida, então esse recorte não ajuda em nada). Reaproveita
+  // _tarefaAtrasada(t), a mesma função que já pinta a borda vermelha e o texto "vencida" de
+  // cada linha — então a contagem de cada título bate exatamente com o que o usuário já via
+  // linha a linha. A ordenação dentro de cada grupo continua sendo a de
+  // getTarefasComerciaisPendentes() (prazo mais próximo primeiro, sem prazo por último) —
+  // só divide a lista já ordenada em dois blocos, não reordena nada.
+  if(pendente){
+    const listaAtrasadas=lista.filter(t=>_tarefaAtrasada(t));
+    const listaProximas=lista.filter(t=>!_tarefaAtrasada(t));
+    const tituloGrupo=(txt,cor,bg,qtd,primeiro)=>`<div style="display:flex;align-items:center;gap:6px;margin:${primeiro?'0 0 8px':'18px 0 8px'};padding-bottom:4px;border-bottom:2px solid ${bg};font-size:.74rem;font-weight:800;letter-spacing:.02em;color:${cor}">${txt} <span style="color:#94a3b8;font-weight:700">(${qtd})</span></div>`;
+    let html='';
+    if(listaAtrasadas.length)html+=tituloGrupo('⚠️ ATRASADAS','#dc2626','#fecaca',listaAtrasadas.length,true)+listaAtrasadas.map(renderLinhaTarefa).join('');
+    if(listaProximas.length)html+=tituloGrupo('🗓️ PRÓXIMAS','#0369a1','#bae6fd',listaProximas.length,!listaAtrasadas.length)+listaProximas.map(renderLinhaTarefa).join('');
+    body.innerHTML=html;
+  } else {
+    body.innerHTML=lista.map(renderLinhaTarefa).join('');
+  }
 }
 // Check discreto da lista (2026-09-08) — marca/reabre direto sem passar pelo detalhe
 // (abrirDetalheTarefa continua com o botão "grande" de sempre, pra quem preferir usar de
@@ -34181,8 +34236,26 @@ function abrirDetalheTarefa(tarefaId){
 // Abre o modal de adiamento pra uma tarefa específica (achada em _tarefasListaAtual, igual
 // abrirDetalheTarefa()) — pré-preenche o prazo atual como referência e ajusta o aviso
 // conforme quem está pedindo é admin (aprova na hora) ou não (fica pendente).
+// Acha uma tarefa pelo id em qualquer uma das origens possíveis (2026-09-18, a pedido do
+// usuário: "PRO usuario Julio cesar nao aparece a opção de adiar" — Julio via a tarefa
+// através do card do CRM, não da tela Ferramentas → Tarefas, então _tarefasListaAtual
+// (populada só por renderTarefasComerciais()) estava vazia/desatualizada ali e o modal de
+// Adiar dava "Tarefa não encontrada" silenciosamente). Tenta primeiro a lista já
+// renderizada (mais rápido, já é a cópia "oficial" quando existe), senão cai pra
+// pedidos[].tarefasComerciais (tarefa de pedido) ou cfg.tarefasGerais (avulsa/CRM) — as
+// mesmas duas origens que getTarefasComerciaisPendentes() já mescla.
+function _acharTarefaPorId(pedidoId,tarefaId){
+  const naLista=_tarefasListaAtual.find(x=>x.id===tarefaId);
+  if(naLista)return naLista;
+  if(pedidoId){
+    const p=pedidos.find(x=>x.id===pedidoId);
+    const naPedido=p&&p.tarefasComerciais&&p.tarefasComerciais.find(x=>x.id===tarefaId);
+    if(naPedido)return naPedido;
+  }
+  return (cfg.tarefasGerais||[]).find(x=>x.id===tarefaId)||null;
+}
 function abrirAdiarTarefa(pedidoId,tarefaId){
-  const t=_tarefasListaAtual.find(x=>x.id===tarefaId);
+  const t=_acharTarefaPorId(pedidoId,tarefaId);
   if(!t){toast('Tarefa não encontrada (a lista pode ter mudado) — atualize e tente de novo','terr');return;}
   if(!_podeMexerNaTarefa(t.responsavel)){toast('Só o responsável ou um administrador pode adiar esta tarefa','terr');return;}
   const elP=document.getElementById('tf-adiar-pedido-id');if(elP)elP.value=pedidoId||'';
@@ -40578,17 +40651,25 @@ function _crmRenderCard(e){
     return concA===concB?(a.prazoTarefa||'').localeCompare(b.prazoTarefa||''):(concA?1:-1);
   });
   const hojeIso=new Date().toISOString().slice(0,10);
+  // Botão "⏳ Adiar" e badge de adiamento pendente (2026-09-18, a pedido do usuário: "PRO
+  // usuario Julio cesar nao aparece a opção de adiar") — essa lista de tarefas do card
+  // (diferente da tela Ferramentas > Tarefas, ver abrirDetalheTarefa()) nunca teve a opção
+  // de adiar, desde que foi criada — quem só mexe nas próprias tarefas por aqui (em vez de
+  // ir em Ferramentas > Tarefas) nunca conseguia solicitar adiamento nenhum. Reaproveita
+  // abrirAdiarTarefa()/_tarefaAdiamentoBadges() já usados na tela de Tarefas — mesmo modal,
+  // mesma regra de aprovação (usuário comum pede, admin aprova; admin já entra aprovado).
   const tarefasHtml=tarefas.length?tarefas.map(t=>{
     const concluida=t.status==='concluida';
     const aguardando=t.status==='aguardando_aprovacao';
     const atrasada=!concluida&&!aguardando&&t.prazoTarefa&&t.prazoTarefa<hojeIso;
     return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:1px solid ${atrasada?'#fecaca':'var(--border-lt)'};border-radius:8px;margin-bottom:6px;${concluida?'opacity:.6':''}">
       <div style="min-width:0;font-size:.78rem">
-        <div style="font-weight:700;color:var(--ink)">${_CRM_TIPO_ICONE[t.crmCategoria]||'📌'} ${t.tipo||''}${aguardando?' <span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:1px 8px;font-size:.6rem;font-weight:700;margin-left:4px;white-space:nowrap">🔍 Aguardando aprovação</span>':''}</div>
+        <div style="font-weight:700;color:var(--ink)">${_CRM_TIPO_ICONE[t.crmCategoria]||'📌'} ${t.tipo||''}${aguardando?' <span style="background:#e0f2fe;color:#0369a1;border-radius:20px;padding:1px 8px;font-size:.6rem;font-weight:700;margin-left:4px;white-space:nowrap">🔍 Aguardando aprovação</span>':''}${!concluida?' '+_tarefaAdiamentoBadges(t,!aguardando):''}</div>
         <div style="color:var(--ink4);font-size:.7rem;margin-top:1px">${t.prazoTarefa?fmtDH(t.prazoTarefa,t.horaTarefa):'sem data'}${t.crmDecisorNome?' · 👤 '+t.crmDecisorNome:''}${concluida?' · concluída em '+_fmtDataHora(t.concluidaEm):''}</div>
       </div>
       <div style="display:flex;gap:5px;flex-shrink:0">
         ${!concluida&&!aguardando?`<button onclick="crmConcluirTarefa('${e.id}','${t.id}',true)" title="Concluir" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:5px 8px;font-size:.7rem;cursor:pointer">✅</button>`:''}
+        ${!concluida&&!aguardando&&!t.adiamentoPendente?`<button onclick="abrirAdiarTarefa('','${t.id}')" title="Adiar" style="background:#fff7ed;color:#c2410c;border:1.5px solid #fed7aa;border-radius:6px;padding:5px 8px;font-size:.7rem;cursor:pointer">⏳</button>`:''}
         ${concluida?`<button onclick="crmConcluirTarefa('${e.id}','${t.id}',false)" title="Reabrir" style="background:#f1f5f9;color:#475569;border:none;border-radius:6px;padding:5px 8px;font-size:.7rem;cursor:pointer">↩️</button>`:''}
         <button onclick="crmExcluirTarefa('${e.id}','${t.id}')" title="Excluir" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:6px;padding:5px 8px;font-size:.7rem;cursor:pointer">🗑️</button>
       </div>
