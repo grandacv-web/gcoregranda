@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-18.7';</script>
+<script>const APP_BUILD_VERSION='2026-09-18.10';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -9059,6 +9059,14 @@ function getTabs(){
   return t;
 }
 
+function _qualidadeTipoDefault(){
+  // Perfil QUALIDADE (2026-09-08) só pode emitir Garantia/Retrabalho ou Interno —
+  // pedido do usuário (2026-09-18): "quando abrir já tem que selecionar uma dessas
+  // opções", pra nunca abrir o formulário com o campo obrigatório "1. Tipo do Pedido"
+  // em branco pra esse perfil (mesma condição já usada pra restringir as opções
+  // visíveis, ver renderStep('conselho')).
+  return(_isSetorUser('QUALIDADE')&&!_getUserCat().isAdm)?'Garantia / Retrabalho':'';
+}
 async function openEmissao(eid2){
   // VER uma venda/emissão já emitida (reabrir pra consulta, "Ver/Editar" do Conselho, "Editar"
   // de Ver Detalhes, "Completar" de pendências) fica liberado pra qualquer usuário comercial —
@@ -9102,7 +9110,7 @@ async function openEmissao(eid2){
       if(mt2)return{idx:parseInt(mt2[1],10),date:'',val:pv};
       return null;
     }).filter(Boolean).sort((a,b)=>a.idx-b.idx);
-    ed={tipo:p.tipo,resp:p.responsavel,cli:p.cliente,emails:[...(p.emails||[])],email_comprador:p.email_comprador||(p.emails||[])[0]||'',email_engenheiro:p.email_engenheiro||(p.emails||[])[1]||'',email_financeiro:p.email_financeiro||'',job:p.job,prazo:p.prazo,os:p.os,obs:p.obs,
+    ed={tipo:p.tipo||_qualidadeTipoDefault(),resp:p.responsavel,cli:p.cliente,emails:[...(p.emails||[])],email_comprador:p.email_comprador||(p.emails||[])[0]||'',email_engenheiro:p.email_engenheiro||(p.emails||[])[1]||'',email_financeiro:p.email_financeiro||'',job:p.job,prazo:p.prazo,os:p.os,obs:p.obs,
       etapa:p.etapa,tipoPedido:p.tipoPedido||'',vtotal:toFmtEd(v['Valor Bruto']||v['Valor Total']),vmed:toFmtEd(inst['Valor da Medição']),vart:toFmtEd(proj['Valor da ART']),vlaudo:toFmtEd(proj['Valor do Laudo Técnico']),
       // i_tipo/medicao/f_tipo liam a chave errada (v['Instalação']/v['Medição Técnica']/
       // v['Frete'] nunca são gravadas — ver _buildPedidoBaseDoEd, que grava em
@@ -9179,7 +9187,7 @@ async function openEmissao(eid2){
       conselhoData:p.conselhoData||'',conselhoEscopo:p.conselhoEscopo||'',conselhoEscopoObs:p.conselhoEscopoObs||'',
       conselhoAssin:p.conselhoAssinatura||'',conselhoWpp:p.conselhoLinkWpp||'',conselhoGrupoWpp:p.conselhoGrupoWpp||'',conselhoClienteProv:p.conselhoClienteProvisorio||''};
   } else {
-    ed={tipo:'',resp:usuarioLogado?.nomeExibicao||'',cli:'',emails:[],email_comprador:'',email_engenheiro:'',email_financeiro:'',job:'',prazo:'',os:'',obs:'',
+    ed={tipo:_qualidadeTipoDefault(),resp:usuarioLogado?.nomeExibicao||'',cli:'',emails:[],email_comprador:'',email_engenheiro:'',email_financeiro:'',job:'',prazo:'',os:'',obs:'',
       conselhoData:'',conselhoEscopo:'',conselhoEscopoObs:'',conselhoAssin:'',conselhoWpp:'',conselhoGrupoWpp:'',conselhoClienteProv:'',
       vtotal:'',i_tipo:'',vinst:'',vmob:'',vrem:'',remocao:'',f_tipo:'',fmod:'',vfrete:'',vmed:'',vart:'',vlaudo:'',
       elevacoes:'',elev_tipo:'',elevs:[],velev:'',elevBloqVia:'',remocoes:[],medicao:'',
@@ -20768,7 +20776,13 @@ function _plPedidosElegiveis(){
     if(!p.origemComercial||p.importadoPlanilha)return false;
     const temInst=moneyToNum((p.instalacao&&p.instalacao['Valor da Instalação'])||'0')>0.005;
     const temFrete=moneyToNum((p.frete&&p.frete['Valor do Frete'])||'0')>0.005;
-    return temInst||temFrete;
+    // Medição Técnica sozinha também é responsabilidade de Planejamento (2026-09-18, a
+    // pedido do usuário) — antes um pedido só com Medição (sem Instalação nem Frete
+    // cobrados) nunca entrava na lista de Finalização de Obra, mesmo a Medição sendo
+    // tarefa do time de Planejamento (mesmo critério já usado em Lista de Pedidos/
+    // Etapas de Confecção, ver _lpTemMedicao()).
+    const temMedicao=(p.instalacao&&p.instalacao['Medição Técnica'])==='Sim';
+    return temInst||temFrete||temMedicao;
   });
 }
 
@@ -37062,6 +37076,19 @@ const PROSP_ETAPAS_DEFAULT=[
 function _prospEtapas(){
   return (cfg.prospEtapas&&cfg.prospEtapas.length)?cfg.prospEtapas:PROSP_ETAPAS_DEFAULT;
 }
+// Card com etapa salva que não existe mais no funil atual (funil customizado em "⚙️ Etapas do
+// Funil" depois de o card ser criado, ou campo vazio) é tratado como se estivesse na PRIMEIRA
+// etapa — nunca invisível (2026-09-18, revisão pedida pelo usuário: "nao permitir que nenhum
+// card suma do funil do sistema seja ele prospecção ou comercial crm"). Mesmo padrão/nome já
+// usado no CRM Comercial (ver _crmEtapaEfetiva) — antes desta revisão, esse cálculo só existia
+// como função LOCAL dentro de renderCrmKanban() (correção de 2026-09-16, só pro CRM); a
+// Prospecção nunca tinha recebido proteção nenhuma — um card com etapa desconhecida
+// simplesmente não aparecia em NENHUMA coluna do Kanban, sumindo da tela sem erro nenhum.
+function _prospEtapaEfetiva(e){
+  const etapas=_prospEtapas();
+  const chavesValidas=new Set(etapas.map(et=>et.key));
+  return(e.etapa&&chavesValidas.has(e.etapa))?e.etapa:etapas[0].key;
+}
 async function _prospSalvarEtapas(etapas){
   cfg.prospEtapas=etapas;
   try{
@@ -37222,7 +37249,7 @@ function renderProspKanban(){
   const empresas=_prospEmpresasFiltradas(busca);
   const etapas=_prospEtapas();
   wrap.innerHTML=etapas.map(et=>{
-    const itens=empresas.filter(e=>(e.etapa||etapas[0].key)===et.key);
+    const itens=empresas.filter(e=>_prospEtapaEfetiva(e)===et.key);
     return `<div class="prosp-col" data-etapa="${et.key}" ondragover="prospDragOver(event)" ondragleave="prospDragLeave(event)" ondrop="prospDrop(event,'${et.key}')">
       <div style="padding:10px 12px;border-bottom:2px solid var(--brand);font-size:.73rem;font-weight:800;color:var(--ink2);display:flex;justify-content:space-between;align-items:center;gap:6px">
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${et.label}">${et.label}</span>
@@ -38615,7 +38642,7 @@ function _prospIndicadoresDados(){
   const atencao=comSaude.filter(x=>x.s.nivel==='amarelo').sort((a,b)=>b.s.dias-a.s.dias);
   const mediaDias=total?Math.round(comSaude.reduce((s,x)=>s+x.s.dias,0)/total):0;
   const etapas=_prospEtapas();
-  const porEtapa=etapas.map(et=>({label:et.label,qtd:empresas.filter(e=>(e.etapa||etapas[0].key)===et.key).length}));
+  const porEtapa=etapas.map(et=>({label:et.label,qtd:empresas.filter(e=>_prospEtapaEfetiva(e)===et.key).length}));
   // Produtividade por responsável — inclui todo mundo elegível (equipe PROSPECÇÃO+admin)
   // mesmo com 0 empresas ainda, MAIS qualquer nome que já tenha empresa atribuída (cobre
   // gente que trocou de categoria/saiu da equipe mas ainda tem cards em aberto).
@@ -38998,6 +39025,18 @@ function _crmEtapaExigeTarefaProximoPasso(etapaKey){
 // pendente. Consumida por _crmFecharModalTarefa() (fricção ao tentar fechar sem salvar) e
 // limpa em crmSalvarTarefa() assim que a tarefa é salva com sucesso.
 let _crmTarefaObrigatoriaEmpresaId=null;
+// Card com etapa salva que não existe mais no funil atual (funil customizado em "⚙️ Etapas do
+// Funil" depois de o card ser criado, ou campo vazio) é tratado como se estivesse na PRIMEIRA
+// etapa — nunca invisível (2026-09-16, correção original só dentro de renderCrmKanban();
+// promovida a função global em 2026-09-18 numa revisão pedida pelo usuário: "nao permitir que
+// nenhum card suma do funil do sistema seja ele prospecção ou comercial crm", pra também
+// proteger o gráfico "por etapa" dos Indicadores, que ainda usava a comparação antiga sem
+// fallback e sub-contava card com etapa desconhecida).
+function _crmEtapaEfetiva(e){
+  const etapas=_crmEtapas();
+  const chavesValidas=new Set(etapas.map(et=>et.key));
+  return(e.etapa&&chavesValidas.has(e.etapa))?e.etapa:etapas[0].key;
+}
 async function _crmSalvarEtapas(etapas){
   cfg.crmEtapas=etapas;
   try{
@@ -39488,14 +39527,13 @@ function renderCrmKanban(){
   const busca=document.getElementById('crm-kanban-busca')?.value||'';
   const empresas=_crmEmpresasFiltradas(busca);
   const etapas=_crmEtapas();
-  const chavesValidasCrm=new Set(etapas.map(et=>et.key));
   const _nomeAtualKanban=(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
   // Etapa salva que não existe mais na config atual (funil customizado depois de a empresa
   // ser cadastrada) cai direto na PRIMEIRA coluna do funil — mesma regra já usada pra etapa
   // vazia — em vez de sumir da tela ou de ganhar uma coluna própria de aviso (removida
   // 2026-09-16 a pedido do usuário: "o usuario tem que selecionar uma etapa que existe e
-  // ponto final").
-  const _crmEtapaEfetiva=e=>(e.etapa&&chavesValidasCrm.has(e.etapa))?e.etapa:etapas[0].key;
+  // ponto final"). _crmEtapaEfetiva agora é função global (2026-09-18, ver definição acima),
+  // reaproveitada também pelo gráfico "por etapa" dos Indicadores.
   let htmlColunas=etapas.map(et=>{
     let itens=empresas.filter(e=>_crmEtapaEfetiva(e)===et.key);
     // Fila FIFO na etapa ORÇAMENTO (2026-09-11, a pedido do usuário: "ordene os cards por
@@ -42514,7 +42552,7 @@ function _crmIndicadoresDados(vendedorFiltro){
   const atencao=comSaude.filter(x=>x.s.nivel==='amarelo').sort((a,b)=>b.s.dias-a.s.dias);
   const mediaDias=total?Math.round(comSaude.reduce((s,x)=>s+x.s.dias,0)/total):0;
   const etapas=_crmEtapas();
-  const porEtapa=etapas.map(et=>({label:et.label,qtd:empresas.filter(e=>(e.etapa||etapas[0].key)===et.key).length}));
+  const porEtapa=etapas.map(et=>({label:et.label,qtd:empresas.filter(e=>_crmEtapaEfetiva(e)===et.key).length}));
   // Produtividade por responsável — inclui todo mundo elegível (equipe COMERCIAL+admin,
   // ver _crmNomesEquipe()) mesmo com 0 empresas ainda, MAIS qualquer nome que já tenha
   // empresa atribuída (cobre gente que trocou de categoria/saiu da equipe mas ainda tem
