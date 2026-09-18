@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-18.6';</script>
+<script>const APP_BUILD_VERSION='2026-09-18.7';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -2179,6 +2179,7 @@ select.fc{cursor:pointer}
       </div>
       <div id="prod-sec-lista">
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <button onclick="prodExportarListaExcel()" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Exportar Excel</button>
           <button onclick="prodExportarListaPDF()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
         </div>
         <div id="prod-body"></div>
@@ -2203,6 +2204,10 @@ select.fc{cursor:pointer}
             <option value="todos">Todos os Meses</option>
           </select>
         </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+          <button onclick="prodExportarKanbanExcel()" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Exportar Excel</button>
+          <button onclick="prodExportarKanbanPDF()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
+        </div>
         <div style="padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
           <span style="font-size:.78rem;color:#166534;font-weight:700">💰 Total líquido a produzir no período selecionado</span>
           <span id="prod-dias-total" style="font-size:1.05rem;color:#166534;font-weight:800">—</span>
@@ -2218,6 +2223,10 @@ select.fc{cursor:pointer}
             <button onclick="prodCalMov(-1)" type="button">◀</button>
             <div class="dash-mes-label" id="prod-cal-lbl" style="min-width:150px"></div>
             <button onclick="prodCalMov(1)" type="button">▶</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button onclick="prodExportarCalendarioExcel()" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Exportar Excel</button>
+            <button onclick="prodExportarCalendarioPDF()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
           </div>
         </div>
         <div id="prod-cal-body"></div>
@@ -23038,6 +23047,34 @@ function _prodFiltrosResumoTexto(){
   }
   return partes.length?partes.join('  ·  '):'Sem filtro (todos os pedidos, exceto concluídos)';
 }
+// Excel da Lista (2026-09-18, a pedido do usuário: "na produção quero poder exportar em pdf
+// ou excel qualquer visualização do pipeline, seja lista, kanban ou calendario") — mesmos
+// pedidos/filtros de _prodListaFiltrada() (igual ao PDF logo abaixo), mas com TODAS as colunas
+// que já aparecem na tela (Tipo/Conselho/Emissão/Valor Produzido/Dias Úteis/Horas Úteis
+// inclusive — o PDF existente tem só um subconjunto, não foi alterado).
+function prodExportarListaExcel(){
+  const infos=_prodListaFiltrada();
+  if(!infos.length){toast('Nenhum pedido encontrado com esses filtros para exportar','terr');return;}
+  const hojeIso=new Date().toISOString().slice(0,10),agora=new Date();
+  const statusTxtMap={nao_iniciado:'Não iniciado',andamento:'Em andamento',atrasado:'Atrasado',concluido:'Concluído'};
+  const headers=['OS','Cliente','JOB','Tipo','Conselho','Emissão','Prazo Produção','Prazo Final','Checklist','Valor Produzido','Valor Total','% Valor','Dias Úteis','Horas Úteis','Status'];
+  const body=infos.map(x=>{
+    const{p,etapa,feitos,totalItens,statusPedido,valorLiquidoTotal,pctValor,valorLiquidoProduzido}=x;
+    const diasUteis=_prodDiasUteisEntreHojeE(hojeIso,etapa.iso);
+    const fimDiaEtapa=new Date((etapa.iso||hojeIso)+'T23:59:59');
+    const horasUteis=etapa.iso&&etapa.iso>hojeIso?_horasUteisEntre(agora,fimDiaEtapa):0;
+    return[
+      p.os||'',p.cliente||'',p.job||'',p.tipo||'',p.conselhoData?fmtD(p.conselhoData):'',p.emissaoEm?fmtD(p.emissaoEm):'',
+      fmtD(etapa.iso),p.prazo?fmtD(p.prazo):'',feitos.toFixed(1).replace(/\.0$/,'')+'/'+totalItens,
+      _fmtValorPdf(valorLiquidoProduzido),_fmtValorPdf(valorLiquidoTotal),Math.round(pctValor)+'%',
+      statusPedido==='atrasado'?'Atrasado':diasUteis+' dias',
+      statusPedido==='atrasado'?'':horasUteis.toFixed(1).replace(/\.0$/,'')+'h',
+      statusTxtMap[statusPedido]||statusPedido
+    ];
+  });
+  _csvDownload(`producao_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
 async function prodExportarListaPDF(){
   if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
   const{jsPDF}=window.jspdf;
@@ -23136,6 +23173,111 @@ function prodDiasNav(dir){
 }
 function prodDiasHoje(){_prodDiasView.refIso=new Date().toISOString().slice(0,10);renderProdDias();}
 function prodDiasSetPeriodo(p){_prodDiasView.periodo=p;renderProdDias();}
+// Exportação da aba "🗂️ Kanban" (2026-09-18, a pedido do usuário: "na produção quero poder
+// exportar em pdf ou excel qualquer visualização do pipeline, seja lista, kanban ou
+// calendario") — essa aba é, na verdade, a visão de colunas-por-DIA com capacidade R$/dia
+// (renderProdDias/_prodDiasView, ver comentário grande acima), diferente do Kanban por ETAPA
+// da Lista de Pedidos (lpExportarKanbanExcel/PDF) — por isso agrupa por DIA, não por etapa,
+// reaproveitando exatamente a mesma janela (dia/semana/mês/todos os meses) já selecionada na
+// tela, incluindo as reservas do Simulador (🟠 SIMULAÇÃO) que já aparecem como card ali.
+function _prodDiasAgrupados(){
+  const mapaCap=_lpMapaProducaoPorDia();
+  const eventos=_prodEventosFiltrados();
+  const{dias}=_prodDiasRange();
+  const porDia={};
+  dias.forEach(iso=>porDia[iso]=[]);
+  eventos.forEach(ev=>{if(porDia[ev.iso])porDia[ev.iso].push(ev);});
+  dias.forEach(iso=>{
+    ((mapaCap[iso]&&mapaCap[iso].itens)||[]).filter(it=>it.reserva).forEach(it=>{
+      porDia[iso].push({isSimulacao:true,reserva:it.reserva,valorChunk:it.liquido});
+    });
+  });
+  return{dias,porDia,mapaCap};
+}
+function prodExportarKanbanExcel(){
+  const{dias,porDia}=_prodDiasAgrupados();
+  const linhas=[];
+  dias.forEach(iso=>{
+    (porDia[iso]||[]).forEach(ev=>{
+      if(ev.isSimulacao){linhas.push([fmtD(iso),'SIMULAÇÃO',(ev.reserva&&ev.reserva.cliente)||'Reserva','','','',_fmtValorPdf(ev.valorChunk||0)]);return;}
+      const statusTxt=ev.statusPedido==='atrasado'?'Atrasado':ev.statusPedido==='concluido'?'Concluído':ev.statusPedido==='andamento'?'Em andamento':'Não iniciado';
+      linhas.push([fmtD(iso),'Pedido',ev.p.cliente||'',ev.p.os||'',ev.p.job||'',ev.sub&&ev.sub.label||'',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'',statusTxt]);
+    });
+  });
+  if(!linhas.length){toast('Nenhum evento encontrado no período selecionado para exportar','terr');return;}
+  const headers=['Data','Tipo','Cliente','OS','JOB','Etapa','Valor','Status'];
+  // Simulação não tem OS/JOB/Etapa/Status — normaliza pra 8 colunas mesmo assim (célula vazia).
+  const body=linhas.map(l=>l.length===7?[l[0],l[1],l[2],l[3],l[4],l[5],l[6],'']:l);
+  _csvDownload(`producao_kanban_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+async function prodExportarKanbanPDF(){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const cap=_lpCapProducaoDia();
+  const{dias,porDia,mapaCap}=_prodDiasAgrupados();
+  const diasComItens=dias.filter(iso=>(porDia[iso]||[]).length);
+  if(!diasComItens.length){toast('Nenhum evento encontrado no período selecionado para gerar o PDF.','terr');return;}
+  const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const filtrosLbl=_prodFiltrosResumoTexto();
+  const drawnFooterPages=new Set();
+  function drawHeader(){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+    doc.text('PRODUÇÃO — KANBAN',pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    const lines=doc.splitTextToSize('Filtros: '+filtrosLbl,pageW-28);
+    doc.text(lines,pageW-14,26.5,{align:'right'});
+    const lineY=27.5+(lines.length-1)*3.2;
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,lineY,pageW-14,lineY);
+    doc.setFont('helvetica','normal');
+    return lineY+6;
+  }
+  function drawFooter(pageNum){
+    if(drawnFooterPages.has(pageNum))return;
+    drawnFooterPages.add(pageNum);
+    doc.setPage(pageNum);
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
+  }
+  let curY=drawHeader();
+  diasComItens.forEach(iso=>{
+    const itens=porDia[iso];
+    const soma=(mapaCap[iso]&&mapaCap[iso].soma)||0;
+    const capInfo=_prodCorCapacidade(soma,cap);
+    const corRgb=_hexToRgb(capInfo.cor);
+    if(curY>pageH-50){doc.addPage();curY=drawHeader();}
+    doc.setFillColor(...corRgb);doc.roundedRect(14,curY,pageW-28,7,1,1,'F');
+    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(8.5);
+    doc.text(fmtD(iso)+' — '+capInfo.label+' ('+itens.length+')',18,curY+5);
+    curY+=10;
+    const head=[['Tipo','Cliente','OS','JOB','Etapa','Valor','Status']];
+    const body=itens.map(ev=>{
+      if(ev.isSimulacao)return['SIMULAÇÃO',(ev.reserva&&ev.reserva.cliente)||'Reserva','—','—','—',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'—','—'];
+      const statusTxt=ev.statusPedido==='atrasado'?'Atrasado':ev.statusPedido==='concluido'?'Concluído':ev.statusPedido==='andamento'?'Em andamento':'Não iniciado';
+      return['Pedido',ev.p.cliente||'—',ev.p.os||'—',ev.p.job||'—',(ev.sub&&ev.sub.label)||'—',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'—',statusTxt];
+    });
+    doc.autoTable({
+      startY:curY,head,body,theme:'grid',
+      styles:{fontSize:7,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.6},
+      headStyles:{fillColor:LIGHT,textColor:[51,65,85],fontStyle:'bold',fontSize:7},
+      margin:{top:32,left:14,right:14,bottom:20},
+      didDrawPage:()=>{drawFooter(doc.internal.getNumberOfPages());}
+    });
+    curY=doc.lastAutoTable.finalY+10;
+  });
+  drawFooter(doc.internal.getNumberOfPages());
+  doc.save(`producao_kanban_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('PDF gerado!','tok');
+}
 // ===================== INDICADORES — PRODUÇÃO (2026-09-11, a pedido do usuário) =====================
 // "crie um menu INDICADORES que mostre uma lista dai por mes ou pelo periodo que o usuario
 // quiser, com essas informações tiradas ali do sistema e tal, parecido com esse que to
@@ -23534,6 +23676,120 @@ function renderProdCalendario(){
     <span>🟢 Livre</span><span style="color:#0284c7">🔵 Ocupado</span><span style="color:#d97706">🟠 Lotado</span><span style="color:#dc2626">🔴 Estourado</span>
   </div>
   <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px">${cabecalho}${celulas.join('')}</div>`;
+}
+// Exportação da aba "📅 Calendário" (2026-09-18, a pedido do usuário: "na produção quero poder
+// exportar em pdf ou excel qualquer visualização do pipeline, seja lista, kanban ou
+// calendario") — mesmo padrão de lpExportarCalendarioExcel/PDF (Lista de Pedidos, 2026-08-26):
+// Excel é uma lista simples dos eventos do mês NAVEGADO na tela (_prodCalMes, botões ◀▶);
+// PDF desenha a grade do mês de verdade. Sempre o mesmo mês/eventos que _prodEventosFiltrados()
+// já traz — nunca exporta o que não está sendo mostrado.
+function _prodEventosDoMesCalendario(){
+  const{y,m}=_prodCalMes;
+  return _prodEventosFiltrados().filter(ev=>{
+    const partes=ev.iso.split('-');
+    return parseInt(partes[0],10)===y&&parseInt(partes[1],10)===m;
+  });
+}
+function prodExportarCalendarioExcel(){
+  const eventosMes=_prodEventosDoMesCalendario();
+  if(!eventosMes.length){toast('Nenhuma etapa encontrada neste mês com esses filtros','terr');return;}
+  const ordenados=eventosMes.slice().sort((a,b)=>a.iso.localeCompare(b.iso)||String(a.p.os||'').localeCompare(String(b.p.os||''),'pt-BR',{numeric:true}));
+  const headers=['Data','OS','Cliente','JOB','Etapa','Valor','Status'];
+  const body=ordenados.map(ev=>{
+    const statusTxt=ev.statusPedido==='atrasado'?'Atrasado':ev.statusPedido==='concluido'?'Concluído':ev.statusPedido==='andamento'?'Em andamento':'Não iniciado';
+    return[fmtD(ev.iso),ev.p.os||'',ev.p.cliente||'',ev.p.job||'',(ev.sub&&ev.sub.label)||'',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'',statusTxt];
+  });
+  const{y,m}=_prodCalMes;
+  _csvDownload(`producao_calendario_${y}_${String(m).padStart(2,'0')}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+// Desenha a grade do mês manualmente (sem autoTable, célula por célula) — mesma técnica de
+// lpExportarCalendarioPDF, pra poder colorir feriado e escrever várias linhas de evento dentro
+// de cada dia.
+async function prodExportarCalendarioPDF(){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const{y,m}=_prodCalMes;
+  const eventosMes=_prodEventosDoMesCalendario();
+  if(!eventosMes.length){toast('Nenhuma etapa encontrada neste mês com esses filtros','terr');return;}
+  const porDia={};
+  eventosMes.forEach(ev=>{if(!porDia[ev.iso])porDia[ev.iso]=[];porDia[ev.iso].push(ev);});
+  const nomesFeriados=getFeriadosComNome(y);
+  const primeiroDia=new Date(y,m-1,1);
+  const diasNoMes=new Date(y,m,0).getDate();
+  const offset=primeiroDia.getDay();
+  const celulas=[];
+  for(let i=0;i<offset;i++)celulas.push(null);
+  for(let d=1;d<=diasNoMes;d++){
+    const iso=`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    celulas.push({dia:d,iso,eventos:porDia[iso]||[],feriado:nomesFeriados[iso]||null});
+  }
+  while(celulas.length%7!==0)celulas.push(null);
+  const semanas=[];
+  for(let i=0;i<celulas.length;i+=7)semanas.push(celulas.slice(i,i+7));
+
+  const doc=new jsPDF({orientation:'landscape'});
+  const NAVY=[26,43,94],PINK=[233,30,99],GRAY=[100,116,139],AMBER=[180,83,9];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const filtrosLbl=_prodFiltrosResumoTexto();
+  if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+  doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+  doc.text('PRODUÇÃO — CALENDÁRIO',pageW-14,15,{align:'right'});
+  doc.setTextColor(...PINK);doc.setFontSize(10);
+  doc.text('GCORE - Sistema Granda · '+MESES_PT[m]+' '+y,pageW-14,21,{align:'right'});
+  doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+  const lines=doc.splitTextToSize('Filtros: '+filtrosLbl,pageW-28);
+  doc.text(lines,pageW-14,26.5,{align:'right'});
+  const lineY=27.5+(lines.length-1)*3.2;
+  doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,lineY,pageW-14,lineY);
+
+  const startY=lineY+8;
+  const marginX=10;
+  const gridW=pageW-marginX*2;
+  const colW=gridW/7;
+  const rowH=(pageH-startY-14)/semanas.length;
+  const diasSemana=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(...NAVY);
+  diasSemana.forEach((d,i)=>{doc.text(d,marginX+i*colW+colW/2,startY-1,{align:'center'});});
+  let curY=startY;
+  semanas.forEach(semana=>{
+    semana.forEach((cel,i)=>{
+      const x=marginX+i*colW;
+      doc.setDrawColor(226,232,240);doc.setLineWidth(.2);
+      if(cel&&cel.feriado){doc.setFillColor(254,243,199);doc.rect(x,curY,colW,rowH,'FD');}
+      else doc.rect(x,curY,colW,rowH,'S');
+      if(!cel)return;
+      doc.setFont('helvetica','bold');doc.setFontSize(7.5);
+      if(cel.feriado)doc.setTextColor(...AMBER);else doc.setTextColor(51,65,85);
+      doc.text(String(cel.dia),x+2,curY+4.5);
+      let ly=curY+8.5;
+      const maxLinhas=Math.max(1,Math.floor((rowH-9)/3.2));
+      if(cel.feriado){
+        doc.setFont('helvetica','bold');doc.setFontSize(5.6);doc.setTextColor(...AMBER);
+        doc.splitTextToSize('Feriado: '+cel.feriado,colW-4).slice(0,maxLinhas).forEach(linha=>{doc.text(linha,x+2,ly);ly+=3.2;});
+      } else {
+        doc.setFont('helvetica','normal');doc.setFontSize(5.4);
+        cel.eventos.slice(0,maxLinhas).forEach(ev=>{
+          doc.setTextColor(..._hexToRgb(_projStatusCor(ev.statusPedido)));
+          const txt=(ev.p.os||'—')+'·'+((ev.sub&&ev.sub.label)||'');
+          doc.text(doc.splitTextToSize(txt,colW-4)[0],x+2,ly);
+          ly+=3.2;
+        });
+        if(cel.eventos.length>maxLinhas){
+          doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');
+          doc.text('+'+(cel.eventos.length-maxLinhas)+' outro(s)',x+2,ly);
+        }
+      }
+    });
+    curY+=rowH;
+  });
+  doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(marginX,pageH-10,pageW-marginX,pageH-10);
+  doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(...GRAY);
+  doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',marginX,pageH-5);
+  doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR'),pageW-marginX,pageH-5,{align:'right'});
+  doc.save(`producao_calendario_${y}_${String(m).padStart(2,'0')}.pdf`);
+  toast('PDF gerado!','tok');
 }
 function prodAbrirDia(iso){
   const eventos=_prodEventosFiltrados().filter(ev=>ev.iso===iso);
