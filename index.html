@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-18.5';</script>
+<script>const APP_BUILD_VERSION='2026-09-18.6';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -3449,7 +3449,7 @@ select.fc{cursor:pointer}
 <div class="mvmod" style="width:420px;max-width:96vw">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
     <h3 style="margin-bottom:0" id="crm-tarefa-modal-titulo">🗓️ Nova Tarefa</h3>
-    <button onclick="fecharJanela('mo-crm-tarefa')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+    <button onclick="_crmFecharModalTarefa()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
   </div>
   <input type="hidden" id="crm-tarefa-empresa-id">
   <input type="hidden" id="crm-tarefa-id">
@@ -9485,9 +9485,9 @@ document.addEventListener('keydown',function(e){
 // antes (mo-vv/mo-ev/mo-em/mo-prosp-card/mo-prosp-decisor-add/mo-prosp-msg-resposta) — agora
 // vale pra QUALQUER .mov aberto via openM(), usando a pilha _openModalStack pra sempre fechar
 // só o de cima (mesma lógica de "não fechar 2 de uma vez" que os comentários antigos citavam).
-// mo-em, mo-prosp-card e mo-crm-card continuam com tratamento especial porque têm lógica
-// própria de salvar-rascunho / checar-tarefa-futura antes de fechar
-// (closeEM()/prospTentarFecharCard()/crmTentarFecharCard()).
+// mo-em, mo-prosp-card, mo-crm-card e mo-crm-tarefa continuam com tratamento especial porque
+// têm lógica própria de salvar-rascunho / checar-tarefa-futura / exigir-próximo-passo antes de
+// fechar (closeEM()/prospTentarFecharCard()/crmTentarFecharCard()/_crmFecharModalTarefa()).
 document.addEventListener('keydown',function(e){
   if(e.key!=='Escape')return;
   if(!_openModalStack.length)return;
@@ -9495,6 +9495,7 @@ document.addEventListener('keydown',function(e){
   if(topo==='mo-em'){closeEM();return;}
   if(topo==='mo-prosp-card'){prospTentarFecharCard();return;}
   if(topo==='mo-crm-card'){crmTentarFecharCard();return;}
+  if(topo==='mo-crm-tarefa'){_crmFecharModalTarefa();return;}
   fecharJanela(topo);
 });
 
@@ -38720,6 +38721,27 @@ function _crmEtapaExigeProposta(etapaKey){
   if(idxApr===-1||idxSel===-1)return true;
   return idxSel>=idxApr;
 }
+// Card CRIADO já a partir de PROPOSTA APRESENTADA (ou etapa depois dela) exige uma tarefa com
+// o próximo passo da negociação (2026-09-18, a pedido do usuário: "NA CRIAÇÃO de um card a
+// partir de proposta apresentada, precisa pedir pro usuario deixar cadastrada ja uma tarefa
+// com o proximo passo para avançar na negociação"). Mesmo padrão de comparação por ÍNDICE de
+// _crmEtapaExigeProposta logo acima, mas usando 'proposta_apresentada' como referência — cobre
+// também as etapas seguintes do funil padrão (FOLLOW-UP, QUENTES) e continua funcionando se o
+// admin customizar o funil em ⚙️ Etapas do Funil. Se a etapa de referência não existir mais na
+// lista, ou a etapa consultada não for encontrada, assume o comportamento mais seguro (sempre
+// exige) — mesmo fallback de _crmEtapaExigeProposta.
+function _crmEtapaExigeTarefaProximoPasso(etapaKey){
+  const etapas=_crmEtapas();
+  const idxProp=etapas.findIndex(x=>x.key==='proposta_apresentada');
+  const idxSel=etapas.findIndex(x=>x.key===etapaKey);
+  if(idxProp===-1||idxSel===-1)return true;
+  return idxSel>=idxProp;
+}
+// Guarda o id da empresa recém-criada enquanto a tarefa de próximo passo obrigatória (ver
+// _crmEtapaExigeTarefaProximoPasso acima) ainda não foi salva — null quando não há exigência
+// pendente. Consumida por _crmFecharModalTarefa() (fricção ao tentar fechar sem salvar) e
+// limpa em crmSalvarTarefa() assim que a tarefa é salva com sucesso.
+let _crmTarefaObrigatoriaEmpresaId=null;
 async function _crmSalvarEtapas(etapas){
   cfg.crmEtapas=etapas;
   try{
@@ -41550,6 +41572,39 @@ async function crmSalvarMensagemResposta(){
 }
 
 // ── TAREFAS (agendadas a partir de um card) ─────────────────────────────────────────
+// Abre o modal de Nova Tarefa já pré-preenchido pra uma empresa RECÉM-CRIADA, usando o
+// objeto `e` que crmSalvarEmpresa() já tem em mãos — em vez de crmAbrirNovaTarefa(empresaId),
+// que faz crmEmpresas.find(x=>x.id===empresaId) e pode não achar nada ainda: a gravação da
+// empresa (_crmSalvarEmpresaObj) só escreve no Firestore, e o array local crmEmpresas só é
+// atualizado depois, de forma assíncrona, via window._fbWatchCrmEmpresas (onSnapshot) — 2026-
+// 09-18, ver _crmEtapaExigeTarefaProximoPasso. Liga _crmTarefaObrigatoriaEmpresaId pra dar
+// fricção real (não só sugestão) contra fechar o modal sem cadastrar o próximo passo.
+function _crmAbrirTarefaObrigatoriaProximoPasso(e){
+  document.getElementById('crm-tarefa-modal-titulo').textContent='🗓️ Próximo passo da negociação';
+  document.getElementById('crm-tarefa-empresa-id').value=e.id;
+  document.getElementById('crm-tarefa-id').value='';
+  document.getElementById('crm-tarefa-tipo').value='ligar';
+  const selDec=document.getElementById('crm-tarefa-decisor');
+  selDec.innerHTML='<option value="">Sem decisor específico</option>'+(e.decisores||[]).map(d=>`<option value="${(d.nome||'').replace(/"/g,'&quot;')}">${d.nome||'—'}${d.cargo?' — '+d.cargo:''}</option>`).join('');
+  document.getElementById('crm-tarefa-titulo').value='';
+  document.getElementById('crm-tarefa-data').value=new Date().toISOString().slice(0,10);
+  const elHoraCrm=document.getElementById('crm-tarefa-hora');if(elHoraCrm)elHoraCrm.value='';
+  _crmTarefaObrigatoriaEmpresaId=e.id;
+  toast('Negócio cadastrado já em '+((_crmEtapas().find(x=>x.key===e.etapa)||{}).label||e.etapa)+' — cadastre o próximo passo pra avançar a negociação.','tok');
+  openM('mo-crm-tarefa');
+}
+// Tenta fechar o modal de Nova Tarefa — se ele estiver aberto por causa da exigência de
+// próximo passo (ver _crmAbrirTarefaObrigatoriaProximoPasso) e ainda não tiver sido salvo,
+// confirma antes de deixar fechar sem registrar nada; senão fecha normal. Mesmo padrão já
+// usado pra mo-em/mo-prosp-card/mo-crm-card (ver o document.addEventListener('keydown',...)
+// genérico logo abaixo) — chamada tanto pelo botão ✕ quanto pelo Esc.
+function _crmFecharModalTarefa(){
+  if(_crmTarefaObrigatoriaEmpresaId){
+    if(!confirm('Este negócio foi cadastrado já em etapa avançada — o próximo passo da negociação ainda não foi registrado. Fechar mesmo assim sem cadastrar a tarefa?'))return;
+    _crmTarefaObrigatoriaEmpresaId=null;
+  }
+  fecharJanela('mo-crm-tarefa');
+}
 function crmAbrirNovaTarefa(empresaId){
   const e=crmEmpresas.find(x=>x.id===empresaId);
   if(!e)return;
@@ -41594,6 +41649,10 @@ async function crmSalvarTarefa(){
   try{await window._fbTxTarefasGerais(tarefas=>{tarefas.push(novaT);return tarefas;});}
   catch(e){toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a tarefa NÃO foi salva, tente de novo.','terr');console.error(e);return;}
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  // Tarefa de próximo passo obrigatória (ver _crmEtapaExigeTarefaProximoPasso) satisfeita —
+  // libera o modal pra fechar normal daqui pra frente, sem o confirm extra de
+  // _crmFecharModalTarefa (2026-09-18).
+  if(_crmTarefaObrigatoriaEmpresaId===empresaId)_crmTarefaObrigatoriaEmpresaId=null;
   closeM('mo-crm-tarefa');
   toast('Tarefa agendada!','tok');
   if(_crmCardAtualId===empresaId)_crmRenderCard(e);
@@ -42108,6 +42167,14 @@ async function crmSalvarEmpresa(){
   if(_crmTabAtiva==='kanban')_crmRenderFunilAtivo();
   else if(_crmTabAtiva==='empresas')_crmRenderContatosSubtab();
   if(_crmCardAtualId===e.id)_crmRenderCard(e);
+  // Card CRIADO já em PROPOSTA APRESENTADA (ou etapa depois dela) exige cadastrar o próximo
+  // passo da negociação (2026-09-18, a pedido do usuário: "NA CRIAÇÃO de um card a partir de
+  // proposta apresentada, precisa pedir pro usuario deixar cadastrada ja uma tarefa com o
+  // proximo passo para avançar na negociação") — abre o modal de tarefa direto a partir de
+  // `e` (ver _crmAbrirTarefaObrigatoriaProximoPasso, evita a corrida do crmEmpresas.find()
+  // não achar a empresa recém-criada). Só na criação — mover um card existente pra essa etapa
+  // depois (crmMoverEtapa) não entra aqui, o pedido foi específico pra criação.
+  if(isNova&&_crmEtapaExigeTarefaProximoPasso(e.etapa))_crmAbrirTarefaObrigatoriaProximoPasso(e);
 }
 async function crmExcluirEmpresa(id){
   // Só admin exclui empresa do funil (2026-08-19, pedido do usuário) — o botão já fica
