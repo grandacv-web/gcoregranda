@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-18.3';</script>
+<script>const APP_BUILD_VERSION='2026-09-18.5';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -1245,7 +1245,7 @@ select.fc{cursor:pointer}
 
       <div id="ferramenta-tarefas">
         <div class="dash-tabs" style="margin-bottom:10px" id="tf-subtabs">
-          <button class="dash-tab active" id="tf-tab-pend" onclick="tarefasTab('pendentes',this)">⏳ Pendentes</button>
+          <button class="dash-tab active" id="tf-tab-pend" onclick="tarefasTab('pendentes',this)">⏳ Pendentes<span id="tf-tab-pend-adiamento-count"></span></button>
           <button class="dash-tab" id="tf-tab-aprov" onclick="tarefasTab('aprovacao',this)">🔍 Aguardando Aprovação<span id="tf-tab-aprov-count"></span></button>
           <button class="dash-tab" id="tf-tab-conc" onclick="tarefasTab('concluidas',this)">✅ Concluídas</button>
           <button class="dash-tab" id="tf-tab-rel" onclick="tarefasTab('relatorio',this)">📊 Relatório</button>
@@ -5257,6 +5257,33 @@ function getTarefasComerciaisConcluidas(){
   out.sort((a,b)=>(b.concluidaEm||'').localeCompare(a.concluidaEm||''));
   return out;
 }
+// Tarefas com pedido de adiamento aguardando SUA decisão (2026-09-18, a pedido do usuário:
+// "confira porque teve tarefas que foram adiadas e nao foi pra minha lista de aprovação...
+// todas adiadas precisam ir pra minha lista"). Causa raiz do que foi relatado: um pedido de
+// adiamento (t.adiamentoPendente) NUNCA mudava t.status — a tarefa continuava 'pendente' (só
+// o PRAZO está em disputa, a tarefa em si não foi concluída) — então nunca entrava em
+// getTarefasComerciaisAguardandoAprovacao() (essa função é só pra aprovação de CONCLUSÃO, ver
+// comentário nela) nem contava em nenhum badge/contador. A única forma de um admin descobrir
+// um pedido de adiamento era abrir a tarefa pendente específica por acaso — fácil de passar
+// batido com muitas tarefas na lista. Não reaproveita/alterou getTarefasComerciaisPendentes()
+// nem getTarefasComerciaisAguardandoAprovacao() de propósito — são usadas em conjunto (Pendentes
+// + Aguardando + Concluídas) como partição completa em relatórios/exports (ver
+// renderRelatorioTarefas()/exportação), e uma tarefa com adiamentoPendente TAMBÉM é 'pendente'
+// — incluir ela aqui de novo duplicaria contagem nesses lugares. Esta função é só um RECORTE
+// adicional (mesmas tarefas já contadas em Pendentes), usada só pra destacar visualmente.
+function getTarefasComerciaisAdiamentoPendente(){
+  const out=[];
+  pedidos.forEach(p=>{
+    (p.tarefasComerciais||[]).forEach(t=>{
+      if((t.status||'pendente')==='pendente'&&t.adiamentoPendente)out.push({...t,pedidoId:p.id,os:p.os,cliente:p.cliente,vendedor:p.responsavel||'—',tipoPedido:p.tipoPedido||'',job:p.job||'',prazo:p.prazo||''});
+    });
+  });
+  (cfg.tarefasGerais||[]).forEach(t=>{
+    if((t.status||'pendente')==='pendente'&&t.adiamentoPendente)out.push({...t,avulsaGeral:true});
+  });
+  out.sort((a,b)=>(a.adiamentoPendente?.dataSolicitacao||'').localeCompare(b.adiamentoPendente?.dataSolicitacao||''));
+  return out;
+}
 // Só admin ou o próprio responsável atribuído podem marcar/reabrir uma tarefa — sem essa
 // trava, qualquer um que descobrisse o id via console poderia concluir tarefa alheia.
 // Cobre tanto tarefa de pedido (pedidoId preenchido) quanto avulsa geral (pedidoId vazio).
@@ -5472,7 +5499,8 @@ function _refreshTarefasBadge(){
   if(badge){
     // Admin conta também as "aguardando aprovação" de todo mundo no badge do sidebar — é
     // trabalho pendente dele igual uma tarefa pendente normal (ver aba nova em
-    // renderTarefasComerciais()).
+    // renderTarefasComerciais()). Adiamentos NÃO entram de novo aqui (já estão dentro de
+    // pend, ver getTarefasComerciaisAdiamentoPendente()) — senão contava a mesma tarefa 2x.
     const n=isAdm?(pend.length+aguardando.length):pend.filter(t=>t.responsavel===meuNome).length;
     badge.textContent=n?` (${n})`:'';
   }
@@ -5480,6 +5508,13 @@ function _refreshTarefasBadge(){
   if(tabAprov){
     const n=isAdm?aguardando.length:aguardando.filter(t=>t.responsavel===meuNome).length;
     tabAprov.textContent=n?` (${n})`:'';
+  }
+  // Contador de adiamentos aguardando decisão (2026-09-18, ver
+  // getTarefasComerciaisAdiamentoPendente()) — só admin decide, então só ele vê.
+  const tabAdiamento=document.getElementById('tf-tab-pend-adiamento-count');
+  if(tabAdiamento){
+    const nAdiamento=isAdm?getTarefasComerciaisAdiamentoPendente().length:0;
+    tabAdiamento.innerHTML=nAdiamento?` <span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:1px 7px;font-size:.62rem;font-weight:800;margin-left:2px">🕓 ${nAdiamento}</span>`:'';
   }
   _renderPainelUsuario();
 }
@@ -34045,7 +34080,7 @@ function renderTarefasComerciais(){
   // Adiar/Aprovar/Reprovar/Devolver/Excluir saíram da lista e foram morar só no detalhe
   // (abrirDetalheTarefa(), que já mostrava tudo isso — não mudou nada lá). Só o check de
   // Concluir/Reabrir continua na lista, pra não precisar abrir o detalhe pra ação mais comum.
-  const renderLinhaTarefa=(t)=>{
+  const renderLinhaTarefa=(t,grupo)=>{
     const atrasada=_tarefaAtrasada(t);
     // Quadradinho de status/ação à esquerda (2026-09-16, a pedido do usuário: "quero um
     // check quadradinho" — antes era um círculo): vazio e clicável (concluir) em Pendentes,
@@ -34079,11 +34114,20 @@ function renderTarefasComerciais(){
     // tarefa de um pedido, mostra OS+cliente; tarefa avulsa geral sem nada disso fica sem
     // essa linha (não tem o que resumir além do título, que já aparece acima).
     const resumoTarefa=t.crmEmpresaId?((_CRM_TIPO_ICONE[t.crmCategoria]||'📌')+' '+(t.crmEmpresaNome||'—')+(t.crmDecisorNome?' · '+t.crmDecisorNome:'')):(t.descricao?t.descricao:(t.avulsaGeral?'':('OS '+(t.os||'—')+' · '+(t.cliente||'—'))));
+    // Cor do card conforme o grupo (2026-09-18, a pedido do usuário: "no titulo atrasadas,
+    // deixar as tarefas vermelhinhas... crie um novo titulo VENCE HOJE e deixe laranja... e
+    // as outras próximas deixe como esta a cor") — 'atrasada'/'hoje' só vêm do agrupamento
+    // da aba Pendentes logo abaixo; nas outras abas (Aguardando/Concluídas) ou no grupo
+    // PRÓXIMAS, `grupo` fica undefined e o card usa exatamente a cor de sempre (fundo
+    // branco, borda padrão) — nada mudou pra esses casos.
+    const corBorda=grupo==='atrasada'?'#fca5a5':grupo==='hoje'?'#fdba74':grupo==='adiamento'?'#fcd34d':(atrasada&&pendente?'#fecaca':'var(--border-lt)');
+    const corFundo=grupo==='atrasada'?'#fef2f2':grupo==='hoje'?'#fff7ed':grupo==='adiamento'?'#fffbeb':'#fff';
+    const corFundoHover=grupo==='atrasada'?'#fee2e2':grupo==='hoje'?'#ffedd5':grupo==='adiamento'?'#fef3c7':'#f8fafc';
     return`
-    <div data-tf-row="${t.id}" onclick="abrirDetalheTarefa('${t.id}')" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid ${atrasada&&pendente?'#fecaca':'var(--border-lt)'};border-radius:10px;margin-bottom:6px;background:#fff;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+    <div data-tf-row="${t.id}" onclick="abrirDetalheTarefa('${t.id}')" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid ${corBorda};border-radius:10px;margin-bottom:6px;background:${corFundo};cursor:pointer" onmouseover="this.style.background='${corFundoHover}'" onmouseout="this.style.background='${corFundo}'">
       ${checkHtml}
       <div style="min-width:0;flex:1">
-        <div style="font-weight:700;font-size:.82rem;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.tipo}</div>
+        <div style="font-weight:700;font-size:.82rem;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.tipo}${pendente&&t.adiamentoPendente?' '+_tarefaAdiamentoBadges(t,true):''}</div>
         ${resumoTarefa?`<div style="font-size:.72rem;color:#64748b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${resumoTarefa}</div>`:''}
         <div style="font-size:.72rem;color:#94a3b8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.responsavel?'👤 '+t.responsavel:'Sem responsável'} <span style="color:${dataCor};font-weight:600">· ${dataTxt}</span></div>
       </div>
@@ -34101,12 +34145,28 @@ function renderTarefasComerciais(){
   // getTarefasComerciaisPendentes() (prazo mais próximo primeiro, sem prazo por último) —
   // só divide a lista já ordenada em dois blocos, não reordena nada.
   if(pendente){
-    const listaAtrasadas=lista.filter(t=>_tarefaAtrasada(t));
-    const listaProximas=lista.filter(t=>!_tarefaAtrasada(t));
+    const hojeIso=new Date().toISOString().slice(0,10);
+    // Adiamentos aguardando decisão (2026-09-18, ver getTarefasComerciaisAdiamentoPendente())
+    // saem à parte, num grupo próprio no TOPO de tudo, só pro admin (quem decide) — pra não
+    // aparecer duplicado, essas tarefas são removidas do restante do agrupamento abaixo
+    // (listaBase). Usuário comum continua vendo a própria tarefa com adiamento pendente
+    // normalmente dentro de Atrasadas/Vence hoje/Próximas, com o badge no título (ver
+    // renderLinhaTarefa) — só não ganha o grupo de destaque, que é a fila de decisão do admin.
+    const listaAdiamentos=isAdm?lista.filter(t=>t.adiamentoPendente):[];
+    const listaBase=isAdm?lista.filter(t=>!t.adiamentoPendente):lista;
+    const listaAtrasadas=listaBase.filter(t=>_tarefaAtrasada(t));
+    // Vence hoje (2026-09-18, a pedido do usuário: "crie um novo titulo VENCE HOJE e deixe
+    // laranja") — prazo é hoje mas ainda não passou da hora (senão já caiu em Atrasadas
+    // acima, via _tarefaAtrasada) — fica destacado em laranja, nem "já era" (vermelho) nem
+    // só mais uma das próximas (azul, sem mudança nenhuma).
+    const listaVenceHoje=listaBase.filter(t=>!_tarefaAtrasada(t)&&t.prazoTarefa===hojeIso);
+    const listaProximas=listaBase.filter(t=>!_tarefaAtrasada(t)&&t.prazoTarefa!==hojeIso);
     const tituloGrupo=(txt,cor,bg,qtd,primeiro)=>`<div style="display:flex;align-items:center;gap:6px;margin:${primeiro?'0 0 8px':'18px 0 8px'};padding-bottom:4px;border-bottom:2px solid ${bg};font-size:.74rem;font-weight:800;letter-spacing:.02em;color:${cor}">${txt} <span style="color:#94a3b8;font-weight:700">(${qtd})</span></div>`;
     let html='';
-    if(listaAtrasadas.length)html+=tituloGrupo('⚠️ ATRASADAS','#dc2626','#fecaca',listaAtrasadas.length,true)+listaAtrasadas.map(renderLinhaTarefa).join('');
-    if(listaProximas.length)html+=tituloGrupo('🗓️ PRÓXIMAS','#0369a1','#bae6fd',listaProximas.length,!listaAtrasadas.length)+listaProximas.map(renderLinhaTarefa).join('');
+    if(listaAdiamentos.length)html+=tituloGrupo('🕓 ADIAMENTOS PARA APROVAR','#92400e','#fcd34d',listaAdiamentos.length,true)+listaAdiamentos.map(t=>renderLinhaTarefa(t,'adiamento')).join('');
+    if(listaAtrasadas.length)html+=tituloGrupo('⚠️ ATRASADAS','#dc2626','#fecaca',listaAtrasadas.length,!listaAdiamentos.length)+listaAtrasadas.map(t=>renderLinhaTarefa(t,'atrasada')).join('');
+    if(listaVenceHoje.length)html+=tituloGrupo('🔥 VENCE HOJE','#c2410c','#fed7aa',listaVenceHoje.length,!listaAdiamentos.length&&!listaAtrasadas.length)+listaVenceHoje.map(t=>renderLinhaTarefa(t,'hoje')).join('');
+    if(listaProximas.length)html+=tituloGrupo('🗓️ PRÓXIMAS','#0369a1','#bae6fd',listaProximas.length,!listaAdiamentos.length&&!listaAtrasadas.length&&!listaVenceHoje.length)+listaProximas.map(renderLinhaTarefa).join('');
     body.innerHTML=html;
   } else {
     body.innerHTML=lista.map(renderLinhaTarefa).join('');
@@ -34187,6 +34247,21 @@ function abrirDetalheTarefa(tarefaId){
   } else if(t.atrasoForcado){
     adiamentoBloco=`<div style="background:#fef2f2;border-left:3px solid #dc2626;border-radius:6px;padding:10px 14px;font-size:.78rem;color:#7f1d1d;margin-bottom:16px">🚫 Um pedido de adiamento desta tarefa foi reprovado — conta como atraso no relatório, independente da data do prazo.</div>`;
   }
+  // Histórico de adiamentos (2026-09-18, a pedido do usuário: "ja mostrar no historico da
+  // tarefa quantas vezes ela foi adiada, pra eu controlar isso") — t.historicoAdiamentos já
+  // existia e era gravado a cada decisão (ver _aplicarDecisaoAdiamento/
+  // _aplicarSolicitacaoAdiamento), mas nunca tinha sido mostrado em lugar nenhum da tela.
+  const histAdiamentos=t.historicoAdiamentos||[];
+  const histAdiamentosHtml=histAdiamentos.length?(()=>{
+    const nAprov=histAdiamentos.filter(h=>h.decisao==='aprovado').length;
+    const nReprov=histAdiamentos.filter(h=>h.decisao==='reprovado').length;
+    return`<div style="background:#f8fafc;border-radius:6px;padding:10px 14px;font-size:.78rem;color:#475569;margin-bottom:16px">
+      <div style="font-weight:700;margin-bottom:6px">🕓 ${histAdiamentos.length} adiamento${histAdiamentos.length===1?'':'s'} nessa tarefa (${nAprov} aprovado${nAprov===1?'':'s'}, ${nReprov} reprovado${nReprov===1?'':'s'})</div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        ${histAdiamentos.map(h=>`<div style="font-size:.72rem;color:${h.decisao==='aprovado'?'#16a34a':'#dc2626'}">${h.decisao==='aprovado'?'✅':'❌'} ${_fmtDataHora(h.dataSolicitacao)} — ${h.solicitadoPor||'—'} pediu ${h.prazoAntigo?fmtD(h.prazoAntigo):'sem prazo'} → ${fmtD(h.prazoSolicitado)} <span style="color:#94a3b8">(${h.decisao} por ${h.decididoPor||'—'})</span></div>`).join('')}
+      </div>
+    </div>`;
+  })():'';
   const statusPill=pendente?{cor1:'#dbeafe',cor2:'#1d4ed8',txt:'⏳ Pendente'}:aguardando?{cor1:'#e0f2fe',cor2:'#0369a1',txt:'🔍 Aguardando aprovação'}:{cor1:'#dcfce7',cor2:'#16a34a',txt:'✅ Concluída'};
   const rodapeTexto=pendente?'Criada em '+_fmtDataHora(t.criadaEm)
     :aguardando?'Enviada para aprovação em '+_fmtDataHora(t.concluidaEm)+(t.concluidoPor?' por '+t.concluidoPor:'')
@@ -34223,6 +34298,7 @@ function abrirDetalheTarefa(tarefaId){
     <div style="font-size:.68rem;font-weight:700;color:var(--ink4);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Descrição</div>
     ${t.descricao?`<div style="background:#f8fafc;border-left:3px solid #1d4ed8;border-radius:6px;padding:12px 14px;font-size:.85rem;color:#374151;line-height:1.6;white-space:pre-wrap;margin-bottom:16px">${t.descricao}</div>`:'<div style="font-size:.8rem;color:#94a3b8;font-style:italic;margin-bottom:16px">Sem descrição detalhada.</div>'}
     ${adiamentoBloco}
+    ${histAdiamentosHtml}
     <div style="border-top:1px solid var(--border-lt);padding-top:12px;font-size:.8rem;color:#475569;display:flex;flex-direction:column;gap:6px">
       <div>${t.avulsaGeral?'📌 Tarefa avulsa (sem venda vinculada)':'<strong>Pedido:</strong> OS '+(t.os||'—')+' · '+(t.cliente||'—')+(t.job?' · JOB: '+t.job:'')+' · '+t.vendedor+(t.prazo?' · Prazo do pedido: '+fmtD(t.prazo):'')}</div>
       <div style="font-size:.76rem;color:#94a3b8">${rodapeTexto}${t.criadoPor?' · Lançada por '+t.criadoPor:''}</div>
