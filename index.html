@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-18.10';</script>
+<script>const APP_BUILD_VERSION='2026-09-21.2';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -4934,6 +4934,13 @@ window._fbSaveCfg=(data)=>{
     safeData.usuarioNomes=atual.usuarioNomes||{};
     safeData.usuarioCats=atual.usuarioCats||{};
     safeData.usuarioMenus=atual.usuarioMenus||{};
+    // Ampliado 2026-09-21 (a pedido do usuário: "nao pode sumir absolutamente mais
+    // nada do sistema nunca mais") — mesmos 3 campos que passaram a ter escrita
+    // atômica dedicada agora (ver window._fbTxArrayField): pagamentosExtras,
+    // avisosCentral, logAdiamentos.
+    safeData.pagamentosExtras=atual.pagamentosExtras||[];
+    safeData.avisosCentral=atual.avisosCentral||[];
+    safeData.logAdiamentos=atual.logAdiamentos||[];
     tx.set(ref,safeData);
   }).catch(e=>{
     console.error('_fbSaveCfg: falhou (dado inválido pro Firestore, ou erro de transação) — nada foi salvo no servidor',e);
@@ -5048,6 +5055,21 @@ window._fbTxTarefasGerais=(mutatorFn)=>runTransaction(db,async(tx)=>{
   const atuais=(snap.exists()&&snap.data().tarefasGerais)||[];
   const novas=mutatorFn(atuais.slice());
   tx.update(ref,{tarefasGerais:novas});
+});
+// Versão GENÉRICA de _fbTxTarefasGerais pra qualquer campo de cfg que seja uma LISTA
+// (2026-09-21, a pedido do usuário: "nao pode sumir absolutamente mais nada do
+// sistema nunca mais" — auditoria encontrou mais 3 campos-lista salvos até então só
+// via _fbSaveCfg(cfg) inteiro: pagamentosExtras, avisosCentral e logAdiamentos, o
+// mesmo padrão de bug já corrigido em tarefasGerais). Mesmo mecanismo: lê a lista
+// FRESCA do servidor dentro da transação (nunca a cópia local em memória), aplica
+// mutatorFn em cima dela e grava de volta, com retry automático do SDK se o
+// documento mudar durante a transação.
+window._fbTxArrayField=(fieldName,mutatorFn)=>runTransaction(db,async(tx)=>{
+  const ref=doc(db,'sistema','config');
+  const snap=await tx.get(ref);
+  const atuais=(snap.exists()&&snap.data()[fieldName])||[];
+  const novas=mutatorFn(atuais.slice());
+  tx.update(ref,{[fieldName]:novas});
 });
 // Funções administrativas (Cloud Functions) — definir senha / apagar usuário direto no Firebase Auth, sem e-mail.
 window._fbAdminSetPassword=(email,newPassword)=>httpsCallable(functions,'adminSetPassword')({email,newPassword});
@@ -7262,9 +7284,14 @@ function addAvisoManual(){
   const{email}=_getUserCat();
   const nomeAdm=(cfg.usuarioNomes&&cfg.usuarioNomes[email])||usuarioLogado?.nomeExibicao||'Admin';
   const avisos=(Array.isArray(cfg.avisosCentral)?cfg.avisosCentral:[]).slice();
-  avisos.push({id:uid(),assunto,texto,imagem:_avisoImgUrl||'',destinatarioTipo,destinatarioValor:destinatarioTipo==='todos'?'':destinatarioValor,criadoPorNome:nomeAdm,criadoPorEmail:email,criadoEm:new Date().toISOString()});
+  const novoAviso={id:uid(),assunto,texto,imagem:_avisoImgUrl||'',destinatarioTipo,destinatarioValor:destinatarioTipo==='todos'?'':destinatarioValor,criadoPorNome:nomeAdm,criadoPorEmail:email,criadoEm:new Date().toISOString()};
+  avisos.push(novoAviso);
   cfg.avisosCentral=avisos;
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  if(window._fbTxArrayField)window._fbTxArrayField('avisosCentral',arr=>{arr.push(novoAviso);return arr;}).catch(e=>{
+    console.error('Erro ao gravar avisosCentral via transação, tentando fallback completo',e);
+    if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  });
+  else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   const elA=document.getElementById('cfg-aviso-assunto');if(elA)elA.value='';
   const elT=document.getElementById('cfg-aviso-texto');if(elT)elT.value='';
@@ -7276,7 +7303,11 @@ function addAvisoManual(){
 function removeAvisoManual(id){
   if(!confirm('Remover este aviso?'))return;
   cfg.avisosCentral=(Array.isArray(cfg.avisosCentral)?cfg.avisosCentral:[]).filter(a=>a.id!==id);
-  if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  if(window._fbTxArrayField)window._fbTxArrayField('avisosCentral',arr=>arr.filter(a=>a.id!==id)).catch(e=>{
+    console.error('Erro ao gravar avisosCentral via transação, tentando fallback completo',e);
+    if(window._fbSaveCfg)window._fbSaveCfg(cfg);
+  });
+  else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderCentralAvisos();
   _atualizarBadgeAvisos();
@@ -15707,8 +15738,17 @@ async function addPagamentoExtra(){
   if(!cfg.pagamentosExtras)cfg.pagamentosExtras=[];
   const agora=new Date();
   const pagLabel=(pagDia===5?'1ª Quinzena (pagar dia 5) · ':'2ª Quinzena (pagar dia 15) · ')+MESES_PT[pagM]+' '+pagY;
-  cfg.pagamentosExtras.push({id:'pe_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),vendedor,y,m,valor,motivo,status:'pendente',criadoEm:agora.toISOString(),pagY,pagM,pagDia,pagLabel});
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  const novoExtra={id:'pe_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),vendedor,y,m,valor,motivo,status:'pendente',criadoEm:agora.toISOString(),pagY,pagM,pagDia,pagLabel};
+  cfg.pagamentosExtras.push(novoExtra);
+  // Escrita atômica via transação (2026-09-21) — mesmo padrão de _fbTxTarefasGerais,
+  // ver window._fbTxArrayField.
+  try{
+    if(window._fbTxArrayField)await window._fbTxArrayField('pagamentosExtras',arr=>{arr.push(novoExtra);return arr;});
+    else if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }catch(e){
+    console.error('Erro ao gravar pagamentosExtras via transação, tentando fallback completo',e);
+    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   document.getElementById('pe-valor').value='';
   document.getElementById('pe-motivo').value='';
@@ -15741,7 +15781,18 @@ async function togglePagamentoExtraStatus(id){
   const p=(cfg.pagamentosExtras||[]).find(x=>x.id===id);if(!p)return;
   p.status=p.status==='confirmado'?'pendente':'confirmado';
   if(p.status==='confirmado')p.confirmadoEm=new Date().toISOString();
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  const _novoStatus=p.status,_novoConfirmadoEm=p.confirmadoEm;
+  try{
+    if(window._fbTxArrayField)await window._fbTxArrayField('pagamentosExtras',arr=>{
+      const alvo=arr.find(x=>x.id===id);
+      if(alvo){alvo.status=_novoStatus;if(_novoStatus==='confirmado')alvo.confirmadoEm=_novoConfirmadoEm;}
+      return arr;
+    });
+    else if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }catch(e){
+    console.error('Erro ao gravar pagamentosExtras via transação, tentando fallback completo',e);
+    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderPagamentosExtrasList();
   if(typeof renderDashComissoes==='function')renderDashComissoes();
@@ -15751,7 +15802,13 @@ async function removerPagamentoExtra(id){
   if(!_getUserCat().isAdm){toast('Apenas administradores podem remover pagamento extra','terr');return;}
   if(!confirm('Remover este pagamento?'))return;
   cfg.pagamentosExtras=(cfg.pagamentosExtras||[]).filter(x=>x.id!==id);
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  try{
+    if(window._fbTxArrayField)await window._fbTxArrayField('pagamentosExtras',arr=>arr.filter(x=>x.id!==id));
+    else if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }catch(e){
+    console.error('Erro ao gravar pagamentosExtras via transação, tentando fallback completo',e);
+    if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+  }
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   renderPagamentosExtrasList();
   if(typeof renderDashComissoes==='function')renderDashComissoes();
@@ -31418,11 +31475,21 @@ function salvarNaoRecebido(){
   // reabertoPor, puxado direto de usuarioLogado, sem exigir digitar nada.
   const _mnrPor=(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—');
   if(!cfg.logAdiamentos)cfg.logAdiamentos=[];
-  cfg.logAdiamentos.push({
+  const _mnrEntrada={
     confKey:_mnrConfKey,cliente:_mnrCliente||'',valor:_mnrValor||0,
     dataPrevistaAnterior:_mnrDataStr||'',novaData:novaDataBR,
     motivos:[motivoTxt],observacao:'',em:new Date().toISOString(),por:_mnrPor
+  };
+  cfg.logAdiamentos.push(_mnrEntrada);
+  // Persistência de verdade do histórico (2026-09-21) — antes esta função nunca
+  // gravava cfg.logAdiamentos no Firestore de forma dedicada (só o pagConf logo
+  // abaixo era gravado de verdade); o registro de histórico só ia pro servidor por
+  // acidente, se outra tela salvasse o cfg inteiro depois. Ver window._fbTxArrayField.
+  if(window._fbTxArrayField)window._fbTxArrayField('logAdiamentos',arr=>{arr.push(_mnrEntrada);return arr;}).catch(e=>{
+    console.error('Erro ao gravar logAdiamentos via transação, tentando fallback completo',e);
+    if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   });
+  else if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   setPagConf(_mnrConfKey,{status:'pendente',novaData:novaDataBR,motivoAtraso:motivoTxt,motivoAtrasoEm:new Date().toISOString(),motivoAtrasoPor:_mnrPor});
   closeM('mo-motivo-nr');
   toast('Marcado como não recebido — adiado para '+novaDataBR,'tok');
@@ -39359,6 +39426,13 @@ function _crmOrdenarPorEtapa(lista,ordem){
     const ia=(a.etapa in idxEtapa)?idxEtapa[a.etapa]:etapas.length;
     const ib=(b.etapa in idxEtapa)?idxEtapa[b.etapa]:etapas.length;
     if(ia!==ib)return(ia-ib)*dir;
+    // Fila FIFO na etapa ORÇAMENTO (2026-09-21, a pedido do usuário) — mesma regra já
+    // usada no Kanban desde 2026-09-11 (ver renderCrmKanban/_crmEtapaEntradaTs: "para
+    // que a pessoa que for fazer orçamentos siga uma fila"), que a Lista nunca tinha
+    // recebido — ficava só em ordem alfabética mesmo dentro da etapa ORÇAMENTO, então
+    // a mesma fila aparecia em ordens DIFERENTES no Kanban e na Lista. Não depende do
+    // toggle Crescente/Decrescente (dir) — mais antigo primeiro sempre, igual ao Kanban.
+    if(ia<etapas.length&&etapas[ia].key==='orcamento')return _crmEtapaEntradaTs(a)-_crmEtapaEntradaTs(b);
     return(a.nome||'').localeCompare(b.nome||'','pt-BR');
   });
 }
