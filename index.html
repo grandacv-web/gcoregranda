@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-21.18';</script>
+<script>const APP_BUILD_VERSION='2026-09-22.4';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -2152,11 +2152,15 @@ select.fc{cursor:pointer}
     </div>
     <div id="sec-cat-PRODUCAO" style="display:none">
       <div class="dash-tabs" style="margin-bottom:14px" id="prod-main-tabs">
-        <button class="dash-tab active prod-main-tab" onclick="prodSetTab('lista',this)">📋 Lista</button>
-        <button class="dash-tab prod-main-tab" onclick="prodSetTab('dias',this)">🗂️ Kanban</button>
-        <button class="dash-tab prod-main-tab" onclick="prodSetTab('calendario',this)">📅 Calendário</button>
+        <button class="dash-tab active prod-main-tab" onclick="prodSetTab('pipeline',this)">🔗 Pipeline de Produção</button>
         <button class="dash-tab prod-main-tab" onclick="prodSetTab('indicadores',this)">📊 Indicadores</button>
       </div>
+      <div id="prod-sec-pipeline">
+        <div class="dash-tabs-sub" id="prod-pipe-tabs">
+          <button class="dash-tab-sub active prod-pipe-tab" data-sub="lista" onclick="prodSetPipeTab('lista',this)">📋 Lista</button>
+          <button class="dash-tab-sub prod-pipe-tab" data-sub="dias" onclick="prodSetPipeTab('dias',this)">🗂️ Kanban</button>
+          <button class="dash-tab-sub prod-pipe-tab" data-sub="calendario" onclick="prodSetPipeTab('calendario',this)">📅 Calendário</button>
+        </div>
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
         🏭 Cada pedido passa por um checklist de 3 subtarefas — Recebimento de Corte Galvanizado, Recebimento de Adesivos e Produzir — antes de ser considerado pronto. Clique em "Iniciar Produção" pra abrir; cada baixa continua indo pro Histórico do pedido, igual sempre foi. A Produção é distribuída em fatias de até <strong id="prod-cap-valor">—</strong> por dia útil, recuando a partir do prazo — a aba 🗂️ Kanban mostra dia a dia quais já estão ocupados, quais estão livres pra novas vendas, e o total líquido a produzir no período (dia/semana/mês/todos os meses) selecionado.
       </div>
@@ -2239,6 +2243,7 @@ select.fc{cursor:pointer}
         </div>
         <div id="prod-cal-body"></div>
       </div>
+      </div>
       <div id="prod-sec-indicadores" style="display:none">
         <!-- Visão Geral (2026-09-21, a pedido do usuário) é a aba padrão agora — cards
              fixos sempre sobre "hoje" (mês atual, próximos meses, dias de capacidade). A
@@ -2271,6 +2276,10 @@ select.fc{cursor:pointer}
               <option value="periodo">Período personalizado</option>
               <option value="todos">Todos os Meses</option>
             </select>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+            <button onclick="prodIndExportarListaExcel()" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Exportar Excel</button>
+            <button onclick="prodIndExportarListaPDF()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
           </div>
           <div style="font-size:.72rem;color:var(--ink4);margin-bottom:14px">Considera o Prazo de Produção (mesma data usada no 🗂️ Kanban/📅 Calendário) de todos os pedidos elegíveis, incluindo os já concluídos — é o relatório de quanto foi/será produzido no período.</div>
           <div id="prod-ind-body"></div>
@@ -7816,9 +7825,14 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
     if(isProducaoSetor)setTimeout(()=>{try{
       document.querySelectorAll('.prod-main-tab').forEach(b=>b.classList.remove('active'));
       document.getElementById('prod-main-tabs')?.querySelector('.prod-main-tab')?.classList.add('active');
-      const sl=document.getElementById('prod-sec-lista'),sd=document.getElementById('prod-sec-dias'),sc=document.getElementById('prod-sec-calendario'),si=document.getElementById('prod-sec-indicadores');
-      if(sl)sl.style.display='';if(sd)sd.style.display='none';if(sc)sc.style.display='none';if(si)si.style.display='none';
+      document.querySelectorAll('.prod-pipe-tab').forEach(b=>b.classList.remove('active'));
+      document.getElementById('prod-pipe-tabs')?.querySelector('.prod-pipe-tab')?.classList.add('active');
+      const sp=document.getElementById('prod-sec-pipeline'),si=document.getElementById('prod-sec-indicadores');
+      if(sp)sp.style.display='';if(si)si.style.display='none';
+      const sl=document.getElementById('prod-sec-lista'),sd=document.getElementById('prod-sec-dias'),sc=document.getElementById('prod-sec-calendario');
+      if(sl)sl.style.display='';if(sd)sd.style.display='none';if(sc)sc.style.display='none';
       _prodTabAtiva='lista';
+      _prodPipeLastSub='lista';
       prodRenderAtivo();
     }catch(e){console.error('Erro ao abrir Produção',e);}},120);
     // Prospecção de Clientes (2026-08-14) sempre reabre no Funil (aba padrão), mesmo padrão
@@ -23234,15 +23248,32 @@ function _prodEscHandler(e){
 // COMPRAS quando ganhou Lista/Kanban/Calendário (2026-08-03) — dá pra adicionar depois se
 // precisar.
 let _prodTabAtiva='lista';
-function prodSetTab(tab,btn){
+// Lembra qual sub-aba do Pipeline (Lista/Kanban/Calendário) estava aberta, pra reabrir nela
+// quando o usuário volta de Indicadores pro Pipeline (2026-09-22, a pedido do usuário: "quero
+// que esses tres menus sejam sub menus do menu... PIPELINE DE PRODUÇÃO").
+let _prodPipeLastSub='lista';
+function prodSetTab(tab,btn){ // nível 1: 'pipeline' | 'indicadores'
   document.querySelectorAll('.prod-main-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  const sl=document.getElementById('prod-sec-lista'),sd=document.getElementById('prod-sec-dias'),sc=document.getElementById('prod-sec-calendario'),si=document.getElementById('prod-sec-indicadores');
-  if(sl)sl.style.display=tab==='lista'?'':'none';
-  if(sd)sd.style.display=tab==='dias'?'':'none';
-  if(sc)sc.style.display=tab==='calendario'?'':'none';
+  const sp=document.getElementById('prod-sec-pipeline'),si=document.getElementById('prod-sec-indicadores');
+  if(sp)sp.style.display=tab==='pipeline'?'':'none';
   if(si)si.style.display=tab==='indicadores'?'':'none';
-  _prodTabAtiva=tab;
+  if(tab==='pipeline'){
+    prodSetPipeTab(_prodPipeLastSub,document.querySelector('.prod-pipe-tab[data-sub="'+_prodPipeLastSub+'"]'));
+  }else{
+    _prodTabAtiva='indicadores';
+    prodRenderAtivo();
+  }
+}
+function prodSetPipeTab(sub,btn){ // nível 2, dentro do Pipeline: 'lista' | 'dias' | 'calendario'
+  document.querySelectorAll('.prod-pipe-tab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  const sl=document.getElementById('prod-sec-lista'),sd=document.getElementById('prod-sec-dias'),sc=document.getElementById('prod-sec-calendario');
+  if(sl)sl.style.display=sub==='lista'?'':'none';
+  if(sd)sd.style.display=sub==='dias'?'':'none';
+  if(sc)sc.style.display=sub==='calendario'?'':'none';
+  _prodTabAtiva=sub;
+  _prodPipeLastSub=sub;
   prodRenderAtivo();
 }
 function prodRenderAtivo(){
@@ -23612,6 +23643,79 @@ function _prodIndDados(){
   const produzido=infos.reduce((s,x)=>s+x.valorLiquidoProduzido,0);
   return{infos,projecao,produzido,aProduzir:projecao-produzido,qtd:infos.length};
 }
+// ===================== EXPORTAÇÃO EXCEL/PDF — INDICADORES → LISTA GERAL (2026-09-22) =====================
+// A pedido do usuário: "coloca uma opção de exportar em pdf ou excel essa lista". Mesmas
+// linhas/colunas que a tabela em tela mostra (_prodIndDados(), já filtrada pelo período ativo
+// em Por mês/Período personalizado/Todos os Meses), incluindo a linha de TOTAL.
+function prodIndExportarListaExcel(){
+  const d=_prodIndDados();
+  if(!d.infos.length){toast('Nenhum pedido encontrado no período para exportar','terr');return;}
+  const headers=['OS','Cliente','Tipo','R$ Líquido','% Produzido','R$ Produzido','R$ à Produzir','Data Produção','Prazo Final'];
+  const body=d.infos.map(x=>{
+    const aProduzirPedido=x.valorLiquidoTotal-x.valorLiquidoProduzido;
+    return[
+      x.p.os||'',x.p.cliente||'',x.p.tipo||'',_fmtValorPdf(x.valorLiquidoTotal),Math.round(x.pctValor)+'%',
+      _fmtValorPdf(x.valorLiquidoProduzido),_fmtValorPdf(aProduzirPedido),fmtD(x.etapa.iso),x.calc.prazoIso?fmtD(x.calc.prazoIso):''
+    ];
+  });
+  body.push(['TOTAL ('+d.qtd+')','','',_fmtValorPdf(d.projecao),'',_fmtValorPdf(d.produzido),_fmtValorPdf(d.aProduzir),'','']);
+  _csvDownload(`producao_indicadores_${new Date().toISOString().slice(0,10)}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+async function prodIndExportarListaPDF(){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const d=_prodIndDados();
+  if(!d.infos.length){toast('Nenhum pedido encontrado no período para gerar o PDF.','terr');return;}
+  const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const periodoLbl=_prodIndRange().label;
+  const drawnFooterPages=new Set();
+  function drawHeader(){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);
+    doc.text('PRODUÇÃO — INDICADORES',pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    doc.text('Período: '+periodoLbl,pageW-14,26.5,{align:'right'});
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,29,pageW-14,29);
+    doc.setFont('helvetica','normal');
+    return 35;
+  }
+  function drawFooter(pageNum){
+    if(drawnFooterPages.has(pageNum))return;
+    drawnFooterPages.add(pageNum);
+    doc.setPage(pageNum);
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+pageNum,pageW-14,pageH-9,{align:'right'});
+  }
+  const curY=drawHeader();
+  const head=['OS','Cliente','Tipo','R$ Líquido','% Prod.','R$ Produzido','R$ à Produzir','Data Prod.','Prazo Final'];
+  const bodyPdf=d.infos.map(x=>{
+    const aProduzirPedido=x.valorLiquidoTotal-x.valorLiquidoProduzido;
+    return[x.p.os||'—',x.p.cliente||'—',x.p.tipo||'—',_fmtValorPdf(x.valorLiquidoTotal),Math.round(x.pctValor)+'%',_fmtValorPdf(x.valorLiquidoProduzido),_fmtValorPdf(aProduzirPedido),fmtD(x.etapa.iso),x.calc.prazoIso?fmtD(x.calc.prazoIso):'—'];
+  });
+  const footPdf=['TOTAL ('+d.qtd+')','','',_fmtValorPdf(d.projecao),'',_fmtValorPdf(d.produzido),_fmtValorPdf(d.aProduzir),'',''];
+  doc.autoTable({
+    startY:curY,head:[head],body:bodyPdf,foot:[footPdf],theme:'grid',
+    styles:{fontSize:6.8,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.6},
+    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:7},
+    footStyles:{fillColor:LIGHT,textColor:[26,27,54],fontStyle:'bold',fontSize:7},
+    alternateRowStyles:{fillColor:LIGHT},
+    columnStyles:{3:{halign:'right'},4:{halign:'right'},5:{halign:'right'},6:{halign:'right'}},
+    margin:{top:32,left:14,right:14,bottom:20},
+    didDrawPage:()=>{drawFooter(doc.internal.getNumberOfPages());}
+  });
+  drawFooter(doc.internal.getNumberOfPages());
+  doc.save(`producao_indicadores_${new Date().toISOString().slice(0,10)}.pdf`);
+  toast('PDF gerado!','tok');
+}
 // ===================== INDICADORES DE PRODUÇÃO — VISÃO GERAL (2026-09-21) =====================
 // A pedido do usuário: além da "Lista Geral" acima (relatório detalhado, inalterado), Visão
 // Geral vira a sub-aba padrão da tela de Indicadores, com cards fixos sempre sobre "hoje" (sem
@@ -23685,7 +23789,7 @@ function _prodVisaoGeralDados(){
     const ref=new Date(y,m-1+off,1);
     const ini=fmtISOLocal(new Date(ref.getFullYear(),ref.getMonth(),1)),fim=fmtISOLocal(new Date(ref.getFullYear(),ref.getMonth()+1,0));
     const doMesRef=infos.filter(x=>x.etapa.iso&&x.etapa.iso>=ini&&x.etapa.iso<=fim);
-    return{label:MESES_PT[ref.getMonth()+1]+'/'+ref.getFullYear(),projetado:doMesRef.reduce((s,x)=>s+x.valorLiquidoTotal,0),qtd:doMesRef.length};
+    return{label:MESES_PT[ref.getMonth()+1]+'/'+ref.getFullYear(),projetado:doMesRef.reduce((s,x)=>s+x.valorLiquidoTotal,0),qtd:doMesRef.length,infos:doMesRef};
   });
   // Janela pra capacidade diária (Excedidos/Quase Lotados/Vazios) — controlada pelo filtro de
   // mês/período/todos ali em cima da seção (2026-09-21, a pedido do usuário), via
@@ -23700,10 +23804,10 @@ function _prodVisaoGeralDados(){
   const diasCap=Object.entries(mapa||{}).filter(([iso])=>iso>=iniCap&&iso<=fimCap).sort((a,b)=>a[0].localeCompare(b[0]));
   // Dias excedidos: mesmo critério de _lpDiasProducaoEstourados (soma>cap), só filtrado pra
   // esta janela em vez de todo o histórico do mapa.
-  const diasExcedidos=diasCap.filter(([,dd])=>dd.soma>cap+0.005).map(([iso,dd])=>({iso,soma:dd.soma,excedente:dd.soma-cap,qtd:(dd.itens||[]).length}));
+  const diasExcedidos=diasCap.filter(([,dd])=>dd.soma>cap+0.005).map(([iso,dd])=>({iso,soma:dd.soma,excedente:dd.soma-cap,qtd:(dd.itens||[]).length,itens:(dd.itens||[]).filter(it=>it.p)}));
   // Dias quase lotados: aviso preventivo novo (não existia antes) — 80% a 100% da
   // capacidade, ainda não estourou.
-  const diasQuaseLotados=diasCap.filter(([,dd])=>dd.soma>=cap*0.8-0.005&&dd.soma<=cap+0.005).map(([iso,dd])=>({iso,soma:dd.soma,pct:dd.soma/cap*100,qtd:(dd.itens||[]).length}));
+  const diasQuaseLotados=diasCap.filter(([,dd])=>dd.soma>=cap*0.8-0.005&&dd.soma<=cap+0.005).map(([iso,dd])=>({iso,soma:dd.soma,pct:dd.soma/cap*100,qtd:(dd.itens||[]).length,itens:(dd.itens||[]).filter(it=>it.p)}));
   // Dias 100% VAZIOS de produção (2026-09-21, a pedido do usuário: "quero que mostre quais
   // dias estão 100% vazios de produção com base naquele 75 mil por dia") — todo dia ÚTIL
   // (mesmo calendário de fim de semana/feriado de _isDiaUtil, já usado na Saúde do Funil)
@@ -23732,7 +23836,80 @@ function _prodVisaoGeralDados(){
   const atrasadosValor=atrasados.reduce((s,x)=>s+(x.valorLiquidoTotal-x.valorLiquidoProduzido),0);
   return{hojeIso,cap,projetadoMes,realizadoMes,qtdMes:doMes.length,produtividadePct,projetadoAteHoje,realizadoAteHoje,
     proximosMeses,diasExcedidos,diasQuaseLotados,diasVazios,taxaOcupacaoPct,diasUteisMes,ocupadoMes,capacidadeTotalMes,
-    atrasadosQtd:atrasados.length,atrasadosValor};
+    atrasadosQtd:atrasados.length,atrasadosValor,doMesInfos:doMes,jaVenceramInfos:jaVenceram,atrasadosInfos:atrasados};
+}
+// ===================== INDICADORES CLICÁVEIS (2026-09-22) =====================
+// A pedido do usuário: "os indicadores de produção quero tudo clicavel, clicou mostra do que
+// se refere, como sao todos os indicadores" — mesmo padrão já usado em Planejamento
+// (fgAbrirListaMetrica/fgAbrirListaCategoria): clicar num card/linha abre uma listinha dos
+// pedidos por trás daquele número; clicar num pedido da lista abre o checklist dele
+// (prodIniciarOuAbrirChecklist, já existente).
+function _prodVGAbrirListaPedidos(titulo,lista){
+  const old=document.getElementById('prod-vg-lista-modal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='prod-vg-lista-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  _dynModalSemFechaClique(modal);
+  const total=lista.reduce((s,x)=>s+(x.valor||0),0);
+  const corpo=lista.length?lista.map(x=>`<div onclick="document.getElementById('prod-vg-lista-modal').remove();prodIniciarOuAbrirChecklist('${x.p.id}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${x.p.cliente||'—'}</div>
+        ${x.sub?`<div style="font-size:.7rem;color:var(--ink4)">${x.sub}</div>`:''}
+      </div>
+      <div style="font-size:.82rem;font-weight:800;color:${x.cor||'#1a1f36'};white-space:nowrap">${fmtR(x.valor||0)}</div>
+    </div>`).join(''):'<div style="text-align:center;padding:30px;color:var(--ink4);font-size:.85rem">Nenhum pedido encontrado.</div>';
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:560px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;gap:10px">
+      <div style="font-size:1rem;font-weight:800;color:#1a1f36">${titulo} (${lista.length})</div>
+      <button onclick="document.getElementById('prod-vg-lista-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
+    </div>
+    <div style="font-size:.76rem;color:var(--ink4);margin-bottom:14px">Total: <b style="color:#0B2A3D">${fmtR(total)}</b></div>
+    ${corpo}
+  </div>`;
+  document.body.appendChild(modal);
+}
+function prodVGAbrirMes(){
+  const d=_prodVisaoGeralDados();
+  const lista=d.doMesInfos.map(x=>({p:x.p,valor:x.valorLiquidoProduzido,sub:'Projetado '+fmtR(x.valorLiquidoTotal),cor:'#166534'}));
+  _prodVGAbrirListaPedidos('🏭 Produção deste mês',lista);
+}
+function prodVGAbrirProdutividade(){
+  const d=_prodVisaoGeralDados();
+  const lista=d.jaVenceramInfos.map(x=>({p:x.p,valor:x.valorLiquidoProduzido,sub:'Projetado '+fmtR(x.valorLiquidoTotal),cor:'#166534'}));
+  _prodVGAbrirListaPedidos('📈 Produtividade — pedidos com prazo até hoje',lista);
+}
+function prodVGAbrirAtrasados(){
+  const d=_prodVisaoGeralDados();
+  const lista=d.atrasadosInfos.map(x=>({p:x.p,valor:x.valorLiquidoTotal-x.valorLiquidoProduzido,sub:'Prazo '+fmtD(x.etapa.iso),cor:'#dc2626'}));
+  _prodVGAbrirListaPedidos('⏰ Pedidos atrasados na Produção',lista);
+}
+function prodVGAbrirProximoMes(offset){
+  const d=_prodVisaoGeralDados();
+  const alvo=d.proximosMeses[offset-1];
+  if(!alvo)return;
+  const lista=(alvo.infos||[]).map(x=>({p:x.p,valor:x.valorLiquidoTotal,cor:'#1e40af'}));
+  _prodVGAbrirListaPedidos('📅 '+alvo.label,lista);
+}
+function prodVGAbrirDia(iso){
+  const d=_prodVisaoGeralDados();
+  const alvo=[...d.diasExcedidos,...d.diasQuaseLotados].find(x=>x.iso===iso);
+  if(!alvo||!alvo.itens||!alvo.itens.length){toast('Sem detalhe de pedidos pra este dia','terr');return;}
+  const lista=alvo.itens.map(it=>({p:it.p,valor:it.liquido,cor:'#0284c7'}));
+  _prodVGAbrirListaPedidos('📅 Produção alocada em '+fmtD(iso),lista);
+}
+function prodIndAbrirTile(key){
+  const d=_prodIndDados();
+  const labelMap={projecao:'💰 Projeção (R$ Líquido no período)',produzido:'✅ Produzido no período',aproduzir:'🔧 À Produzir no período',pedidos:'📦 Pedidos no período'};
+  let infos=d.infos;
+  if(key==='produzido')infos=infos.filter(x=>x.valorLiquidoProduzido>0.005);
+  if(key==='aproduzir')infos=infos.filter(x=>(x.valorLiquidoTotal-x.valorLiquidoProduzido)>0.005);
+  const lista=infos.map(x=>{
+    const aProduzirPedido=x.valorLiquidoTotal-x.valorLiquidoProduzido;
+    const valor=key==='produzido'?x.valorLiquidoProduzido:key==='aproduzir'?aProduzirPedido:x.valorLiquidoTotal;
+    const cor=key==='aproduzir'?'#dc2626':key==='produzido'?'#166534':'#1e40af';
+    return{p:x.p,valor,cor};
+  });
+  _prodVGAbrirListaPedidos(labelMap[key]||'Pedidos',lista);
 }
 function renderProdVisaoGeral(){
   const wrap=document.getElementById('prod-ind-geral-body');
@@ -23746,7 +23923,7 @@ function renderProdVisaoGeral(){
   const corProdutividade=d.produtividadePct==null?'#64748b':d.produtividadePct>=95?'#16a34a':d.produtividadePct>=80?'#d97706':'#dc2626';
   const corOcupacao=d.taxaOcupacaoPct>100?'#dc2626':d.taxaOcupacaoPct>=85?'#d97706':'#16a34a';
   const rangeCap=_prodVGRange();
-  const htmlMes=`<div class="dash-card">
+  const htmlMes=`<div class="dash-card" onclick="prodVGAbrirMes()" style="cursor:pointer" title="Clique para ver os pedidos deste mês">
     <div class="dash-sec-title">🏭 Produção deste mês</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px">
       <div><div style="font-size:.62rem;font-weight:700;color:#64748b;text-transform:uppercase">Projetado</div><div style="font-size:1.15rem;font-weight:800;color:#1e40af">${fmtR(d.projetadoMes)}</div></div>
@@ -23756,17 +23933,17 @@ function renderProdVisaoGeral(){
     <div style="height:10px;border-radius:20px;background:#e5e7eb;overflow:hidden"><div style="height:100%;width:${pctMes}%;background:#16a34a;border-radius:20px"></div></div>
     <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">${pctMes.toFixed(0)}% do projetado do mês já produzido</div>
   </div>`;
-  const htmlProdutividade=`<div class="dash-card">
+  const htmlProdutividade=`<div class="dash-card" onclick="prodVGAbrirProdutividade()" style="cursor:pointer" title="Clique para ver os pedidos com prazo até hoje">
     <div class="dash-sec-title">📈 Produtividade (projetado × realizado nas datas)</div>
     <div style="font-size:1.6rem;font-weight:900;color:${corProdutividade}">${d.produtividadePct==null?'—':d.produtividadePct.toFixed(0)+'%'}</div>
     <div style="font-size:.72rem;color:var(--ink4);margin-top:2px">${d.produtividadePct==null?'Nenhum pedido com prazo de Produção vencido ainda este mês.':`Dos pedidos com prazo até hoje (${fmtR(d.projetadoAteHoje)}), já foi produzido ${fmtR(d.realizadoAteHoje)}.`}</div>
   </div>`;
-  const htmlOcupacao=`<div class="dash-card">
+  const htmlOcupacao=`<div class="dash-card" onclick="prodVGAbrirMes()" style="cursor:pointer" title="Clique para ver os pedidos deste mês">
     <div class="dash-sec-title">📊 Taxa de ocupação da capacidade (mês)</div>
     <div style="font-size:1.6rem;font-weight:900;color:${corOcupacao}">${d.taxaOcupacaoPct.toFixed(0)}%</div>
     <div style="font-size:.72rem;color:var(--ink4);margin-top:2px">${fmtR(d.ocupadoMes)} de ${fmtR(d.capacidadeTotalMes)} da capacidade do mês (${d.diasUteisMes} dias úteis × ${fmtR(d.cap)}/dia) já ocupados.</div>
   </div>`;
-  const htmlAtrasados=`<div class="dash-card">
+  const htmlAtrasados=`<div class="dash-card" onclick="prodVGAbrirAtrasados()" style="cursor:pointer" title="Clique para ver os pedidos atrasados">
     <div class="dash-sec-title">⏰ Pedidos atrasados na Produção</div>
     <div style="font-size:1.6rem;font-weight:900;color:${d.atrasadosQtd?'#dc2626':'#16a34a'}">${d.atrasadosQtd}</div>
     <div style="font-size:.72rem;color:var(--ink4);margin-top:2px">${d.atrasadosQtd?`${fmtR(d.atrasadosValor)} ainda a produzir, com prazo já vencido.`:'Nenhum pedido atrasado no momento.'}</div>
@@ -23774,21 +23951,21 @@ function renderProdVisaoGeral(){
   const htmlProximos=`<div class="dash-card">
     <div class="dash-sec-title">📅 Próximos 3 meses</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
-      ${d.proximosMeses.map(x=>`<div style="background:#f8fafc;border-radius:10px;padding:10px"><div style="font-size:.68rem;font-weight:700;color:#475569">${x.label}</div><div style="font-size:1rem;font-weight:800;color:#1e40af;margin-top:2px">${fmtR(x.projetado)}</div><div style="font-size:.64rem;color:var(--ink4)">${x.qtd} pedido${x.qtd===1?'':'s'}</div></div>`).join('')}
+      ${d.proximosMeses.map((x,i)=>`<div onclick="prodVGAbrirProximoMes(${i+1})" style="cursor:pointer;background:#f8fafc;border-radius:10px;padding:10px"><div style="font-size:.68rem;font-weight:700;color:#475569">${x.label}</div><div style="font-size:1rem;font-weight:800;color:#1e40af;margin-top:2px">${fmtR(x.projetado)}</div><div style="font-size:.64rem;color:var(--ink4)">${x.qtd} pedido${x.qtd===1?'':'s'}</div></div>`).join('')}
     </div>
   </div>`;
   const htmlExcedidos=`<div class="dash-card">
     <div class="dash-sec-title">🔴 Dias com produção acima da capacidade</div>
     ${d.diasExcedidos.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
       <thead><tr style="background:#fef2f2;text-align:left"><th style="padding:6px 8px">Data</th><th style="padding:6px 8px;text-align:right">Alocado</th><th style="padding:6px 8px;text-align:right">Excedente</th><th style="padding:6px 8px;text-align:right">Pedidos</th></tr></thead>
-      <tbody>${d.diasExcedidos.slice(0,10).map(x=>`<tr><td style="padding:6px 8px">${fmtD(x.iso)}</td><td style="padding:6px 8px;text-align:right">${fmtR(x.soma)}</td><td style="padding:6px 8px;text-align:right;color:#dc2626;font-weight:700">${fmtR(x.excedente)}</td><td style="padding:6px 8px;text-align:right">${x.qtd}</td></tr>`).join('')}</tbody>
+      <tbody>${d.diasExcedidos.slice(0,10).map(x=>`<tr onclick="prodVGAbrirDia('${x.iso}')" style="cursor:pointer" title="Clique para ver os pedidos deste dia"><td style="padding:6px 8px">${fmtD(x.iso)}</td><td style="padding:6px 8px;text-align:right">${fmtR(x.soma)}</td><td style="padding:6px 8px;text-align:right;color:#dc2626;font-weight:700">${fmtR(x.excedente)}</td><td style="padding:6px 8px;text-align:right">${x.qtd}</td></tr>`).join('')}</tbody>
     </table></div>${d.diasExcedidos.length>10?`<div style="font-size:.68rem;color:var(--ink4);margin-top:6px">+${d.diasExcedidos.length-10} outro(s) dia(s) — veja o 🗂️ Kanban por dia pra detalhes.</div>`:''}`:`<div style="font-size:.8rem;color:var(--ink4)">Nenhum dia acima da capacidade em ${rangeCap.label}.</div>`}
   </div>`;
   const htmlQuaseLotados=`<div class="dash-card">
     <div class="dash-sec-title">🟠 Dias quase lotados (≥80% da capacidade)</div>
     ${d.diasQuaseLotados.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
       <thead><tr style="background:#fffbeb;text-align:left"><th style="padding:6px 8px">Data</th><th style="padding:6px 8px;text-align:right">Alocado</th><th style="padding:6px 8px;text-align:right">% da capacidade</th><th style="padding:6px 8px;text-align:right">Pedidos</th></tr></thead>
-      <tbody>${d.diasQuaseLotados.slice(0,10).map(x=>`<tr><td style="padding:6px 8px">${fmtD(x.iso)}</td><td style="padding:6px 8px;text-align:right">${fmtR(x.soma)}</td><td style="padding:6px 8px;text-align:right;color:#d97706;font-weight:700">${x.pct.toFixed(0)}%</td><td style="padding:6px 8px;text-align:right">${x.qtd}</td></tr>`).join('')}</tbody>
+      <tbody>${d.diasQuaseLotados.slice(0,10).map(x=>`<tr onclick="prodVGAbrirDia('${x.iso}')" style="cursor:pointer" title="Clique para ver os pedidos deste dia"><td style="padding:6px 8px">${fmtD(x.iso)}</td><td style="padding:6px 8px;text-align:right">${fmtR(x.soma)}</td><td style="padding:6px 8px;text-align:right;color:#d97706;font-weight:700">${x.pct.toFixed(0)}%</td><td style="padding:6px 8px;text-align:right">${x.qtd}</td></tr>`).join('')}</tbody>
     </table></div>${d.diasQuaseLotados.length>10?`<div style="font-size:.68rem;color:var(--ink4);margin-top:6px">+${d.diasQuaseLotados.length-10} outro(s) dia(s).</div>`:''}`:`<div style="font-size:.8rem;color:var(--ink4)">Nenhum dia perto do limite em ${rangeCap.label}.</div>`}
   </div>`;
   // Dias 100% vazios (2026-09-21, a pedido do usuário) — lista compacta de "chips" (não uma
@@ -23846,11 +24023,20 @@ function renderProdIndicadores(){
   const r=_prodIndRange();
   if(lblEl)lblEl.textContent=r.label;
   const d=_prodIndDados();
-  const tilesHtml=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">
-    <div style="background:#dbeafe;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#1e40af">💰 Projeção</div><div style="font-size:1.05rem;font-weight:800;color:#1e40af">${fmtR(d.projecao)}</div></div>
-    <div style="background:#dcfce7;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#166534">✅ Produzido</div><div style="font-size:1.05rem;font-weight:800;color:#166534">${fmtR(d.produzido)}</div></div>
-    <div style="background:#fef3c7;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#92400e">🔧 À Produzir</div><div style="font-size:1.05rem;font-weight:800;color:#92400e">${fmtR(d.aProduzir)}</div></div>
-    <div style="background:#f1f5f9;border-radius:10px;padding:12px"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#475569">📦 Pedidos</div><div style="font-size:1.05rem;font-weight:800;color:#475569">${d.qtd}</div></div>
+  const _prodIndTilesDef=[
+    {key:'projecao',icon:'💰',label:'Projeção',val:fmtR(d.projecao),bg:'#dbeafe',fg:'#1e40af'},
+    {key:'produzido',icon:'✅',label:'Produzido',val:fmtR(d.produzido),bg:'#dcfce7',fg:'#166534'},
+    {key:'aproduzir',icon:'🔧',label:'À Produzir',val:fmtR(d.aProduzir),bg:'#fef3c7',fg:'#92400e'},
+    {key:'pedidos',icon:'📦',label:'Pedidos',val:String(d.qtd),bg:'#f1f5f9',fg:'#475569'}
+  ];
+  const tilesHtml=`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+    ${_prodIndTilesDef.map(t=>`<div onclick="prodIndAbrirTile('${t.key}')" style="cursor:pointer;flex:1 1 200px;min-width:0;display:flex;align-items:center;gap:10px;background:${t.bg};border-radius:10px;padding:12px;box-sizing:border-box" title="Clique para ver os pedidos">
+      <div style="flex-shrink:0;width:34px;height:34px;border-radius:999px;background:rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-size:1rem;line-height:1">${t.icon}</div>
+      <div style="min-width:0;flex:1;text-align:left">
+        <div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${t.fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.label}</div>
+        <div style="font-size:1.05rem;font-weight:800;color:${t.fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.val}</div>
+      </div>
+    </div>`).join('')}
   </div>`;
   if(!d.infos.length){
     wrap.innerHTML=tilesHtml+'<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum pedido com Prazo de Produção no período selecionado.</div>';
@@ -41267,13 +41453,35 @@ async function crmCardPropostaPdfSelecionado(input){
 // Caminho da pasta (2026-09-11, a pedido do usuário: "ficar no card, inserir um campo de
 // texto onde o usuario coloca esse caminho") — salva direto no Firestore sem precisar abrir
 // a janela inteira de editar empresa, mesmo padrão já usado por crmCardSalvarValoresProposta.
-async function crmCardSalvarCaminhoPasta(empresaId){
+// silent=true (2026-09-22, a pedido do usuário: "quero que salve sozinho o caminho sem esse
+// botao, nao preciso salvar ele salva sozinho") — chamado no onchange do campo (ver
+// _crmRenderCard), sem toast a cada blur; mesmo padrão silencioso de
+// crmCardSalvarValoresProposta(silent).
+async function crmCardSalvarCaminhoPasta(empresaId,silent){
   const e=crmEmpresas.find(x=>x.id===empresaId);
   if(!e)return;
+  const _caminhoAntes=(e.caminhoPasta||'').trim();
   e.caminhoPasta=(document.getElementById('crm-card-caminho-pasta').value||'').trim();
+  if(_caminhoAntes!==e.caminhoPasta){
+    if(!e.timeline)e.timeline=[];
+    e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'✏️ Caminho da pasta alterado: '+(_caminhoAntes||'—')+' → '+(e.caminhoPasta||'—'),autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString(),sistema:true});
+  }
   e.atualizadoEm=new Date().toISOString();
   try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
-  toast('Caminho da pasta salvo!','tok');
+  if(!silent)toast('Caminho da pasta salvo!','tok');
+}
+// Botão "📋 Copiar caminho" ao lado do campo (2026-09-22, a pedido do usuário: "no lugar do
+// botao salvar coloca um botao: copiar caminho, clicou ali ele copia o caminho pra eu colar")
+// — reaproveita o mesmo fallback de clipboard já usado em _crmCopiarValor/_crmCopiarFallback.
+function crmCardCopiarCaminhoPasta(){
+  const el=document.getElementById('crm-card-caminho-pasta');
+  const valor=(el&&el.value||'').trim();
+  if(!valor){toast('Nenhum caminho preenchido ainda','terr');return;}
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(valor).then(()=>toast('Caminho copiado!','tok')).catch(()=>_crmCopiarFallback(valor));
+  }else{
+    _crmCopiarFallback(valor);
+  }
 }
 // Sincroniza os campos da aba Proposta do CARD ABERTO (Bruto/Operacionais/Desconto/
 // Líquido) direto pro objeto `e`, sem exigir o clique em "💾 Salvar valores" antes
@@ -41330,6 +41538,7 @@ async function crmCardSalvarValoresProposta(silent){
   const empresaId=_crmCardAtualId;
   const e=crmEmpresas.find(x=>x.id===empresaId);
   if(!e)return;
+  const _propAntes={bruto:e.propostaValorBruto||0,operacionais:e.propostaOperacionais||0,desconto:e.propostaDesconto||0,liquido:e.propostaValorLiquido||0};
   const bruto=moneyToNum(document.getElementById('crm-card-proposta-bruto').value);
   if(silent&&!(bruto>0))return;
   const operacionais=moneyToNum(document.getElementById('crm-card-proposta-operacionais').value);
@@ -41356,6 +41565,7 @@ async function crmCardSalvarValoresProposta(silent){
   e.propostaOperacionais=operacionais;
   e.propostaDesconto=desconto;
   e.propostaValorLiquido=liquido;
+  _crmLogDiffProposta(e,_propAntes,{bruto,operacionais,desconto,liquido});
   e.atualizadoEm=new Date().toISOString();
   try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
   if(!silent)toast('Valores da proposta salvos!','tok');
@@ -41455,6 +41665,7 @@ async function crmSalvarValoresJanelaProposta(silent){
   const empresaId=document.getElementById('crm-proposta-modal-empresa-id').value;
   const alvo=empresaId?crmEmpresas.find(x=>x.id===empresaId):_crmEmpPropostaPendente;
   if(!alvo)return;
+  const _propAntes={bruto:alvo.propostaValorBruto||0,operacionais:alvo.propostaOperacionais||0,desconto:alvo.propostaDesconto||0,liquido:alvo.propostaValorLiquido||0};
   const bruto=moneyToNum(document.getElementById('crm-proposta-modal-bruto').value);
   if(silent&&!(bruto>0))return;
   const operacionais=moneyToNum(document.getElementById('crm-proposta-modal-operacionais').value);
@@ -41482,6 +41693,7 @@ async function crmSalvarValoresJanelaProposta(silent){
   alvo.propostaDesconto=desconto;
   alvo.propostaValorLiquido=liquido;
   if(empresaId){
+    _crmLogDiffProposta(alvo,_propAntes,{bruto,operacionais,desconto,liquido});
     alvo.atualizadoEm=new Date().toISOString();
     try{await _crmSalvarEmpresaObj(alvo);}catch(err){return;}
     if(!silent)toast('Valores da proposta salvos!','tok');
@@ -41632,8 +41844,8 @@ function _crmRenderCard(e){
       <div class="fg">
         <label>📁 Caminho da pasta (arquivos para orçamentação deste negócio)</label>
         <div style="display:flex;gap:8px">
-          <input class="fc no-upper" type="text" id="crm-card-caminho-pasta" style="flex:1" value="${(e.caminhoPasta||'').replace(/"/g,'&quot;')}" placeholder="Ex.: \\servidor\Orcamentos\Empresa X">
-          <button type="button" onclick="crmCardSalvarCaminhoPasta('${e.id}')" style="background:var(--brand);color:#fff;border:none;border-radius:9px;padding:0 16px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap">💾 Salvar</button>
+          <input class="fc no-upper" type="text" id="crm-card-caminho-pasta" style="flex:1" value="${(e.caminhoPasta||'').replace(/"/g,'&quot;')}" placeholder="Ex.: \\servidor\Orcamentos\Empresa X" onchange="crmCardSalvarCaminhoPasta('${e.id}',true)">
+          <button type="button" onclick="crmCardCopiarCaminhoPasta()" style="background:var(--brand);color:#fff;border:none;border-radius:9px;padding:0 16px;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap">📋 Copiar caminho</button>
         </div>
       </div>
       <div class="fg" style="margin-bottom:0">
@@ -42858,6 +43070,45 @@ function _crmLogDiffDecisores(e,antigos,novos){
     }
   });
 }
+// Loga no histórico do card quando um campo geral do negócio muda pela tela de editar
+// empresa (2026-09-22, a pedido do usuário: "quero que tambem registre toda alteração feita
+// no card inclusive etapa alterada e por quem foi com data e hora" — etapa já era registrada
+// em crmMoverEtapa; isso cobre os demais campos editáveis por ✏️ EDITAR NEGÓCIO). Snapshot
+// tirado ANTES de sobrescrever os campos em `e` (ver crmSalvarEmpresa), comparado depois — só
+// loga o que de fato mudou, um evento por campo, mesmo estilo sistema:true das outras
+// entradas automáticas (ex.: "Etapa alterada: X → Y").
+const CRM_CAMPOS_DIFF_LABELS={nome:'Nome do negócio',job:'JOB',responsavel:'Responsável',tipoNegocio:'Tipo de negócio',caminhoPasta:'Caminho da pasta'};
+function _crmLogDiffCampos(e,antigo){
+  if(!antigo)return;
+  if(!e.timeline)e.timeline=[];
+  const autor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  const em=new Date().toISOString();
+  Object.keys(CRM_CAMPOS_DIFF_LABELS).forEach(campo=>{
+    const antes=(antigo[campo]||'').toString().trim();
+    const depois=(e[campo]||'').toString().trim();
+    if(antes===depois)return;
+    e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'✏️ '+CRM_CAMPOS_DIFF_LABELS[campo]+' alterado: '+(antes||'—')+' → '+(depois||'—'),autor,em,sistema:true});
+  });
+  const cidadeAntes=(antigo.sedeCidade||'').trim(),ufAntes=(antigo.sedeUf||'').trim();
+  const cidadeDepois=(e.sedeCidade||'').trim(),ufDepois=(e.sedeUf||'').trim();
+  if(cidadeAntes!==cidadeDepois||ufAntes!==ufDepois){
+    const antes=[cidadeAntes,ufAntes].filter(Boolean).join('/')||'—';
+    const depois=[cidadeDepois,ufDepois].filter(Boolean).join('/')||'—';
+    e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'✏️ Onde será a instalação alterado: '+antes+' → '+depois,autor,em,sistema:true});
+  }
+}
+// Idem, pros 4 valores da proposta (Bruto/Operacionais/Desconto/Líquido) editados manualmente
+// (2026-09-22, mesmo pedido acima) — chamada por crmCardSalvarValoresProposta (aba PROPOSTA
+// do card) e crmSalvarValoresJanelaProposta (janela "💰 Gerenciar Proposta"), só quando já
+// existe negócio salvo (empresaId). Um evento só juntando os 4 valores, não um por campo, pra
+// não poluir o histórico a cada tecla — só dispara quando pelo menos um dos 4 mudou de
+// verdade em relação ao que já estava salvo.
+function _crmLogDiffProposta(e,antes,depois){
+  if(antes.bruto===depois.bruto&&antes.operacionais===depois.operacionais&&antes.desconto===depois.desconto&&antes.liquido===depois.liquido)return;
+  if(!e.timeline)e.timeline=[];
+  const autor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'✏️ Proposta editada — Bruto R$ '+_fmtValorPdf(depois.bruto)+', Operacionais R$ '+_fmtValorPdf(depois.operacionais)+', Desconto R$ '+_fmtValorPdf(depois.desconto)+', Líquido R$ '+_fmtValorPdf(depois.liquido),autor,em:new Date().toISOString(),sistema:true});
+}
 let _crmSalvandoEmpresaEmAndamento=false;
 // Trava contra clique duplo / duplo submit (2026-09-21, a pedido do usuário: "o usuario ao
 // gravar um negocio nao gravou dai ele apertou de novo duplicou criou dois negocios"). Sem
@@ -42952,6 +43203,9 @@ async function _crmSalvarEmpresaImpl(){
     criadoEm:new Date().toISOString()
   }:crmEmpresas.find(x=>x.id===id);
   if(!e){toast('Empresa não encontrada','terr');return;}
+  // Snapshot ANTES de sobrescrever os campos abaixo (2026-09-22) — usado por
+  // _crmLogDiffCampos logo adiante pra registrar no histórico só o que de fato mudou.
+  const _crmCamposAntigos=isNova?null:{nome:e.nome,job:e.job,responsavel:e.responsavel,sedeCidade:e.sedeCidade,sedeUf:e.sedeUf,tipoNegocio:e.tipoNegocio,caminhoPasta:e.caminhoPasta};
   e.nome=nome;
   e.job=(document.getElementById('crm-emp-job').value||'').trim();
   e.responsavel=document.getElementById('crm-emp-responsavel').value||'';
@@ -42959,6 +43213,7 @@ async function _crmSalvarEmpresaImpl(){
   e.sedeUf=ufInst;
   e.tipoNegocio=tipoNegocio;
   e.caminhoPasta=caminhoPastaForm;
+  _crmLogDiffCampos(e,_crmCamposAntigos);
   // Negócio criado JÁ na etapa ORÇAMENTO APROVADO (2026-09-14) — mesmo sinal de "aprovado
   // novo" que crmMoverEtapa liga ao ENTRAR nessa etapa arrastando/movendo (ver
   // _crmAprovNovoParaMim/renderCrmKanban/_avisosAutomaticos); sem isso, um card que nasce já
