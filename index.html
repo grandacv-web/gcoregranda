@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-22.6';</script>
+<script>const APP_BUILD_VERSION='2026-09-22.7';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -40027,24 +40027,32 @@ function _kanbanPararScroll(id){
   _kanbanScrollSpeeds[id]=0;
 }
 // Timestamp (ms) de quando o card ENTROU na etapa atual — usado só pra ordenar a fila FIFO
-// da etapa ORÇAMENTO (ver renderCrmKanban). Cai pra criadoEm/atualizadoEm em cards antigos
-// que nunca passaram por crmMoverEtapa depois que etapaEntradaEm passou a existir.
+// da etapa ORÇAMENTO (ver renderCrmKanban). Cai pra criadoEm em cards antigos que nunca
+// passaram por crmMoverEtapa depois que etapaEntradaEm passou a existir (cards novos já
+// nascem com etapaEntradaEm preenchido, ver crmSalvarEmpresa). NUNCA cai pra atualizadoEm
+// (2026-09-22, a pedido do usuário: "nao quero que mude a ordem dos cards pq interagiu
+// recentemente neste card... independente da interação o card fica na mesma posição que ele
+// tava na ordem de chegada, somente caso ele va pra outra etapa e depois volte pra orçamento
+// dai ele vai pro final da fila de novo") — atualizadoEm muda a CADA edição do card (proposta,
+// caminho da pasta, comentário etc.), então usá-lo como fallback fazia qualquer interação num
+// card sem etapaEntradaEm empurrar ele pra outra posição da fila.
 function _crmEtapaEntradaTs(e){
-  const iso=e.etapaEntradaEm||e.criadoEm||e.atualizadoEm||'';
+  const iso=e.etapaEntradaEm||e.criadoEm||'';
   const t=iso?Date.parse(iso):NaN;
   return isNaN(t)?0:t;
 }
 // Dias nessa etapa (2026-09-15, a pedido do usuário: "coloque outro dado: DIAS NESSA ETAPA
 // e dai o contador de quantos dias faz que o card está nessa etapa de funil desde que foi
 // colocado ali") — mesma fonte de data que a fila FIFO/o selo "Lançado em" já usam
-// (etapaEntradaEm||criadoEm||atualizadoEm, ver _crmEtapaEntradaTs/filaBadge em
-// _crmCardHtml). Virou dias ÚTEIS em 2026-09-21 (a pedido do usuário: "nao quero que
-// conte finais de semana e feriado como dias uteis... tanto na fila de orçamento quanto
-// em qualquer card") — antes era contado em dias corridos de propósito (ver histórico),
-// mas o pedido de hoje pede explicitamente o mesmo critério já usado pela Saúde do Funil
-// (_diasUteisDesde, que também cuida do "Entrou hoje"/comparação por data local).
+// (etapaEntradaEm||criadoEm, ver _crmEtapaEntradaTs/filaBadge em _crmCardHtml — atualizadoEm
+// saiu do fallback em 2026-09-22, ver comentário em _crmEtapaEntradaTs). Virou dias ÚTEIS em
+// 2026-09-21 (a pedido do usuário: "nao quero que conte finais de semana e feriado como dias
+// uteis... tanto na fila de orçamento quanto em qualquer card") — antes era contado em dias
+// corridos de propósito (ver histórico), mas o pedido de hoje pede explicitamente o mesmo
+// critério já usado pela Saúde do Funil (_diasUteisDesde, que também cuida do "Entrou
+// hoje"/comparação por data local).
 function _crmDiasNaEtapa(e){
-  return _diasUteisDesde(e.etapaEntradaEm||e.criadoEm||e.atualizadoEm||new Date().toISOString());
+  return _diasUteisDesde(e.etapaEntradaEm||e.criadoEm||new Date().toISOString());
 }
 // Alternar Funil entre Kanban e Lista (2026-09-15, a pedido do usuário: "permita mudar o
 // funil de kanban para lista") — mesma base de dados (_crmEmpresasFiltradas), só muda a
@@ -40338,7 +40346,7 @@ function _crmCardHtml(e){
   // tal... para que a pessoa que for fazer orçamentos siga uma fila") — só na etapa
   // ORÇAMENTO, que é a que o pedido do usuário se referia (ver ordenação em
   // renderCrmKanban/_crmEtapaEntradaTs).
-  const filaBadge=e.etapa==='orcamento'?`<div style="font-size:.64rem;color:var(--ink4);margin-top:8px;padding-top:6px;border-top:1px dashed var(--border-lt)">🕒 Lançado em ${_fmtDataHora(e.etapaEntradaEm||e.criadoEm||e.atualizadoEm).replace(', ',' às ')}</div>`:'';
+  const filaBadge=e.etapa==='orcamento'?`<div style="font-size:.64rem;color:var(--ink4);margin-top:8px;padding-top:6px;border-top:1px dashed var(--border-lt)">🕒 Lançado em ${_fmtDataHora(e.etapaEntradaEm||e.criadoEm).replace(', ',' às ')}</div>`:'';
   // Selo de Ganho/Perdido no card (2026-09-16) — só aparece quando o card tem e.fechamento
   // (visível na prática só na visão Ganhos/Perdidos do painel de filtros, já que a visão
   // "Em aberto" nem devolve esses cards mais — ver _crmEmpresasFiltradas).
@@ -40360,7 +40368,7 @@ function _crmCardHtml(e){
     ${e.propostaValorLiquido?`<div class="crm-card-row" style="font-weight:700;color:#0e7a45">💰 ${fmtR(e.propostaValorLiquido)}</div>`:''}
     <div style="display:flex;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap">
       <div class="crm-card-pill" style="color:${saude.cor};background:${saude.bg}">${saude.dias===0?'Interação hoje':saude.dias+'d sem interação'}</div>
-      <div class="crm-card-pill" title="Entrou nesta etapa em ${_fmtDataHora(e.etapaEntradaEm||e.criadoEm||e.atualizadoEm).replace(', ',' às ')}" style="color:#475569;background:#e2e8f0">${diasEtapa===0?'Entrou hoje':diasEtapa+'d nessa etapa'}</div>
+      <div class="crm-card-pill" title="Entrou nesta etapa em ${_fmtDataHora(e.etapaEntradaEm||e.criadoEm).replace(', ',' às ')}" style="color:#475569;background:#e2e8f0">${diasEtapa===0?'Entrou hoje':diasEtapa+'d nessa etapa'}</div>
       ${baixarPropostaBtn}
     </div>
     ${fechamentoBadge}
@@ -43210,6 +43218,7 @@ async function _crmSalvarEmpresaImpl(){
   const e=isNova?{
     id:'pe_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
     etapa:etapaEscolhida,
+    etapaEntradaEm:new Date().toISOString(),
     timeline:[],
     tarefas:[],
     criadoPor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',
