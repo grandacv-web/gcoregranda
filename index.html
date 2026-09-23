@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-22.7';</script>
+<script>const APP_BUILD_VERSION='2026-09-23.1';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -437,12 +437,14 @@ body{font-family:'Inter',system-ui,sans-serif;background:#f4f6f8;color:var(--ink
    NUNCA some sozinho: só quando o usuário clica em "Atualizar agora" ou no X — e mesmo assim
    volta a aparecer no próximo ciclo de checagem se ainda estiver desatualizado, de propósito
    (o medo aqui é alguém passar o dia inteiro numa versão velha sem perceber). */
-.sys-update-banner{display:none;position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:340;background:linear-gradient(135deg,#00bac7,#0099a8);color:#fff;padding:14px 18px;border-radius:12px;box-shadow:0 10px 30px rgba(0,153,168,.35);max-width:460px;align-items:center;gap:12px}
+.sys-update-banner{display:none;position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.72);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);align-items:center;justify-content:center;padding:16px}
 .sys-update-banner.open{display:flex}
-.sys-update-banner .sub-txt{font-size:.85rem;font-weight:600;line-height:1.4}
-.sys-update-banner .sub-btn{background:#fff;color:#0099a8;border:none;border-radius:8px;padding:7px 14px;font-size:.78rem;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0}
-.sys-update-banner .sub-x{background:rgba(255,255,255,.2);border:none;color:#fff;width:24px;height:24px;border-radius:50%;cursor:pointer;font-size:.85rem;flex-shrink:0;display:flex;align-items:center;justify-content:center}
-.sys-update-banner .sub-x:hover{background:rgba(255,255,255,.35)}
+.sys-update-banner .sub-box{background:linear-gradient(135deg,#00bac7,#0099a8);color:#fff;padding:28px 26px;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,.35);max-width:440px;width:100%;text-align:center;display:flex;flex-direction:column;align-items:center;gap:16px}
+.sys-update-banner .sub-ico{font-size:2.4rem;line-height:1}
+.sys-update-banner .sub-tit{font-size:1.1rem;font-weight:800}
+.sys-update-banner .sub-txt{font-size:.88rem;font-weight:600;line-height:1.45}
+.sys-update-banner .sub-btn{background:#fff;color:#0099a8;border:none;border-radius:10px;padding:12px 26px;font-size:.95rem;font-weight:800;cursor:pointer;white-space:nowrap}
+.sys-update-banner .sub-btn:hover{filter:brightness(.95)}
 .meta-win-modal{text-align:center;background:linear-gradient(160deg,#1a2b5e,#0f1b3d);color:#fff;border-radius:20px;padding:40px 32px;max-width:440px;width:100%;position:relative;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.5)}
 .meta-win-modal .mwm-emoji{font-size:3rem;margin-bottom:10px;position:relative;z-index:2}
 .meta-win-modal h2{font-size:1.25rem;font-weight:800;margin-bottom:8px;letter-spacing:-.3px;position:relative;z-index:2}
@@ -4296,10 +4298,16 @@ select.fc{cursor:pointer}
      edição), sem precisar de clique nenhum. Esse banner serve pra: (1) avisar enquanto espera
      a hora segura de atualizar sozinho, e (2) dar a opção de forçar a atualização na hora, se
      a pessoa não se importar de perder o que estiver digitando. -->
-<div class="sys-update-banner" id="sys-update-banner">
-  <div class="sub-txt">🔄 Nova versão disponível. Atualiza sozinho assim que você terminar o que estiver fazendo — ou clique para atualizar agora.</div>
-  <button class="sub-btn" onclick="_aplicarNovaVersaoSistema()">Atualizar agora</button>
-  <button class="sub-x" onclick="document.getElementById('sys-update-banner').classList.remove('open')" title="Fechar">✕</button>
+<!-- 2026-09-23 (a pedido do usuário): usuários fechavam o banner no ✕ e seguiam na versão
+     antiga. Agora é uma tela de bloqueio SEM opção de fechar — o sistema fica parado até
+     clicar em "Atualizar agora". Ver _mostrarBloqueioAtualizacao(). -->
+<div class="sys-update-banner" id="sys-update-banner" role="alertdialog" aria-modal="true">
+  <div class="sub-box">
+    <div class="sub-ico">🔄</div>
+    <div class="sub-tit">Nova versão do sistema disponível</div>
+    <div class="sub-txt">Para continuar usando o GCORE, é obrigatório atualizar. Clique no botão abaixo.</div>
+    <button class="sub-btn" onclick="_aplicarNovaVersaoSistema()">Atualizar agora</button>
+  </div>
 </div>
 <div class="mov" id="mo-meta-win">
   <div class="meta-win-modal">
@@ -13308,22 +13316,34 @@ function _dispararAtualizacaoAutomatica(){
   toast('🔄 Nova versão do sistema — atualizando...','tok');
   setTimeout(_aplicarNovaVersaoSistema,4000);
 }
-function _tentarAutoAtualizar(){
+// 2026-09-23 (a pedido do usuário): atualização OBRIGATÓRIA. Ao detectar versão nova, o
+// sistema inteiro trava atrás de uma tela sem botão de fechar — só sai clicando em
+// "Atualizar agora". Teclado também fica bloqueado (senão daria pra seguir digitando num
+// campo que já estava com foco por trás da tela).
+let _bloqueioAtualizacaoAtivo=false;
+function _bloqueioTecladoAtualizacao(e){
+  if(!_bloqueioAtualizacaoAtivo)return;
+  const btn=document.querySelector('#sys-update-banner .sub-btn');
+  if(e.target===btn&&(e.key==='Enter'||e.key===' '))return; // deixa confirmar pelo teclado
+  e.preventDefault();e.stopPropagation();
+  if(btn)btn.focus();
+}
+function _mostrarBloqueioAtualizacao(){
   const b=document.getElementById('sys-update-banner');
-  if(b)b.classList.add('open');
-  if(_sistemaEstaSeguroPraRecarregar()){
-    if(_watcherAutoAtualizar){clearInterval(_watcherAutoAtualizar);_watcherAutoAtualizar=null;}
-    _dispararAtualizacaoAutomatica();
-    return;
-  }
-  if(_watcherAutoAtualizar)return; // já tem uma checagem esperando o momento seguro
-  _watcherAutoAtualizar=setInterval(()=>{
-    if(_sistemaEstaSeguroPraRecarregar()){
-      clearInterval(_watcherAutoAtualizar);
-      _watcherAutoAtualizar=null;
-      _dispararAtualizacaoAutomatica();
-    }
-  },15000);
+  if(!b)return;
+  if(b.parentNode!==document.body)document.body.appendChild(b); // garante que fica por cima de tudo
+  b.classList.add('open');
+  if(_bloqueioAtualizacaoAtivo)return;
+  _bloqueioAtualizacaoAtivo=true;
+  try{if(document.activeElement&&document.activeElement.blur)document.activeElement.blur();}catch(e){}
+  document.addEventListener('keydown',_bloqueioTecladoAtualizacao,true);
+  document.addEventListener('keypress',_bloqueioTecladoAtualizacao,true);
+  // Se algum código tentar esconder a tela (ex.: remover a classe), ela volta na hora.
+  try{new MutationObserver(()=>{if(_bloqueioAtualizacaoAtivo&&!b.classList.contains('open'))b.classList.add('open');}).observe(b,{attributes:true,attributeFilter:['class','style']});}catch(e){}
+  setTimeout(()=>{try{b.querySelector('.sub-btn').focus();}catch(e){}},50);
+}
+function _tentarAutoAtualizar(){
+  _mostrarBloqueioAtualizacao();
 }
 async function _checarNovaVersaoSistema(){
   _ultimaChecagemVersaoSistema=Date.now();
