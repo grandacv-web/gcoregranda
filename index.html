@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-24.17';</script>
+<script>const APP_BUILD_VERSION='2026-09-24.22';</script>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
 <style>
@@ -1865,11 +1865,15 @@ select.fc{cursor:pointer}
          de Frete na própria Emissão). Mesma trava de acesso do resto do Planejamento
          (_isPlanejamentoUser()). 3 visualizações: Lista, Kanban e Calendário. -->
     <div id="sec-cat-LISTA_PEDIDOS" style="display:none">
+      <!-- 2026-09-24.21: Lista/Kanban/Calendário viraram sub-menus de "Visualização de Pedidos". -->
       <div class="dash-tabs" style="margin-bottom:14px" id="lp-main-tabs">
-        <button class="dash-tab active lp-main-tab" onclick="lpSetTab('lista',this)">📋 Lista</button>
-        <button class="dash-tab lp-main-tab" onclick="lpSetTab('kanban',this)">🗂️ Kanban</button>
-        <button class="dash-tab lp-main-tab" onclick="lpSetTab('calendario',this)">📅 Calendário</button>
-        <button class="dash-tab lp-main-tab" onclick="lpSetTab('simulador',this)">🧮 Simulador</button>
+        <button class="dash-tab active lp-main-tab" data-main="visualizacao" onclick="lpSetMain('visualizacao')">👁️ Visualização de Pedidos</button>
+        <button class="dash-tab lp-main-tab" data-main="simulador" onclick="lpSetTab('simulador')">🧮 Simulador</button>
+      </div>
+      <div class="dash-tabs-sub" id="lp-sub-tabs">
+        <button class="dash-tab-sub active lp-sub-tab" data-sub="lista" onclick="lpSetTab('lista')">📋 Lista</button>
+        <button class="dash-tab-sub lp-sub-tab" data-sub="kanban" onclick="lpSetTab('kanban')">🗂️ Kanban</button>
+        <button class="dash-tab-sub lp-sub-tab" data-sub="calendario" onclick="lpSetTab('calendario')">📅 Calendário</button>
       </div>
       <!-- Botão "Emitir Pedido" (2026-09-04, a pedido do usuário) — abre o MESMO formulário de
            emissão usado no Conselho de Pedidos (openEmissao(), sem id = rascunho novo), só que
@@ -2288,6 +2292,7 @@ select.fc{cursor:pointer}
         </div>
         <div id="prod-ind-sub-geral" style="margin-top:14px">
           <div id="prod-ind-geral-body"></div>
+          <div id="prod-heatmap" style="margin-top:16px"></div>
         </div>
         <div id="prod-ind-sub-lista" style="display:none;margin-top:14px">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px">
@@ -8104,11 +8109,12 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
     }catch(e){console.error('Erro ao abrir Planejamento',e);}},120);
     // Lista de Pedidos sempre reabre na aba Lista (2026-07-30, mesmo padrão do Planejamento).
     if(isListaPedidos)setTimeout(()=>{try{
-      document.querySelectorAll('.lp-main-tab').forEach(b=>b.classList.remove('active'));
-      document.getElementById('lp-main-tabs')?.querySelector('.lp-main-tab')?.classList.add('active');
-      const sl=document.getElementById('lp-sec-lista'),sk=document.getElementById('lp-sec-kanban'),sc=document.getElementById('lp-sec-calendario');
-      if(sl)sl.style.display='';if(sk)sk.style.display='none';if(sc)sc.style.display='none';
-      if(typeof lpSetTab==='function')_lpTabAtiva='lista';
+      document.querySelectorAll('.lp-main-tab').forEach(b=>b.classList.toggle('active',b.dataset.main==='visualizacao'));
+      document.querySelectorAll('.lp-sub-tab').forEach(b=>b.classList.toggle('active',b.dataset.sub==='lista'));
+      const lpSubW=document.getElementById('lp-sub-tabs');if(lpSubW)lpSubW.style.display='';
+      const sl=document.getElementById('lp-sec-lista'),sk=document.getElementById('lp-sec-kanban'),sc=document.getElementById('lp-sec-calendario'),ssim=document.getElementById('lp-sec-simulador');
+      if(sl)sl.style.display='';if(sk)sk.style.display='none';if(sc)sc.style.display='none';if(ssim)ssim.style.display='none';
+      if(typeof lpSetTab==='function'){_lpTabAtiva='lista';_lpUltimaVisualizacao='lista';}
       // Sempre reabre com o filtro de Status em "Em andamento" (2026-08-08, a pedido do
       // usuário) — troca de aba Lista/Kanban/Calendário dentro do menu (lpSetTab) NÃO mexe
       // nisso, só reabrir o menu pelo menu lateral. O usuário pode trocar o filtro à vontade
@@ -24972,6 +24978,7 @@ function prodIndAbrirTile(key){
   _prodVGAbrirListaPedidos(labelMap[key]||'Pedidos',lista);
 }
 function renderProdVisaoGeral(){
+  try{_simRenderHeatmap('prod-heatmap');}catch(e){console.error('heatmap produção',e);}
   const wrap=document.getElementById('prod-ind-geral-body');
   if(!wrap)return;
   if(!_isSetorUser('PRODUÇÃO')){
@@ -25760,9 +25767,18 @@ function _lpFecharEFiltrarAtencao(pedidoId,os){
   const busca=document.getElementById('lp-fil-busca');
   if(busca){busca.value=os||'';lpRenderAtivo();}
 }
+let _lpUltimaVisualizacao='lista';
+function lpSetMain(main){
+  if(main==='simulador')lpSetTab('simulador');
+  else lpSetTab(_lpUltimaVisualizacao||'lista');
+}
 function lpSetTab(tab,btn){
-  document.querySelectorAll('.lp-main-tab').forEach(b=>b.classList.remove('active'));
-  if(btn)btn.classList.add('active');
+  const main=tab==='simulador'?'simulador':'visualizacao';
+  if(main==='visualizacao')_lpUltimaVisualizacao=tab;
+  document.querySelectorAll('.lp-main-tab').forEach(b=>b.classList.toggle('active',b.dataset.main===main));
+  document.querySelectorAll('.lp-sub-tab').forEach(b=>b.classList.toggle('active',b.dataset.sub===tab));
+  const subWrap=document.getElementById('lp-sub-tabs');
+  if(subWrap)subWrap.style.display=main==='visualizacao'?'':'none';
   const sl=document.getElementById('lp-sec-lista'),sk=document.getElementById('lp-sec-kanban'),sc=document.getElementById('lp-sec-calendario'),ss=document.getElementById('lp-sec-simulador');
   if(sl)sl.style.display=tab==='lista'?'':'none';
   if(sk)sk.style.display=tab==='kanban'?'':'none';
@@ -26009,7 +26025,12 @@ function _simParamsTela(){
 }
 function _simCtx(){return{mapaProd:_lpMapaProducaoPorDia(),mapaInst:_lpMapaInstalacoesPorDia(),ativ:{}};}
 function _simAvaliar(P,prazoIso,emissaoIso,ctx){
-  const res={prazoIso,emissaoIso,status:'nao',motivos:[],etapas:[],aloc:null,chegadaIso:null,coletaIso:null};
+  // 2026-09-24.22 (teste automático achou): entrega final em sábado/domingo/feriado deixava a
+  // chegada do frete DEPOIS da entrega e dava "ok" pra datas antes do "Mais rápido". Agora a
+  // conta usa o dia útil ANTERIOR (conservador) e a tela avisa.
+  const prazoPedido=prazoIso;
+  if(prazoIso&&typeof _isDiaUtil==='function'){let g=0;while(!_isDiaUtil(prazoIso)&&g<15){prazoIso=_opAddDias(prazoIso,-1);g++;}}
+  const res={prazoIso,emissaoIso,status:'nao',motivos:[],etapas:[],aloc:null,chegadaIso:null,coletaIso:null,prazoPedido,prazoAjustado:prazoIso!==prazoPedido};
   const coletaRaw=_opAddDias(prazoIso,-(P.diasInst+P.diasFrete));
   const chegadaRaw=_opAddDias(prazoIso,-P.diasInst);
   const dias=coletaRaw?Math.round((new Date(coletaRaw+'T00:00:00')-new Date(emissaoIso+'T00:00:00'))/86400000):0;
@@ -26071,13 +26092,26 @@ function _simBuscarDatas(P,ctx){
   return{rapido,seguro};
 }
 // Validade: até que dia de EMISSÃO a data pedida continua com o mesmo resultado (ou melhor).
-function _simValidade(P,prazoIso,ctx,statusHoje){
+// 2026-09-24.19: antes só olhava capacidade, então deixava "emitir até" colado na produção
+// (ex.: entrega 13/10 → "emita até 05/10", sem tempo pra projeto/compras). Agora exige também o
+// prazo MÍNIMO de ponta a ponta que o próprio simulador achou saindo de hoje (data mais rápida):
+// a emissão tem que ficar pelo menos esses N dias úteis antes da entrega.
+function _simValidade(P,prazoIso,ctx,statusHoje,rapido){
   if(statusHoje==='nao')return null;
-  let d=_hojeIso(),ultimo=d;
+  {let g=0;while(prazoIso&&!_isDiaUtil(prazoIso)&&g<15){prazoIso=_opAddDias(prazoIso,-1);g++;}}
+  const hoje=_hojeIso();
+  let limiteLead=null;
+  if(rapido&&rapido.prazoIso){
+    let n=0,x=hoje;
+    for(let k=0;k<400&&x<rapido.prazoIso;k++){x=_opAddDias(x,1);if(_isDiaUtil(x))n++;}
+    if(n>0){limiteLead=prazoIso;for(let k=0;k<n;k++){do{limiteLead=_opAddDias(limiteLead,-1);}while(!_isDiaUtil(limiteLead));}}
+  }
+  let d=hoje,ultimo=d;
   for(let i=0;i<60;i++){
     d=_opAddDias(d,1);
     if(!_isDiaUtil(d))continue;
     if(d>=prazoIso)break;
+    if(limiteLead&&d>limiteLead)break;
     const r=_simAvaliar(P,prazoIso,d,ctx);
     if(SIM_RANK[r.status]>SIM_RANK[statusHoje])break;
     ultimo=d;
@@ -26092,7 +26126,7 @@ function _simUsarData(iso){
   const el=document.getElementById('sim-prazo');if(el)el.value=iso;
   _lpSimular();
 }
-function _simTimelineHtml(r){
+function _simTimelineHtml(r,ctx){
   if(!r||!r.etapas||!r.etapas.length)return'';
   const ini=r.emissaoIso,fim=r.prazoIso;
   const t0=new Date(ini+'T00:00:00').getTime(),t1=new Date(fim+'T00:00:00').getTime()+86400000;
@@ -26102,18 +26136,31 @@ function _simTimelineHtml(r){
   let anterior=ini;
   const linhas=r.etapas.map((e,i)=>{
     const a=pos(anterior),b=Math.max(a+1.5,pos(e.iso)+100*86400000/tot);
+    // Infos que antes só existiam nos "detalhes técnicos" (2026-09-24, a pedido do usuário:
+    // "precisa disso? nao é info duplicada?") — dias úteis do setor, atividades no dia e a
+    // produção distribuída por dia agora ficam na própria linha da etapa.
+    let du='';try{du=_lpDiasUteisJanela(anterior,e.iso)+' d.ú.';}catch(err){}
+    let ativ='';
+    try{
+      const lim=LP_LIMITE_ATIVIDADES_ETAPA[e.key];
+      if(lim!=null&&ctx){const m=ctx.ativ[e.key]||(ctx.ativ[e.key]=_lpMapaAtividadesPorEtapa(e.key));const q=((m[e.iso]||{qtd:0}).qtd)+1;ativ=`<span title="Pedidos com esta etapa no mesmo dia, contando este (limite ${lim})" style="margin-left:6px;font-weight:700;color:${q>=lim?'#dc2626':'#15803d'}">${q>=lim?'🔴':'🟢'} ${q}/${lim}</span>`;}
+    }catch(err){}
+    let prodDias='';
+    if(e.key==='producao'&&r.aloc&&r.aloc.chunks&&r.aloc.chunks.length){
+      prodDias=`<div style="margin:0 0 6px 148px;font-size:.68rem;color:var(--ink3)">🏭 Produção por dia: ${r.aloc.chunks.map(c=>`<span style="white-space:nowrap;${c.estouro?'color:#b91c1c;font-weight:700':''}">${fmtD(c.iso).slice(0,5)} ${fmtR(c.valor)}${c.estouro?' ⚠️':''}</span>`).join(' · ')} <span style="color:var(--ink4)">(limite ${fmtR(_lpCapProducaoDia())}/dia)</span></div>`;
+    }
     const html=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
       <div style="width:140px;flex-shrink:0;font-size:.72rem;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${e.label}">${e.label}</div>
       <div style="position:relative;flex:1;height:16px;background:#f1f5f9;border-radius:5px">
         <div title="${e.label}: até ${fmtD(e.iso)}" style="position:absolute;left:${a}%;width:${Math.min(100-a,b-a)}%;top:0;bottom:0;background:${cores[i%cores.length]};border-radius:5px;opacity:.85"></div>
       </div>
-      <div style="width:70px;flex-shrink:0;font-size:.7rem;color:var(--ink3);text-align:right">${fmtD(e.iso)}</div>
-    </div>`;
+      <div style="width:190px;flex-shrink:0;font-size:.7rem;color:var(--ink3);text-align:right;white-space:nowrap">${fmtD(e.iso)} <span style="color:var(--ink4)">· ${du}</span>${ativ}</div>
+    </div>${prodDias}`;
     anterior=e.iso;
     return html;
   }).join('');
   return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">🗓️ Linha do tempo do pedido simulado</div>
-    <div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--ink4);margin:6px 0 6px 148px;padding-right:78px"><span>Emissão ${fmtD(ini)}</span><span>Entrega ${fmtD(fim)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--ink4);margin:6px 0 6px 148px;padding-right:198px"><span>Emissão ${fmtD(ini)}</span><span>Entrega ${fmtD(fim)}</span></div>
     ${linhas}</div>`;
 }
 function _simRenderExtras(){
@@ -26124,10 +26171,10 @@ function _simRenderExtras(){
   const hoje=_hojeIso();
   const pedido=_simAvaliar(P,P.prazoCliente,hoje,ctx);
   const{rapido,seguro}=_simBuscarDatas(P,ctx);
-  const validade=_simValidade(P,P.prazoCliente,ctx,pedido.status);
+  const validade=_simValidade(P,P.prazoCliente,ctx,pedido.status,rapido);
   _simUltimoExtras={P,pedido,rapido,seguro,validade,em:new Date().toISOString()};
   const v=_simStatusVisual(pedido.status);
-  const folga=seguro&&pedido.status==='ok'?Math.round((new Date(P.prazoCliente)-new Date(seguro.prazoIso))/86400000):null;
+  const folga=seguro&&pedido.status==='ok'?Math.round((new Date(pedido.prazoIso)-new Date(seguro.prazoIso))/86400000):null;
   const frase=pedido.status==='ok'
     ?`Dá pra entregar em ${fmtD(P.prazoCliente)}${folga>0?` — ${folga} dia(s) de folga em relação à data mínima segura`:''}`
     :pedido.status==='apertado'
@@ -26135,8 +26182,14 @@ function _simRenderExtras(){
       :`Não dá pra entregar em ${fmtD(P.prazoCliente)}: ${pedido.motivos[0]||'prazo insuficiente'}`;
   const resumo=`<div style="background:${v.bg};border:2px solid ${v.bd};border-radius:12px;padding:14px 16px;margin-bottom:14px">
     <div style="font-size:1.15rem;font-weight:800;color:${v.cor}">${v.ico} ${frase}</div>
-    <div style="font-size:.86rem;margin-top:6px;color:var(--ink2)">🎯 <b>Data mínima ideal (sem estourar nada): ${seguro?fmtD(seguro.prazoIso):'acima de 180 dias'}</b>${rapido&&(!seguro||rapido.prazoIso!==seguro.prazoIso)?` · data mais rápida possível (apertada): ${fmtD(rapido.prazoIso)}`:''}</div>
-    ${validade?`<div style="font-size:.8rem;margin-top:6px;color:var(--ink3)">⏳ Essa condição vale se o pedido for emitido até <b>${fmtD(validade)}</b> — considerando a ocupação da fábrica hoje (outras vendas podem ocupar a vaga antes).</div>`:''}
+    <div style="font-size:.86rem;margin-top:6px;color:var(--ink2)">🎯 <b>Data mínima ideal de entrega (sem estourar nada): ${seguro?fmtD(seguro.prazoIso):'acima de 180 dias'}</b>${rapido&&(!seguro||rapido.prazoIso!==seguro.prazoIso)?` · data mais rápida possível (apertada): ${fmtD(rapido.prazoIso)}`:''}</div>
+    ${(()=>{try{
+      if(pedido.status==='apertado'&&seguro&&seguro.prazoIso<P.prazoCliente&&pedido.aloc&&pedido.aloc.chunks&&pedido.aloc.chunks.length){
+        const cs=pedido.aloc.chunks,a=fmtD(cs[0].iso).slice(0,5),b=fmtD(cs[cs.length-1].iso).slice(0,5);
+        return`<div style="font-size:.8rem;margin-top:6px;color:var(--ink2)">💡 <b>Por que uma data mais cedo sai melhor?</b> A produção é programada pra perto da saída do frete. Pra entregar em ${fmtD(P.prazoCliente)}, ela cairia em <b>${a===b?a:a+' a '+b}</b>, dias que já estão ocupados por pedidos emitidos/reservas. Na data segura ela cai em dias livres.</div>`;}
+      return'';}catch(err){return'';}})()}
+    ${pedido.prazoAjustado?`<div style="font-size:.8rem;margin-top:6px;color:#b45309">📅 ${fmtD(P.prazoCliente)} não é dia útil (fim de semana/feriado) — a conta considerou a entrega no dia útil anterior, <b>${fmtD(pedido.prazoIso)}</b>.</div>`:''}
+    ${validade?`<div style="font-size:.8rem;margin-top:6px;color:var(--ink3)">⏳ Essa condição vale se o pedido for emitido até <b>${fmtD(validade)}</b> — depois disso não sobra tempo pras etapas antes da produção (projeto, compras...) ou a fábrica já estará ocupada. Considera a ocupação de hoje; outras vendas podem ocupar a vaga antes.</div>`:''}
   </div>`;
   const card=(ico,titulo,r,sub)=>{
     if(!r)return`<div style="flex:1;min-width:190px;border:1.5px dashed var(--border);border-radius:12px;padding:12px"><div style="font-weight:800">${ico} ${titulo}</div><div style="font-size:.78rem;color:var(--ink4);margin-top:6px">Sem data possível nos próximos 180 dias.</div></div>`;
@@ -26157,9 +26210,7 @@ function _simRenderExtras(){
     ${_simPodeReservar()?`<button onclick="_simReservarData()" class="dash-btn-conf" style="background:#0891b2" type="button">📌 Reservar esta data (3 dias úteis)</button>`:''}
     ${crmId?`<button onclick="_simSalvarNoCrm()" class="dash-btn-conf" style="background:#7c3aed" type="button">💾 Salvar simulação no card do CRM</button>`:''}
   </div>`;
-  const tecnico=out.innerHTML;
-  out.innerHTML=resumo+cenarios+acoes+_simTimelineHtml(pedido.status!=='nao'?pedido:(seguro||null))
-    +`<details style="margin-top:6px"><summary style="cursor:pointer;font-weight:700;font-size:.82rem;color:var(--ink3)">🔍 Ver detalhes técnicos (capacidade por dia, etapas, atividades)</summary><div style="margin-top:10px">${tecnico}</div></details>`;
+  out.innerHTML=resumo+cenarios+acoes+_simTimelineHtml(pedido.status!=='nao'?pedido:(seguro||null),ctx);
 }
 // ── (5) CRM opcional ──
 function _simPopularCrm(){
@@ -26194,11 +26245,13 @@ async function _simSalvarNoCrm(){
   try{await _crmSalvarEmpresaObj(e);toast('Simulação salva no card do CRM ✅','tok');}catch(err){}
 }
 // ── (8) Mapa de calor da fábrica — próximas 8 semanas ──
-function _simRenderHeatmap(){
-  const el=document.getElementById('sim-heatmap');if(!el)return;
-  let mapaProd={},mapaInst={};
-  try{mapaProd=_lpMapaProducaoPorDia();mapaInst=_lpMapaInstalacoesPorDia();}catch(e){el.innerHTML='';return;}
-  const cap=_lpCapProducaoDia(),capI=_lpCapInstalacoesDia();
+// 2026-09-24.20: a pedido do usuário, o mapa passou a ser SÓ de Produção (antes misturava o
+// maior entre Produção e Instalação) e também aparece em PRODUÇÃO → Indicadores → Visão Geral.
+function _simRenderHeatmap(elId){
+  const el=document.getElementById(elId||'sim-heatmap');if(!el)return;
+  let mapaProd={};
+  try{mapaProd=_lpMapaProducaoPorDia();}catch(e){el.innerHTML='';return;}
+  const cap=_lpCapProducaoDia();
   const hoje=new Date();hoje.setHours(0,0,0,0);
   const seg=new Date(hoje);seg.setDate(hoje.getDate()-((hoje.getDay()+6)%7));
   const hojeIso=_hojeIso();
@@ -26210,18 +26263,18 @@ function _simRenderHeatmap(){
       const dt=new Date(seg);dt.setDate(seg.getDate()+w*7+d);
       const iso=_isoLocal(dt);
       if(!_isDiaUtil(iso)){cels+=`<td title="${fmtD(iso)} — feriado" style="background:#e2e8f0;color:#94a3b8;text-align:center;border-radius:6px;padding:6px 2px;font-size:.7rem">${dt.getDate()}<div style="font-size:.58rem">feriado</div></td>`;continue;}
-      const prod=(mapaProd[iso]&&mapaProd[iso].soma)||0,inst=(mapaInst[iso]&&mapaInst[iso].qtd)||0;
-      const pct=Math.max(prod/cap,inst/capI);
+      const prod=(mapaProd[iso]&&mapaProd[iso].soma)||0;
+      const pct=prod/cap;
       if(iso>=hojeIso){somaPct+=pct;n++;}
       const[bg,fg]=cor(pct);
-      cels+=`<td title="${fmtD(iso)} · Produção ${fmtR(prod)} (${Math.round(prod/cap*100)}% da capacidade) · Instalações ${inst}/${capI}" style="background:${iso<hojeIso?'#f8fafc':bg};color:${iso<hojeIso?'#cbd5e1':fg};text-align:center;border-radius:6px;padding:6px 2px;font-size:.72rem;font-weight:700;${iso===hojeIso?'outline:2px solid #1e293b;':''}">${dt.getDate()}/${dt.getMonth()+1}<div style="font-size:.6rem;font-weight:600">${iso<hojeIso?'':Math.round(pct*100)+'%'}</div></td>`;
+      cels+=`<td title="${fmtD(iso)} · Produção ${fmtR(prod)} (${Math.round(prod/cap*100)}% da capacidade diária de ${fmtR(cap)})" style="background:${iso<hojeIso?'#f8fafc':bg};color:${iso<hojeIso?'#cbd5e1':fg};text-align:center;border-radius:6px;padding:6px 2px;font-size:.72rem;font-weight:700;${iso===hojeIso?'outline:2px solid #1e293b;':''}">${dt.getDate()}/${dt.getMonth()+1}<div style="font-size:.6rem;font-weight:600">${iso<hojeIso?'':Math.round(pct*100)+'%'}</div></td>`;
     }
     const dIni=new Date(seg);dIni.setDate(seg.getDate()+w*7);
     if(n&&somaPct/n<0.5)semanasLivres.push(`${dIni.getDate()}/${dIni.getMonth()+1}`);
     linhas+=`<tr><td style="font-size:.68rem;color:var(--ink4);padding-right:6px;white-space:nowrap">sem. ${dIni.getDate()}/${dIni.getMonth()+1}</td>${cels}</tr>`;
   }
-  el.innerHTML=`<div class="dash-card"><div class="dash-sec-title">🔥 Ocupação da fábrica — próximas 8 semanas</div>
-    <div style="font-size:.74rem;color:var(--ink3);margin:4px 0 10px">Maior ocupação do dia entre Produção (R$ ${cap.toLocaleString('pt-BR')}/dia) e Instalação (${capI} obras/dia), já contando pedidos reais e reservas. ${semanasLivres.length?`<b style="color:#15803d">Semanas com folga pra vender prazo curto: ${semanasLivres.join(', ')}</b>`:''}</div>
+  el.innerHTML=`<div class="dash-card"><div class="dash-sec-title">🔥 Ocupação da PRODUÇÃO — próximas 8 semanas</div>
+    <div style="font-size:.74rem;color:var(--ink3);margin:4px 0 10px">Só Produção: valor líquido já programado em cada dia ÷ capacidade de R$ ${cap.toLocaleString('pt-BR')}/dia, contando pedidos emitidos (ainda sem baixa na Produção) e reservas do simulador. Instalação não entra aqui. ${semanasLivres.length?`<b style="color:#15803d">Semanas com folga pra vender prazo curto: ${semanasLivres.join(', ')}</b>`:''}</div>
     <div style="overflow-x:auto"><table style="border-collapse:separate;border-spacing:4px;width:100%;min-width:420px"><thead><tr><th></th>${['Seg','Ter','Qua','Qui','Sex'].map(x=>`<th style="font-size:.68rem;color:var(--ink4)">${x}</th>`).join('')}</tr></thead><tbody>${linhas}</tbody></table></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:.68rem;margin-top:8px;color:var(--ink3)"><span>🟩 folga</span><span>🟨 50–79%</span><span>🟧 80–99%</span><span>🟥 lotado</span></div></div>`;
 }
