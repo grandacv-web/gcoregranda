@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-24.28';</script>
+<script>const APP_BUILD_VERSION='2026-09-24.30';</script>
 <!-- Carregamento mais rápido (2026-09-24.27, a pedido do usuário: "essa demora pra atualizar
      o sistema tem como diminuir"): abre as conexões com Firebase/CDNs e já começa a baixar o
      Firebase logo no início, em paralelo com o resto da página. -->
@@ -658,6 +658,10 @@ select.fc{cursor:pointer}
 .toast{position:fixed;bottom:24px;right:24px;z-index:999;padding:13px 22px;border-radius:12px;font-size:.82rem;font-weight:600;opacity:0;transition:all .3s;pointer-events:none;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.2);backdrop-filter:blur(8px);display:flex;align-items:center;gap:8px}
 .toast.show{opacity:1;transform:translateY(-2px)}
 .tok{background:linear-gradient(135deg,#15803d,#16a34a)} .terr{background:linear-gradient(135deg,#b91c1c,#dc2626)} .tinf{background:linear-gradient(135deg,#0369a1,#2563eb)}
+
+/* avisos clicáveis (2026-09-24.29) */
+.aviso-clicavel{transition:transform .12s,box-shadow .12s}
+.aviso-clicavel:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(15,23,42,.12)}
 </style>
 </head>
 <body>
@@ -2367,6 +2371,8 @@ select.fc{cursor:pointer}
       <div class="dash-tabs" style="margin-bottom:14px" id="rh-main-tabs">
         <button class="dash-tab active rh-main-tab" onclick="rhSetMainTab('pontualidade',this)">Pontualidade e Assiduidade</button>
         <button class="dash-tab rh-main-tab" onclick="rhSetMainTab('colaboradores',this)">Lista de Colaboradores</button>
+        <button class="dash-tab rh-main-tab" onclick="rhSetMainTab('bancohoras',this)">Banco de Horas</button>
+        <button class="dash-tab rh-main-tab" onclick="rhSetMainTab('ferias',this)">Férias</button>
       </div>
       <div id="rh-sec-pontualidade">
         <div style="font-size:.78rem;color:var(--ink4);margin-bottom:16px;padding:12px 16px;background:#fff;border-radius:10px;border:1px solid var(--border-lt);border-left:3px solid #101B3D;line-height:1.5">
@@ -2467,6 +2473,27 @@ select.fc{cursor:pointer}
            (mesmo modal de abrirRhHistoricoFuncionario, com Demitir/Horários/Afastamento/
            Atestado + os dados gerais de assiduidade/pontualidade). Não recalcula nada novo —
            só lista cfg.rhFuncionarios e reaproveita o modal que já existe. -->
+      <!-- Banco de Horas e Férias (2026-09-24.30, sugestões aprovadas pelo usuário) — ver
+           renderRhBancoHoras()/renderRhFerias(). -->
+      <div id="rh-sec-bancohoras" style="display:none">
+        <div style="font-size:.78rem;color:var(--ink4);margin-bottom:16px;padding:12px 16px;background:#fff;border-radius:10px;border:1px solid var(--border-lt);border-left:3px solid #101B3D;line-height:1.5">
+          Horas extras, horas devidas e saldo de cada colaborador e de cada setor, calculados do Cartão Ponto já importado. Clique num colaborador pra ver o ponto dia a dia.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
+          <select id="rh-bh-mes" onchange="rhBhSetMes(this.value)" style="padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:.83rem;font-family:inherit;cursor:pointer;min-width:190px;background:#fff"></select>
+          <select id="rh-bh-depto" onchange="renderRhBancoHoras()" style="padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:.83rem;font-family:inherit;cursor:pointer;min-width:190px;background:#fff"><option value="">Todos os departamentos</option></select>
+        </div>
+        <div id="rh-bh-body"></div>
+      </div>
+      <div id="rh-sec-ferias" style="display:none">
+        <div style="font-size:.78rem;color:var(--ink4);margin-bottom:16px;padding:12px 16px;background:#fff;border-radius:10px;border:1px solid var(--border-lt);border-left:3px solid #101B3D;line-height:1.5">
+          Quem já pode tirar férias, quem está perto do limite (depois dele a empresa paga em dobro) e o calendário do ano por setor. Preencha a data de admissão de cada colaborador na tabela — é com ela que o sistema calcula os períodos. Férias tiradas antes do sistema não estão registradas: pra quem é antigo de casa, marque em "Férias em dia até" o último período que já foi tirado.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
+          <input id="rh-fe-busca" placeholder="Buscar colaborador ou setor..." oninput="renderRhFerias()" style="flex:1;min-width:240px;padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:.83rem;font-family:inherit">
+        </div>
+        <div id="rh-ferias-body"></div>
+      </div>
       <div id="rh-sec-colaboradores" style="display:none">
         <div style="font-size:.78rem;color:var(--ink4);margin-bottom:16px;padding:12px 16px;background:#fff;border-radius:10px;border:1px solid var(--border-lt);border-left:3px solid #101B3D;line-height:1.5">
           Pesquise um colaborador (ativo ou demitido) pelo nome e clique nele pra abrir o perfil completo — histórico de ponto, assiduidade/pontualidade, e os botões de Demitir, Horários deste Colaborador, Afastamento/Férias e Apresentar Declaração/Atestado.
@@ -7316,7 +7343,7 @@ function _avisosAutomaticos(){
       const quando=dias===0?'é HOJE':dias===1?'é amanhã':`é em ${dias} dias`;
       out.push({
         id:'aniv_'+(c.empresaId||'')+'_'+(c._idx!=null?c._idx:'')+'_'+ano,
-        automatico:true,tipoAuto:'aniversario',
+        automatico:true,tipoAuto:'aniversario',crmEmpresaId:c.empresaId||'',
         assunto:'🎂 Aniversário chegando',
         texto:`${c.nome||'Contato'} (${c.empresaNome||'—'}) ${quando} — dia ${String(c._anivDia).padStart(2,'0')}/${String(c._anivMes).padStart(2,'0')}. Que tal mandar uma mensagem?`,
         destinatarioTipo:'setor',destinatarioValor:'COMERCIAL'
@@ -7334,7 +7361,7 @@ function _avisosAutomaticos(){
       if(e.etapa==='orcamento_aprovado'&&e.avisoAprovacaoNovo&&e.responsavel){
         out.push({
           id:'aprov_'+e.id,
-          automatico:true,tipoAuto:'orcamento_aprovado',
+          automatico:true,tipoAuto:'orcamento_aprovado',crmEmpresaId:e.id,
           assunto:'✅ Orçamento aprovado!',
           texto:`O negócio "${e.nome||'—'}"${e.job?' ('+e.job+')':''} foi movido pra ORÇAMENTO APROVADO — dá uma olhada!`+(function(){try{const pz=_crmAprovPrazo(e);return pz?` Você tem até ${_fmtDataHora(new Date(pz.limiteMs).toISOString()).replace(', ',' às ')} (${pz.horas}h úteis) pra enviar ao cliente e tirar o card dessa etapa.`:'';}catch(err){return'';}})(),
           destinatarioTipo:'nome',destinatarioValor:e.responsavel
@@ -7364,7 +7391,7 @@ function _avisosAutomaticos(){
         if(pz.estourado){
           out.push({
             id:(aprov?'aprov_estourou_':'prazoetapa_estourou_')+e.id+'_'+pz.entradaMs+sufixo,
-            automatico:true,tipoAuto:'aprov_prazo',
+            automatico:true,tipoAuto:'aprov_prazo',crmEmpresaId:e.id,
             assunto:`🚨 ${aprov?'Orçamento aprovado parado':'Card parado em '+pz.label} — prazo estourado`,
             texto:`O negócio ${nomeNeg} passou das ${pz.horas}h úteis em ${pz.label} (venceu ${lim}). ${acao} agora.`,
             destinatarioTipo:'nome',destinatarioValor:nomeDest
@@ -7373,7 +7400,7 @@ function _avisosAutomaticos(){
         if(new Date().getHours()>=8&&_isoLocal(new Date(pz.entradaMs))!==hojeAprov){
           out.push({
             id:(aprov?'aprov_diario_':'prazoetapa_diario_')+e.id+'_'+hojeAprov+sufixo,
-            automatico:true,tipoAuto:'aprov_prazo',
+            automatico:true,tipoAuto:'aprov_prazo',crmEmpresaId:e.id,
             assunto:pz.estourado?`🚨 ${aprov?'Orçamento aprovado parado':'Card parado em '+pz.label}`:`⏳ ${aprov?'Orçamento aprovado aguardando envio':'Card em '+pz.label+' com prazo'}`,
             texto:pz.estourado
               ?`O negócio ${nomeNeg} continua parado em ${pz.label} — o prazo de ${pz.horas}h úteis venceu em ${lim} (atraso de ${_crmAprovPrazoTxtHoras(pz.atrasoMs)}). ${acao}.`
@@ -7391,6 +7418,7 @@ function _avisosAutomaticos(){
   try{_simReservaAvisos().forEach(a=>out.push(a));}catch(err){console.error('reserva aviso',err);}
   try{_finProjecaoAvisos().forEach(a=>out.push(a));}catch(err){console.error('fluxo aviso',err);}
   try{_cpAvisosSemanais().forEach(a=>out.push(a));}catch(err){console.error('cp semana',err);}
+  try{if(typeof _rhFeriasAvisos==='function')_rhFeriasAvisos().forEach(a=>out.push(a));}catch(err){console.error('rh ferias aviso',err);}
   // Resumo semanal do gestor (2026-09-24) — só admin, a partir de segunda 08h.
   try{
     const agR=new Date();
@@ -7467,6 +7495,7 @@ function _avisoAplicavelPara(av,email,cat,isAdm,nome){
   // da tarefa (mesma checagem do ramo 'nome' logo abaixo, só que sem o bypass de admin).
   if(av.tipoAuto==='tarefas_diarias'||av.tipoAuto==='tarefa_vence20'||av.tipoAuto==='aprov_prazo')return !!nome&&av.destinatarioValor===nome;
   if(av.tipoAuto==='resumo_semanal'||av.tipoAuto==='cp_autorizar')return !!isAdm;
+  if(av.tipoAuto==='rh_ferias')return !!isAdm||_isRhUser();
   if(av.tipoAuto==='regua_vendedor')return !!nome&&(vendedorMatch(av.destinatarioValor,nome)||vendedorMatch(nome,av.destinatarioValor));
   if(isAdm)return true;
   if(av.destinatarioTipo==='todos')return true;
@@ -7550,18 +7579,19 @@ function _renderPainelAvisos(){
   const lista=_avisosNaoLidosParaUsuarioAtual();
   if(!lista.length){body.innerHTML='<div style="text-align:center;padding:30px 10px;color:var(--ink4)"><div style="font-size:2rem;margin-bottom:8px">🔕</div>Nenhum aviso novo no momento.</div>';return;}
   const{isAdm}=_getUserCat();
-  body.innerHTML=lista.map(av=>{
+  _avisosListaNovos=lista;
+  body.innerHTML=lista.map((av,idx)=>{
     const cor=av.automatico?'#f59e0b':'#0ea5e9';
     const destTxt=av.destinatarioTipo==='todos'?'Todos':av.destinatarioTipo==='segmentado'?_avisoDestSegmentadoTxt(av):av.destinatarioTipo==='setor'?('Setor: '+av.destinatarioValor):av.destinatarioTipo==='nome'?('Pessoa: '+av.destinatarioValor):('Pessoa: '+((cfg.usuarioNomes&&cfg.usuarioNomes[(av.destinatarioValor||'').toLowerCase()])||av.destinatarioValor||''));
-    const vaiParaTarefas=av.tipoAuto==='tarefas_diarias';
-    return `<div ${vaiParaTarefas?'onclick="_avisosIrParaTarefas()" ':''}style="border:1.5px solid ${cor};background:${av.automatico?'#fffbeb':'#f0f9ff'};border-radius:12px;padding:12px 14px;position:relative${vaiParaTarefas?';cursor:pointer':''}">
+    const dest=_avisoDestino(av);
+    return `<div ${dest?`onclick="_avisoClicar('n',${idx})" title="Clique para ${dest.label.replace(/"/g,'&quot;')}" class="aviso-clicavel" `:''}style="border:1.5px solid ${cor};background:${av.automatico?'#fffbeb':'#f0f9ff'};border-radius:12px;padding:12px 14px;position:relative${dest?';cursor:pointer':''}">
       <span style="position:absolute;top:10px;right:12px;background:${cor};color:#fff;font-size:.6rem;font-weight:800;padding:2px 7px;border-radius:20px">NOVO</span>
       <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:4px;padding-right:46px">${av.assunto||'(sem assunto)'}</div>
       <div style="font-size:.78rem;color:var(--ink2);line-height:1.4;white-space:pre-wrap">${(av.texto||'').replace(/</g,'&lt;')}</div>
       ${av.imagem?`<img src="${av.imagem}" style="display:block;max-width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin-top:8px;border:1px solid var(--border-lt)">`:''}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
         <span style="font-size:.66rem;color:var(--ink4)">${av.automatico?'🤖 Automático · '+destTxt:'📌 '+(av.criadoPorNome||'Admin')+' · '+destTxt}</span>
-        ${vaiParaTarefas?'<span style="font-size:.72rem;font-weight:800;color:#b45309">Ver tarefas ▶️</span>':''}
+        ${dest?`<span style="font-size:.72rem;font-weight:800;color:${av.automatico?'#b45309':'#0369a1'};white-space:nowrap;margin-left:8px">${dest.label} ▶️</span>`:''}
         ${(!av.automatico&&isAdm)?`<button onclick="event.stopPropagation();_avisosExcluirManual('${av.id}')" title="Excluir" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.75rem;padding:2px 4px">🗑</button>`:''}
       </div>
     </div>`;
@@ -7573,15 +7603,18 @@ function _renderAvisosLidosPanel(){
   const lista=_avisosLidosParaUsuarioAtual();
   if(!lista.length){body.innerHTML='<div style="text-align:center;padding:30px 10px;color:var(--ink4)"><div style="font-size:2rem;margin-bottom:8px">📭</div>Nenhum aviso lido ainda.</div>';return;}
   const{isAdm}=_getUserCat();
-  body.innerHTML=lista.map(av=>{
+  _avisosListaLidos=lista;
+  body.innerHTML=lista.map((av,idx)=>{
+    const dest=_avisoDestino(av);
     const destTxt=av.destinatarioTipo==='todos'?'Todos':av.destinatarioTipo==='segmentado'?_avisoDestSegmentadoTxt(av):av.destinatarioTipo==='setor'?('Setor: '+av.destinatarioValor):av.destinatarioTipo==='nome'?('Pessoa: '+av.destinatarioValor):('Pessoa: '+((cfg.usuarioNomes&&cfg.usuarioNomes[(av.destinatarioValor||'').toLowerCase()])||av.destinatarioValor||''));
-    return `<div style="border:1.5px solid var(--border-lt);background:#fff;border-radius:12px;padding:12px 14px">
+    return `<div ${dest?`onclick="_avisoClicar('l',${idx})" title="Clique para ${dest.label.replace(/"/g,'&quot;')}" class="aviso-clicavel" `:''}style="border:1.5px solid var(--border-lt);background:#fff;border-radius:12px;padding:12px 14px${dest?';cursor:pointer':''}">
       <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:4px">${av.assunto||'(sem assunto)'}</div>
       <div style="font-size:.78rem;color:var(--ink2);line-height:1.4;white-space:pre-wrap">${(av.texto||'').replace(/</g,'&lt;')}</div>
       ${av.imagem?`<img src="${av.imagem}" style="display:block;max-width:100%;max-height:220px;object-fit:contain;border-radius:8px;margin-top:8px;border:1px solid var(--border-lt)">`:''}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
         <span style="font-size:.66rem;color:var(--ink4)">${av.automatico?'🤖 Automático · '+destTxt:'📌 '+(av.criadoPorNome||'Admin')+' · '+destTxt}</span>
-        ${(!av.automatico&&isAdm)?`<button onclick="_avisosExcluirManualLido('${av.id}')" title="Excluir" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.75rem;padding:2px 4px">🗑</button>`:''}
+        ${dest?`<span style="font-size:.72rem;font-weight:800;color:#475569;white-space:nowrap;margin-left:8px">${dest.label} ▶️</span>`:''}
+        ${(!av.automatico&&isAdm)?`<button onclick="event.stopPropagation();_avisosExcluirManualLido('${av.id}')" title="Excluir" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.75rem;padding:2px 4px">🗑</button>`:''}
       </div>
     </div>`;
   }).join('');
@@ -7597,6 +7630,85 @@ function _avisosExcluirManualLido(id){
 function _avisosIrParaTarefas(){
   closeM('mo-avisos');
   setSection('cat:FERRAMENTAS');
+}
+// ══ AVISOS CLICÁVEIS (2026-09-24.29, a pedido do usuário: "nos avisos tem como ser clicavel
+// quando possivel? quando clicar ir pro orçamento aprovado, ir pro financeiro... quando nao
+// tiver pra onde ir dai nao ser clicavel") ══
+// _avisoDestino(av) devolve {label, go} quando o aviso tem pra onde levar E o usuário logado
+// tem acesso àquela tela; senão null (aí o aviso fica como antes, sem clique). Avisos manuais
+// (Central de Avisos) nunca são clicáveis — não têm destino.
+let _avisosListaNovos=[],_avisosListaLidos=[];
+function _avisoEmpresaIdCrm(av){
+  if(av.crmEmpresaId)return av.crmEmpresaId;
+  // avisos gerados antes do campo existir: tenta tirar do id (aprov_<id>)
+  if(av.tipoAuto==='orcamento_aprovado'&&/^aprov_/.test(av.id||''))return av.id.slice(6);
+  return '';
+}
+function _avisoFecharPaineis(){try{closeM('mo-avisos');}catch(e){}try{closeM('mo-avisos-lidos');}catch(e){}}
+function _avisosIrCrm(sub,empresaId){
+  _avisoFecharPaineis();
+  setSection('geral');
+  try{geralTab('crm',document.getElementById('gtab-crm'));}catch(e){console.error(e);}
+  const btn=[...document.querySelectorAll('#crm-main-tabs .crm-main-tab')].find(b=>(b.getAttribute('onclick')||'').includes("'"+sub+"'"));
+  try{crmSetTab(sub,btn);}catch(e){console.error(e);}
+  if(empresaId)setTimeout(()=>crmAbrirCard(empresaId),60);
+}
+function _avisosIrFinanceiro(tab){
+  _avisoFecharPaineis();
+  setSection('cat:FINANCEIRO');
+  const btn=[...document.querySelectorAll('.fin-main-tab')].find(b=>(b.getAttribute('onclick')||'').includes("'"+tab+"'"));
+  try{finMainSetTab(tab,btn);}catch(e){console.error(e);}
+}
+function _avisosIrSimulador(){
+  _avisoFecharPaineis();
+  setSection('cat:LISTA_PEDIDOS');
+  try{lpSetTab('simulador');}catch(e){console.error(e);}
+}
+function _avisoDestino(av){
+  if(!av||!av.automatico)return null;
+  const t=av.tipoAuto;
+  try{
+    if(t==='orcamento_aprovado'||t==='aprov_prazo'||t==='aniversario'){
+      const id=_avisoEmpresaIdCrm(av);
+      if(!id||!_podeVerVisaoComercial()||typeof crmEmpresas==='undefined'||!crmEmpresas.some(e=>e.id===id))return null;
+      return{label:t==='aniversario'?'Abrir contato no CRM':'Abrir negócio no CRM',go:()=>_avisosIrCrm('kanban',id)};
+    }
+    if(t==='resumo_semanal'){
+      if(!_podeVerVisaoComercial())return null;
+      return{label:'Ver indicadores do CRM',go:()=>_avisosIrCrm('indicadores')};
+    }
+    if(t==='tarefas_diarias'||t==='tarefa_vence20'){
+      if(!_temAcessoFerramentas())return null;
+      return{label:'Ver tarefas',go:()=>{_avisoFecharPaineis();setSection('cat:FERRAMENTAS');}};
+    }
+    if(t==='regua_financeiro'||t==='regua_vendedor'){
+      if(!_isFinanceiroUser())return null;
+      return{label:'Ir pro Contas a Receber',go:()=>_avisosIrFinanceiro('contas')};
+    }
+    if(t==='fluxo_negativo'||t==='cp_semana'||t==='cp_autorizar'){
+      if(!_isFinanceiroUser())return null;
+      return{label:'Ir pro Financeiro',go:()=>_avisosIrFinanceiro('indicadores')};
+    }
+    if(t==='roteiro_cliente'){
+      if(!_isPlanejamentoUser())return null;
+      return{label:'Ir pro Planejamento',go:()=>{_avisoFecharPaineis();setSection('cat:PLANEJAMENTO');}};
+    }
+    if(t==='rh_ferias'){
+      if(!_isRhUser())return null;
+      return{label:'Ir pra Férias (RH)',go:()=>{_avisoFecharPaineis();setSection('cat:RH');const b=[...document.querySelectorAll('.rh-main-tab')].find(x=>(x.getAttribute('onclick')||'').includes("'ferias'"));rhSetMainTab('ferias',b);}};
+    }
+    if(t==='sim_reserva'){
+      if(!_isPlanejamentoUser())return null;
+      return{label:'Ir pro Simulador',go:_avisosIrSimulador};
+    }
+  }catch(err){console.error('_avisoDestino',err);}
+  return null;
+}
+function _avisoClicar(qual,idx){
+  const av=(qual==='l'?_avisosListaLidos:_avisosListaNovos)[idx];
+  const d=_avisoDestino(av);
+  if(!d){toast('Esse aviso não tem uma tela pra abrir','twar');return;}
+  try{d.go();}catch(err){console.error('Abrir aviso',err);toast('Não consegui abrir essa tela','terr');}
 }
 function abrirPainelAvisos(){
   _renderPainelAvisos();
@@ -30403,12 +30515,14 @@ function _rhLimparPeriodo(){
 function rhSetMainTab(tab,btn){
   document.querySelectorAll('.rh-main-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  ['pontualidade','colaboradores'].forEach(t=>{
+  ['pontualidade','colaboradores','bancohoras','ferias'].forEach(t=>{
     const el=document.getElementById('rh-sec-'+t);
     if(el)el.style.display=t===tab?'':'none';
   });
   if(tab==='pontualidade')renderRhPontualidade();
   if(tab==='colaboradores')renderRhListaColaboradores();
+  if(tab==='bancohoras')renderRhBancoHoras();
+  if(tab==='ferias')renderRhFerias();
 }
 // Anel/gauge SVG do índice de pontualidade (0-100) — substitui o texto puro "87/100 —
 // Saudável" por um indicador visual, a pedido do usuário ("muito texto... quero algo mais
@@ -30662,6 +30776,10 @@ async function _rhSalvarMotivoAtestado(funcId,data,remover){
 }
 function renderRhPontualidade(){
   if(!_isRhUser())return;
+  try{
+    if(document.getElementById('rh-sec-bancohoras')?.style.display==='')renderRhBancoHoras();
+    if(document.getElementById('rh-sec-ferias')?.style.display==='')renderRhFerias();
+  }catch(err){console.error('RH abas extras',err);}
   const cardsElErro=document.getElementById('rh-cards-gerais');
   if(!cardsElErro)return;
   _rhIniciarIconesEstaticos();
@@ -31316,9 +31434,10 @@ async function rhSalvarAfastamento(funcionarioId){
   f.afastamentos.push({id:uid(),tipo,dataInicio,dataFim,motivo,por:(usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'),em:new Date().toISOString()});
   try{
     await _rhSalvarCfg();
-    toast('Afastamento registrado ✅','tok');
+    toast((tipo==='Férias'?'Férias':'Afastamento')+' registrado ✅','tok');
     const m=document.getElementById('rh-afastamento-modal');if(m)m.remove();
-    _rhRenderHistoricoModal();
+    if(document.getElementById('rh-hist-modal'))_rhRenderHistoricoModal();
+    if(document.getElementById('rh-sec-ferias')?.style.display==='')renderRhFerias();
   }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
 }
 async function rhRemoverAfastamento(funcionarioId,afastamentoId){
@@ -31329,7 +31448,8 @@ async function rhRemoverAfastamento(funcionarioId,afastamentoId){
   try{
     await _rhSalvarCfg();
     toast('Afastamento removido','tok');
-    _rhRenderHistoricoModal();
+    if(document.getElementById('rh-hist-modal'))_rhRenderHistoricoModal();
+    if(document.getElementById('rh-sec-ferias')?.style.display==='')renderRhFerias();
   }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
 }
 // ── APRESENTAR DECLARAÇÃO/ATESTADO com anexo (2026-08-26, a pedido do usuário) ─────────
@@ -31454,6 +31574,340 @@ function renderRhListaColaboradores(){
     </tr>`).join('')}</tbody>
   </table>`;
 }
+// ══════════════════════════════════════════════════════════════════════════════════════
+// RH → BANCO DE HORAS (2026-09-24.30, a pedido do usuário — sugestão aprovada: "saldo de banco
+// de horas de cada colaborador, quanto de hora extra cada setor fez no mês e quem está sempre
+// fazendo hora extra"). 100% derivado do ponto já importado (rhPontoMeses via
+// _rhDiasDoFuncionario, que já aplica horário personalizado/atestado/afastamento/desligamento).
+// Regras:
+//  • Tolerância CLT (art. 58 §1º): diferença de até 10 min no dia não conta nem como extra nem
+//    como devida.
+//  • Hora extra do dia = trabalhado − previsto (inclui sábado/domingo/feriado trabalhado, onde
+//    o previsto é 0 — mostrado à parte como "em folga/fim de semana").
+//  • Horas devidas = previsto − trabalhado SÓ em dia que a pessoa trabalhou (atraso/saída
+//    antecipada). Falta do dia inteiro NÃO entra aqui — continua em Pontualidade e Assiduidade.
+//  • Dias ignorados: atestado, afastamento/férias, desligado e dia "incompleto" (ponto não fechou).
+//  • "Sempre em hora extra" = fez extra em 50%+ dos dias trabalhados (mín. 5 dias no período).
+// ══════════════════════════════════════════════════════════════════════════════════════
+const _RH_BH_TOLERANCIA_MIN=10;
+let _rhBhMes=null; // null = ainda não escolhido (usa o último mês com dado); '' = todos os meses
+function _rhBhCalc(dias){
+  let heMin=0,heFolgaMin=0,devidoMin=0,diasTrab=0,diasHE=0,previstoMin=0;
+  dias.forEach(d=>{
+    if(d.atestado||d.manualAtestado||d.afastamento||d.desligado||d.incompleto)return;
+    const prev=d.previstoMin||0,trab=d.trabalhadoMin||0;
+    previstoMin+=prev;
+    if(trab<=0)return; // falta (ou dia sem expediente sem ponto) — não é banco de horas
+    diasTrab++;
+    const dif=trab-prev;
+    if(Math.abs(dif)<=_RH_BH_TOLERANCIA_MIN)return;
+    if(dif>0){heMin+=dif;diasHE++;if(prev===0)heFolgaMin+=dif;}
+    else devidoMin+=-dif;
+  });
+  const saldoMin=heMin-devidoMin;
+  const freqHE=diasTrab?diasHE/diasTrab:0;
+  return{heMin,heFolgaMin,devidoMin,saldoMin,diasTrab,diasHE,previstoMin,freqHE,sempreHE:diasTrab>=5&&freqHE>=0.5};
+}
+function _rhBhMesesDisponiveis(){return[...new Set(rhPontoMeses.map(m=>m.anoMes).filter(Boolean))].sort();}
+function _rhMesExtenso(am){if(!am)return'Todos os meses';const[a,m]=am.split('-');const n=String(MESES_PT[+m]||m);return n.charAt(0)+n.slice(1).toLowerCase()+' de '+a;}
+function rhBhSetMes(v){_rhBhMes=v;renderRhBancoHoras();}
+function renderRhBancoHoras(){
+  if(!_isRhUser())return;
+  const el=document.getElementById('rh-bh-body');
+  if(!el)return;
+  const meses=_rhBhMesesDisponiveis();
+  if(_rhBhMes===null)_rhBhMes=meses.length?meses[meses.length-1]:'';
+  const selMes=document.getElementById('rh-bh-mes');
+  if(selMes){selMes.innerHTML=`<option value="">Todos os meses</option>`+meses.slice().reverse().map(m=>`<option value="${m}">${_rhMesExtenso(m)}</option>`).join('');selMes.value=_rhBhMes;}
+  const funcsTodos=(cfg.rhFuncionarios||[]).filter(f=>f.status!=='demitido');
+  const selDep=document.getElementById('rh-bh-depto');
+  const depAtual=selDep?selDep.value:'';
+  const deptos=[...new Set(funcsTodos.map(f=>f.departamento||'SEM DEPARTAMENTO'))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  if(selDep){selDep.innerHTML='<option value="">Todos os departamentos</option>'+deptos.map(d=>`<option value="${String(d).replace(/"/g,'&quot;')}">${d}</option>`).join('');selDep.value=deptos.includes(depAtual)?depAtual:'';}
+  const depFil=selDep?selDep.value:'';
+  const funcs=funcsTodos.filter(f=>!depFil||(f.departamento||'SEM DEPARTAMENTO')===depFil);
+  const linhas=funcs.map(f=>{
+    const c=_rhBhCalc(_rhDiasDoFuncionario(f.id,_rhBhMes||'',null,null));
+    const acum=_rhBhCalc(_rhDiasDoFuncionario(f.id,'',null,null));
+    return{f,depto:f.departamento||'SEM DEPARTAMENTO',c,saldoAcum:acum.saldoMin};
+  }).filter(x=>x.c.diasTrab>0||x.saldoAcum!==0);
+  if(!linhas.length){
+    el.innerHTML=`<div style="padding:30px;text-align:center;color:var(--ink4);font-size:.85rem;background:#fff;border:1px solid #e2e8f0;border-radius:8px">Nenhum ponto importado ${_rhBhMes?'em '+_rhMesExtenso(_rhBhMes):''} — suba o Cartão Ponto na aba Pontualidade e Assiduidade.</div>`;
+    return;
+  }
+  const tot=linhas.reduce((a,x)=>{a.he+=x.c.heMin;a.folga+=x.c.heFolgaMin;a.dev+=x.c.devidoMin;a.prev+=x.c.previstoMin;if(x.c.heMin>0)a.pessoas++;if(x.c.sempreHE)a.sempre++;return a;},{he:0,folga:0,dev:0,prev:0,pessoas:0,sempre:0});
+  const saldoTot=tot.he-tot.dev;
+  const kpi=(rot,val,sub,cor)=>`<div style="flex:1;min-width:150px;padding:14px 16px;border-right:1px solid #eef1f6"><div style="font-size:.64rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em">${rot}</div><div style="font-size:1.45rem;font-weight:800;color:${cor||'#101B3D'};margin-top:4px">${val}</div><div style="font-size:.68rem;color:#94a3b8;margin-top:2px">${sub||''}</div></div>`;
+  const corSaldo=v=>v>0?'#15803d':v<0?'#b91c1c':'#64748b';
+  const fmtS=v=>(v>0?'+':'')+_rhFmtHoras(v);
+  // por departamento
+  const porDep={};
+  linhas.forEach(x=>{const d=porDep[x.depto]=porDep[x.depto]||{pessoas:0,he:0,dev:0,prev:0,folga:0};d.pessoas++;d.he+=x.c.heMin;d.dev+=x.c.devidoMin;d.prev+=x.c.previstoMin;d.folga+=x.c.heFolgaMin;});
+  const depArr=Object.entries(porDep).sort((a,b)=>b[1].he-a[1].he);
+  const maxHeDep=Math.max(1,...depArr.map(([,d])=>d.he));
+  const th='text-align:left;font-size:.64rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;padding:10px 12px;border-bottom:1px solid #e2e8f0;white-space:nowrap;position:sticky;top:0;background:#fff';
+  const td='padding:9px 12px;font-size:.8rem;color:#1e293b;border-bottom:1px solid #f1f5f9;white-space:nowrap';
+  const titulo=t=>`<div style="display:flex;align-items:center;gap:10px;margin:0 0 12px"><div style="width:4px;height:18px;background:#101B3D;border-radius:2px"></div><h2 style="margin:0;font-size:.76rem;font-weight:800;color:#101B3D;letter-spacing:.09em;text-transform:uppercase">${t}</h2></div>`;
+  const sempre=linhas.filter(x=>x.c.sempreHE).sort((a,b)=>b.c.heMin-a.c.heMin);
+  const ordenadas=linhas.slice().sort((a,b)=>b.c.heMin-a.c.heMin||a.f.nome.localeCompare(b.f.nome,'pt-BR'));
+  el.innerHTML=`
+    <div style="display:flex;flex-wrap:wrap;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:24px">
+      ${kpi('Horas extras',_rhFmtHoras(tot.he),`${tot.pessoas} colaborador${tot.pessoas===1?'':'es'} fizeram`,'#b45309')}
+      ${kpi('Em folga / fim de semana',_rhFmtHoras(tot.folga),'parte das extras feita fora do expediente')}
+      ${kpi('Horas devidas',_rhFmtHoras(tot.dev),'atrasos e saídas antecipadas','#b91c1c')}
+      ${kpi('Saldo do período',fmtS(saldoTot),'extras − devidas',corSaldo(saldoTot))}
+      ${kpi('Extra sobre o previsto',tot.prev?((tot.he/tot.prev)*100).toFixed(1).replace('.',',')+'%':'—','quanto da jornada virou hora extra')}
+    </div>
+    ${sempre.length?`<div style="background:#fffbeb;border:1px solid #fde68a;border-left:3px solid #b45309;border-radius:8px;padding:12px 16px;margin-bottom:24px;font-size:.8rem;color:#78350f;line-height:1.5">
+      <b>🔥 Sempre em hora extra (${sempre.length}):</b> ${sempre.map(x=>`<a href="javascript:void(0)" onclick="abrirRhHistoricoFuncionario('${x.f.id}')" style="color:#78350f;font-weight:700">${x.f.nome}</a> (${x.c.diasHE} de ${x.c.diasTrab} dias, ${_rhFmtHoras(x.c.heMin)})`).join(' · ')}
+      <div style="font-size:.72rem;color:#92400e;margin-top:4px">Fizeram extra em metade ou mais dos dias trabalhados. Pode ser sinal de falta de gente no setor — ou de hora extra que dava pra evitar.</div></div>`:''}
+    ${titulo('Por departamento')}
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow-x:auto;margin-bottom:28px">
+      <table style="width:100%;border-collapse:collapse"><thead><tr>
+        <th style="${th}">Departamento</th><th style="${th}">Pessoas</th><th style="${th};min-width:180px">Horas extras</th><th style="${th}">Média/pessoa</th><th style="${th}">Em folga/FDS</th><th style="${th}">Devidas</th><th style="${th}">Saldo</th><th style="${th}">% sobre previsto</th>
+      </tr></thead><tbody>${depArr.map(([nome,d])=>`<tr>
+        <td style="${td};font-weight:700;color:#101B3D">${nome}</td>
+        <td style="${td}">${d.pessoas}</td>
+        <td style="${td}"><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:6px;background:#f1f5f9;border-radius:3px;min-width:80px"><div style="width:${(d.he/maxHeDep*100).toFixed(1)}%;height:100%;background:#b45309;border-radius:3px"></div></div><b>${_rhFmtHoras(d.he)}</b></div></td>
+        <td style="${td}">${_rhFmtHoras(d.he/d.pessoas)}</td>
+        <td style="${td};color:#64748b">${_rhFmtHoras(d.folga)}</td>
+        <td style="${td};color:#b91c1c">${_rhFmtHoras(d.dev)}</td>
+        <td style="${td};font-weight:800;color:${corSaldo(d.he-d.dev)}">${fmtS(d.he-d.dev)}</td>
+        <td style="${td}">${d.prev?((d.he/d.prev)*100).toFixed(1).replace('.',',')+'%':'—'}</td>
+      </tr>`).join('')}</tbody></table>
+    </div>
+    ${titulo('Por colaborador')}
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:640px">
+      <table style="width:100%;border-collapse:collapse"><thead><tr>
+        <th style="${th}">Colaborador</th><th style="${th}">Departamento</th><th style="${th}">Horas extras</th><th style="${th}">Dias com extra</th><th style="${th}">Em folga/FDS</th><th style="${th}">Devidas</th><th style="${th}">Saldo do período</th><th style="${th}" title="Soma de todos os meses importados">Saldo acumulado</th>
+      </tr></thead><tbody>${ordenadas.map(x=>`<tr onclick="abrirRhHistoricoFuncionario('${x.f.id}')" style="cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+        <td style="${td};font-weight:700;color:#101B3D">${x.c.sempreHE?'🔥 ':''}${x.f.nome}</td>
+        <td style="${td};color:#64748b">${x.depto}</td>
+        <td style="${td};font-weight:700;color:${x.c.heMin?'#b45309':'#94a3b8'}">${_rhFmtHoras(x.c.heMin)}</td>
+        <td style="${td}">${x.c.diasHE} de ${x.c.diasTrab}</td>
+        <td style="${td};color:#64748b">${x.c.heFolgaMin?_rhFmtHoras(x.c.heFolgaMin):'—'}</td>
+        <td style="${td};color:${x.c.devidoMin?'#b91c1c':'#94a3b8'}">${_rhFmtHoras(x.c.devidoMin)}</td>
+        <td style="${td};font-weight:800;color:${corSaldo(x.c.saldoMin)}">${fmtS(x.c.saldoMin)}</td>
+        <td style="${td};font-weight:700;color:${corSaldo(x.saldoAcum)}">${fmtS(x.saldoAcum)}</td>
+      </tr>`).join('')}</tbody></table>
+    </div>
+    <div style="font-size:.7rem;color:#94a3b8;margin-top:10px;line-height:1.5">Calculado do Cartão Ponto importado, com o horário de cada colaborador. Diferença de até ${_RH_BH_TOLERANCIA_MIN} min no dia é ignorada (tolerância da CLT). Faltas do dia inteiro não entram aqui (estão em Pontualidade e Assiduidade), nem dias de atestado, afastamento/férias ou ponto incompleto.</div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════
+// RH → FÉRIAS (2026-09-24.30, a pedido do usuário — sugestão aprovada: "quem já pode tirar
+// férias e quem está perto do limite (se passar do prazo a empresa paga em dobro), e um
+// calendário pra ver se muita gente do mesmo setor vai sair no mesmo mês").
+// Usa a data de admissão (novo campo f.dataAdmissao, preenchido nesta própria tela) e as
+// férias já registradas pelo botão "🏖️ Afastamento/Férias" (f.afastamentos com tipo 'Férias')
+// — nada de coleção nova.
+// Regras (CLT): período aquisitivo = 12 meses a partir da admissão; período concessivo = os 12
+// meses seguintes — as férias têm que COMEÇAR até o fim do concessivo, senão a empresa paga em
+// dobro (art. 137). Direito = 30 dias, reduzido pelas faltas sem justificativa do ponto importado
+// dentro do aquisitivo (art. 130: 6–14 faltas → 24, 15–23 → 18, 24–32 → 12, 33+ → 0). Férias
+// registradas abatem sempre do período mais antigo com saldo.
+// ══════════════════════════════════════════════════════════════════════════════════════
+const _RH_FERIAS_ALERTA_DIAS=60;
+let _rhFeriasAno=new Date().getFullYear();
+function _rhIsoAddAnos(iso,n){const[a,m,d]=iso.split('-').map(Number);const dt=new Date(a+n,m-1,d);if(dt.getMonth()!==m-1)dt.setDate(0);return _isoLocal(dt);}
+function _rhIsoAddDias(iso,n){const[a,m,d]=iso.split('-').map(Number);return _isoLocal(new Date(a,m-1,d+n));}
+function _rhDiasEntre(de,ate){const[a1,m1,d1]=de.split('-').map(Number),[a2,m2,d2]=ate.split('-').map(Number);return Math.round((new Date(a2,m2-1,d2)-new Date(a1,m1-1,d1))/86400000);}
+function _rhFeriasDoFunc(f){return(f.afastamentos||[]).filter(a=>a.tipo==='Férias'&&a.dataInicio).map(a=>({...a,dataFim:a.dataFim||a.dataInicio,dias:_rhDiasEntre(a.dataInicio,a.dataFim||a.dataInicio)+1})).sort((a,b)=>a.dataInicio.localeCompare(b.dataInicio));}
+function _rhDireitoPorFaltas(faltas){return faltas<=5?30:faltas<=14?24:faltas<=23?18:faltas<=32?12:0;}
+function _rhFeriasSituacao(f){
+  const hoje=_hojeIso();
+  if(!f.dataAdmissao)return{semAdmissao:true,nivel:4,periodos:[]};
+  const periodos=[];
+  for(let k=0;k<60;k++){
+    const ini=_rhIsoAddAnos(f.dataAdmissao,k);
+    if(ini>hoje)break;
+    const fimAq=_rhIsoAddDias(_rhIsoAddAnos(f.dataAdmissao,k+1),-1);
+    const limite=_rhIsoAddDias(_rhIsoAddAnos(f.dataAdmissao,k+2),-1);
+    let faltas=0;
+    try{faltas=_rhStats(_rhDiasDoFuncionario(f.id,'',ini,fimAq<hoje?fimAq:hoje)).faltasDias;}catch(e){}
+    const direito=_rhDireitoPorFaltas(faltas);
+    // "Férias em dia até" (f.feriasQuitadasAte = índice do período) — férias tiradas ANTES do
+    // sistema existir não estão registradas; o RH marca até qual período já está tudo quitado
+    // e esses períodos entram com saldo 0 (senão todo mundo antigo apareceria como vencido).
+    const quitado=Number.isInteger(f.feriasQuitadasAte)&&k<=f.feriasQuitadasAte;
+    periodos.push({k,ini,fimAq,limite,faltas,direito,saldo:quitado?0:direito,quitado,gozos:[],completo:fimAq<hoje});
+  }
+  // abate as férias registradas (antigas → novas) do período mais antigo com saldo
+  _rhFeriasDoFunc(f).forEach(fe=>{
+    let resta=fe.dias;
+    for(const p of periodos){
+      if(resta<=0)break;
+      if(p.saldo<=0)continue;
+      const usa=Math.min(p.saldo,resta);
+      p.saldo-=usa;resta-=usa;
+      p.gozos.push({ini:fe.dataInicio,fim:fe.dataFim,dias:usa,foraDoPrazo:fe.dataInicio>p.limite,futura:fe.dataInicio>hoje});
+    }
+  });
+  const abertos=periodos.filter(p=>p.completo&&p.saldo>0);
+  const vencidos=abertos.filter(p=>p.limite<hoje);
+  const atual=periodos.find(p=>!p.completo);
+  let nivel,label,detalhe,cor,bg;
+  if(vencidos.length){
+    const dias=vencidos.reduce((s,p)=>s+p.saldo,0);
+    nivel=0;cor='#fff';bg='#b91c1c';label='🔴 Vencida — paga em dobro';
+    detalhe=`${dias} dia${dias===1?'':'s'} de ${vencidos.length} período${vencidos.length===1?'':'s'} que venceu em ${vencidos.map(p=>fmtD(p.limite)).join(', ')}`;
+  }else if(abertos.length){
+    const p=abertos[0];const faltam=_rhDiasEntre(hoje,p.limite);
+    if(faltam<=_RH_FERIAS_ALERTA_DIAS){nivel=1;cor='#9a3412';bg='#ffedd5';label=`🟠 Vence em ${faltam} dia${faltam===1?'':'s'}`;}
+    else{nivel=2;cor='#166534';bg='#dcfce7';label='🟢 Pode tirar';}
+    detalhe=`${abertos.reduce((s,x)=>s+x.saldo,0)} dias a tirar · começar até ${fmtD(p.limite)}`;
+  }else{
+    nivel=3;cor='#475569';bg='#f1f5f9';label='⚪ Adquirindo';
+    detalhe=atual?`completa o período em ${fmtD(_rhIsoAddDias(atual.fimAq,1))}`:'—';
+  }
+  const foraPrazo=periodos.some(p=>p.gozos.some(g=>g.foraDoPrazo&&!g.futura));
+  const agendadaForaPrazo=periodos.some(p=>p.gozos.some(g=>g.foraDoPrazo&&g.futura));
+  return{nivel,label,detalhe,cor,bg,periodos,abertos,vencidos,atual,foraPrazo,agendadaForaPrazo,proximoLimite:abertos[0]?abertos[0].limite:null};
+}
+async function rhFeriasSalvarAdmissao(funcId,valor){
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcId);
+  if(!f)return;
+  if(valor&&valor>_hojeIso()){toast('Data de admissão no futuro — confira','terr');renderRhFerias();return;}
+  f.dataAdmissao=valor||'';
+  try{await _rhSalvarCfg();toast('Admissão salva ✅','tok');}catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+  renderRhFerias();
+}
+async function rhFeriasSalvarQuitado(funcId,valor){
+  const f=(cfg.rhFuncionarios||[]).find(x=>x.id===funcId);
+  if(!f)return;
+  if(valor===''||valor==null)delete f.feriasQuitadasAte;else f.feriasQuitadasAte=parseInt(valor,10);
+  try{await _rhSalvarCfg();toast('Salvo ✅','tok');}catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+  renderRhFerias();
+}
+function _rhFeriasSelQuitado(f){
+  if(!f.dataAdmissao)return'—';
+  const hoje=_hojeIso();const ops=[];
+  for(let k=0;k<60;k++){const fimAq=_rhIsoAddDias(_rhIsoAddAnos(f.dataAdmissao,k+1),-1);if(fimAq>=hoje)break;const iniK=_rhIsoAddAnos(f.dataAdmissao,k);ops.push({k,lbl:iniK.slice(0,4)+'/'+fimAq.slice(0,4),tit:fmtD(iniK)+' a '+fmtD(fimAq)});}
+  if(!ops.length)return'<span style="color:#94a3b8;font-size:.72rem">ainda no 1º ano</span>';
+  const v=Number.isInteger(f.feriasQuitadasAte)?f.feriasQuitadasAte:'';
+  return`<select onchange="rhFeriasSalvarQuitado('${f.id}',this.value)" title="Férias tiradas antes do sistema: marque até qual período aquisitivo já está tudo quitado" style="border:1px solid #e2e8f0;border-radius:6px;padding:4px 6px;font-size:.72rem;font-family:inherit;max-width:200px">
+    <option value="">Nenhum marcado</option>${ops.map(o=>`<option value="${o.k}" title="${o.tit}"${v===o.k?' selected':''}>período ${o.lbl} (${o.tit})</option>`).join('')}</select>`;
+}
+function rhFeriasRegistrar(funcId){
+  rhAbrirModalAfastamento(funcId);
+  setTimeout(()=>{const s=document.getElementById('rh-afast-tipo');if(s)s.value='Férias';},0);
+}
+function rhFeriasAnoMov(dir){_rhFeriasAno+=dir;renderRhFerias();}
+function renderRhFerias(){
+  if(!_isRhUser())return;
+  const el=document.getElementById('rh-ferias-body');
+  if(!el)return;
+  const busca=(document.getElementById('rh-fe-busca')?.value||'').toUpperCase().trim();
+  const funcs=(cfg.rhFuncionarios||[]).filter(f=>f.status!=='demitido');
+  const todas=funcs.map(f=>({f,depto:f.departamento||'SEM DEPARTAMENTO',s:_rhFeriasSituacao(f)}));
+  const cont={v:0,a:0,p:0,sem:0};
+  todas.forEach(x=>{if(x.s.semAdmissao)cont.sem++;else if(x.s.nivel===0)cont.v++;else if(x.s.nivel===1)cont.a++;else if(x.s.nivel===2)cont.p++;});
+  let lista=todas;
+  if(busca)lista=lista.filter(x=>x.f.nome.toUpperCase().includes(busca)||x.depto.toUpperCase().includes(busca));
+  lista=lista.slice().sort((a,b)=>(a.s.nivel-b.s.nivel)||((a.s.proximoLimite||'9999').localeCompare(b.s.proximoLimite||'9999'))||a.f.nome.localeCompare(b.f.nome,'pt-BR'));
+  const kpi=(rot,val,sub,cor)=>`<div style="flex:1;min-width:150px;padding:14px 16px;border-right:1px solid #eef1f6"><div style="font-size:.64rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em">${rot}</div><div style="font-size:1.45rem;font-weight:800;color:${cor};margin-top:4px">${val}</div><div style="font-size:.68rem;color:#94a3b8;margin-top:2px">${sub}</div></div>`;
+  const th='text-align:left;font-size:.64rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;padding:10px 12px;border-bottom:1px solid #e2e8f0;white-space:nowrap;position:sticky;top:0;background:#fff;z-index:1';
+  const td='padding:9px 12px;font-size:.8rem;color:#1e293b;border-bottom:1px solid #f1f5f9;white-space:nowrap;vertical-align:middle';
+  const titulo=t=>`<div style="display:flex;align-items:center;gap:10px;margin:0 0 12px"><div style="width:4px;height:18px;background:#101B3D;border-radius:2px"></div><h2 style="margin:0;font-size:.76rem;font-weight:800;color:#101B3D;letter-spacing:.09em;text-transform:uppercase">${t}</h2></div>`;
+  const tabela=lista.length?`<table style="width:100%;border-collapse:collapse"><thead><tr>
+      <th style="${th}">Colaborador</th><th style="${th}">Departamento</th><th style="${th}">Admissão</th><th style="${th}" title="Férias tiradas antes do sistema: até qual período aquisitivo já está tudo quitado">Férias em dia até</th><th style="${th}">Situação</th><th style="${th}">Detalhe</th><th style="${th}">Últimas/próximas férias</th><th style="${th}"></th>
+    </tr></thead><tbody>${lista.map(x=>{
+      const fe=_rhFeriasDoFunc(x.f);const ult=fe[fe.length-1];
+      return`<tr>
+        <td style="${td};font-weight:700;color:#101B3D;cursor:pointer" onclick="abrirRhHistoricoFuncionario('${x.f.id}')" title="Abrir perfil">${x.f.nome}</td>
+        <td style="${td};color:#64748b">${x.depto}</td>
+        <td style="${td}"><input type="date" value="${x.f.dataAdmissao||''}" onchange="rhFeriasSalvarAdmissao('${x.f.id}',this.value)" style="border:1px solid ${x.f.dataAdmissao?'#e2e8f0':'#f59e0b'};background:${x.f.dataAdmissao?'#fff':'#fffbeb'};border-radius:6px;padding:4px 6px;font-size:.76rem;font-family:inherit"></td>
+        <td style="${td}">${_rhFeriasSelQuitado(x.f)}</td>
+        <td style="${td}">${x.s.semAdmissao?'<span style="color:#b45309;font-size:.74rem;font-weight:700">⚠️ Informe a admissão</span>':`<span style="background:${x.s.bg};color:${x.s.cor};border-radius:999px;padding:3px 10px;font-size:.7rem;font-weight:800">${x.s.label}</span>`}</td>
+        <td style="${td};color:#475569;font-size:.76rem">${x.s.semAdmissao?'—':x.s.detalhe}${x.s.agendadaForaPrazo?' <span title="Tem férias agendada começando depois do limite do período — se mantiver, paga em dobro" style="color:#b91c1c;font-weight:700">· ⚠️ férias agendada depois do limite</span>':''}${x.s.foraPrazo?' <span title="Alguma férias foi tirada depois do limite do período (paga em dobro)" style="color:#b91c1c;font-weight:700">· já teve férias fora do prazo</span>':''}</td>
+        <td style="${td};color:#64748b;font-size:.76rem">${ult?`${fmtD(ult.dataInicio)} a ${fmtD(ult.dataFim)} (${ult.dias}d)${ult.dataInicio>_hojeIso()?' · agendada':''}`:'—'}</td>
+        <td style="${td}"><button type="button" onclick="rhFeriasRegistrar('${x.f.id}')" class="dash-btn-conf" style="background:#0891b2;font-size:.72rem;padding:6px 10px">🏖️ Registrar férias</button></td>
+      </tr>`;}).join('')}</tbody></table>`:`<div style="padding:30px;text-align:center;color:var(--ink4);font-size:.85rem">${funcs.length?'Nenhum colaborador encontrado.':'Nenhum colaborador cadastrado ainda.'}</div>`;
+  el.innerHTML=`
+    <div style="display:flex;flex-wrap:wrap;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:24px">
+      ${kpi('Vencidas',cont.v,'empresa paga em dobro',cont.v?'#b91c1c':'#101B3D')}
+      ${kpi('Vencendo',cont.a,`limite em até ${_RH_FERIAS_ALERTA_DIAS} dias`,cont.a?'#b45309':'#101B3D')}
+      ${kpi('Podem tirar',cont.p,'período completo, dentro do prazo','#15803d')}
+      ${kpi('Sem data de admissão',cont.sem,'preencha na tabela abaixo',cont.sem?'#b45309':'#101B3D')}
+    </div>
+    ${titulo('Situação de cada colaborador')}
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:560px;margin-bottom:28px">${tabela}</div>
+    <div style="font-size:.7rem;color:#94a3b8;margin:-18px 0 28px;line-height:1.5">Regra da CLT: a cada 12 meses de trabalho a pessoa ganha 30 dias de férias, que precisam começar nos 12 meses seguintes. Depois disso a empresa paga em dobro. O direito diminui com faltas sem justificativa no período (6+ faltas no ponto importado). As férias registradas no botão 🏖️ abatem sempre do período mais antigo.</div>
+    ${titulo('Calendário de férias')}
+    <div id="rh-ferias-cal"></div>`;
+  _rhRenderFeriasCalendario(todas);
+}
+function _rhRenderFeriasCalendario(todas){
+  const el=document.getElementById('rh-ferias-cal');
+  if(!el)return;
+  const ano=_rhFeriasAno;
+  const iniAno=ano+'-01-01',fimAno=ano+'-12-31';
+  const diasAno=_rhDiasEntre(iniAno,fimAno)+1;
+  const porDep={};
+  todas.forEach(x=>{
+    const fe=_rhFeriasDoFunc(x.f).filter(a=>a.dataFim>=iniAno&&a.dataInicio<=fimAno);
+    if(!fe.length)return;
+    (porDep[x.depto]=porDep[x.depto]||[]).push({f:x.f,fe});
+  });
+  // conflitos: 2+ pessoas do mesmo departamento de férias no mesmo dia
+  const conflitos=[];
+  Object.entries(porDep).forEach(([dep,pessoas])=>{
+    if(pessoas.length<2)return;
+    const totalDep=todas.filter(x=>x.depto===dep).length;
+    let d=iniAno,atual=null;
+    while(d<=fimAno){
+      const quem=pessoas.filter(p=>p.fe.some(a=>d>=a.dataInicio&&d<=a.dataFim)).map(p=>p.f.nome);
+      const chave=quem.length>=2?quem.join('|'):null;
+      if(chave&&atual&&atual.chave===chave)atual.fim=d;
+      else{if(atual)conflitos.push(atual);atual=chave?{dep,chave,quem,ini:d,fim:d,totalDep}:null;}
+      d=_rhIsoAddDias(d,1);
+    }
+    if(atual)conflitos.push(atual);
+  });
+  const conflitoNoDia=(dep,nome,a)=>conflitos.some(c=>c.dep===dep&&c.quem.includes(nome)&&c.fim>=a.dataInicio&&c.ini<=a.dataFim);
+  const mesesHead=MESES_PT.slice(1,13).map(m=>`<div style="flex:1;text-align:center;font-size:.62rem;font-weight:700;color:#94a3b8;text-transform:uppercase;border-left:1px solid #f1f5f9;padding:4px 0">${String(m).slice(0,3)}</div>`).join('');
+  const hojeIso=_hojeIso();
+  const posHoje=hojeIso.slice(0,4)===String(ano)?(_rhDiasEntre(iniAno,hojeIso)/diasAno*100):null;
+  const deps=Object.keys(porDep).sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  const corpo=deps.length?deps.map(dep=>`<div style="padding:8px 0 4px;font-size:.68rem;font-weight:800;color:#101B3D;text-transform:uppercase;letter-spacing:.05em">${dep}</div>`+porDep[dep].map(p=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <div style="width:180px;flex-shrink:0;font-size:.74rem;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="${String(p.f.nome).replace(/"/g,'&quot;')}" onclick="abrirRhHistoricoFuncionario('${p.f.id}')">${p.f.nome}</div>
+      <div style="flex:1;position:relative;height:20px;background:#f8fafc;border-radius:4px">
+        ${posHoje!=null?`<div style="position:absolute;left:${posHoje}%;top:-2px;bottom:-2px;width:2px;background:#0ea5e9;opacity:.6"></div>`:''}
+        ${p.fe.map(a=>{const i=a.dataInicio<iniAno?iniAno:a.dataInicio,fm=a.dataFim>fimAno?fimAno:a.dataFim;const left=_rhDiasEntre(iniAno,i)/diasAno*100,w=Math.max(0.6,(_rhDiasEntre(i,fm)+1)/diasAno*100);const conf=conflitoNoDia(dep,p.f.nome,a);return`<div title="${fmtD(a.dataInicio)} a ${fmtD(a.dataFim)} (${a.dias} dias)${conf?' — coincide com outra pessoa do setor':''}" style="position:absolute;left:${left}%;width:${w}%;top:2px;bottom:2px;background:${conf?'#dc2626':'#0891b2'};border-radius:3px"></div>`;}).join('')}
+      </div></div>`).join('')).join(''):`<div style="padding:20px;text-align:center;color:var(--ink4);font-size:.82rem">Nenhuma férias registrada em ${ano}.</div>`;
+  el.innerHTML=`<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+      <div class="dash-mes-nav" style="margin:0"><button type="button" onclick="rhFeriasAnoMov(-1)">◀</button><div class="dash-mes-label" style="min-width:70px">${ano}</div><button type="button" onclick="rhFeriasAnoMov(1)">▶</button></div>
+      <span style="font-size:.7rem;color:#64748b;display:inline-flex;align-items:center;gap:5px"><span style="width:12px;height:8px;background:#0891b2;border-radius:2px"></span>férias</span>
+      <span style="font-size:.7rem;color:#64748b;display:inline-flex;align-items:center;gap:5px"><span style="width:12px;height:8px;background:#dc2626;border-radius:2px"></span>coincide com outra pessoa do mesmo setor</span>
+      ${posHoje!=null?'<span style="font-size:.7rem;color:#64748b;display:inline-flex;align-items:center;gap:5px"><span style="width:2px;height:10px;background:#0ea5e9"></span>hoje</span>':''}
+    </div>
+    <div style="display:flex;gap:8px"><div style="width:180px;flex-shrink:0"></div><div style="flex:1;display:flex">${mesesHead}</div></div>
+    ${corpo}
+    ${conflitos.length?`<div style="margin-top:14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;font-size:.78rem;color:#991b1b;line-height:1.6"><b>⚠️ Gente do mesmo setor saindo junto:</b><br>${conflitos.map(c=>`• <b>${c.dep}</b>: ${c.quem.join(' e ')} — ${fmtD(c.ini)}${c.fim!==c.ini?' a '+fmtD(c.fim):''} (${c.quem.length} de ${c.totalDep} pessoas do setor)`).join('<br>')}</div>`:''}
+  </div>`;
+}
+// Aviso no sino pro RH (e admin) — 1 por semana (ID = segunda-feira), só quando tem férias
+// vencida ou com limite em até 60 dias. Clicável → abre RH → Férias (ver _avisoDestino).
+function _rhFeriasAvisos(){
+  const out=[];
+  if(!(cfg.rhFuncionarios||[]).length)return out;
+  const venc=[],quase=[];
+  (cfg.rhFuncionarios||[]).filter(f=>f.status!=='demitido'&&f.dataAdmissao).forEach(f=>{
+    const s=_rhFeriasSituacao(f);
+    if(s.nivel===0)venc.push(`• ${f.nome} — ${s.detalhe}`);
+    else if(s.nivel===1)quase.push(`• ${f.nome} — ${s.label.replace('🟠 ','').toLowerCase()} (começar até ${fmtD(s.proximoLimite)})`);
+  });
+  if(!venc.length&&!quase.length)return out;
+  const hoje=new Date();hoje.setHours(0,0,0,0);
+  const seg=new Date(hoje);seg.setDate(hoje.getDate()-((hoje.getDay()+6)%7));
+  out.push({id:'rh_ferias_'+_isoLocal(seg),automatico:true,tipoAuto:'rh_ferias',
+    assunto:venc.length?'🔴 Férias vencidas — empresa paga em dobro':'🏖️ Férias perto do limite',
+    texto:(venc.length?`Vencidas (${venc.length}):\n${venc.join('\n')}`:'')+(venc.length&&quase.length?'\n\n':'')+(quase.length?`Limite em até ${_RH_FERIAS_ALERTA_DIAS} dias (${quase.length}):\n${quase.join('\n')}`:''),
+    destinatarioTipo:'setor',destinatarioValor:'RH'});
+  return out;
+}
+
 // ── INSERIR FUNCIONÁRIO manualmente (2026-08-26, a pedido do usuário) ──────────────────
 // Cadastra um colaborador ANTES de subir o Cartão Ponto dele (ex.: acabou de ser admitido e
 // o ponto só vai ser exportado no fim do mês). Reaproveita _rhGarantirFuncionario — a MESMA
