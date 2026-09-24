@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-24.27';</script>
+<script>const APP_BUILD_VERSION='2026-09-24.28';</script>
 <!-- Carregamento mais rápido (2026-09-24.27, a pedido do usuário: "essa demora pra atualizar
      o sistema tem como diminuir"): abre as conexões com Firebase/CDNs e já começa a baixar o
      Firebase logo no início, em paralelo com o resto da página. -->
@@ -11585,16 +11585,51 @@ async function reenviarEmailPedido(pedidoId){
 // inconsistência entre o que foi marcado na Emissão (instalação/frete/elevação/medição/ART
 // com valor) e o que o texto da OS realmente descreve. É heurística — pode ter falso
 // positivo/negativo — por isso nunca bloqueia a emissão, só avisa.
+// 2026-09-24.28 (pedido do usuário: acelerar a leitura da proposta): o pdf.js criava um
+// worker novo (baixando/compilando o pdf.worker de ~1MB) a CADA PDF lido. Agora existe um
+// worker único, aquecido em segundo plano (_pdfAquecer, chamado ao abrir o card do CRM e
+// logo depois que a página carrega), reaproveitado em toda leitura; e as páginas são lidas
+// em paralelo em vez de uma por vez.
+let _pdfWorkerUnico=null;
+function _pdfWorkerCompartilhado(){
+  try{
+    if(!window.pdfjsLib)return null;
+    if(!pdfjsLib.GlobalWorkerOptions.workerSrc)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    if(!_pdfWorkerUnico||_pdfWorkerUnico.destroyed)_pdfWorkerUnico=new pdfjsLib.PDFWorker({name:'gcore-pdf'});
+    return _pdfWorkerUnico;
+  }catch(err){console.warn('PDFWorker compartilhado indisponível',err);return null;}
+}
+function _pdfAquecer(){
+  const go=()=>{try{const w=_pdfWorkerCompartilhado();if(w&&w.promise)w.promise.catch(()=>{_pdfWorkerUnico=null;});}catch(err){}};
+  if(window.requestIdleCallback)requestIdleCallback(go,{timeout:2000});else setTimeout(go,300);
+}
+window.addEventListener('load',()=>setTimeout(_pdfAquecer,4000));
 async function _extrairTextoPDF(file){
   const buf=await file.arrayBuffer();
-  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-  let texto='';
-  for(let i=1;i<=pdf.numPages;i++){
-    const page=await pdf.getPage(i);
-    const content=await page.getTextContent();
-    texto+=content.items.map(it=>it.str).join(' ')+'\n';
+  const worker=_pdfWorkerCompartilhado();
+  let pdf;
+  try{
+    // .slice(0): o pdf.js "consome" o buffer — guarda o original pro plano B abaixo.
+    pdf=await pdfjsLib.getDocument(worker?{data:buf.slice(0),worker}:{data:buf.slice(0)}).promise;
+  }catch(err){
+    if(!worker)throw err;
+    // Plano B: se o worker compartilhado der problema, lê do jeito antigo (worker próprio).
+    console.warn('Worker compartilhado do PDF falhou — lendo do jeito antigo',err);
+    _pdfWorkerUnico=null;
+    pdf=await pdfjsLib.getDocument({data:buf}).promise;
   }
-  return texto;
+  try{
+    const idx=Array.from({length:pdf.numPages},(_,i)=>i+1);
+    const partes=await Promise.all(idx.map(async i=>{
+      const page=await pdf.getPage(i);
+      const content=await page.getTextContent();
+      return content.items.map(it=>it.str).join(' ');
+    }));
+    return partes.join('\n')+'\n';
+  }finally{
+    // destroy() do documento NÃO derruba o worker compartilhado (ele foi passado por fora).
+    try{pdf.destroy();}catch(err){}
+  }
 }
 function _checarOsPdf(texto,edState){
   const itens=[];
@@ -42429,9 +42464,14 @@ async function crmMoverEtapa(id,etapaKey){
   // na etapa — sair dela não desliga sozinho, mas os 3 consumidores já checam e.etapa===
   // 'orcamento_aprovado' também, então uma flag "esquecida" true não aparece em nenhum lugar
   // depois que o card sai dali; some de vez só quando o responsável abre o card (crmAbrirCard).
+  // 2026-09-24.28 (pedido do usuário: "avançar de etapa melhorar a velocidade"): antes a
+  // tela só atualizava depois de gravar no Firestore (e, indo pra ORÇAMENTO APROVADO, depois
+  // de criar a tarefa automática também) — 1 a 3 segundos parado. Agora a mudança aparece na
+  // hora (card aberto + funil) e a gravação roda em segundo plano; se falhar, avisa.
+  let _promTarefa=null;
   if(etapaKey==='orcamento_aprovado'){
     e.avisoAprovacaoNovo=true;
-    await _crmCriarTarefaEnvioProposta(e);
+    _promTarefa=_crmCriarTarefaEnvioProposta(e); // já entra em cfg.tarefasGerais na hora; só a gravação fica em 2º plano
   }
   if(!e.timeline)e.timeline=[];
   e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:`Etapa alterada: ${labelAntiga} → ${labelNova}`,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:e.atualizadoEm,sistema:true});
@@ -42439,10 +42479,18 @@ async function crmMoverEtapa(id,etapaKey){
   // arrastar mais intuitivo) — consumido uma única vez dentro de _crmCardHtml() no
   // próximo render, já que o board inteiro é reconstruído do zero a cada movimento.
   _crmUltimoMovidoId=id;
-  renderCrmKanban();
-  try{
-    if(window._fbSaveCrmEmpresa)await window._fbSaveCrmEmpresa(e);
-  }catch(err){console.error('Erro ao mover etapa:',err);toast('Erro ao salvar a mudança de etapa','terr');}
+  if(_crmCardAtualId===id){
+    try{_crmRenderCard(e);}catch(err){console.error(err);}
+    toast('✅ Etapa alterada para '+labelNova,'tok');
+    // funil atrás do card é redesenhado logo em seguida, sem segurar a tela do card
+    setTimeout(()=>{try{renderCrmKanban();}catch(err){console.error(err);}},0);
+  }else renderCrmKanban();
+  (async()=>{
+    try{
+      if(window._fbSaveCrmEmpresa)await window._fbSaveCrmEmpresa(e);
+    }catch(err){console.error('Erro ao mover etapa:',err);toast('Erro ao salvar a mudança de etapa — confira a internet e tente de novo','terr');}
+    if(_promTarefa){try{await _promTarefa;}catch(err){console.error(err);}}
+  })();
 }
 
 // ── ABA EMPRESAS (lista/busca, fora do kanban) ──────────────────────────────────────
@@ -42784,6 +42832,7 @@ function crmAbrirCard(id){
   _crmCardHistoricoExpandido=true; // 2026-09-23: histórico de propostas abre já expandido
   _crmRenderCard(e);
   openM('mo-crm-card');
+  _pdfAquecer(); // 2026-09-24.28: deixa o leitor de PDF pronto antes de anexar a proposta
 }
 // Aviso "sem tarefa futura" ao tentar fechar o card (2026-08-26, a pedido do usuário: "quando
 // eu abrir o card de uma empresa e fechar ja quero que o sistema analise se esse card está
@@ -43389,6 +43438,9 @@ async function crmCardPropostaPdfSelecionado(input){
   _crmPropostaProcessando=true;let salvou=false;
   window.addEventListener('beforeunload',_crmPropostaAntesDeSair);
   _crmPropostaOverlay(true,_crmArquivoEhPdf(f)?'🔍 Lendo a proposta em PDF e salvando no card...':'📎 Enviando e salvando o documento no card...');
+  // 2026-09-24.28: garante que a tela de "lendo" é desenhada ANTES de começar o trabalho
+  // pesado (antes ela às vezes só aparecia depois de um tempo, com o PDF já sendo lido).
+  await new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)));
   try{
     salvou=await _crmCardPropostaPdfSelecionadoInterno(input);
   }catch(err){console.error('Anexar proposta',err);}
@@ -43413,6 +43465,17 @@ async function _crmCardPropostaPdfSelecionadoInterno(input){
   const status=document.getElementById('crm-card-proposta-pdf-status');
   const ehPdf=_crmArquivoEhPdf(f);
   let confiavel=false,vals={};
+  // 2026-09-24.28: o envio pro Cloudinary começa JÁ, em paralelo com a leitura do PDF
+  // (antes só começava depois que a leitura terminava — somava os dois tempos).
+  const uploadPromise=(async()=>{
+    if(!(cfg.cld_cloud&&cfg.cld_preset))return'';
+    try{
+      const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_crm_propostas');
+      const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/raw/upload`,{method:'POST',body:fd});
+      const d=await r.json();
+      return d.secure_url||'';
+    }catch(err){console.error('Erro ao enviar PDF da proposta:',err);return'';}
+  })();
   if(ehPdf){
     if(status)status.textContent='🔍 Lendo a proposta em PDF...';
     try{
@@ -43429,15 +43492,9 @@ async function _crmCardPropostaPdfSelecionadoInterno(input){
   }else{
     if(status)status.textContent='📎 Documento anexado — informe os valores manualmente abaixo.';
   }
-  let url='';
-  if(cfg.cld_cloud&&cfg.cld_preset){
-    try{
-      const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_crm_propostas');
-      const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/raw/upload`,{method:'POST',body:fd});
-      const d=await r.json();
-      url=d.secure_url||'';
-    }catch(err){console.error('Erro ao enviar PDF da proposta:',err);}
-  }
+  if(ehPdf)_crmPropostaOverlay(true,'📤 Terminando de enviar o arquivo...');
+  const url=await uploadPromise;
+  _crmPropostaOverlay(true,'💾 Salvando no card...');
   const bruto=confiavel?(vals.bruto||0):0;
   const operacionais=confiavel?(vals.operacionais||0):0;
   const desconto=confiavel?(vals.desconto||0):0;
