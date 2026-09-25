@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-25.7';</script>
+<script>const APP_BUILD_VERSION='2026-09-25.9';</script>
 <!-- Carregamento mais rápido (2026-09-24.27, a pedido do usuário: "essa demora pra atualizar
      o sistema tem como diminuir"): abre as conexões com Firebase/CDNs e já começa a baixar o
      Firebase logo no início, em paralelo com o resto da página. -->
@@ -8895,6 +8895,7 @@ function viewP(id){
       ${p.email_engenheiro?`<div class="vf" style="grid-column:span 2;display:flex;align-items:center;gap:8px"><div class="l" style="margin:0;white-space:nowrap">E-mail do Engenheiro da Obra</div><div class="v" style="margin:0">${p.email_engenheiro}</div></div>`:''}
       ${p.email_financeiro?`<div class="vf" style="grid-column:span 2;display:flex;align-items:center;gap:8px"><div class="l" style="margin:0;white-space:nowrap">E-mail Financeiro (NF's)</div><div class="v" style="margin:0">${p.email_financeiro}</div></div>`:''}
       ${p.obs?`<div class="vf" style="grid-column:span 2"><div class="l">Observações</div><div class="v">${p.obs}</div></div>`:''}
+      ${p.rncPedidoOrigem&&p.rncPedidoOrigem.os?`<div class="vf" style="grid-column:span 2"><div class="l">RNC — Pedido de origem (venda)</div><div class="v">OS ${p.rncPedidoOrigem.os} — ${p.rncPedidoOrigem.cliente||'—'}${p.rncPedidoOrigem.job?' — '+p.rncPedidoOrigem.job:''}</div></div>`:''}
     </div></div>
     ${docsHtml}
     ${sec('Valores',v)}${sec('Pagamento',pg)}${sec('Instalação',inst)}${sec('Frete',fr)}
@@ -9916,7 +9917,7 @@ async function openEmissao(eid2){
       fend:fr['Endereço de Entrega']||'',fie:fr['Inscrição Estadual']||'',chumbador:p.chumbador||'',arq_chumb:p.arq_chumb_url?'Arquivo já enviado':'',arq_chumb_url:p.arq_chumb_url||'',os_chumb:p.os_chumb||'',
       // RNC (Relatório de Não Conformidade, 2026-09-08) — mesmo padrão de restauração do
       // arq_chumb acima.
-      arq_rnc:p.arq_rnc_url?'Arquivo já enviado':'',arq_rnc_url:p.arq_rnc_url||'',
+      arq_rnc:p.arq_rnc_url?'Arquivo já enviado':'',arq_rnc_url:p.arq_rnc_url||'',rncOrigem:p.rncPedidoOrigem||null,
       // ftel lia 'Telefone Descarga' (nunca gravada; a chave real é 'Telefone da Descarga').
       facomp:fr['Quem Acompanhou a Descarga']||'',ftel:fr['Telefone da Descarga']||'',bases:p.bases||'',
       // Conselho de Pedidos (2026-08-07) — reconstrói a partir do que já foi salvo (rascunho
@@ -9931,7 +9932,7 @@ async function openEmissao(eid2){
       tem_oc:'',arq_oc:'',tem_ent:'Não tem entrada',vent:'',dent:'',fent:'',
       nparc:'Sem parcelamento',fparc:'',pdatas:[],pvals:[],nf:'',obsfin:'',art:'',cnpj_art:'',cnpj_art_url:'',arq_prod:'',layout_inst:'',fotos_orig:'',pasta_arquivos:'',laudo:'',
       iacomp:'',itel:'',icep:'',ilog:'',inum_e:'',icomp:'',ibairro:'',icidade:'',iuf:'',ihor:'Comercial',inum:'',idias:'',iinteg:'',iseg:'',vseg:'',ibloqenergia:'',pintubo:'',vpintub:'',icep_ok:false,
-      minfo:'',fcep:'',flog:'',fnum_e:'',fcomp:'',fbairro:'',fcidade:'',fuf:'',fend:'',fie:'',facomp:'',ftel:'',fdist:'',bases:'',chumbador:'',arq_chumb:'',os_chumb:'',fcep_ok:false,arq_rnc:'',arq_rnc_url:''};
+      minfo:'',fcep:'',flog:'',fnum_e:'',fcomp:'',fbairro:'',fcidade:'',fuf:'',fend:'',fie:'',facomp:'',ftel:'',fdist:'',bases:'',chumbador:'',arq_chumb:'',os_chumb:'',fcep_ok:false,arq_rnc:'',arq_rnc_url:'',rncOrigem:null};
   }
   step=0;renderEM();openM('mo-em');
 }
@@ -9986,8 +9987,30 @@ function _tipoDispensaValores(tipo){
   // só deixa de ser bloqueante pra emitir.
   return['Garantia / Retrabalho','Interno','Amostra','Brinde'].includes(tipo);
 }
+// RNC — Pedido de origem (2026-09-25, a pedido do usuário: "toda garantia ou retrabalho deve
+// estar ligada a uma venda que ocorreu anteriormente") — lista de vendas já emitidas/importadas
+// (tipo Venda/Permuta pelo fluxo normal, ou vindas da planilha) pra escolher de qual pedido é a
+// RNC. Guardado em ed.rncOrigem / p.rncPedidoOrigem = {id,os,cliente,job}.
+function _rncVendasOrigem(){
+  const atual=editing||'';
+  return pedidos.filter(p=>p.id!==atual&&p.os&&(p.importadoPlanilha||(p.origemComercial&&(p.tipo==='Venda'||p.tipo==='Permuta')))&&!(typeof isVendaCancelada==='function'&&isVendaCancelada(p.os)))
+    .map(p=>({id:p.id,os:String(p.os),cliente:p.cliente||'',job:p.job||''}))
+    .sort((a,b)=>(parseInt(b.os,10)||0)-(parseInt(a.os,10)||0));
+}
+function _rncOrigemLabel(o){return o?('OS '+o.os+' — '+(o.cliente||'—')+(o.job?' — '+o.job:'')):'';}
+function _rncOrigemEscolher(inp){
+  const v=(inp.value||'').trim();
+  const lista=_rncVendasOrigem();
+  let o=lista.find(x=>_rncOrigemLabel(x)===v);
+  if(!o){const m=v.match(/^(?:OS\s*)?(\d+)\b/i);if(m){const c=lista.filter(x=>x.os===m[1]);if(c.length===1)o=c[0];}}
+  ed.rncOrigem=o||null;
+  const box=document.getElementById('em-rnc-origem-sel');
+  if(box)box.innerHTML=o?`<div style="margin-top:6px;padding:8px 12px;border-radius:8px;background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;font-size:.8rem;font-weight:700">✅ Vinculada a: ${_rncOrigemLabel(o).replace(/</g,'&lt;')}</div>`:(v?`<div style="margin-top:6px;padding:8px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:.78rem;font-weight:700">Pedido não encontrado — escolha um da lista (digite a OS, o cliente ou o JOB).</div>`:'');
+  if(typeof _emAgendarRascunho==='function')_emAgendarRascunho();
+}
 function validarAba(id){
   // Retorna lista de erros da aba atual
+  if(id==='rnc'&&ed.tipo==='Garantia / Retrabalho'&&!(ed.rncOrigem&&ed.rncOrigem.os))return['Informe de qual pedido (venda anterior) é esta Garantia/Retrabalho'];
   const erros=[];
   // Conselho de Pedidos (2026-08-07) — só exige RESPOSTA (Sim ou Não vale) pra avançar de
   // aba, mesmo padrão "obrigatório responder" do resto do formulário. A trava mais forte —
@@ -11032,7 +11055,13 @@ function _renderStepBase(id){
   }else if(id==='rnc'){
     bd.innerHTML=`<div class="fsec">
       <div class="fsec-t">&#128203; RNC — RELATÓRIO DE NÃO CONFORMIDADE</div>
-      <div style="font-size:.76rem;color:var(--ink3);margin-bottom:14px">Pedido de Garantia/Retrabalho — anexe aqui o relatório de não conformidade da Qualidade, com as informações da análise feita. Não é obrigatório pra emitir, mas o sistema avisa se estiver faltando.</div>
+      <div style="font-size:.76rem;color:var(--ink3);margin-bottom:14px">Pedido de Garantia/Retrabalho — informe de qual venda ele é e anexe o relatório de não conformidade da Qualidade.</div>
+      <div class="fg"><label>De qual pedido é esta RNC? <span class="r">*</span></label>
+        <input class="fc" id="em-rnc-origem" list="em-rnc-origem-list" autocomplete="off" placeholder="Digite a OS, o cliente ou o JOB da venda original..." value="${_rncOrigemLabel(ed.rncOrigem).replace(/"/g,'&quot;')}" onchange="_rncOrigemEscolher(this)" oninput="if(this.value==='')_rncOrigemEscolher(this)">
+        <datalist id="em-rnc-origem-list">${_rncVendasOrigem().map(o=>`<option value="${_rncOrigemLabel(o).replace(/"/g,'&quot;')}"></option>`).join('')}</datalist>
+        <div id="em-rnc-origem-sel">${ed.rncOrigem?`<div style="margin-top:6px;padding:8px 12px;border-radius:8px;background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;font-size:.8rem;font-weight:700">✅ Vinculada a: ${_rncOrigemLabel(ed.rncOrigem).replace(/</g,'&lt;')}</div>`:''}</div>
+        <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Obrigatório — toda garantia/retrabalho precisa estar ligada a uma venda que já aconteceu.</div>
+      </div>
       <div class="fg"><label>Inserir o Relatório de Não Conformidade</label>
         <div class="upload-zone${ed.arq_rnc?' has-file':''}" id="uz-rnc" onclick="document.getElementById('em-rnc-file').click()">
           <span class="uz-icon">${ed.arq_rnc?'✅':'📄'}</span>
@@ -11626,6 +11655,7 @@ function buildEmissaoEmailContent(p){
       <tr><td colspan="2" style="padding:20px 0 8px;border-bottom:2px solid #e91e63">
         <span style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#111827">RNC — Relatório de Não Conformidade</span>
       </td></tr>
+      ${p.rncPedidoOrigem&&p.rncPedidoOrigem.os?`<tr style="background:#fafafa"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Pedido de origem (venda)</td><td style="padding:10px 0;color:#111827;font-size:13px;font-weight:700">OS ${p.rncPedidoOrigem.os} — ${p.rncPedidoOrigem.cliente||'—'}${p.rncPedidoOrigem.job?' — '+p.rncPedidoOrigem.job:''}</td></tr>`:''}
       ${p.arq_rnc_url?`<tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Relatório de Não Conformidade</td><td style="padding:10px 0;font-size:13px;font-weight:600"><a href="${cldDownload(p.arq_rnc_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">Clique aqui para baixar ↗</a></td></tr>`:`<tr><td colspan="2" style="padding:10px 0;color:#9ca3af;font-size:13px;font-style:italic">Nenhum relatório de não conformidade anexado.</td></tr>`}
       `:''}
 
@@ -12495,6 +12525,7 @@ function _buildPedidoBaseDoEd(){
     // cidade/UF do assunto). Sempre com fallback pra string vazia — nunca undefined,
     // porque undefined no objeto quebra o savePedidoFS (ver [[project_firestore_undefined_fields]]).
     arq_os_url:ed.arq_os_url||'',arq_oc_url:ed.arq_oc_url||'',arq_chumb_url:ed.arq_chumb_url||'',arq_rnc_url:ed.arq_rnc_url||'',
+    rncPedidoOrigem:(ed.tipo==='Garantia / Retrabalho'&&ed.rncOrigem)?{id:ed.rncOrigem.id||'',os:ed.rncOrigem.os||'',cliente:ed.rncOrigem.cliente||'',job:ed.rncOrigem.job||''}:null,
     chumbador:ed.chumbador||'',os_chumb:ed.os_chumb||'',
     // Congela a config de Etapas de Pedidos (percentuais/removidas/extras) NO MOMENTO da
     // emissão — se for edição de um pedido que já tinha isso, mantém o snapshot antigo (nunca
@@ -12934,6 +12965,12 @@ async function submit(){
   // este relatorio para emitir o pedido mas lembrar o usuario de que está sem este relatorio ao
   // emitir e dai se quer emitir sem relatório mesmo"), só avisa e pede confirmação antes de
   // deixar emitir sem ele.
+  // Pedido de origem obrigatório pra Garantia/Retrabalho (2026-09-25).
+  if(ed.tipo==='Garantia / Retrabalho'&&!(ed.rncOrigem&&ed.rncOrigem.os)){
+    toast('Informe na aba RNC de qual pedido (venda anterior) é esta Garantia/Retrabalho','terr');
+    const tRnc=getTabs().findIndex(t=>t.id==='rnc');if(tRnc>=0){step=tRnc;renderEM();}
+    return;
+  }
   if(ed.tipo==='Garantia / Retrabalho'&&!ed.arq_rnc_url){
     const prosseguirSemRNC=await _confirmarEmitirSemRNC();
     if(!prosseguirSemRNC)return;
@@ -38992,6 +39029,7 @@ function verVendaDetalhe(os,pedidoId){
           <div class="vf" style="grid-column:span 2"><div class="l">E-mail de emissão</div><div class="v" style="font-weight:600">${_fmtEmailStatus(p)}</div></div>
           ${proj2.pasta_arquivos?`<div class="vf" style="grid-column:span 2"><div class="l">📁 Pasta de arquivos para projetos</div><div class="v">${proj2.pasta_arquivos}</div></div>`:''}
           ${p.obs?`<div class="vf" style="grid-column:span 2"><div class="l">Observações</div><div class="v">${p.obs}</div></div>`:''}
+      ${p.rncPedidoOrigem&&p.rncPedidoOrigem.os?`<div class="vf" style="grid-column:span 2"><div class="l">RNC — Pedido de origem (venda)</div><div class="v">OS ${p.rncPedidoOrigem.os} — ${p.rncPedidoOrigem.cliente||'—'}${p.rncPedidoOrigem.job?' — '+p.rncPedidoOrigem.job:''}</div></div>`:''}
         </div></div>
         ${secHtml('Valores',vBase)}${secHtml('Elevações',vElev)}
         ${parcRows.length?`<div class="vm-sec"><h4>Datas de Pagamento</h4><div class="vm-gr">${parcRows.map(r=>`<div class="vf"><div class="l">${r.l}</div><div class="v">${r.v}</div></div>`).join('')}</div></div>`:secHtml('Pagamento',pg)}
@@ -41706,17 +41744,18 @@ function _prospSugerirDecisor(inputEl){
   const alvo=_prospAlvoSugestaoDecisor(inputEl);
   if(!alvo)return;
   const nome=(inputEl.value||'').trim();
-  if(nome.length<3){alvo.style.display='none';alvo.innerHTML='';return;}
-  const q=nome.toUpperCase();
-  const crmM=_crmTodosContatos().filter(c=>(c.nome||'').toUpperCase().includes(q)).map(c=>Object.assign({},c,{_origem:'CRM Comercial'}));
-  const prospM=(typeof _prospTodosContatos==='function'?_prospTodosContatos():[]).filter(c=>(c.nome||'').toUpperCase().includes(q)).map(c=>Object.assign({},c,{_origem:'Prospecção'}));
+  if(nome.length<2){alvo.style.display='none';alvo.innerHTML='';return;}
+  const q=nome;
+  const crmM=_crmTodosContatos().filter(c=>_decisorBuscaMatch(c,q)).map(c=>Object.assign({},c,{_origem:'CRM Comercial'}));
+  const prospM=(typeof _prospTodosContatos==='function'?_prospTodosContatos():[]).filter(c=>_decisorBuscaMatch(c,q)).map(c=>Object.assign({},c,{_origem:'Prospecção'}));
   // Ordena pelo mais completo primeiro (2026-09-15, a pedido do usuário: "ele ta puxando
   // incompleto, nao puxou o sobrenome... nem o linkedin") — quando existe cadastro
   // duplicado/incompleto do mesmo contato, o registro com mais dados preenchidos aparece
   // primeiro e é o mais provável de ser escolhido.
   const _completude=c=>(c.cargo?1:0)+(c.empresa?1:0)+(c.email?1:0)+(c.linkedin?1:0)+(_crmTelefonesDecisor(c).length?1:0)+(c.aniversario?1:0)+((c.nome||'').trim().includes(' ')?1:0);
-  const todos=[...crmM,...prospM].sort((a,b)=>_completude(b)-_completude(a)).slice(0,6);
-  if(!todos.length){alvo.style.display='none';alvo.innerHTML='';return;}
+  const _vistosSug=new Set();
+  const todos=[...crmM,...prospM].sort((a,b)=>_completude(b)-_completude(a)).filter(c=>{const k=_crmContatoChave(c);if(_vistosSug.has(k))return false;_vistosSug.add(k);return true;}).slice(0,8);
+  if(!todos.length){alvo.style.display='block';alvo.innerHTML='<div style="font-size:.68rem;color:var(--ink4);margin:4px 0">Nenhum contato cadastrado parecido com esse nome — será um contato novo.</div>';return;}
   alvo.style.display='block';
   alvo.innerHTML='<div style="font-size:.66rem;color:var(--ink4);margin:4px 0 4px">🔎 Contato(s) parecido(s) já cadastrado(s) — confira e clique pra usar:</div>'
     +todos.map(c=>{
@@ -43639,6 +43678,20 @@ function _crmContatoComCopiar(d){
 // form completo de empresa (.crm-decisor-row), usa a div .crm-dec-sugestao dessa MESMA linha
 // (cada linha tem a sua, ver crmAddDecisorRow); senão, é o modal rápido de adicionar decisor,
 // que tem uma única div fixa (#crm-decisor-add-sugestao).
+// Busca de contato existente ao digitar o nome do decisor (2026-09-25, a pedido do usuário:
+// "quando digito o nome do decisor ele não tá puxando da lista") — agora ignora acento e
+// maiúscula/minúscula ("joao" acha "JOÃO"), aceita as palavras em qualquer ordem ("alonso
+// aline"), começa com 2 letras e também acha por telefone, e-mail ou empresa do contato.
+function _decisorBuscaMatch(c,termo){
+  const t=_normSemAcento(termo).trim();
+  if(!t)return false;
+  const alvo=_normSemAcento([c.nome,c.empresa,c.empresaNome,c.email].filter(Boolean).join(' '));
+  const palavras=t.split(/\s+/).filter(Boolean);
+  if(palavras.every(w=>alvo.includes(w)))return true;
+  const dig=String(termo).replace(/\D/g,'');
+  if(dig.length>=4&&_crmTelefonesDecisor(c).some(x=>String(x.numero||'').replace(/\D/g,'').includes(dig)))return true;
+  return false;
+}
 function _crmAlvoSugestaoDecisor(inputEl){
   const row=inputEl.closest('.crm-decisor-row');
   if(row)return row.querySelector('.crm-dec-sugestao');
@@ -43648,17 +43701,18 @@ function _crmSugerirDecisor(inputEl){
   const alvo=_crmAlvoSugestaoDecisor(inputEl);
   if(!alvo)return;
   const nome=(inputEl.value||'').trim();
-  if(nome.length<3){alvo.style.display='none';alvo.innerHTML='';return;}
-  const q=nome.toUpperCase();
-  const crmM=_crmTodosContatos().filter(c=>(c.nome||'').toUpperCase().includes(q)).map(c=>Object.assign({},c,{_origem:'CRM Comercial'}));
-  const prospM=(typeof _prospTodosContatos==='function'?_prospTodosContatos():[]).filter(c=>(c.nome||'').toUpperCase().includes(q)).map(c=>Object.assign({},c,{_origem:'Prospecção'}));
+  if(nome.length<2){alvo.style.display='none';alvo.innerHTML='';return;}
+  const q=nome;
+  const crmM=_crmTodosContatos().filter(c=>_decisorBuscaMatch(c,q)).map(c=>Object.assign({},c,{_origem:'CRM Comercial'}));
+  const prospM=(typeof _prospTodosContatos==='function'?_prospTodosContatos():[]).filter(c=>_decisorBuscaMatch(c,q)).map(c=>Object.assign({},c,{_origem:'Prospecção'}));
   // Ordena pelo mais completo primeiro (2026-09-15, a pedido do usuário: "ele ta puxando
   // incompleto, nao puxou o sobrenome... nem o linkedin") — quando existe cadastro
   // duplicado/incompleto do mesmo contato, o registro com mais dados preenchidos aparece
   // primeiro e é o mais provável de ser escolhido.
   const _completude=c=>(c.cargo?1:0)+(c.empresa?1:0)+(c.email?1:0)+(c.linkedin?1:0)+(_crmTelefonesDecisor(c).length?1:0)+(c.aniversario?1:0)+((c.nome||'').trim().includes(' ')?1:0);
-  const todos=[...crmM,...prospM].sort((a,b)=>_completude(b)-_completude(a)).slice(0,6);
-  if(!todos.length){alvo.style.display='none';alvo.innerHTML='';return;}
+  const _vistosSug=new Set();
+  const todos=[...crmM,...prospM].sort((a,b)=>_completude(b)-_completude(a)).filter(c=>{const k=_crmContatoChave(c);if(_vistosSug.has(k))return false;_vistosSug.add(k);return true;}).slice(0,8);
+  if(!todos.length){alvo.style.display='block';alvo.innerHTML='<div style="font-size:.68rem;color:var(--ink4);margin:4px 0">Nenhum contato cadastrado parecido com esse nome — será um contato novo.</div>';return;}
   alvo.style.display='block';
   alvo.innerHTML='<div style="font-size:.66rem;color:var(--ink4);margin:4px 0 4px">🔎 Contato(s) parecido(s) já cadastrado(s) — confira e clique pra usar:</div>'
     +todos.map(c=>{
