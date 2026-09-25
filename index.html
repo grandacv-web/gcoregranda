@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-25.10';</script>
+<script>const APP_BUILD_VERSION='2026-09-25.17';</script>
 <!-- Carregamento mais rápido (2026-09-24.27, a pedido do usuário: "essa demora pra atualizar
      o sistema tem como diminuir"): abre as conexões com Firebase/CDNs e já começa a baixar o
      Firebase logo no início, em paralelo com o resto da página. -->
@@ -7318,7 +7318,7 @@ function _resumoSemanalCrm(){
   const segAnt=new Date(segAtual);segAnt.setDate(segAtual.getDate()-7);
   const ini=segAnt.getTime(),fim=segAtual.getTime();
   const naSemana=iso=>{const t=Date.parse(iso||'');return t>=ini&&t<fim;};
-  const ganhos=crmEmpresas.filter(e=>e.fechamento&&e.fechamento.status==='ganho'&&naSemana(e.fechamento.em));
+  const ganhos=crmEmpresas.filter(e=>{const g=_crmGanhoInfo(e);return g.emitido&&naSemana(g.em);});
   const perdidos=crmEmpresas.filter(e=>e.fechamento&&e.fechamento.status==='perdido'&&naSemana(e.fechamento.em));
   const novos=crmEmpresas.filter(e=>naSemana(e.criadoEm));
   const soma=l=>l.reduce((x,e)=>x+(e.propostaValorLiquido||0),0);
@@ -7387,6 +7387,24 @@ function _avisosAutomaticos(){
           destinatarioTipo:'nome',destinatarioValor:e.responsavel
         });
       }
+    });
+    // @Menção em comentário do card (2026-09-25) — aviso pessoal pra cada marcado, nos
+    // comentários dos últimos 14 dias; clicável (crmEmpresaId) abre o card.
+    const _limMenc=Date.now()-14*86400000;
+    crmEmpresas.forEach(e=>{
+      (e.timeline||[]).forEach(ev=>{
+        if(!ev||!Array.isArray(ev.mencoes)||!ev.mencoes.length)return;
+        if((Date.parse(ev.em||'')||0)<_limMenc)return;
+        ev.mencoes.forEach(nomeM=>{
+          out.push({
+            id:'mencao_'+ev.id+'_'+nomeM,
+            automatico:true,tipoAuto:'mencao',crmEmpresaId:e.id,
+            assunto:'💬 Você foi marcado num comentário',
+            texto:`${ev.autor||'Alguém'} marcou você no negócio "${e.nome||'—'}": "${String(ev.texto||'').slice(0,160)}${String(ev.texto||'').length>160?'…':''}"`,
+            destinatarioTipo:'nome',destinatarioValor:nomeM
+          });
+        });
+      });
     });
     // Prazo de 24h úteis em ORÇAMENTO APROVADO (2026-09-24) — ver _crmAprovPrazo. Dois avisos,
     // só pro responsável do card (pessoais, igual aviso de tarefa — admin não recebe os dos outros):
@@ -7516,6 +7534,7 @@ function _avisoAplicavelPara(av,email,cat,isAdm,nome){
   if(av.tipoAuto==='tarefas_diarias'||av.tipoAuto==='tarefa_vence20'||av.tipoAuto==='aprov_prazo')return !!nome&&av.destinatarioValor===nome;
   if(av.tipoAuto==='resumo_semanal'||av.tipoAuto==='cp_autorizar')return !!isAdm;
   if(av.tipoAuto==='rh_ferias')return !!isAdm||_isRhUser();
+  if(av.tipoAuto==='mencao')return !!nome&&(vendedorMatch(av.destinatarioValor,nome)||vendedorMatch(nome,av.destinatarioValor));
   if(av.tipoAuto==='regua_vendedor')return !!nome&&(vendedorMatch(av.destinatarioValor,nome)||vendedorMatch(nome,av.destinatarioValor));
   if(isAdm)return true;
   if(av.destinatarioTipo==='todos')return true;
@@ -11580,6 +11599,16 @@ function buildEmissaoEmailContent(p){
   <!-- BODY -->
   <tr><td style="padding:32px 40px;background:#ffffff">
     <table width="100%" cellpadding="0" cellspacing="0">
+      <!-- Garantia/Retrabalho em destaque no topo (2026-09-25) -->
+      ${p.tipo==='Garantia / Retrabalho'?`
+      <tr><td colspan="2" style="padding:0 0 22px">
+        <table width="100%" cellpadding="0" cellspacing="0"><tr><td style="background:#fef2f2;border:2px solid #dc2626;border-radius:10px;padding:16px 18px">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:#b91c1c">⚠️ Garantia / Retrabalho</p>
+          ${p.rncPedidoOrigem&&p.rncPedidoOrigem.os?`<p style="margin:0 0 4px;font-size:17px;font-weight:800;color:#111827">REFERENTE AO PEDIDO OS ${p.rncPedidoOrigem.os}</p>
+          <p style="margin:0 0 12px;font-size:13px;color:#374151">${p.rncPedidoOrigem.cliente||'—'}${p.rncPedidoOrigem.job?' — '+p.rncPedidoOrigem.job:''}</p>`:`<p style="margin:0 0 12px;font-size:13px;color:#b91c1c;font-weight:700">Pedido de origem não informado.</p>`}
+          ${p.arq_rnc_url?`<a href="${cldDownload(p.arq_rnc_url)}" target="_blank" style="display:inline-block;background:#dc2626;color:#ffffff;font-size:13px;font-weight:800;text-decoration:none;border-radius:8px;padding:10px 16px">📄 BAIXAR RNC — RELATÓRIO DE NÃO CONFORMIDADE ↗</a>`:`<p style="margin:0;font-size:12px;color:#9ca3af;font-style:italic">Nenhum relatório de não conformidade anexado.</p>`}
+        </td></tr></table>
+      </td></tr>`:''}
       ${_semObsCrm(p.obs)?`
       <tr><td colspan="2" style="padding:0 0 8px;border-bottom:2px solid #e91e63">
         <span style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#111827">Observações</span>
@@ -11648,16 +11677,7 @@ function buildEmissaoEmailContent(p){
       `:`<tr><td colspan="2" style="padding:10px 0;color:#9ca3af;font-size:13px;font-style:italic">Não tem base neste pedido.</td></tr>`}
       ${obsAbaRow('bases')}
 
-      <!-- RNC (RELATÓRIO DE NÃO CONFORMIDADE) — só pra pedidos de Garantia/Retrabalho, 2026-09-08,
-      a pedido do usuário: "Esse arquivo deve ir tambem no email no mesmo formato dos demais,
-      clicavel e para baixar ao clicar. Mesmo padrão." -->
-      ${p.tipo==='Garantia / Retrabalho'?`
-      <tr><td colspan="2" style="padding:20px 0 8px;border-bottom:2px solid #e91e63">
-        <span style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#111827">RNC — Relatório de Não Conformidade</span>
-      </td></tr>
-      ${p.rncPedidoOrigem&&p.rncPedidoOrigem.os?`<tr style="background:#fafafa"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Pedido de origem (venda)</td><td style="padding:10px 0;color:#111827;font-size:13px;font-weight:700">OS ${p.rncPedidoOrigem.os} — ${p.rncPedidoOrigem.cliente||'—'}${p.rncPedidoOrigem.job?' — '+p.rncPedidoOrigem.job:''}</td></tr>`:''}
-      ${p.arq_rnc_url?`<tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Relatório de Não Conformidade</td><td style="padding:10px 0;font-size:13px;font-weight:600"><a href="${cldDownload(p.arq_rnc_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">Clique aqui para baixar ↗</a></td></tr>`:`<tr><td colspan="2" style="padding:10px 0;color:#9ca3af;font-size:13px;font-style:italic">Nenhum relatório de não conformidade anexado.</td></tr>`}
-      `:''}
+      <!-- RNC agora vai em destaque no TOPO do e-mail (2026-09-25), logo no começo do corpo -->
 
       <!-- PROJETOS — cabeçalho da seção sempre aparece: Pasta de Arquivos é obrigatória em
       todo pedido (ver validação em submit()), então não faz sentido a seção só existir
@@ -11694,7 +11714,7 @@ function buildEmissaoEmailContent(p){
   const _cidade=(p.locCidade||'').toUpperCase();
   const _uf=(p.locUf||'').toUpperCase();
   const _locStr=_cidade&&_uf?` - ${_cidade}/${_uf}`:_cidade?` - ${_cidade}`:_uf?` - ${_uf}`:'';
-  const subject=`EMISSÃO DE PEDIDO - OS Nº ${p.os} · ${p.cliente} - ${p.job||''}${_locStr}`.replace(/\s+-\s*$/,'').replace(/\s{2,}/g,' ').replace(/\//g,'-');
+  const subject=`${p.tipo==='Garantia / Retrabalho'?'GARANTIA/RETRABALHO'+(p.rncPedidoOrigem&&p.rncPedidoOrigem.os?' (REF. OS '+p.rncPedidoOrigem.os+')':'')+' - ':''}EMISSÃO DE PEDIDO - OS Nº ${p.os} · ${p.cliente} - ${p.job||''}${_locStr}`.replace(/\s+-\s*$/,'').replace(/\s{2,}/g,' ').replace(/\//g,'-');
   // Corrige acentos "sumindo" no e-mail de emissão recebido (2026-08-21): texto vindo de
   // PDF (pdf.js às vezes extrai o acento como caractere combinante separado — forma NFD,
   // "e" + acento agudo — em vez de "é" já composto) ou colado de outra fonte pode chegar
@@ -12703,6 +12723,113 @@ window.addEventListener('beforeunload',function(e){
   e.returnValue='';
 });
 
+// ===================== 🏆 CELEBRAÇÃO DE PEDIDO GANHO (2026-09-25) =====================
+// A pedido do usuário: "quero que faça uma festa na tela quando alguém ganhar o pedido" +
+// "inclua algo parabenizando o vendedor pela conquista" — aparece pra quem EMITE uma Venda
+// (1ª emissão, ver submit()). Chuva de confete nas cores da Granda + banner central com
+// parabéns, cliente/JOB, bruto/líquido e progresso da meta do mês. Tudo self-contained
+// (CSS injetado uma vez, canvas próprio), sem lib externa.
+const _CEL_MSGS=['Sua dedicação fez a diferença — essa conquista é toda sua!','Negociação de mestre! O time todo comemora com você.','Trabalho duro dá resultado — que venham os próximos!','Mais um cliente confiando na Granda graças a você!','Isso é jogar em outro nível. Orgulho do time!'];
+function _celInjetarCss(){
+  if(document.getElementById('cel-css'))return;
+  const st=document.createElement('style');st.id='cel-css';
+  st.textContent=`#cel-ovl{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:99990;background:rgba(17,24,39,.55);backdrop-filter:blur(2px);animation:celFade .25s ease}
+#cel-ovl .cel-ban{position:relative;width:min(460px,92vw);background:#fff;border-radius:22px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.35);text-align:center;animation:celPop .55s cubic-bezier(.2,1.6,.4,1);font-family:inherit}
+#cel-ovl .cel-top{background:linear-gradient(135deg,#111827 0%,#1f2a44 55%,#2a1030 100%);padding:24px 20px 34px}
+#cel-ovl .cel-trof{font-size:64px;line-height:1;display:inline-block;animation:celBounce 1.2s ease-in-out infinite;filter:drop-shadow(0 6px 14px rgba(245,179,1,.55))}
+#cel-ovl h1{margin:10px 0 0;color:#fff;font-size:1.7rem;letter-spacing:1px;font-weight:900}
+#cel-ovl h1 span{color:#f5b301}
+#cel-ovl .cel-parab{margin-top:12px;display:inline-block;background:rgba(245,179,1,.15);border:1px solid rgba(245,179,1,.45);color:#fff;border-radius:30px;padding:6px 16px;font-size:1.05rem;font-weight:800;animation:celBrilho 1.8s ease-in-out infinite}
+#cel-ovl .cel-parab b{color:#f5b301}
+#cel-ovl .cel-msg{margin:8px 0 0;color:rgba(255,255,255,.82);font-size:.88rem;font-style:italic}
+#cel-ovl .cel-body{padding:20px 22px 22px;margin-top:-18px;background:#fff;border-radius:18px 18px 0 0;position:relative}
+#cel-ovl .cel-vend{display:inline-flex;align-items:center;gap:8px;background:#fdf2f8;color:#e91e63;border-radius:30px;padding:6px 14px;font-weight:800;font-size:.85rem}
+#cel-ovl .cel-cli{font-size:1.15rem;font-weight:800;color:#111827;margin:12px 0 2px}
+#cel-ovl .cel-job{font-size:.8rem;color:#64748b}
+#cel-ovl .cel-vals{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}
+#cel-ovl .cel-val{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:10px}
+#cel-ovl .cel-val .l{font-size:.64rem;color:#64748b;font-weight:700;letter-spacing:1px}
+#cel-ovl .cel-val .v{font-size:1.1rem;font-weight:900;color:#111827;margin-top:2px}
+#cel-ovl .cel-val.liq .v{color:#059669}
+#cel-ovl .cel-meta{font-size:.76rem;color:#475569;background:#ecfeff;border-radius:10px;padding:8px 10px;margin-bottom:14px}
+#cel-ovl .cel-meta b{color:#0e7490}
+#cel-ovl .cel-ok{width:100%;border:none;border-radius:12px;padding:13px;font-weight:900;font-size:.9rem;cursor:pointer;color:#fff;background:linear-gradient(90deg,#e91e63,#ff5c8a);font-family:inherit}
+#cel-ovl .cel-slogan{font-size:.66rem;color:#94a3b8;margin-top:10px;letter-spacing:2px;font-weight:700}
+#cel-canvas{position:fixed;inset:0;pointer-events:none;z-index:99995}
+@keyframes celPop{0%{transform:scale(.6);opacity:0}100%{transform:scale(1);opacity:1}}
+@keyframes celFade{from{opacity:0}to{opacity:1}}
+@keyframes celBounce{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-8px) rotate(4deg)}}
+@keyframes celBrilho{0%,100%{box-shadow:0 0 0 rgba(245,179,1,0)}50%{box-shadow:0 0 18px rgba(245,179,1,.55)}}`;
+  document.head.appendChild(st);
+}
+function _celConfete(){
+  let cv=document.getElementById('cel-canvas');
+  if(!cv){cv=document.createElement('canvas');cv.id='cel-canvas';document.body.appendChild(cv);}
+  cv.width=innerWidth;cv.height=innerHeight;
+  const cx=cv.getContext('2d');
+  const cores=['#e91e63','#00bac7','#f5b301','#ffffff','#34d399','#7c3aed'];
+  let parts=[];
+  const lote=(qtd,topo)=>{for(let i=0;i<qtd;i++){const esq=i%2===0;parts.push({x:topo?Math.random()*cv.width:(esq?0:cv.width),y:topo?-20:cv.height*.75,vx:topo?(Math.random()-.5)*3:(esq?1:-1)*(4+Math.random()*9),vy:topo?2+Math.random()*3:-(9+Math.random()*9),s:5+Math.random()*7,r:Math.random()*6.28,vr:(Math.random()-.5)*.3,c:cores[Math.floor(Math.random()*cores.length)],vida:0,circ:Math.random()<.3});}};
+  lote(160,false);setTimeout(()=>lote(120,true),450);setTimeout(()=>lote(90,false),1100);
+  let quadros=0;
+  const loop=()=>{
+    cx.clearRect(0,0,cv.width,cv.height);
+    parts.forEach(p=>{p.vy+=.25;p.vx*=.99;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.vida++;cx.save();cx.translate(p.x,p.y);cx.rotate(p.r);cx.fillStyle=p.c;if(p.circ){cx.beginPath();cx.arc(0,0,p.s/2,0,6.28);cx.fill();}else cx.fillRect(-p.s/2,-p.s/4,p.s,p.s/2);cx.restore();});
+    parts=parts.filter(p=>p.y<cv.height+40&&p.vida<500);
+    quadros++;
+    if(parts.length||quadros<90)requestAnimationFrame(loop);else cv.remove();
+  };
+  requestAnimationFrame(loop);
+}
+function _celFechar(){const o=document.getElementById('cel-ovl');if(o)o.remove();}
+function _celebrarPedidoGanho(d){
+  _celInjetarCss();_celFechar();
+  const esc=t=>String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const nomeCompleto=(d.vendedor||'').trim();
+  const primeiro=nomeCompleto?nomeCompleto.split(/\s+/)[0]:'';
+  const primeiroFmt=primeiro?primeiro.charAt(0).toUpperCase()+primeiro.slice(1).toLowerCase():'';
+  // Progresso da meta do mês — o pedido acabou de ser salvo (save assíncrono), então soma o
+  // líquido dele se ainda não estiver na lista de vendas do mês.
+  let metaTxt='';
+  try{
+    const hoje=new Date(),y=hoje.getFullYear(),m=hoje.getMonth()+1;
+    const rows=getVendaRowsMerged().filter(r=>r.m===m&&vendedorMatch(r.v,nomeCompleto));
+    const jaIncluso=d.os&&rows.some(r=>String(r.p)===String(d.os));
+    const vendido=rows.reduce((s,r)=>s+(r.lq||0),0)+(jaIncluso?0:(d.liq||0));
+    const qtd=rows.length+(jaIncluso?0:1);
+    const meta=getMetaMes(y,m,nomeCompleto)||0;
+    const partes=[];
+    if(meta>0){const pct=Math.round(vendido/meta*100);partes.push(pct>=100?`🎯 <b>META BATIDA!</b> ${pct}% da meta do mês`:`Com esse, ${esc(primeiroFmt||'você')} chegou a <b>${pct}% da meta</b> do mês`);}
+    partes.push(`<b>${qtd}º pedido</b> em ${MESES_PT[m].charAt(0)+MESES_PT[m].slice(1).toLowerCase()}`);
+    metaTxt=`<div class="cel-meta">📈 ${partes.join(' · ')}</div>`;
+  }catch(err){}
+  const msg=_CEL_MSGS[Math.floor(Math.random()*_CEL_MSGS.length)];
+  const ov=document.createElement('div');ov.id='cel-ovl';
+  ov.onclick=ev=>{if(ev.target===ov)_celFechar();};
+  ov.innerHTML=`<div class="cel-ban">
+    <div class="cel-top">
+      <div class="cel-trof">🏆</div>
+      <h1>PEDIDO <span>GANHO!</span></h1>
+      ${primeiroFmt?`<div class="cel-parab">👏 Parabéns, <b>${esc(primeiroFmt)}</b>!</div>`:''}
+      <p class="cel-msg">${msg}</p>
+    </div>
+    <div class="cel-body">
+      ${nomeCompleto?`<div class="cel-vend">🧑‍💼 ${esc(nomeCompleto.toUpperCase())}</div>`:''}
+      <div class="cel-cli">${esc(d.cliente||'—')}</div>
+      <div class="cel-job">${d.os?'OS '+esc(d.os)+' · ':''}${esc(d.job||'')}</div>
+      <div class="cel-vals">
+        <div class="cel-val"><div class="l">VALOR BRUTO</div><div class="v">${fmtR(d.bruto||0)}</div></div>
+        <div class="cel-val liq"><div class="l">VALOR LÍQUIDO</div><div class="v">${fmtR(d.liq||0)}</div></div>
+      </div>
+      ${metaTxt}
+      <button type="button" class="cel-ok" onclick="_celFechar()">🎉 BORA PRO PRÓXIMO!</button>
+      <div class="cel-slogan">PENSE GRANDE, SEJA GRANDA!</div>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+  _celConfete();
+}
+
 async function submit(){
   if(_submitPedidoEmAndamento){
     toast('Aguarde — já estamos processando a emissão deste pedido, não clique de novo...','tinf');
@@ -13028,6 +13155,12 @@ async function submit(){
   if(wasEditing&&_pedidoExistente)_histRegistrarEdicao(p,_histSnapPedido(_pedidoExistente),'formulario');
   savePedidoFS(p).catch(e=>toast('Erro ao salvar: '+e.message,'terr'));
   toast(wasEditing?'Pedido atualizado!':'Pedido emitido! Enviando e-mail...','tok');
+  // 🏆 Celebração de pedido ganho (2026-09-25) — só na 1ª emissão de verdade de uma Venda/Permuta.
+  if(!wasEditing&&(p.tipo==='Venda'||p.tipo==='Permuta')){
+    try{let _lqCel=0;try{_lqCel=calcLiq()||0;}catch(err){}
+      _celebrarPedidoGanho({vendedor:p.responsavel||'',cliente:p.cliente||'',job:p.job||'',os:p.os||'',bruto:moneyToNum(ed.vtotal||'0')||0,liq:_lqCel});
+    }catch(err){console.error('Erro na celebração:',err);}
+  }
   // Registra no card do CRM o que foi emitido DE VERDADE (2026-09-24) — OS, valor bruto e
   // líquido do pedido x proposta. Não altera os valores da proposta do card, só anota.
   if(!wasEditing&&p.crmEmpresaId&&typeof crmEmpresas!=='undefined'){
@@ -24398,15 +24531,26 @@ async function prodItemToggleEscopo(pedidoId,itemId,foraEscopo){
   prodAbrirChecklist(pedidoId);
   if(typeof prodRenderAtivo==='function')prodRenderAtivo();
 }
+// Registro de cada baixa por setor/item da Produção (2026-09-25) — alimenta o Histórico de
+// Pedidos. Só acrescenta em p.historicoProducao (limite de 400 registros por pedido).
+function _prodLogHistorico(p,item,setorLabel,de,para){
+  try{
+    if(!Array.isArray(p.historicoProducao))p.historicoProducao=[];
+    p.historicoProducao.push({em:new Date().toISOString(),por:(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—',item:String(item&&item.nome||'—').slice(0,120),setor:setorLabel,de:Math.round(Number(de)||0),para:Math.round(Number(para)||0)});
+    if(p.historicoProducao.length>400)p.historicoProducao=p.historicoProducao.slice(-400);
+  }catch(err){console.error('_prodLogHistorico',err);}
+}
 async function prodItemToggle(pedidoId,itemId,checked){
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
   const item=(p.itensProducao||[]).find(i=>i.id===itemId);
   if(!item)return;
   const v=checked?100:0;
+  const _pctAntesHist=_prodItemPercentualCalc(item);
   item.setores={};
   PROD_SETORES_ITEM.forEach(st=>{item.setores[st.key]=v;});
   item.percentual=v;
+  if(_pctAntesHist!==v)_prodLogHistorico(p,item,'TODOS OS SETORES',_pctAntesHist,v);
   await _prodSyncBaixaProducao(p);
   await savePedidoFS(p);
   prodAbrirChecklist(pedidoId);
@@ -24430,8 +24574,10 @@ async function prodItemSetSetorPercentual(pedidoId,itemId,setorKey,valorStr){
     item.setores={};
     PROD_SETORES_ITEM.forEach(st=>{item.setores[st.key]=base;});
   }
+  const _vAntesHist=_prodItemSetorValor(item,setorKey);
   item.setores[setorKey]=v;
   item.percentual=_prodItemPercentualCalc(item);
+  if(_vAntesHist!==v)_prodLogHistorico(p,item,(PROD_SETORES_ITEM.find(x=>x.key===setorKey)||{}).label||setorKey,_vAntesHist,v);
   prodAbrirChecklist(pedidoId); // resposta visual na hora, sem esperar o salvamento
   await _prodSyncBaixaProducao(p);
   await savePedidoFS(p);
@@ -26077,6 +26223,17 @@ function lpSetTab(tab,btn){
   if(sk)sk.style.display=tab==='kanban'?'':'none';
   if(sc)sc.style.display=tab==='calendario'?'':'none';
   if(ss)ss.style.display=tab==='simulador'?'':'none';
+  // Simulador não usa busca/filtros (2026-09-25, a pedido do usuário: "no simulador não faz
+  // sentido ter filtro, não vou buscar nada, vou inserir infos e simular datas") — esconde a
+  // barra de mês, busca/etapa/status e filtro de datas só nessa aba (os valores ficam guardados).
+  try{
+    const esconder=tab==='simulador';
+    const lbl=document.getElementById('lp-mes-lbl');
+    const linhaMes=lbl&&lbl.closest('.dash-mes-nav')&&lbl.closest('.dash-mes-nav').parentElement;
+    const linhaBusca=document.getElementById('lp-fil-busca')&&document.getElementById('lp-fil-busca').parentElement;
+    const linhaData=document.getElementById('lp-fil-data-campo')&&document.getElementById('lp-fil-data-campo').parentElement;
+    [linhaMes,linhaBusca,linhaData].forEach(el=>{if(el)el.style.display=esconder?'none':'flex';});
+  }catch(err){console.error('lp filtros simulador',err);}
   _lpTabAtiva=tab;
   lpRenderAtivo();
 }
@@ -33703,6 +33860,30 @@ function _histPedidoEventos(p){
     else if(p.finalizacao&&p.finalizacao.pendenciasObs&&!(pf&&pf.resolvido))add('⚠️','Obra finalizada com pendência em aberto',p.finalizacao.preenchidoEm||p.finalizacao.dataFinalizacao,`${p.finalizacao.pendenciasObs}${pf&&pf.dataResolucaoPrevista?' — resolução prevista: '+fmtD(pf.dataResolucaoPrevista):''}`,'#d97706');
   });
 
+  // 23. (2026-09-25) Baixas da Produção por setor/item (p.historicoProducao).
+  try{
+    (p.historicoProducao||[]).forEach(h=>{
+      add('🏭',`Produção — ${h.setor}`,h.em,`${h.item} · de ${h.de}% para ${h.para}% (${h.por||'—'})`,h.para>=100?'#16a34a':'#0284c7');
+    });
+  }catch(err){console.error('hist producao',err);}
+  // 24. (2026-09-25) Garantias/Retrabalhos ligados a esta venda (RNC com pedido de origem) e,
+  // se este pedido É uma garantia, a venda de origem dele.
+  try{
+    pedidos.filter(x=>x.id!==p.id&&x.rncPedidoOrigem&&(x.rncPedidoOrigem.id===p.id||(p.os&&String(x.rncPedidoOrigem.os)===String(p.os)))).forEach(g=>{
+      add('⚠️','Garantia/Retrabalho aberta para este pedido',g.emissaoEmHora||g.emissaoEm||g.conselhoCriadoEm,`OS ${g.os||'—'} · ${g.job||g.cliente||'—'} · ${g.origemComercial?'emitida':'em rascunho no Conselho'}${g.responsavel?' · '+g.responsavel:''}`,'#dc2626');
+    });
+    if(p.rncPedidoOrigem&&p.rncPedidoOrigem.os){
+      add('🔗','Garantia/Retrabalho referente a uma venda anterior',p.emissaoEmHora||p.emissaoEm||p.conselhoCriadoEm,`Venda de origem: OS ${p.rncPedidoOrigem.os} — ${p.rncPedidoOrigem.cliente||'—'}${p.rncPedidoOrigem.job?' — '+p.rncPedidoOrigem.job:''}`,'#dc2626');
+    }
+  }catch(err){console.error('hist garantias',err);}
+  // 25. (2026-09-25) Observações por aba preenchidas na emissão.
+  try{
+    const oa=p.obsAba||{};
+    const ks=Object.keys(oa).filter(k=>String(oa[k]||'').trim());
+    if(ks.length&&typeof EM_OBS_ABAS!=='undefined'){
+      add('📝','Observações registradas na emissão',p.emissaoEmHora||p.emissaoEm||p.conselhoCriadoEm,ks.map(k=>`${EM_OBS_ABAS[k]||k}: ${String(oa[k]).replace(/</g,'&lt;')}`).join(' · '),'#64748b');
+    }
+  }catch(err){console.error('hist obsAba',err);}
   eventos.sort((a,b)=>a.ts-b.ts);
   return eventos;
 }
@@ -33799,6 +33980,83 @@ function renderHistoricoPedidos(){
 // Abre a timeline de um pedido — só existe histórico de verdade pra quem tem registro no
 // Firestore (pedidoId preenchido); linha que só existe na planilha nunca gerou nenhum evento
 // rastreável (não passou por Emissão/Finalização/confirmação de pagamento no sistema).
+// ── PAINEL "ONDE ESTÁ O PEDIDO AGORA" + RÉGUA PREVISTO × REALIZADO (2026-09-25, a pedido do
+// usuário). Só leitura — calcula tudo na hora a partir do que já existe no pedido (etapas de
+// _lpCalcEtapas + p.lpBaixas, _prodInfo, getParcelas/pagConf, pendências do Conselho,
+// garantias vinculadas). Qualquer erro aqui devolve '' e o histórico abre normal.
+function _histDiasEntre(aIso,bIso){
+  try{return Math.round((new Date(bIso+'T00:00:00')-new Date(aIso+'T00:00:00'))/86400000);}catch(e){return null;}
+}
+function _histPainelResumoHtml(p){
+  try{
+    const hojeIso=_hojeIso();
+    const calc=(typeof _lpCalcEtapas==='function')?_lpCalcEtapas(p):null;
+    const etapas=(calc&&calc.ok)?calc.etapas.filter(e=>e.aplicavel):[];
+    const baixas=p.lpBaixas||{};
+    const finalizado=!!(p.finalizacao&&p.finalizacao.dataFinalizacao);
+    const proxima=etapas.find(e=>!baixas[e.key]);
+    let statusTxt,statusCor,statusBg;
+    if(finalizado){statusTxt='🏁 Obra finalizada';statusCor='#166534';statusBg='#dcfce7';}
+    else if(!etapas.length){statusTxt='ℹ️ Sem etapas calculadas';statusCor='#475569';statusBg='#f1f5f9';}
+    else if(!proxima){statusTxt='✅ Todas as etapas concluídas';statusCor='#166534';statusBg='#dcfce7';}
+    else if(proxima.iso&&proxima.iso<hojeIso){statusTxt='🔴 Atrasado';statusCor='#b91c1c';statusBg='#fee2e2';}
+    else{statusTxt='🟢 No prazo';statusCor='#166534';statusBg='#dcfce7';}
+    let pctProd=null;
+    try{const info=_prodInfo(p,hojeIso);if(info&&info.ok)pctProd=Math.round(info.pctValor||0);}catch(e){}
+    let recebido=0,totalParc=0;
+    try{(getParcelas(p)||[]).forEach(it=>{const b=Number(it.valorBruto||it.valor||0)||0;totalParc+=b;const c=getPagConf(it.confKey);if(c&&c.status==='confirmado')recebido+=Number(c.valorBrutoConfirmado||b)||0;});}catch(e){}
+    let pend=0;try{pend=_pedPendAbertas(p).length;}catch(e){}
+    let garantias=0;try{garantias=pedidos.filter(x=>x.id!==p.id&&x.rncPedidoOrigem&&(x.rncPedidoOrigem.id===p.id||(p.os&&String(x.rncPedidoOrigem.os)===String(p.os)))).length;}catch(e){}
+    const card=(ic,l,v,sub,cor)=>`<div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:10px;padding:9px 11px;min-width:0">
+      <div style="font-size:.6rem;font-weight:800;color:var(--ink4);letter-spacing:.5px">${ic} ${l}</div>
+      <div style="font-size:.92rem;font-weight:900;color:${cor||'var(--ink)'};margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v}</div>
+      ${sub?`<div style="font-size:.64rem;color:var(--ink4);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sub}</div>`:''}
+    </div>`;
+    const etapaTxt=finalizado?'Finalizada':(proxima?proxima.label:(etapas.length?'Concluídas':'—'));
+    const etapaSub=(!finalizado&&proxima&&proxima.iso)?`prazo ${fmtD(proxima.iso)}${proxima.iso<hojeIso?' · '+_histDiasEntre(proxima.iso,hojeIso)+'d de atraso':''}`:(calc&&calc.prazoIso?`finalização ${fmtD(calc.prazoIso)}`:'');
+    const cards=[
+      card('📍','ETAPA ATUAL',etapaTxt,etapaSub,(!finalizado&&proxima&&proxima.iso<hojeIso)?'#b91c1c':'var(--ink)'),
+      card('🏭','PRODUZIDO',pctProd==null?'—':pctProd+'%','do valor líquido',pctProd>=100?'#16a34a':'#0284c7'),
+      card('💰','RECEBIDO',totalParc>0?fmtR(recebido):'—',totalParc>0?`de ${fmtR(totalParc)} (${Math.round(recebido/totalParc*100)}%)`:'sem parcelas',recebido>=totalParc&&totalParc>0?'#16a34a':'var(--ink)'),
+      card('📋','PENDÊNCIAS',String(pend),pend?'do Conselho em aberto':'nenhuma em aberto',pend?'#d97706':'#16a34a'),
+      card('⚠️','GARANTIAS',String(garantias),garantias?'vinculadas a esta venda':'nenhuma',garantias?'#dc2626':'var(--ink)')
+    ].join('');
+    // Régua previsto × realizado
+    let regua='';
+    if(etapas.length){
+      const linhas=etapas.map(e=>{
+        const b=baixas[e.key];
+        const realIso=b?(b.data||(b.dataHora?_isoLocalTs(b.dataHora):'')):'';
+        let dif='',cor='var(--ink4)',st='⏳';
+        if(realIso&&e.iso){const d=_histDiasEntre(e.iso,realIso);dif=d>0?`+${d}d`:d<0?`${d}d`:'no dia';cor=d>0?'#b91c1c':'#16a34a';st=d>0?'🔴':'✅';}
+        else if(!realIso&&e.iso&&e.iso<hojeIso){const d=_histDiasEntre(e.iso,hojeIso);dif=`${d}d atrasada`;cor='#b91c1c';st='🔴';}
+        else if(realIso){st='✅';}
+        return `<tr style="border-top:1px solid var(--border-lt)">
+          <td style="padding:6px 6px;font-size:.74rem;font-weight:700;color:var(--ink)">${st} ${e.label}</td>
+          <td style="padding:6px 6px;font-size:.72rem;color:var(--ink3);white-space:nowrap">${e.iso?fmtD(e.iso):'—'}</td>
+          <td style="padding:6px 6px;font-size:.72rem;color:var(--ink3);white-space:nowrap">${realIso?fmtD(realIso):'—'}</td>
+          <td style="padding:6px 6px;font-size:.72rem;font-weight:800;color:${cor};white-space:nowrap">${dif||'—'}</td>
+        </tr>`;
+      }).join('');
+      regua=`<details style="margin-top:10px" open>
+        <summary style="cursor:pointer;font-size:.74rem;font-weight:800;color:var(--ink)">📏 Previsto × Realizado por etapa</summary>
+        <div style="overflow-x:auto;margin-top:6px"><table style="width:100%;border-collapse:collapse">
+          <thead><tr><th style="text-align:left;font-size:.62rem;color:var(--ink4);padding:4px 6px">ETAPA</th><th style="text-align:left;font-size:.62rem;color:var(--ink4);padding:4px 6px">PREVISTO</th><th style="text-align:left;font-size:.62rem;color:var(--ink4);padding:4px 6px">REALIZADO</th><th style="text-align:left;font-size:.62rem;color:var(--ink4);padding:4px 6px">DIFERENÇA</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table></div>
+        <div style="font-size:.62rem;color:var(--ink4);margin-top:4px">+Nd = concluída N dias depois do previsto · -Nd = adiantada.</div>
+      </details>`;
+    }
+    return `<div style="border:1.5px solid var(--border-lt);border-radius:12px;padding:12px;margin-bottom:14px;background:#fff">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
+        <div style="font-size:.8rem;font-weight:900;color:var(--ink)">📌 Onde está o pedido agora</div>
+        <span style="background:${statusBg};color:${statusCor};border-radius:20px;padding:3px 10px;font-size:.7rem;font-weight:800;white-space:nowrap">${statusTxt}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:8px">${cards}</div>
+      ${regua}
+    </div>`;
+  }catch(err){console.error('_histPainelResumoHtml',err);return'';}
+}
 function abrirHistoricoPedido(pedidoId,os){
   if(!pedidoId){toast(`OS ${os} nunca teve nenhum evento registrado no sistema — existe só na planilha de vendas colada.`,'tinf');return;}
   const p=pedidos.find(x=>x.id===pedidoId);
@@ -33827,7 +34085,7 @@ function abrirHistoricoPedido(pedidoId,os){
     <button onclick="hpExportarPedidoExcel('${pedidoId}')" class="dash-btn-conf" style="background:#16a34a" type="button">📊 Exportar Excel</button>
     <button onclick="hpExportarPedidoPDF('${pedidoId}')" class="dash-btn-conf" style="background:#dc2626" type="button">📄 Exportar PDF</button>
   </div>`:'';
-  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:560px;width:92%;max-height:85vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:720px;width:94%;max-height:88vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:10px">
       <div>
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">🔍 Histórico — OS ${p.os||'—'}</div>
@@ -33835,7 +34093,9 @@ function abrirHistoricoPedido(pedidoId,os){
       </div>
       <button onclick="document.getElementById('hp-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
     </div>
+    ${_histPainelResumoHtml(p)}
     ${botoesExport}
+    <div style="font-size:.74rem;font-weight:800;color:var(--ink);margin-bottom:8px">🕘 Linha do tempo</div>
     <div>${timelineHtml}</div>
   </div>`;
   document.body.appendChild(modal);
@@ -43038,7 +43298,7 @@ function _crmCardHtml(e){
   // Selo de Ganho/Perdido no card (2026-09-16) — só aparece quando o card tem e.fechamento
   // (visível na prática só na visão Ganhos/Perdidos do painel de filtros, já que a visão
   // "Em aberto" nem devolve esses cards mais — ver _crmEmpresasFiltradas).
-  const fechamentoBadge=e.fechamento?(e.fechamento.status==='ganho'?`<div class="crm-card-pill" style="margin-top:8px;color:#0e7a45;background:#dcfce7">🏆 Ganho em ${fmtD(e.fechamento.em.slice(0,10))}</div>`:`<div class="crm-card-pill" style="margin-top:8px;color:#dc2626;background:#fee2e2">❌ Perdido em ${fmtD(e.fechamento.em.slice(0,10))}</div>`):'';
+  const fechamentoBadge=e.fechamento?(e.fechamento.status==='ganho'?(_crmGanhoAguardandoEmissao(e)?`<div class="crm-card-pill" style="margin-top:8px;color:#b45309;background:#fef3c7" title="Só conta como venda depois que o pedido for emitido no Conselho de Pedidos">🏆 Ganho · ⏳ aguardando emissão</div>`:`<div class="crm-card-pill" style="margin-top:8px;color:#0e7a45;background:#dcfce7">🏆 Ganho em ${fmtD(e.fechamento.em.slice(0,10))}</div>`):`<div class="crm-card-pill" style="margin-top:8px;color:#dc2626;background:#fee2e2">❌ Perdido em ${fmtD(e.fechamento.em.slice(0,10))}</div>`):'';
   // Flash de confirmação no card recém-movido (arrastado ou via seletor "Mover") --
   // consumido uma única vez aqui, já que renderCrmKanban() reconstrói o board inteiro a
   // cada chamada e este é o único ponto que gera o HTML de cada card.
@@ -43903,7 +44163,7 @@ function _crmTimelineHtml(e,timelineParam){
           <div style="font-weight:700;color:var(--ink);font-size:.78rem">${ev.autor||'—'}</div>
           <div style="font-size:.68rem;color:var(--ink4);white-space:nowrap">${_fmtDataHora(ev.em)}</div>
         </div>
-        <div style="font-size:.78rem;color:${ev.sistema?'var(--ink4)':'var(--ink3)'};margin-top:2px;white-space:pre-wrap;${ev.sistema?'font-style:italic':''}">${(ev.texto||'').replace(/</g,'&lt;')}</div>
+        <div style="font-size:.78rem;color:${ev.sistema?'var(--ink4)':'var(--ink3)'};margin-top:2px;white-space:pre-wrap;${ev.sistema?'font-style:italic':''}">${ev.mencoes&&ev.mencoes.length?_crmTextoComMencoes(ev):(ev.texto||'').replace(/</g,'&lt;')}</div>
       </div>
     </div>`).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.78rem">Nenhum comentário ainda.</div>';
 }
@@ -44726,7 +44986,10 @@ function _crmRenderCard(e){
       <div style="border-top:1px solid var(--border-lt);padding-top:14px">
         <div style="font-weight:800;font-size:.85rem;color:var(--ink);margin-bottom:8px">💬 Linha do Tempo</div>
         <div style="margin-bottom:10px">
-          <textarea id="crm-comentario-novo" class="fc" rows="2" placeholder="Registre o que está fazendo com essa empresa..." style="text-transform:none;width:100%"></textarea>
+          <div style="position:relative">
+            <textarea id="crm-comentario-novo" class="fc" rows="2" placeholder="Registre o que está fazendo com essa empresa... (digite @ pra marcar alguém do comercial)" style="text-transform:none;width:100%" oninput="_crmMencaoInput(this)" onkeydown="_crmMencaoKey(event,this)" onblur="setTimeout(_crmMencaoFechar,180)"></textarea>
+            <div id="crm-mencao-drop" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:50;background:#fff;border:1px solid var(--border-lt);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.15);max-height:220px;overflow:auto;margin-top:2px"></div>
+          </div>
         </div>
         <button onclick="crmAdicionarComentario('${e.id}')" style="width:100%;background:#f1f5f9;color:#334155;border:none;border-radius:9px;padding:9px;font-size:.78rem;font-weight:700;cursor:pointer;margin-bottom:14px">+ Adicionar comentário</button>
         <div id="crm-inteligencia-timeline" class="crm-timeline">${_crmTimelineHtml(e,timeline)}</div>
@@ -45102,6 +45365,33 @@ function _crmMesAtual(){
   const h=new Date();
   return {y:h.getFullYear(),m:h.getMonth()+1};
 }
+// ── "GANHO" SÓ VIRA VENDA DEPOIS DE EMITIDO (2026-09-25, a pedido do usuário: "algo só conta
+// como venda efetivamente depois de emitida a venda... pode acontecer dele dar como ganho e ir
+// pro rascunho mas não emitir, venda é emitida!"). Um negócio ganho no CRM só entra como
+// FECHADO nos indicadores quando o pedido ligado a ele (fechamento.pedidoId ou
+// p.crmEmpresaId) foi emitido de verdade (origemComercial) — e conta no mês da EMISSÃO, com o
+// líquido REAL emitido. Enquanto está no rascunho, continua contando como pipeline em aberto.
+// Ganhos anteriores a 24/09/2026 (antes de existir o vínculo card↔pedido) seguem valendo como
+// sempre, pra não zerar o histórico.
+const _CRM_GANHO_VINCULO_DESDE='2026-09-24';
+function _crmPedidoDoGanho(e){
+  if(!e||!e.fechamento||e.fechamento.status!=='ganho')return null;
+  const pid=e.fechamento.pedidoId;
+  return pedidos.find(p=>p.origemComercial&&((pid&&p.id===pid)||p.crmEmpresaId===e.id))||null;
+}
+function _crmGanhoInfo(e){
+  if(!e||!e.fechamento||e.fechamento.status!=='ganho')return{ganho:false,emitido:false};
+  const ped=_crmPedidoDoGanho(e);
+  if(ped){
+    let liq=Number(e.fechamento.pedidoValorLiquido)||0;
+    if(!liq){try{liq=pedidoToVendaRow(ped).lq||0;}catch(err){}}
+    if(!liq)liq=e.propostaValorLiquido||0;
+    return{ganho:true,emitido:true,em:ped.emissaoEmHora||(ped.emissaoEm?ped.emissaoEm+'T12:00:00':e.fechamento.em),liq,pedido:ped};
+  }
+  if((e.fechamento.em||'').slice(0,10)<_CRM_GANHO_VINCULO_DESDE)return{ganho:true,emitido:true,legado:true,em:e.fechamento.em,liq:e.propostaValorLiquido||0};
+  return{ganho:true,emitido:false};
+}
+function _crmGanhoAguardandoEmissao(e){const g=_crmGanhoInfo(e);return g.ganho&&!g.emitido;}
 function _crmFechamentoNoMes(e,y,m){
   if(!e.fechamento||!e.fechamento.em)return false;
   const d=new Date(e.fechamento.em);
@@ -45111,13 +45401,20 @@ function _crmFechamentoNoMes(e,y,m){
 // vendedor: soma de propostaValorLiquido de todo negócio do funil que ainda não foi
 // fechado (ganho ou perdido). Sem vendedor (null/undefined), soma o funil inteiro.
 function _crmAbertoLiq(vendedor){
-  return crmEmpresas.filter(e=>!e.fechamento&&(vendedor?vendedorMatch(e.responsavel,vendedor):true))
+  // Ganho ainda não emitido continua sendo pipeline em aberto (2026-09-25).
+  return crmEmpresas.filter(e=>(!e.fechamento||_crmGanhoAguardandoEmissao(e))&&(vendedor?vendedorMatch(e.responsavel,vendedor):true))
     .reduce((s,e)=>s+(e.propostaValorLiquido||0),0);
 }
 // Quanto um vendedor (ou o time, sem vendedor) fechou (GANHOU) no mês, em valor líquido.
 function _crmFechadoMesLiq(vendedor,y,m){
-  return crmEmpresas.filter(e=>e.fechamento&&e.fechamento.status==='ganho'&&_crmFechamentoNoMes(e,y,m)&&(vendedor?vendedorMatch(e.responsavel,vendedor):true))
-    .reduce((s,e)=>s+(e.propostaValorLiquido||0),0);
+  // Só GANHO EMITIDO, no mês da emissão, com o líquido real emitido (2026-09-25).
+  return crmEmpresas.reduce((s,e)=>{
+    if(vendedor&&!vendedorMatch(e.responsavel,vendedor))return s;
+    const g=_crmGanhoInfo(e);
+    if(!g.emitido||!g.em)return s;
+    const d=new Date(g.em);
+    return (d.getFullYear()===y&&(d.getMonth()+1)===m)?s+(g.liq||0):s;
+  },0);
 }
 // Detalhe dos negócios PERDIDOS no mês — quantidade, valor bruto, valor líquido e
 // divisão por motivo (CRM_MOTIVOS_PERDA) — de um vendedor específico, ou do time inteiro
@@ -45240,6 +45537,65 @@ function crmIndSetVend(v){
   crmIndVendIdx=v;
   renderCrmIndicadores();
 }
+// ── @MENÇÃO NO COMENTÁRIO DO CARD (2026-09-25, a pedido do usuário: "no comentário do card
+// tem como digitar um @ e marcar um usuário? ... um usuário do comercial"). Digitar @ abre a
+// lista do time comercial (_crmNomesEquipe), filtrando conforme digita; ↑/↓ + Enter/Tab ou
+// clique escolhem. Ao salvar, os nomes marcados vão em ev.mencoes[] e cada um recebe um aviso
+// no sino (automático, ver _avisosAutomaticos tipoAuto 'mencao'), clicável pra abrir o card.
+let _crmMencaoSel=0;
+function _crmMencaoToken(ta){
+  const ate=ta.value.slice(0,ta.selectionStart||0);
+  const m=ate.match(/(^|\s)@([^\s@]{0,30}(?: [^\s@]{0,30})?)$/);
+  return m?{inicio:ate.length-m[2].length-1,termo:m[2]}:null;
+}
+function _crmMencaoOpcoes(termo){
+  const t=_normSemAcento(termo||'').trim();
+  const meu=(usuarioLogado&&usuarioLogado.nomeExibicao||'').toUpperCase();
+  return _crmNomesEquipe().filter(n=>n!==meu&&(!t||_normSemAcento(n).includes(t))).slice(0,8);
+}
+function _crmMencaoInput(ta){
+  const drop=document.getElementById('crm-mencao-drop');if(!drop)return;
+  const tk=_crmMencaoToken(ta);
+  if(!tk){_crmMencaoFechar();return;}
+  const ops=_crmMencaoOpcoes(tk.termo);
+  if(!ops.length){_crmMencaoFechar();return;}
+  _crmMencaoSel=Math.min(_crmMencaoSel,ops.length-1);
+  drop.innerHTML='<div style="font-size:.64rem;color:var(--ink4);padding:6px 10px 2px;font-weight:700">MARCAR ALGUÉM DO COMERCIAL</div>'+ops.map((n,i)=>`<div class="crm-mencao-op" data-nome="${n.replace(/"/g,'&quot;')}" onmousedown="event.preventDefault();_crmMencaoEscolher('${n.replace(/'/g,"\\'")}')" style="padding:8px 10px;cursor:pointer;font-size:.8rem;font-weight:700;color:var(--ink);background:${i===_crmMencaoSel?'#e0f7fa':'#fff'}">👤 ${n}</div>`).join('');
+  drop.style.display='block';
+}
+function _crmMencaoKey(ev,ta){
+  const drop=document.getElementById('crm-mencao-drop');
+  if(!drop||drop.style.display==='none')return;
+  const ops=[...drop.querySelectorAll('.crm-mencao-op')];
+  if(!ops.length)return;
+  if(ev.key==='ArrowDown'){ev.preventDefault();_crmMencaoSel=(_crmMencaoSel+1)%ops.length;_crmMencaoInput(ta);}
+  else if(ev.key==='ArrowUp'){ev.preventDefault();_crmMencaoSel=(_crmMencaoSel-1+ops.length)%ops.length;_crmMencaoInput(ta);}
+  else if(ev.key==='Enter'||ev.key==='Tab'){ev.preventDefault();_crmMencaoEscolher(ops[_crmMencaoSel].dataset.nome);}
+  else if(ev.key==='Escape'){_crmMencaoFechar();}
+}
+function _crmMencaoEscolher(nome){
+  const ta=document.getElementById('crm-comentario-novo');if(!ta)return;
+  const tk=_crmMencaoToken(ta);
+  const pos=ta.selectionStart||0;
+  const ini=tk?tk.inicio:pos;
+  ta.value=ta.value.slice(0,ini)+'@'+nome+' '+ta.value.slice(pos);
+  const novoPos=ini+nome.length+2;
+  ta.focus();ta.setSelectionRange(novoPos,novoPos);
+  _crmMencaoSel=0;_crmMencaoFechar();
+}
+function _crmMencaoFechar(){const d=document.getElementById('crm-mencao-drop');if(d){d.style.display='none';d.innerHTML='';}_crmMencaoSel=0;}
+function _crmMencoesDoTexto(texto){
+  const up=_normSemAcento(texto||'');
+  return _crmNomesEquipe().filter(n=>up.includes('@'+_normSemAcento(n)));
+}
+function _crmTextoComMencoes(ev){
+  let h=(ev.texto||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  (ev.mencoes||[]).forEach(n=>{
+    const esc=n.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    h=h.replace(new RegExp('@'+esc,'gi'),m=>`<span style="background:#e0f7fa;color:#00838f;border-radius:6px;padding:0 4px;font-weight:700">${m}</span>`);
+  });
+  return h;
+}
 async function crmAdicionarComentario(empresaId){
   const ta=document.getElementById('crm-comentario-novo');
   const texto=(ta&&ta.value||'').trim();
@@ -45247,10 +45603,13 @@ async function crmAdicionarComentario(empresaId){
   const e=crmEmpresas.find(x=>x.id===empresaId);
   if(!e)return;
   if(!e.timeline)e.timeline=[];
-  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString()});
+  const mencoes=_crmMencoesDoTexto(texto);
+  const evNovo={id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',autorEmail:(usuarioLogado&&usuarioLogado.email)||'',em:new Date().toISOString()};
+  if(mencoes.length)evNovo.mencoes=mencoes;
+  e.timeline.push(evNovo);
   e.atualizadoEm=new Date().toISOString();
   try{await _crmSalvarEmpresaObj(e);}catch(err){return;}
-  toast('Comentário adicionado!','tok');
+  toast(mencoes.length?('Comentário adicionado! Avisamos: '+mencoes.join(', ')):'Comentário adicionado!','tok');
   _crmRenderCard(e);
 }
 
@@ -46644,7 +47003,7 @@ function _crmTaxaConversaoHistorica(vend){
     if(!e.fechamento||!e.fechamento.em||Date.parse(e.fechamento.em)<desde)return;
     if(vend&&!vendedorMatch(e.responsavel,vend))return;
     const v=e.propostaValorLiquido||0;
-    if(e.fechamento.status==='ganho')g+=v;else if(e.fechamento.status==='perdido')p+=v;
+    if(e.fechamento.status==='ganho'){if(_crmGanhoInfo(e).emitido)g+=v;}else if(e.fechamento.status==='perdido')p+=v;
   });
   return(g+p)>0?g/(g+p):null;
 }
@@ -46897,7 +47256,7 @@ function _crmIndAbrirDetalhe(tipo){
   const baseEmpresasCrmInd=vendedor?crmEmpresas.filter(e=>vendedorMatch(e.responsavel,vendedor)):crmEmpresas;
   let titulo='',sub='',itens=[],campo='valor';
   if(tipo==='expectativa'){
-    itens=crmEmpresas.filter(e=>!e.fechamento&&(vendedor?vendedorMatch(e.responsavel,vendedor):true)).map(e=>({e,s:_crmSaude(e)}));
+    itens=crmEmpresas.filter(e=>(!e.fechamento||_crmGanhoAguardandoEmissao(e))&&(vendedor?vendedorMatch(e.responsavel,vendedor):true)).map(e=>({e,s:_crmSaude(e)}));
     const taxa=_crmTaxaFechamento(vendedor,y,m);
     titulo='📈 Expectativa de Fechamento — '+MESES_PT[m]+' '+y;
     sub='Oportunidades em aberto que compõem esse cálculo'+(vendedor?' de '+vendedor:'')+(taxa==null?' (sem taxa de fechamento calculável ainda):':' — taxa de fechamento atual: '+taxa.toFixed(1).replace('.',',')+'%:');
