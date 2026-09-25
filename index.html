@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-24.30';</script>
+<script>const APP_BUILD_VERSION='2026-09-25.2';</script>
 <!-- Carregamento mais rápido (2026-09-24.27, a pedido do usuário: "essa demora pra atualizar
      o sistema tem como diminuir"): abre as conexões com Firebase/CDNs e já começa a baixar o
      Firebase logo no início, em paralelo com o resto da página. -->
@@ -9827,7 +9827,7 @@ async function openEmissao(eid2){
       if(mt2)return{idx:parseInt(mt2[1],10),date:'',val:pv};
       return null;
     }).filter(Boolean).sort((a,b)=>a.idx-b.idx);
-    ed={tipo:p.tipo||_qualidadeTipoDefault(),resp:p.responsavel,cli:p.cliente,emails:[...(p.emails||[])],email_comprador:p.email_comprador||(p.emails||[])[0]||'',email_engenheiro:p.email_engenheiro||(p.emails||[])[1]||'',email_financeiro:p.email_financeiro||'',job:p.job,prazo:p.prazo,os:p.os,obs:p.obs,
+    ed={tipo:p.tipo||_qualidadeTipoDefault(),resp:p.responsavel,cli:p.cliente,emails:[...(p.emails||[])],email_comprador:p.email_comprador||(p.emails||[])[0]||'',email_engenheiro:p.email_engenheiro||(p.emails||[])[1]||'',email_financeiro:p.email_financeiro||'',job:p.job,prazo:p.prazo,os:p.os,obs:p.obs,obsAba:{...(p.obsAba||{})},
       etapa:p.etapa,tipoPedido:p.tipoPedido||'',vtotal:toFmtEd(v['Valor Bruto']||v['Valor Total']),vmed:toFmtEd(inst['Valor da Medição']),vart:toFmtEd(proj['Valor da ART']),vlaudo:toFmtEd(proj['Valor do Laudo Técnico']),
       // i_tipo/medicao/f_tipo liam a chave errada (v['Instalação']/v['Medição Técnica']/
       // v['Frete'] nunca são gravadas — ver _buildPedidoBaseDoEd, que grava em
@@ -9904,7 +9904,7 @@ async function openEmissao(eid2){
       conselhoData:p.conselhoData||'',conselhoEscopo:p.conselhoEscopo||'',conselhoEscopoObs:p.conselhoEscopoObs||'',
       conselhoAssin:p.conselhoAssinatura||'',conselhoWpp:p.conselhoLinkWpp||'',conselhoGrupoWpp:p.conselhoGrupoWpp||'',conselhoClienteProv:p.conselhoClienteProvisorio||''};
   } else {
-    ed={tipo:_qualidadeTipoDefault(),resp:usuarioLogado?.nomeExibicao||'',cli:'',emails:[],email_comprador:'',email_engenheiro:'',email_financeiro:'',job:'',prazo:'',os:'',obs:'',
+    ed={tipo:_qualidadeTipoDefault(),resp:usuarioLogado?.nomeExibicao||'',cli:'',emails:[],email_comprador:'',email_engenheiro:'',email_financeiro:'',job:'',prazo:'',os:'',obs:'',obsAba:{},
       conselhoData:'',conselhoEscopo:'',conselhoEscopoObs:'',conselhoAssin:'',conselhoWpp:'',conselhoGrupoWpp:'',conselhoClienteProv:'',
       vtotal:'',i_tipo:'',vinst:'',vmob:'',vrem:'',remocao:'',f_tipo:'',fmod:'',vfrete:'',vmed:'',vart:'',vlaudo:'',
       elevacoes:'',elev_tipo:'',elevs:[],velev:'',elevBloqVia:'',remocoes:[],medicao:'',
@@ -10594,7 +10594,32 @@ function addEmail(e){
 }
 function rmEmail(em){ed.emails=ed.emails.filter(e=>e!==em);document.querySelectorAll('.etag').forEach(t=>{if(t.textContent.trim().startsWith(em))t.remove()})}
 
+// Observações por aba da Emissão/Conselho (2026-09-25, a pedido do usuário: "dentro de cada
+// aba de preenchimento eu quero um campo de observação no final... aparecerá no email de
+// emissão caso o usuário preencha algo"). Fica em ed.obsAba[<id da aba>] / p.obsAba e é
+// gravado direto no oninput (não depende de saveSt()). Conselho, Dados e Pagamento ficam de
+// fora porque já têm campo de observação próprio (escopo / Observações / Obs. financeiras).
+const EM_OBS_ABAS={valores:'Observações de Valores',projetos:'Observações de Projetos',remocoes:'Observações de Remoções',instalacao:'Observações de Instalação',medicao:'Observações de Medição',elevacoes:'Observações de Elevações',bases:'Observações de Bases/Fundações',frete:'Observações de Frete'};
+function _emObsAbaSet(id,v){if(!ed.obsAba||typeof ed.obsAba!=='object')ed.obsAba={};ed.obsAba[id]=v;}
+function _emObsAbaHtml(id){
+  const lbl=EM_OBS_ABAS[id];if(!lbl)return'';
+  const val=((ed.obsAba||{})[id]||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  return`<div class="fsec" style="margin-top:14px">
+    <div class="fg"><label>${lbl.toUpperCase()} <span style="font-weight:400;color:var(--ink4)">(opcional — vai no e-mail de emissão se preenchido)</span></label>
+      <textarea class="fc" id="em-obsaba-${id}" rows="3" oninput="_emObsAbaSet('${id}',this.value)" placeholder="Alguma observação sobre ${lbl.replace('Observações de ','').toLowerCase()}?">${val}</textarea>
+    </div>
+  </div>`;
+}
+// Limpa e devolve só as observações preenchidas (strings aparadas) — usado ao gravar o pedido.
+function _emObsAbaLimpo(o){const r={};Object.keys(EM_OBS_ABAS).forEach(k=>{const v=String((o||{})[k]||'').trim();if(v)r[k]=v;});return r;}
 function renderStep(id){
+  _renderStepBase(id);
+  if(EM_OBS_ABAS[id]){
+    const bd=document.getElementById('em-bd');
+    if(bd&&!document.getElementById('em-obsaba-'+id))bd.insertAdjacentHTML('beforeend',_emObsAbaHtml(id));
+  }
+}
+function _renderStepBase(id){
   const bd=document.getElementById('em-bd');
   if(id==='conselho'){
     // Conselho de Pedidos (2026-08-07, a pedido do usuário) — 1ª aba do formulário. O
@@ -11444,6 +11469,14 @@ function buildEmissaoEmailContent(p){
   });
   // Parcelas/Entrada em "(Líquido)" são um dado interno (base de cálculo da comissão do
   // vendedor) — não relevante pro cliente/equipe que recebe este e-mail de emissão.
+  // Observação da aba (2026-09-25) — só aparece se o usuário escreveu algo naquela aba.
+  const _oa=p.obsAba||{};
+  const obsAbaRow=k=>{const v=String(_oa[k]||'').trim();if(!v)return'';
+    const esc=v.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    return`<tr><td colspan="2" style="padding:10px 0 0"><table width="100%" cellpadding="0" cellspacing="0"><tr><td style="background:#f8fafc;border-left:4px solid #e91e63;border-radius:6px;padding:10px 14px">
+      <p style="margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#6b7280">${EM_OBS_ABAS[k]}</p>
+      <p style="margin:0;font-size:13px;color:#111827;line-height:1.6;white-space:pre-line">${esc}</p>
+    </td></tr></table></td></tr>`;};
   const pagSemLiquido=Object.fromEntries(Object.entries(pag).filter(([k])=>!/\(Líquido\)$/.test(k)));
   const fmtSec=(titulo,obj)=>{
     if(!Object.keys(obj).length)return'';
@@ -11498,11 +11531,11 @@ function buildEmissaoEmailContent(p){
   <!-- BODY -->
   <tr><td style="padding:32px 40px;background:#ffffff">
     <table width="100%" cellpadding="0" cellspacing="0">
-      ${p.obs?`
+      ${_semObsCrm(p.obs)?`
       <tr><td colspan="2" style="padding:0 0 8px;border-bottom:2px solid #e91e63">
         <span style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#111827">Observações</span>
       </td></tr>
-      <tr><td colspan="2" style="padding:12px 0;color:#374151;font-size:13px;line-height:1.7;border-bottom:1px solid #f3f4f6">${p.obs}</td></tr>`:''}
+      <tr><td colspan="2" style="padding:12px 0;color:#374151;font-size:13px;line-height:1.7;border-bottom:1px solid #f3f4f6">${_semObsCrm(p.obs)}</td></tr>`:''}
       ${fmtSec('Contatos',{
         ...(p.email_comprador?{"E-mail do Comprador(a)":p.email_comprador}:{}),
         ...(p.email_engenheiro?{"E-mail do Engenheiro da Obra":p.email_engenheiro}:{}),
@@ -11510,6 +11543,7 @@ function buildEmissaoEmailContent(p){
         ...(p.conselhoGrupoWpp?{"Grupo de WhatsApp criado com o cliente?":p.conselhoGrupoWpp}:{})
       })}
       ${fmtSec('Valores',valEmail)}
+      ${obsAbaRow('valores')}
       ${fmtSec('Pagamento',pagSemLiquido)}
       ${p.arq_os_url?`
       <tr style="background:#fafafa"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Ordem de Serviço</td>
@@ -11538,6 +11572,7 @@ function buildEmissaoEmailContent(p){
         </td></tr></table>
       </td></tr>`:''}
       `:`<tr><td colspan="2" style="padding:10px 0;color:#9ca3af;font-size:13px;font-style:italic">Não tem elevações neste pedido.</td></tr>`}
+      ${obsAbaRow('elevacoes')}
 
       ${fmtSec('Instalação',inst)}
       ${inst['Necessita de Bloqueio de Energia']==='Sim'?`
@@ -11546,7 +11581,11 @@ function buildEmissaoEmailContent(p){
           <p style="margin:0;font-size:13px;font-weight:700;color:#b91c1c">⚡ NECESSITA BLOQUEIO DE ENERGIA PARA INSTALAÇÃO <span style="font-weight:400;font-style:italic">(Responsabilidade do cliente a solicitação de bloqueio de energia na data de instalação)</span></p>
         </td></tr></table>
       </td></tr>`:''}
+      ${obsAbaRow('instalacao')}
+      ${obsAbaRow('remocoes')}
+      ${obsAbaRow('medicao')}
       ${fmtSec('Frete',fr)}
+      ${obsAbaRow('frete')}
 
       <!-- BASES E FUNDAÇÕES -->
       <tr><td colspan="2" style="padding:20px 0 8px;border-bottom:2px solid #e91e63">
@@ -11558,6 +11597,7 @@ function buildEmissaoEmailContent(p){
       ${p.os_chumb?`<tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">OS do Chumbador</td><td style="padding:10px 0;color:#111827;font-size:13px;font-weight:600">${p.os_chumb}</td></tr>`:''}
       ${p.arq_chumb_url?`<tr style="background:#fafafa"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Pedido de Chumbador</td><td style="padding:10px 0;font-size:13px;font-weight:600"><a href="${cldDownload(p.arq_chumb_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">Clique aqui para baixar ↗</a></td></tr>`:''}
       `:`<tr><td colspan="2" style="padding:10px 0;color:#9ca3af;font-size:13px;font-style:italic">Não tem base neste pedido.</td></tr>`}
+      ${obsAbaRow('bases')}
 
       <!-- RNC (RELATÓRIO DE NÃO CONFORMIDADE) — só pra pedidos de Garantia/Retrabalho, 2026-09-08,
       a pedido do usuário: "Esse arquivo deve ir tambem no email no mesmo formato dos demais,
@@ -11578,6 +11618,7 @@ function buildEmissaoEmailContent(p){
       <tr style="background:#fafafa"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">ART</td><td style="padding:10px 0;color:#111827;font-size:13px;font-weight:600">SERÁ EMITIDA ART</td></tr>
       ${proj.cnpj_art?`<tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Cartão CNPJ da Obra</td><td style="padding:10px 0;font-size:13px;font-weight:600">${proj.cnpj_art_url?`<a href="${cldDownload(proj.cnpj_art_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">Clique aqui para baixar ↗</a>`:`${proj.cnpj_art}`}</td></tr>`:''}
       `:''}
+      ${obsAbaRow('projetos')}
     </table>
 
     ${cfg.avisos?`
@@ -12424,7 +12465,7 @@ function _buildPedidoBaseDoEd(){
     // de prazo (Lista de Pedidos/Planejamento) espera.
     emissaoEm:_emissaoExistente||'',
     emissaoEmHora:(_pedidoExistente&&_pedidoExistente.emissaoEmHora)||'',
-    obs:ed.obs,valores:val,pagamento:pag,
+    obs:_semObsCrm(ed.obs),obsAba:_emObsAbaLimpo(ed.obsAba),valores:val,pagamento:pag,
     instalacao:inst,frete:fr,bases:ed.bases||'',
     elevacoes:ed.elevs||[],remocoes:ed.remocoes||[],elevBloqVia:ed.elevBloqVia||'',
     projetos:proj,
@@ -44758,6 +44799,11 @@ async function crmMarcarGanhou(id){
 // novo. _buildPedidoBaseDoEd()/calcLiq() sempre leem do objeto `ed` global (nunca do DOM
 // diretamente, com fallback via readInput), então dá pra pré-preencher e salvar sem precisar
 // navegar pelos steps do formulário primeiro.
+// Remove a linha automática "Vindo do CRM Comercial — ..." que rascunhos criados antes de
+// 2026-09-25 ainda carregam nas Observações — não sai no e-mail de emissão nem fica gravada.
+function _semObsCrm(t){
+  return String(t||'').split('\n').filter(l=>!/^\s*Vindo do CRM Comercial\s*[—-]/i.test(l)).join('\n').replace(/\n{3,}/g,'\n\n').trim();
+}
 function crmAbrirEmissaoDoFechamento(e){
   try{
     openEmissao();
@@ -44767,7 +44813,8 @@ function crmAbrirEmissaoDoFechamento(e){
     ed.resp=e.responsavel||(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
     if(decisorPrincipal&&decisorPrincipal.email){ed.emails=[decisorPrincipal.email];ed.email_comprador=decisorPrincipal.email;}
     if(e.propostaValorBruto>0)ed.vtotal=e.propostaValorBruto.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-    ed.obs=(ed.obs?ed.obs+'\n\n':'')+'Vindo do CRM Comercial — '+(e.nome||'');
+    // (2026-09-25) Não grava mais "Vindo do CRM Comercial — ..." nas Observações — a pedido
+    // do usuário, o campo fica normal (só o que o vendedor escrever).
     // Vínculo com o card do CRM (2026-09-24) — usado na emissão pra pedir conferência com a
     // Ordem de Serviço Granda e pra registrar no card o valor REAL que foi emitido.
     ed.crmEmpresaId=e.id;
