@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-28.17';</script>
+<script>const APP_BUILD_VERSION='2026-09-28.20';</script>
 <!-- Carregamento mais rápido (2026-09-24.27, a pedido do usuário: "essa demora pra atualizar
      o sistema tem como diminuir"): abre as conexões com Firebase/CDNs e já começa a baixar o
      Firebase logo no início, em paralelo com o resto da página. -->
@@ -20886,7 +20886,7 @@ function _finxHistGeralHtml(){
   if(q)ev=ev.filter(e=>_finxNorm(e.onde+' '+e.por+' '+JSON.stringify(e.mud)).includes(q));
   const exc=_finxDocs('exclusao').sort((a,b)=>String(b.em).localeCompare(String(a.em)));
   return `<div class="fx-card"><div class="fx-h">💾 Backup em Excel</div>
-      <div class="fx-mut">Baixa uma planilha com TUDO: parcelas a receber, contas a pagar, receitas manuais, cobranças, promessas, lotes e exclusões. ${ub?'Último backup: <b>'+_finxFmtDH(ub.em)+'</b> por '+_finxEsc(ub.por)+'.':'Nenhum backup baixado ainda.'} O sistema lembra no sino se passar 7 dias sem backup. (O backup diário automático do servidor continua funcionando igual.)</div>
+      <div class="fx-mut">Baixa uma planilha com TUDO: parcelas a receber, contas a pagar, receitas manuais, cobranças, promessas, lotes e exclusões. ${ub?'Último backup: <b>'+_finxFmtDH(ub.em)+'</b> por '+_finxEsc(ub.por)+'.':'Nenhum backup baixado ainda.'} É opcional — serve só se você quiser uma planilha pra consultar/guardar fora do sistema. Quem garante que nada se perde é o backup automático diário do servidor.</div>
       <div class="fx-row"><button class="fx-b" onclick="finxBackupExcel()">💾 Baixar backup agora</button></div></div>
     <div class="fx-card"><div class="fx-h">🗑️ Excluídos (cópia completa guardada) — ${exc.length} registro(s)</div>
       ${exc.slice(0,20).map(x=>`<details class="fx-li"><summary>${_finxFmtDH(x.em)} · ${_finxEsc(x.por)} · ${_finxEsc(x.motivo)} · ${(x.itens||[]).length} item(ns) · ${fmtR(x.total||0)}</summary>${(x.itens||[]).map(c=>`<div class="fx-mut">${x.tipo==='pagar'?_finxEsc(c.fornecedor)+' · '+_finxEsc(c.despesaDesc||'')+' · venc. '+fmtD(c.vencimento)+' · '+fmtR(_cpValorAjustado(c))+' · '+_finxEsc(c.status||''):_finxEsc(c.cliente)+' · '+_finxEsc(c.descricao||'')+' · '+fmtR(c.valor||0)}</div>`).join('')}</details>`).join('')||'<div class="fx-mut">Nada excluído desde que o registro começou.</div>'}</div>
@@ -20936,14 +20936,8 @@ function _finxAvisos(){
     if(h8&&est.length)out.push({id:'fin_orc_'+ym+'_'+est.sort().join('_').slice(0,80)+'_'+hoje.slice(8),automatico:true,tipoAuto:'fin_orcamento',assunto:'🎯 Orçamento estourado',
       texto:'Centro(s) de custo acima do orçamento do mês:\n• '+est.map(cc=>cc+': '+fmtR(real[cc].tot)+' de '+fmtR(orc[cc])).join('\n• '),destinatarioTipo:'setor',destinatarioValor:'FINANCEIRO'});
   }catch(e){}
-  // Backup
-  try{
-    const ub=_finxCfgDoc().ultimoBackup;
-    if(h8&&(!ub||(Date.now()-new Date(ub.em).getTime())>7*86400000)){
-      const d=new Date();const wk=d.getFullYear()+'_'+Math.floor((d-new Date(d.getFullYear(),0,1))/604800000);
-      out.push({id:'fin_backup_'+wk,automatico:true,tipoAuto:'fin_backup',assunto:'💾 Backup do Financeiro',texto:'Faz mais de 7 dias sem baixar o backup em Excel do Financeiro. Baixe em Financeiro → 🧰 Gestão → 🕓 Histórico & Backup.',destinatarioTipo:'setor',destinatarioValor:'FINANCEIRO'});
-    }
-  }catch(e){}
+  // (2026-09-28, a pedido do usuário) Sem aviso pra baixar backup — o backup automático diário do
+  // servidor já guarda tudo; o botão "Baixar backup em Excel" continua disponível, só opcional.
   return out;
 }
 
@@ -46276,6 +46270,7 @@ async function crmMoverEtapa(id,etapaKey){
   // cuidando dele.
   const labelAntiga=(etapas.find(x=>x.key===e.etapa)||{}).label||e.etapa||'—';
   const labelNova=(etapas.find(x=>x.key===etapaKey)||{}).label||etapaKey;
+  const _etapaAnteriorKey=e.etapa,_entradaAnterior=e.etapaEntradaEm||null;
   e.etapa=etapaKey;
   e.atualizadoEm=new Date().toISOString();
   // Data/hora de ENTRADA na etapa atual (2026-09-11, a pedido do usuário: fila FIFO na etapa
@@ -46317,6 +46312,35 @@ async function crmMoverEtapa(id,etapaKey){
     }catch(err){console.error('Erro ao mover etapa:',err);toast('Erro ao salvar a mudança de etapa — confira a internet e tente de novo','terr');}
     if(_promTarefa){try{await _promTarefa;}catch(err){console.error(err);}}
   })();
+  // Tarefa obrigatória ao entrar em ATENDIMENTO / PROPOSTA APRESENTADA / FOLLOW-UP / QUENTES
+  // (2026-09-28, a pedido do usuário: "obrigatorio inserir tarefa caso nao tenha nenhuma
+  // agendada ja"). Se o card já tem qualquer tarefa em aberto, não pede nada.
+  if(CRM_ETAPAS_EXIGEM_TAREFA_AO_MOVER.includes(etapaKey)&&!e.fechamento&&!_crmTemTarefaFutura(e)){
+    setTimeout(()=>{try{_crmAbrirTarefaObrigatoriaMovimento(e,labelNova,_etapaAnteriorKey,labelAntiga,_entradaAnterior);}catch(err){console.error(err);}},150);
+  }
+}
+const CRM_ETAPAS_EXIGEM_TAREFA_AO_MOVER=['atendimento','proposta_apresentada','follow_up','quentes'];
+// Card movido pra uma dessas etapas sem nenhuma tarefa em aberto: abre a Nova Tarefa e não deixa
+// fechar sem cadastrar — a única saída sem tarefa é VOLTAR o card pra etapa de onde veio.
+let _crmTarefaObrigMov=null;
+function _crmAbrirTarefaObrigatoriaMovimento(e,labelNova,etapaAnteriorKey,labelAntiga,entradaAnterior){
+  _crmAbrirTarefaObrigatoriaProximoPasso(e);
+  document.getElementById('crm-tarefa-modal-titulo').textContent='🗓️ Tarefa obrigatória — '+labelNova;
+  _crmTarefaObrigMov={id:e.id,etapaAnteriorKey,labelAntiga,labelNova,entradaAnterior};
+  toast('Para deixar o card em '+labelNova+' é obrigatório agendar uma tarefa (o card não tem nenhuma em aberto).','twar');
+}
+async function _crmDesfazerMovimentoSemTarefa(){
+  const m=_crmTarefaObrigMov;_crmTarefaObrigMov=null;_crmTarefaObrigatoriaEmpresaId=null;
+  if(!m)return;
+  const e=crmEmpresas.find(x=>x.id===m.id);if(!e)return;
+  e.etapa=m.etapaAnteriorKey;
+  e.etapaEntradaEm=m.entradaAnterior||e.etapaEntradaEm;
+  e.atualizadoEm=new Date().toISOString();
+  if(!e.timeline)e.timeline=[];
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:`Etapa alterada: ${m.labelNova} → ${m.labelAntiga} (voltou: nenhuma tarefa agendada)`,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:e.atualizadoEm,sistema:true});
+  try{if(_crmCardAtualId===e.id)_crmRenderCard(e);renderCrmKanban();}catch(err){console.error(err);}
+  toast('Card voltou para '+m.labelAntiga+' — sem tarefa ele não pode ficar em '+m.labelNova,'tinf');
+  try{if(window._fbSaveCrmEmpresa)await window._fbSaveCrmEmpresa(e);}catch(err){console.error(err);toast('Erro ao salvar — confira a internet','terr');}
 }
 
 // ── ABA EMPRESAS (lista/busca, fora do kanban) ──────────────────────────────────────
@@ -48811,6 +48835,12 @@ function _crmAbrirTarefaObrigatoriaProximoPasso(e){
 // usado pra mo-em/mo-prosp-card/mo-crm-card (ver o document.addEventListener('keydown',...)
 // genérico logo abaixo) — chamada tanto pelo botão ✕ quanto pelo Esc.
 function _crmFecharModalTarefa(){
+  if(_crmTarefaObrigMov&&_crmTarefaObrigatoriaEmpresaId===_crmTarefaObrigMov.id){
+    if(!confirm('Nessa etapa é OBRIGATÓRIO ter uma tarefa agendada.\n\nOK = voltar o card para '+_crmTarefaObrigMov.labelAntiga+' sem criar tarefa\nCancelar = continuar e cadastrar a tarefa'))return;
+    fecharJanela('mo-crm-tarefa');
+    _crmDesfazerMovimentoSemTarefa();
+    return;
+  }
   if(_crmTarefaObrigatoriaEmpresaId){
     if(!confirm('Este negócio foi cadastrado já em etapa avançada — o próximo passo da negociação ainda não foi registrado. Fechar mesmo assim sem cadastrar a tarefa?'))return;
     _crmTarefaObrigatoriaEmpresaId=null;
@@ -48858,13 +48888,23 @@ async function crmSalvarTarefa(){
   cfg.tarefasGerais.push(novaT);
   // Grava via transação (2026-09-17, ver window._fbTxTarefasGerais) em vez de _fbSaveCfg(cfg)
   // do documento inteiro.
-  try{await window._fbTxTarefasGerais(tarefas=>{tarefas.push(novaT);return tarefas;});}
-  catch(e){toast('Erro ao salvar no servidor: '+(e&&e.message||e)+' — a tarefa NÃO foi salva, tente de novo.','terr');console.error(e);return;}
-  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  // (2026-09-28, a pedido do usuário: "criando tarefa em card funil comercial ta demorando muito")
+  // A tela não espera mais o servidor: fecha o modal e mostra a tarefa na hora, e a gravação
+  // (mesma transação segura de sempre) roda em segundo plano. Se a gravação falhar, a tarefa é
+  // tirada da tela e aparece um aviso claro pra criar de novo — nunca fica "parecendo salva".
+  const _crmTxSalvar=window._fbTxTarefasGerais(tarefas=>{if(!tarefas.some(t=>t&&t.id===novaT.id))tarefas.push(novaT);return tarefas;});
+  _crmTxSalvar.then(()=>{try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(err){}})
+  .catch(err=>{
+    console.error(err);
+    try{cfg.tarefasGerais=(cfg.tarefasGerais||[]).filter(t=>t&&t.id!==novaT.id);}catch(e2){}
+    toast('⚠️ A tarefa "'+titulo+'" NÃO foi salva no servidor ('+(err&&err.message||err)+') — crie de novo.','terr');
+    try{const e3=crmEmpresas.find(x=>x.id===empresaId);if(e3&&_crmCardAtualId===empresaId)_crmRenderCard(e3);if(_crmTabAtiva==='kanban')_crmRenderFunilAtivo();_refreshTarefasBadge();}catch(e4){}
+  });
   // Tarefa de próximo passo obrigatória (ver _crmEtapaExigeTarefaProximoPasso) satisfeita —
   // libera o modal pra fechar normal daqui pra frente, sem o confirm extra de
   // _crmFecharModalTarefa (2026-09-18).
   if(_crmTarefaObrigatoriaEmpresaId===empresaId)_crmTarefaObrigatoriaEmpresaId=null;
+  if(_crmTarefaObrigMov&&_crmTarefaObrigMov.id===empresaId)_crmTarefaObrigMov=null;
   closeM('mo-crm-tarefa');
   toast('Tarefa agendada!','tok');
   if(_crmCardAtualId===empresaId)_crmRenderCard(e);
