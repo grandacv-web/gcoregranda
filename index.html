@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-29.19';</script>
+<script>const APP_BUILD_VERSION='2026-09-29.22';</script>
 <!-- Carregamento mais rápido (2026-09-24.27, a pedido do usuário: "essa demora pra atualizar
      o sistema tem como diminuir"): abre as conexões com Firebase/CDNs e já começa a baixar o
      Firebase logo no início, em paralelo com o resto da página. -->
@@ -24776,6 +24776,14 @@ const LP_CLIENTES_EXCLUIR=['TESTE GRANDA'];
 // QUALQUER pedido emitido pelo sistema (Venda, Garantia/Retrabalho, Interno, Amostra, Brinde,
 // Permuta). Continua valendo "não conta como venda" pra Lista de Vendas/Metas/Comissões/
 // Financeiro (isComercialPedido() não mudou) — aqui é só o lado OPERACIONAL.
+// (2026-09-29, a pedido do usuário: "o que já foi dado baixa tem que deixar como concluído, tanto
+// projetos como produção etc") — REGRA GERAL: pedido com obra FINALIZADA (p.finalizacao) conta
+// como concluído em TODOS os setores, mesmo que alguma baixa intermediária nunca tenha sido dada.
+function _lpObraFinalizada(p){return !!(p&&p.finalizacao&&p.finalizacao.dataFinalizacao);}
+function _lpEtapaConcluida(p,key){return !!((p&&p.lpBaixas&&p.lpBaixas[key])||_lpObraFinalizada(p));}
+// Pedidos que não são venda (garantia/interno/amostra...) entram no pipeline só a partir desta data
+// — os antigos nunca tinham passado pelos setores e voltavam como "pendente/atrasado".
+const LP_NAO_VENDA_DESDE='2026-09-29';
 function _lpEhNaoVenda(p){return !!(p&&p.origemComercial&&!isComercialPedido(p));}
 function _lpTipoBadge(p){
   if(!_lpEhNaoVenda(p))return'';
@@ -24788,7 +24796,7 @@ function _lpPedidosElegiveis(){
   // ver project memory) — esta função alimenta 15+ telas (Lista de Pedidos, Kanban,
   // Calendário, projeções de Produção/Compras/ART etc.), então sem este filtro um pedido
   // cancelado continuava "vivo" em TODAS elas, não só em Planejamento.
-  return pedidos.filter(p=>!(p.os&&isVendaCancelada(p.os))&&p.origemComercial&&!p.importadoPlanilha&&p.emissaoEm&&_normPrazoIso(p.emissaoEm)>=LP_DATA_CORTE&&!LP_CLIENTES_EXCLUIR.includes((p.cliente||'').trim().toUpperCase()));
+  return pedidos.filter(p=>!(p.os&&isVendaCancelada(p.os))&&p.origemComercial&&!p.importadoPlanilha&&(!_lpEhNaoVenda(p)||_normPrazoIso(p.emissaoEm)>=LP_NAO_VENDA_DESDE)&&p.emissaoEm&&_normPrazoIso(p.emissaoEm)>=LP_DATA_CORTE&&!LP_CLIENTES_EXCLUIR.includes((p.cliente||'').trim().toUpperCase()));
 }
 // Etapa "atual" de um pedido hoje — a primeira etapa aplicável cuja data ainda não passou (a
 // próxima meta); se todas já passaram, fica na última (Final da Instalação). Concluído usa
@@ -24959,7 +24967,7 @@ function _lpMapaProducaoPorDia(){
   const mapa={};
   _lpProdAlocCache={};
   const elegiveis=_lpPedidosElegiveis()
-    .filter(p=>!(p.lpBaixas&&p.lpBaixas.producao))
+    .filter(p=>!(p.lpBaixas&&p.lpBaixas.producao)&&!_lpObraFinalizada(p))
     .map(p=>({p,calc:_lpCalcEtapas(p)}))
     .filter(x=>x.calc.ok);
   // Reservas de Data ativas do Simulador (2026-08-18, a pedido do usuário: "reservar aquela data
@@ -25145,7 +25153,7 @@ function _isSetorUser(setorKey){
 // concluiu.
 function _lpStatusEtapa(p,etapa,hojeIso){
   const baixa=p.lpBaixas&&p.lpBaixas[etapa.key];
-  if(baixa)return 'ok';
+  if(baixa||_lpObraFinalizada(p))return 'ok';
   return etapa.iso<hojeIso?'atrasado':'pendente';
 }
 // Assertividade de UM pedido (a partir de um calc já calculado, pra não recalcular à toa).
@@ -25222,7 +25230,7 @@ function renderSetorTarefas(setorKey){
     const{p,etapa,status}=l;
     const baixa=p.lpBaixas&&p.lpBaixas[etapa.key];
     const cor=status==='ok'?'#16a34a':status==='atrasado'?'#dc2626':'#0284c7';
-    const statusTxt=status==='ok'?`✅ Concluído em ${fmtD(baixa.data)}`:status==='atrasado'?'🔴 Atrasado':'🔵 Pendente';
+    const statusTxt=status==='ok'?(baixa?`✅ Concluído em ${fmtD(baixa.data)}`:'✅ Concluído (obra finalizada)'):status==='atrasado'?'🔴 Atrasado':'🔵 Pendente';
     const acao=status==='ok'
       ?`<button onclick="lpDesfazerBaixa('${p.id}','${etapa.key}','${setorKey}')" class="dash-btn-conf" style="background:#94a3b8;white-space:nowrap">↩️ Desfazer</button>`
       :`<button onclick="lpDarBaixa('${p.id}','${etapa.key}','${setorKey}')" class="dash-btn-conf" style="background:#16a34a;white-space:nowrap">✅ Dar Baixa</button>`;
@@ -25804,7 +25812,7 @@ function _projRmMensalHtml(){
 }
 
 function _projStatusPedido(p,etapa,hojeIso,itensFeitos){
-  const concluido=!!(p.lpBaixas&&p.lpBaixas.projeto);
+  const concluido=_lpEtapaConcluida(p,'projeto');
   if(concluido)return 'concluido';
   // (2026-09-29) checklist todo resolvido (feito/N/A) = concluído, mesmo se a baixa ainda não
   // gravou (ex.: CMV/RM não informado) — sai de Pendentes/Atrasado e vai pra Concluídos.
@@ -26069,6 +26077,7 @@ async function projCkSalvarRm(pedidoId){
 async function projMarcarItemNA(pedidoId,itemKey,on){
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
+  if(!on&&p.lpBaixas&&p.lpBaixas.projeto&&!confirm('Este projeto JÁ ESTÁ CONCLUÍDO.\n\nReativar esta etapa reabre o projeto. Quer mesmo reabrir?'))return;
   p.projChecklist=p.projChecklist||{iniciadoEm:new Date().toISOString(),itens:{}};
   const d=p.projChecklist.itens[itemKey]=p.projChecklist.itens[itemKey]||{feito:false,quando:null,obs:''};
   d.na=!!on;
@@ -26089,6 +26098,7 @@ async function projMarcarItemNA(pedidoId,itemKey,on){
 async function projMarcarItem(pedidoId,itemKey,feito){
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
+  if(!feito&&p.lpBaixas&&p.lpBaixas.projeto&&!confirm('Este projeto JÁ ESTÁ CONCLUÍDO.\n\nDesmarcar esta etapa reabre o projeto e ele volta pra lista de pendentes. Quer mesmo reabrir?')){try{projAbrirChecklist(pedidoId);}catch(e){}return;}
   p.projChecklist=p.projChecklist||{iniciadoEm:new Date().toISOString(),itens:{}};
   p.projChecklist.itens[itemKey]=p.projChecklist.itens[itemKey]||{feito:false,quando:null,obs:''};
   p.projChecklist.itens[itemKey].feito=feito;
@@ -26267,7 +26277,7 @@ function _comprasChecarConclusao(p,etapaKey){
 // concluído > atrasado (prazo já vencido sem concluir) > em andamento (checklist iniciado,
 // ao menos 1 subtarefa marcada) > não iniciado.
 function _comprasStatusLinha(p,etapa,hojeIso,itensFeitos){
-  const concluido=!!(p.lpBaixas&&p.lpBaixas[etapa.key]);
+  const concluido=_lpEtapaConcluida(p,etapa.key);
   if(concluido)return 'concluido';
   if(etapa.iso<hojeIso)return 'atrasado';
   if(itensFeitos>0)return 'andamento';
@@ -26431,6 +26441,7 @@ function comprasAbrirChecklist(pedidoId,etapaKey){
 async function comprasMarcarItem(pedidoId,etapaKey,itemKey,feito){
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
+  if(!feito&&p.lpBaixas&&p.lpBaixas[etapaKey]&&!confirm('ESTA ETAPA DE COMPRAS JÁ ESTÁ CONCLUÍDA.\n\nDesmarcar reabre a etapa e ela volta pra lista de pendentes. Quer mesmo reabrir?')){try{if(typeof comprasAbrirChecklist==='function')comprasAbrirChecklist(pedidoId,etapaKey);}catch(e){}return;}
   p.comprasChecklist=p.comprasChecklist||{};
   p.comprasChecklist[etapaKey]=p.comprasChecklist[etapaKey]||{iniciadoEm:new Date().toISOString(),itens:{}};
   p.comprasChecklist[etapaKey].itens[itemKey]=p.comprasChecklist[etapaKey].itens[itemKey]||{feito:false,quando:null,obs:''};
@@ -26730,7 +26741,7 @@ function _prodInfo(p,hojeIso){
     // ditado pelos itens (todos em 100%) em vez do checkbox único — mas p.lpBaixas.producao
     // continua sendo mantido em sincronia (ver _prodSyncBaixaProducao), então nada que já lia
     // esse campo direto quebra.
-    const feito=(it.key==='producao'&&progItens.temItens)?progItens.completo:!!(p.lpBaixas&&p.lpBaixas[it.key]);
+    const feito=_lpObraFinalizada(p)||((it.key==='producao'&&progItens.temItens)?progItens.completo:!!(p.lpBaixas&&p.lpBaixas[it.key]));
     return{key:it.key,label:it.label,etapa,feito};
   }).filter(Boolean);
   if(!subs.length)return{p,ok:false,semEtapa:true};
@@ -27038,6 +27049,7 @@ async function prodItemToggle(pedidoId,itemId,checked){
   if(!p){toast('Pedido não encontrado','terr');return;}
   const item=(p.itensProducao||[]).find(i=>i.id===itemId);
   if(!item)return;
+  if(p.lpBaixas&&p.lpBaixas.producao&&!checked&&!confirm('A PRODUÇÃO DESTE PEDIDO JÁ ESTÁ CONCLUÍDA.\n\nEssa alteração reabre a produção e o pedido volta pra lista de pendentes. Quer mesmo reabrir?')){try{prodAbrirChecklist(pedidoId);}catch(e){}return;}
   const v=checked?100:0;
   const _pctAntesHist=_prodItemPercentualCalc(item);
   item.setores={};
@@ -27057,6 +27069,7 @@ async function prodItemSetSetorPercentual(pedidoId,itemId,setorKey,valorStr){
   if(!p){toast('Pedido não encontrado','terr');return;}
   const item=(p.itensProducao||[]).find(i=>i.id===itemId);
   if(!item)return;
+  if(p.lpBaixas&&p.lpBaixas.producao&&(parseFloat(String(valorStr).replace(',','.'))||0)<100&&!confirm('A PRODUÇÃO DESTE PEDIDO JÁ ESTÁ CONCLUÍDA.\n\nEssa alteração reabre a produção e o pedido volta pra lista de pendentes. Quer mesmo reabrir?')){try{prodAbrirChecklist(pedidoId);}catch(e){}return;}
   let v=parseFloat(String(valorStr).replace(',','.'));
   if(isNaN(v))v=0;
   v=Math.min(100,Math.max(0,Math.round(v)));
@@ -27084,6 +27097,7 @@ async function prodItemSetSetorNA(pedidoId,itemId,setorKey,on){
   if(!p){toast('Pedido não encontrado','terr');return;}
   const item=(p.itensProducao||[]).find(i=>i.id===itemId);
   if(!item)return;
+  if(p.lpBaixas&&p.lpBaixas.producao&&!on&&!confirm('A PRODUÇÃO DESTE PEDIDO JÁ ESTÁ CONCLUÍDA.\n\nEssa alteração reabre a produção e o pedido volta pra lista de pendentes. Quer mesmo reabrir?')){try{prodAbrirChecklist(pedidoId);}catch(e){}return;}
   if(!item.setores){
     const base=Math.min(100,Math.max(0,Math.round(Number(item.percentual)||0)));
     item.setores={};
