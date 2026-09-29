@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-29.22';</script>
+<script>const APP_BUILD_VERSION='2026-09-29.23';</script>
 <!-- Carregamento mais rápido (2026-09-24.27, a pedido do usuário: "essa demora pra atualizar
      o sistema tem como diminuir"): abre as conexões com Firebase/CDNs e já começa a baixar o
      Firebase logo no início, em paralelo com o resto da página. -->
@@ -52195,6 +52195,14 @@ function _crmxCss(){
   .crmx-acoes button{background:#f1f5f9;border:none;border-radius:7px;padding:5px 9px;font-size:.72rem;font-weight:700;color:#334155;cursor:pointer}
   .crmx-acoes button:hover{background:var(--brand);color:#fff}
   .crmx-lista-th{cursor:pointer;user-select:none;white-space:nowrap}.crmx-lista-th:hover{color:#0284c7}
+  .crmx-chips{gap:5px;margin:0 0 8px}.crmx-chip{padding:3px 9px;font-size:.68rem;border-width:1px}.crmx-chip b{font-size:.72rem}
+  .crmx-prevd{margin:0 0 10px}.crmx-prevd>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.72rem;color:#475569;background:#f8fafc;border:1px solid #e2e8f0;border-radius:20px;padding:4px 12px;width:max-content;max-width:100%}
+  .crmx-prevd>summary::-webkit-details-marker{display:none}.crmx-prevd[open]>summary{border-color:#bae6fd}.crmx-prevd .crmx-prev{margin-top:6px}
+  .crmx-bar-mini{display:inline-block;flex:0 0 70px;min-width:70px;height:6px}
+  .crmx-fx.on{border-color:#0284c7;background:#e0f2fe}
+  #crmx-drawer-row{margin-bottom:10px}
+  .crm-card .crmx-meta{color:#64748b;font-size:.7rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .crmx-est-h{margin-left:6px;background:#dc2626;color:#fff;border-radius:20px;padding:0 6px;font-size:.6rem}
   `;
   document.head.appendChild(st);
 }
@@ -52275,17 +52283,21 @@ function _crmxPrevisaoHtml(base){
     let meta=0;try{meta=vend?getMetaMesTodos(y,m,vend):_crmNomesEquipe().reduce((s,v)=>s+(getMetaMesTodos(y,m,v)||0),0);}catch(err){}
     const falta=Math.max(0,meta-vendido);
     const pv=meta?Math.min(100,vendido/meta*100):0,pp=meta?Math.min(100,(vendido+pond)/meta*100):0;
-    return`<div class="crmx-prev" title="Provável = vendido no mês + funil em aberto ponderado pela taxa de conversão histórica de cada vendedor">
+    return`<details class="crmx-prevd"><summary title="Clique pra ver o detalhe">📈 <b>${MESES_PT[m].charAt(0)+MESES_PT[m].slice(1).toLowerCase()}</b> · vendido <b style="color:#16a34a">${fmtR(vendido)}</b> · provável <b style="color:#0369a1">${fmtR(vendido+pond)}</b>${meta?(falta?` · falta <b style="color:#dc2626">${fmtR(falta)}</b>`:' · <b style="color:#16a34a">🎯 meta batida</b>'):''}${meta?`<span class="crmx-bar crmx-bar-mini"><i style="width:${pp}%;background:#bae6fd"></i><i style="width:${pv}%;background:#16a34a"></i></span>`:''}</summary><div class="crmx-prev" title="Provável = vendido no mês + funil em aberto ponderado pela taxa de conversão histórica de cada vendedor">
       <span>📈 <b>${MESES_PT[m].charAt(0)+MESES_PT[m].slice(1).toLowerCase()}</b>${vend?' · '+_crmxEsc(vend):' · equipe'}</span>
       <span>Vendido <b style="color:#16a34a">${fmtR(vendido)}</b></span>
       <span>Em negociação <b>${fmtR(emNeg)}</b></span>
       <span>Provável <b style="color:#0369a1">${fmtR(vendido+pond)}</b></span>
       ${meta?`<span>Meta <b>${fmtR(meta)}</b></span><span>${falta?`Falta <b style="color:#dc2626">${fmtR(falta)}</b>`:'<b style="color:#16a34a">🎯 Meta batida</b>'}</span>
-      <div class="crmx-bar"><i style="width:${pp}%;background:#bae6fd"></i><i style="width:${pv}%;background:#16a34a"></i></div>`:'<span style="color:#94a3b8">sem meta cadastrada pro mês</span>'}
-    </div>`;
+      `:'<span style="color:#94a3b8">sem meta cadastrada pro mês</span>'}
+    </div></details>`;
   }catch(err){console.error('crmx previsão',err);return'';}
 }
 function _crmxRenderTopo(){
+  // (2026-09-29, a pedido do usuário: "ficou meio poluído... visualmente um caos") — topo enxuto:
+  // filtros extras foram pra dentro do painel "Filtros e Exportação"; Meu dia só com chips > 0;
+  // previsão numa pílula (detalhe ao clicar); faixa de etapas só na Lista (no Kanban as colunas
+  // já mostram qtd/R$, e o 🚨 foi pro cabeçalho da coluna).
   _crmxCss();
   const sec=document.getElementById('crm-sec-kanban');if(!sec)return;
   let topo=document.getElementById('crmx-topo');
@@ -52295,25 +52307,34 @@ function _crmxRenderTopo(){
   const{isAdm}=_getUserCat();const meu=(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
   const veTodos=isAdm||((cfg.comercialTipo&&cfg.comercialTipo[meu])==='ORCAMENTISTA');
   const respAtual=document.getElementById('crm-fil-responsavel')?.value||'';
-  let equipe=[];try{equipe=_crmNomesEquipe();}catch(err){}
   const etapas=_crmEtapas();
   const f=_crmxFil;
   const buscaTxt=busca?busca.value:'';
+  // filtros extras dentro do painel de filtros (substitui o select de responsável antigo de lá)
+  const drawer=document.getElementById('crm-filtros-drawer');
+  if(drawer){
+    let row=document.getElementById('crmx-drawer-row');
+    if(!row){row=document.createElement('div');row.id='crmx-drawer-row';row.className='crmx-tb';drawer.prepend(row);const antigo=document.getElementById('crm-fil-responsavel');if(antigo&&antigo.parentElement&&antigo.parentElement!==row)antigo.parentElement.style.display='none';}
+    let equipe=[];try{equipe=_crmNomesEquipe();}catch(err){}
+    row.innerHTML=`${veTodos?`<select onchange="crmxSetResp(this.value)" title="Responsável"><option value="">👥 Todos os responsáveis</option>${equipe.map(n=>`<option value="${_crmxEsc(n)}" ${respAtual===n?'selected':''}>${_crmxEsc(n)}${n===meu?' (eu)':''}</option>`).join('')}</select>`:''}
+      <select onchange="crmxSet('etapa',this.value)" title="Etapa"><option value="">🗂️ Todas as etapas</option>${etapas.map(et=>`<option value="${et.key}" ${f.etapa===et.key?'selected':''}>${_crmxEsc(et.label)}</option>`).join('')}</select>
+      <select onchange="crmxSet('valor',this.value)" title="Valor líquido">${_CRMX_VALOR.map(([k,l])=>`<option value="${k}" ${f.valor===k?'selected':''}>💰 ${l}</option>`).join('')}</select>
+      <select onchange="crmxSet('saude',this.value)" title="Saúde"><option value="">❤️ Qualquer saúde</option><option value="verde" ${f.saude==='verde'?'selected':''}>🟢 Saudável</option><option value="amarelo" ${f.saude==='amarelo'?'selected':''}>🟡 Atenção</option><option value="vermelho" ${f.saude==='vermelho'?'selected':''}>🔴 Desassistido</option></select>`;
+  }
   const base=_crmxFiltrar(buscaTxt,true);
   const cont={};base.forEach(e=>{const c=_crmxClasses(e);Object.keys(c).forEach(k=>{cont[k]=(cont[k]||0)+1;});});
-  const temFiltro=f.rapido||f.etapa||f.valor||f.saude||respAtual||buscaTxt;
-  const tb=`<div class="crmx-tb">
-    ${veTodos?`<select onchange="crmxSetResp(this.value)" title="Responsável"><option value="">👥 Todos os responsáveis</option>${equipe.map(n=>`<option value="${_crmxEsc(n)}" ${respAtual===n?'selected':''}>${_crmxEsc(n)}${n===meu?' (eu)':''}</option>`).join('')}</select>`:''}
-    <select onchange="crmxSet('etapa',this.value)" title="Etapa"><option value="">🗂️ Todas as etapas</option>${etapas.map(et=>`<option value="${et.key}" ${f.etapa===et.key?'selected':''}>${_crmxEsc(et.label)}</option>`).join('')}</select>
-    <select onchange="crmxSet('valor',this.value)" title="Valor líquido">${_CRMX_VALOR.map(([k,l])=>`<option value="${k}" ${f.valor===k?'selected':''}>💰 ${l}</option>`).join('')}</select>
-    <select onchange="crmxSet('saude',this.value)" title="Saúde"><option value="">❤️ Qualquer saúde</option><option value="verde" ${f.saude==='verde'?'selected':''}>🟢 Saudável</option><option value="amarelo" ${f.saude==='amarelo'?'selected':''}>🟡 Atenção</option><option value="vermelho" ${f.saude==='vermelho'?'selected':''}>🔴 Desassistido</option></select>
-    ${temFiltro?`<button type="button" class="crmx-limpar" onclick="crmxLimpar()">✕ Limpar</button>`:''}
-  </div>`;
-  const chips=`<div class="crmx-chips"><span style="font-size:.7rem;font-weight:800;color:#64748b;align-self:center">MEU DIA:</span>${_CRMX_CHIPS.map(([k,ic,l])=>`<span class="crmx-chip ${f.rapido===k?'on':''} ${cont[k]?'':'zero'}" onclick="crmxChip('${k}')">${ic} ${l} <b>${cont[k]||0}</b></span>`).join('')}</div>`;
-  const porEt={};const vis=_crmxFiltrar(buscaTxt,false);
-  vis.forEach(e=>{const k=_crmEtapaEfetiva(e);const o=porEt[k]=porEt[k]||{n:0,v:0,est:0};o.n++;o.v+=e.propostaValorLiquido||0;try{const pz=_crmPrazoEtapa(e);if(pz&&pz.estourado)o.est++;}catch(err){}});
-  const faixa=`<div class="crmx-faixa">${etapas.map(et=>{const o=porEt[et.key]||{n:0,v:0,est:0};return`<div class="crmx-fx" onclick="crmxIrEtapa('${et.key}')" title="${_crmFunilView==='kanban'?'Ir até a coluna':'Filtrar a lista por esta etapa'}"><div class="t" title="${_crmxEsc(et.label)}">${_crmxEsc(et.label)}</div><div><b>${o.n}</b> · <span class="v">${fmtR(o.v)}</span>${o.est?` · <span class="a">🚨 ${o.est}</span>`:''}</div></div>`;}).join('')}</div>`;
-  topo.innerHTML=tb+chips+(_crmSituacaoFiltro==='aberto'?_crmxPrevisaoHtml(base):'')+faixa;
+  const extrasAtivos=[f.etapa&&'etapa',f.valor&&'valor',f.saude&&'saúde'].filter(Boolean);
+  const chipsVis=_CRMX_CHIPS.filter(([k])=>cont[k]||f.rapido===k);
+  const temAlgo=chipsVis.length||extrasAtivos.length||f.rapido;
+  const chips=temAlgo?`<div class="crmx-chips">${chipsVis.map(([k,ic,l])=>`<span class="crmx-chip ${f.rapido===k?'on':''}" onclick="crmxChip('${k}')" title="${l}">${ic} ${l} <b>${cont[k]||0}</b></span>`).join('')}${(extrasAtivos.length||f.rapido)?`<span class="crmx-chip" onclick="crmxLimpar()" style="border-style:dashed;color:#64748b" title="Limpar filtros">✕ Limpar${extrasAtivos.length?' ('+extrasAtivos.join(', ')+')':''}</span>`:''}</div>`:'';
+  const prev=_crmSituacaoFiltro==='aberto'?_crmxPrevisaoHtml(base):'';
+  let faixa='';
+  if(_crmFunilView==='lista'){
+    const porEt={};const vis=_crmxFiltrar(buscaTxt,false);
+    vis.forEach(e=>{const k=_crmEtapaEfetiva(e);const o=porEt[k]=porEt[k]||{n:0,v:0,est:0};o.n++;o.v+=e.propostaValorLiquido||0;try{const pz=_crmPrazoEtapa(e);if(pz&&pz.estourado)o.est++;}catch(err){}});
+    faixa=`<div class="crmx-faixa">${etapas.map(et=>{const o=porEt[et.key]||{n:0,v:0,est:0};return`<div class="crmx-fx ${f.etapa===et.key?'on':''}" onclick="crmxIrEtapa('${et.key}')" title="Filtrar a lista por esta etapa"><div class="t">${_crmxEsc(et.label)}</div><div><b>${o.n}</b> · <span class="v">${fmtR(o.v)}</span>${o.est?` · <span class="a">🚨 ${o.est}</span>`:''}</div></div>`;}).join('')}</div>`;
+  }
+  topo.innerHTML=chips+prev+faixa;
 }
 const _crmxRenderFunilOrig=_crmRenderFunilAtivo;
 _crmRenderFunilAtivo=function(){_crmxRenderFunilOrig();try{_crmxRenderTopo();}catch(err){console.error('crmx topo',err);}};
@@ -52349,6 +52370,17 @@ _crmCardHtml=function(e){
     const av=e.responsavel?`<span class="crmx-av" style="background:${_crmxCor(e.responsavel)}" title="Responsável: ${_crmxEsc(e.responsavel)}">${_crmxIniciais(e.responsavel)}</span>`:'';
     const qa=e.fechamento?'':`<div class="crmx-qa" onclick="event.stopPropagation()"><button type="button" onclick="crmAbrirModalAtividade('ligacao','${e.id}')" title="Registrar ligação">📞 Ligou</button><button type="button" onclick="crmAbrirModalAtividade('email','${e.id}')" title="Registrar e-mail">✉️ E-mail</button><button type="button" onclick="crmAbrirNovaTarefa('${e.id}')" title="Nova tarefa">➕ Tarefa</button><button type="button" onclick="_crmxAvancar('${e.id}')" title="Avançar pra próxima etapa">→ Avançar</button></div>`;
     const extra=(selos.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${selos.join('')}</div>`:'')+nx+qa;
+    // Declutter (2026-09-29): tira pills repetidas (saúde já está na bolinha/borda; dias na etapa vai pro title)
+    html=html.replace(/<div class="crm-card-pill" style="color:[^";]*;background:[^"]*">(Interação hoje|\d+d sem interação)<\/div>/,'');
+    html=html.replace(/<div class="crm-card-pill" title="Entrou nesta etapa[^"]*" style="color:#475569;background:#e2e8f0">[^<]*<\/div>/,'');
+    // Junta cidade · decisor · JOB numa linha só; responsável já aparece no avatar
+    const metas=[];const _mk=()=>metas.length===1?'@@CRMXMETA@@':'';
+    html=html.replace(/<div class="crm-card-row">(📍 [^<]*)<\/div>/,(m,t)=>{metas.push(t);return _mk();});
+    html=html.replace(/<div class="crm-card-row">👤 ([^<]*)<\/div>/,(m,t)=>{metas.push('👤 '+t.split(' — ')[0]);return _mk();});
+    html=html.replace(/<div class="crm-card-row">(🏷️ [^<]*)<\/div>/,(m,t)=>{metas.push(t);return _mk();});
+    if(e.responsavel)html=html.replace(/<div class="crm-card-row">🧑‍💼 [^<]*<\/div>/,'');
+    if(metas.length){const mt=metas.join(' · ');const t2=mt.replace(/"/g,'&quot;');html=html.replace('@@CRMXMETA@@',()=>`<div class="crm-card-row crmx-meta" title="${t2}">${mt}</div>`);}
+    html=html.replace(/<div style="display:flex;align-items:center;gap:8px;margin-top:9px;flex-wrap:wrap">\s*<\/div>/,'');
     const k=html.lastIndexOf('</div>');
     if(k>0)html=html.slice(0,k)+extra+html.slice(k);
     if(av)html=html.replace(/(<span title="[^"]*sem interação" style="flex-shrink:0;font-size:\.82rem;line-height:1\.1">)/,av+'$1');
@@ -52356,7 +52388,14 @@ _crmCardHtml=function(e){
   return html;
 };
 function _crmxPosKanban(){
-  document.querySelectorAll('#crm-kanban-body .crm-col').forEach(col=>{col.classList.toggle('crmx-vazia',!col.querySelector('.crm-card'));});
+  document.querySelectorAll('#crm-kanban-body .crm-col').forEach(col=>{col.classList.toggle('crmx-vazia',!col.querySelector('.crm-card'));
+    try{
+      const ids=[...col.querySelectorAll('.crm-card')].map(c=>{const m=(c.getAttribute('onclick')||'').match(/crmAbrirCard\('([^']+)'\)/);return m?m[1]:null;}).filter(Boolean);
+      const n=ids.map(id=>crmEmpresas.find(x=>x.id===id)).filter(e=>e&&!e.fechamento&&(_crmPrazoEtapa(e)||{}).estourado).length;
+      const hd=col.firstElementChild&&col.firstElementChild.querySelector('div');
+      if(hd&&n&&!hd.querySelector('.crmx-est-h')){const sp=document.createElement('span');sp.className='crmx-est-h';sp.title=n+' negócio(s) com prazo da etapa estourado';sp.textContent='🚨 '+n;const cnt=hd.lastElementChild;cnt.parentNode.insertBefore(sp,cnt);}
+    }catch(err){}
+  });
   _crmxDestacarAberto();
 }
 function _crmxDestacarAberto(){
