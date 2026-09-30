@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-30.32';</script>
+<script>const APP_BUILD_VERSION='2026-09-30.33';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -53378,39 +53378,58 @@ function _prodRealEntradas(x){
   }
   return out.filter(e=>e.iso&&Math.abs(e.valor)>0.004);
 }
-function _prodIndDados(){
+// ── VISÃO NOVA (2026-09-30, a pedido do usuário: "preciso ver quanto produziu no mês que tá
+// passando e quanto tem pra produzir nos meses seguintes... a data original confunde"). Duas
+// perguntas separadas:
+//   ✅ PRODUZIDO no mês  → soma das baixas pela DATA DA BAIXA (_prodRealEntradas);
+//   📋 A PRODUZIR no mês → só o SALDO que falta, pela data PROGRAMADA; no mês atual entram também
+//      os atrasados. Adiantar algo de novembro em outubro faz novembro diminuir sozinho.
+// Linha do tempo no topo (mês passado + atual + 4 próximos) com a ocupação da capacidade.
+function _prodVDiasUteis(ini,fim){let n=0;const d=new Date(ini+'T12:00:00'),f=new Date(fim+'T12:00:00');let g=0;while(d<=f&&g<400){if(_isDiaUtil(_isoLocal(d)))n++;d.setDate(d.getDate()+1);g++;}return n;}
+function _prodVMesRange(y,m){const p=n=>String(n).padStart(2,'0');const ult=new Date(y,m,0).getDate();return{ini:`${y}-${p(m)}-01`,fim:`${y}-${p(m)}-${p(ult)}`};}
+function _prodVBase(){
   const hojeIso=_hojeIso();
   _lpMapaProducaoPorDia();
-  const{ini,fim}=_prodIndRange();
-  const todas=_lpPedidosElegiveis().map(p=>_prodInfo(p,hojeIso)).filter(x=>x.ok);
-  const periodoAtual=hojeIso>=ini&&hojeIso<=fim;
-  const infos=[];
-  todas.forEach(x=>{
-    const ent=_prodRealEntradas(x).filter(e=>e.iso>=ini&&e.iso<=fim);
-    const prodPer=ent.reduce((s,e)=>s+e.valor,0);
-    const planejado=!!(x.etapa.iso&&x.etapa.iso>=ini&&x.etapa.iso<=fim);
-    // Saldo de pedido ATRASADO (data original já passou e não terminou) também aparece no período
-    // que contém HOJE, como "À produzir — atrasado" (2026-09-30, a pedido do usuário).
-    const restante=Math.max(0,x.valorLiquidoTotal-x.valorLiquidoProduzido);
-    const carregaAtraso=!planejado&&periodoAtual&&x.etapa.iso&&x.etapa.iso<ini&&restante>0.005;
-    if(!planejado&&!(prodPer>0.005)&&!carregaAtraso)return;
-    x.origemPeriodo=planejado?'periodo':(x.etapa.iso&&x.etapa.iso<ini?'atrasado':'adiantado');x.carregaAtraso=!!carregaAtraso;
-    x.entradasPeriodo=ent;const porDia={};ent.forEach(e=>{porDia[e.iso]=(porDia[e.iso]||0)+e.valor;});const datas=Object.keys(porDia).filter(k=>porDia[k]>0.004).sort();x.porDiaPeriodo=porDia;
-    x.prodPeriodo=prodPer;x.datasPeriodo=datas;x.planejadoNoPeriodo=planejado;x.estimadoNoPeriodo=ent.some(e=>e.estimado);
+  return _lpPedidosElegiveis().map(p=>_prodInfo(p,hojeIso)).filter(x=>x.ok).map(x=>{
+    x.entradasTodas=_prodRealEntradas(x);
     x.aProduzirTotal=Math.max(0,x.valorLiquidoTotal-x.valorLiquidoProduzido);
-    infos.push(x);
+    return x;
   });
-  infos.sort((a,b)=>String(a.datasPeriodo[0]||a.etapa.iso||'9999').localeCompare(String(b.datasPeriodo[0]||b.etapa.iso||'9999')));
-  const plan=infos.filter(x=>x.planejadoNoPeriodo);
-  const projecao=plan.reduce((s,x)=>s+x.valorLiquidoTotal,0);
-  const produzido=infos.reduce((s,x)=>s+x.prodPeriodo,0);
-  const aProduzirAtrasado=infos.filter(x=>x.carregaAtraso).reduce((s,x)=>s+x.aProduzirTotal,0);
-  const aProduzir=plan.reduce((s,x)=>s+x.aProduzirTotal,0)+aProduzirAtrasado;
-  const adiantados=infos.filter(x=>!x.planejadoNoPeriodo).length;
-  return{infos,projecao,produzido,aProduzir,aProduzirAtrasado,qtd:infos.length,adiantados};
 }
-function _prodRealDatasTxt(x){return x.datasPeriodo.length?x.datasPeriodo.map(i=>fmtD(i).slice(0,5)+' '+fmtR(x.porDiaPeriodo[i])).join(' · ')+(x.estimadoNoPeriodo?' *':''):'—';}
-function _prodRealDatasHtml(x){const tip=(x.entradasPeriodo||[]).map(e=>fmtD(e.iso)+' · '+fmtR(e.valor)+' · '+(e.fonte||'')).join('\n').replace(/"/g,'&quot;');return x.datasPeriodo.length?`<div title="${tip}" style="cursor:help">`+x.datasPeriodo.map(i=>`<div style="white-space:nowrap">${fmtD(i).slice(0,5)} · ${fmtR(x.porDiaPeriodo[i])}</div>`).join('')+(x.estimadoNoPeriodo?'<div style="font-size:.64rem;color:var(--ink4)">* sem data de baixa</div>':'')+'</div>':'—';}
+function _prodVCalc(base,ini,fim){
+  const hoje=_hojeIso();
+  const inclHoje=hoje>=ini&&hoje<=fim,passado=fim<hoje;
+  const prods=[],aprod=[];
+  base.forEach(x=>{
+    const ent=x.entradasTodas.filter(e=>e.iso>=ini&&e.iso<=fim);
+    const v=ent.reduce((s,e)=>s+e.valor,0);
+    if(v>0.005){const porDia={};ent.forEach(e=>{porDia[e.iso]=(porDia[e.iso]||0)+e.valor;});
+      prods.push({x,valor:v,ent,porDia,datas:Object.keys(porDia).filter(k=>porDia[k]>0.004).sort(),estimado:ent.some(e=>e.estimado),
+        origem:(x.etapa.iso&&x.etapa.iso>fim)?'adiantado':(x.etapa.iso&&x.etapa.iso<ini)?'atrasado':'no mês'});}
+    if(x.aProduzirTotal>0.005&&x.etapa.iso){
+      const noPeriodo=x.etapa.iso>=ini&&x.etapa.iso<=fim;
+      const atrasado=x.etapa.iso<hoje;
+      if(noPeriodo&&!(passado))aprod.push({x,valor:x.aProduzirTotal,atrasado});
+      else if(inclHoje&&x.etapa.iso<ini)aprod.push({x,valor:x.aProduzirTotal,atrasado:true});
+      else if(passado&&noPeriodo)aprod.push({x,valor:x.aProduzirTotal,atrasado:true,pendenteDoPassado:true});
+    }
+  });
+  prods.sort((a,b)=>String(a.datas[0]||'').localeCompare(String(b.datas[0]||'')));
+  aprod.sort((a,b)=>(b.atrasado-a.atrasado)||String(a.x.etapa.iso).localeCompare(String(b.x.etapa.iso)));
+  const produzido=prods.reduce((s,r)=>s+r.valor,0);
+  const aProduzir=aprod.filter(r=>!r.pendenteDoPassado).reduce((s,r)=>s+r.valor,0);
+  const atrasados=aprod.filter(r=>r.atrasado&&!r.pendenteDoPassado).reduce((s,r)=>s+r.valor,0);
+  // capacidade: no mês atual só os dias úteis de HOJE em diante (o que ainda dá pra fazer)
+  const capIni=inclHoje?hoje:ini;
+  const diasCap=passado?0:_prodVDiasUteis(capIni,fim);
+  const cap=diasCap*_lpCapProducaoDia();
+  return{prods,aprod,produzido,aProduzir,atrasados,cap,diasCap,inclHoje,passado,ini,fim};
+}
+// compatibilidade: quem ainda chamar _prodIndDados recebe o período ativo
+function _prodIndDados(){const{ini,fim}=_prodIndRange();const c=_prodVCalc(_prodVBase(),ini,fim);return Object.assign(c,{infos:c.prods.map(r=>r.x),qtd:new Set(c.prods.map(r=>r.x.p.id).concat(c.aprod.map(r=>r.x.p.id))).size});}
+function prodIndIrMes(iso){_prodIndView.modo='mes';_prodIndView.refIso=iso;const s=document.getElementById('prod-ind-modo');if(s)s.value='mes';try{prodIndSetModo('mes');}catch(e){renderProdIndicadores();}}
+function _prodVDatasHtml(r){const tip=r.ent.map(e=>fmtD(e.iso)+' · '+fmtR(e.valor)+' · '+(e.fonte||'')).join('\n').replace(/"/g,'&quot;');
+  return`<div title="${tip}" style="cursor:help">${r.datas.map(i=>`<div style="white-space:nowrap">${fmtD(i).slice(0,5)} · ${fmtR(r.porDia[i])}</div>`).join('')}${r.estimado?'<div style="font-size:.64rem;color:var(--ink4)">* sem data de baixa (antes de 25/09)</div>':''}</div>`;}
 function renderProdIndicadores(){
   const wrap=document.getElementById('prod-ind-body');
   if(!wrap)return;
@@ -53418,100 +53437,116 @@ function renderProdIndicadores(){
     wrap.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700;font-size:.85rem">🔒 ACESSO NÃO PERMITIDO — apenas Produção ou Administrador podem ver os Indicadores.</div>';
     return;
   }
-  const lblEl=document.getElementById('prod-ind-lbl');
   const r=_prodIndRange();
-  if(lblEl)lblEl.textContent=r.label;
-  try{const desc=wrap.previousElementSibling;if(desc&&!desc.id&&/Considera o Prazo de Produção/.test(desc.textContent))desc.innerHTML='<b>Produzido</b> conta pela <b>data em que a Produção deu a baixa</b> (mesmo parcial, mesmo que o pedido fosse de outro mês). <b>Projeção</b> e <b>À produzir</b> contam os pedidos com a <b>data original de produção</b> no período. No mês atual, <b>À produzir</b> também traz o saldo dos pedidos <b>atrasados</b> (data original já passou e não terminou), com etiqueta vermelha. * = produção antiga sem data de baixa registrada (considera a data original).';}catch(e){}
-  const d=_prodIndDados();
+  const lblEl=document.getElementById('prod-ind-lbl');if(lblEl)lblEl.textContent=r.label;
+  try{const desc=wrap.previousElementSibling;if(desc&&!desc.id&&!desc.dataset.v2&&/Considera o Prazo de Produção|Produzido<\/b> conta/.test(desc.innerHTML)){desc.dataset.v2='1';desc.innerHTML='<b>✅ Produzido</b> = baixas dadas pela Produção no mês (data real da baixa, mesmo parcial ou adiantado). <b>📋 A produzir</b> = só o que ainda falta, pela data programada — no mês atual inclui os atrasados. Passe o mouse em "Baixas no mês" pra ver cada lançamento.';}}catch(e){}
+  const base=_prodVBase();
+  const hoje=_hojeIso();const hd=new Date(hoje+'T12:00:00');
+  // ── linha do tempo: mês passado + atual + 4 próximos ──
+  const meses=[];for(let k=-1;k<=4;k++){const d=new Date(hd.getFullYear(),hd.getMonth()+k,1);meses.push({y:d.getFullYear(),m:d.getMonth()+1});}
+  const tl=meses.map(o=>{const g=_prodVMesRange(o.y,o.m);const c=_prodVCalc(base,g.ini,g.fim);return Object.assign(o,g,{c});});
+  const maxV=Math.max(1,...tl.map(o=>Math.max(o.c.produzido+o.c.aProduzir,o.c.cap)));
+  const selIni=r.ini,selFim=r.fim;
+  const tlHtml=`<div style="display:grid;grid-template-columns:repeat(${tl.length},minmax(0,1fr));gap:8px;margin-bottom:16px">${tl.map(o=>{
+    const c=o.c,sel=_prodIndView.modo==='mes'&&o.ini===selIni;
+    const hP=Math.round(c.produzido/maxV*70),hA=Math.round(c.aProduzir/maxV*70),hC=c.cap>0?Math.min(74,Math.round(c.cap/maxV*70)):0;
+    const occ=c.cap>0?Math.round(c.aProduzir/c.cap*100):null;
+    const corOcc=occ==null?'#94a3b8':occ>=100?'#dc2626':occ>=80?'#ea580c':'#16a34a';
+    const nome=(MESES_PT[o.m]||'').slice(0,3)+'/'+String(o.y).slice(2);
+    return`<div onclick="prodIndIrMes('${o.ini}')" title="Clique pra abrir ${MESES_PT[o.m]}" style="cursor:pointer;border:1.5px solid ${sel?'#1a2b5e':'#e2e8f0'};background:${sel?'#f8fafc':'#fff'};border-radius:10px;padding:8px 8px 6px;text-align:center">
+      <div style="font-size:.68rem;font-weight:800;color:${sel?'#1a2b5e':'#64748b'};text-transform:uppercase">${nome}${c.inclHoje?' · atual':''}</div>
+      <div style="position:relative;height:74px;display:flex;align-items:flex-end;justify-content:center;gap:4px;margin:6px 0 4px;border-bottom:1px solid #e2e8f0">
+        ${hC?`<div title="Capacidade restante ${fmtR(c.cap)}" style="position:absolute;left:4px;right:4px;bottom:${hC}px;border-top:2px dashed #94a3b8"></div>`:''}
+        <div title="Produzido ${fmtR(c.produzido)}" style="width:40%;max-width:26px;height:${Math.max(hP,c.produzido>0?2:0)}px;background:#22c55e;border-radius:4px 4px 0 0"></div>
+        <div title="A produzir ${fmtR(c.aProduzir)}" style="width:40%;max-width:26px;height:${Math.max(hA,c.aProduzir>0?2:0)}px;background:#f59e0b;border-radius:4px 4px 0 0"></div>
+      </div>
+      <div style="font-size:.64rem;color:#166534;font-weight:700;white-space:nowrap">✅ ${_crmFmtCurto(c.produzido)}</div>
+      <div style="font-size:.64rem;color:#b45309;font-weight:700;white-space:nowrap">📋 ${c.passado?'—':_crmFmtCurto(c.aProduzir)}</div>
+      <div style="font-size:.62rem;font-weight:800;color:${corOcc}">${occ==null?'&nbsp;':occ+'% da capac.'}</div>
+    </div>`;}).join('')}</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:.66rem;color:#64748b;margin:-8px 0 14px"><span><b style="color:#22c55e">■</b> produzido (baixas)</span><span><b style="color:#f59e0b">■</b> a produzir (saldo programado)</span><span>┄ capacidade restante</span><span>% = a produzir ÷ capacidade dos dias úteis restantes</span></div>`;
+  // ── mês/período selecionado ──
+  const c=_prodVCalc(base,r.ini,r.fim);
+  const occ=c.cap>0?Math.round(c.aProduzir/c.cap*100):null;
   const T=[
-    {key:'projecao',icon:'💰',label:'Projeção (data original)',val:fmtR(d.projecao),bg:'#dbeafe',fg:'#1e40af'},
-    {key:'produzido',icon:'✅',label:'Produzido no período',val:fmtR(d.produzido),bg:'#dcfce7',fg:'#166534'},
-    {key:'aproduzir',icon:'🔧',label:'À produzir'+(d.aProduzirAtrasado>0.005?' · '+_crmFmtCurto(d.aProduzirAtrasado)+' atrasados':''),val:fmtR(d.aProduzir),bg:'#fef3c7',fg:'#92400e'},
-    {key:'pedidos',icon:'📦',label:'Pedidos'+(d.adiantados?' · '+d.adiantados+' de outros meses':''),val:String(d.qtd),bg:'#f1f5f9',fg:'#475569'}
+    {key:'produzido',icon:'✅',label:'Produzido'+(c.inclHoje?' até agora':''),val:fmtR(c.produzido),sub:c.prods.length+' pedido'+(c.prods.length===1?'':'s'),bg:'#dcfce7',fg:'#166534'},
+    {key:'aproduzir',icon:'📋',label:'A produzir',val:c.passado?'—':fmtR(c.aProduzir),sub:c.passado?'mês encerrado':(c.atrasados>0.005?'dos quais '+_crmFmtCurto(c.atrasados)+' atrasados':'saldo programado'),bg:'#fef3c7',fg:'#92400e'},
+    {key:'ocupacao',icon:'📊',label:'Ocupação',val:occ==null?'—':occ+'%',sub:c.cap>0?fmtR(c.cap)+' de capacidade em '+c.diasCap+' dias úteis':'—',bg:occ!=null&&occ>=100?'#fee2e2':'#f1f5f9',fg:occ!=null&&occ>=100?'#b91c1c':'#475569'}
   ];
-  const tilesHtml=`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">${T.map(t=>`<div onclick="prodIndAbrirTile('${t.key}')" style="cursor:pointer;flex:1 1 200px;min-width:0;display:flex;align-items:center;gap:10px;background:${t.bg};border-radius:10px;padding:12px;box-sizing:border-box" title="Clique para ver os pedidos">
-      <div style="flex-shrink:0;width:34px;height:34px;border-radius:999px;background:rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-size:1rem;line-height:1">${t.icon}</div>
-      <div style="min-width:0;flex:1;text-align:left"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${t.fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.label}</div>
-      <div style="font-size:1.05rem;font-weight:800;color:${t.fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.val}</div></div></div>`).join('')}</div>`;
-  if(!d.infos.length){wrap.innerHTML=tilesHtml+'<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum pedido produzido ou programado no período selecionado.</div>';return;}
-  const th='padding:8px 10px';
-  const linhas=d.infos.map(x=>{const p=x.p;const fora=!x.planejadoNoPeriodo;const atr=x.origemPeriodo==='atrasado';
-    return`<tr${fora?` style="background:${atr?'#fef2f2':'#f0fdf4'}"`:''}>
-      <td style="${th}">${p.os||'—'}</td>
-      <td style="${th}">${p.cliente||'—'}${fora?(atr?` <span style="font-size:.62rem;font-weight:800;color:#b91c1c;background:#fee2e2;border-radius:20px;padding:1px 7px;white-space:nowrap">${x.carregaAtraso?'À produzir — atrasado':'atrasado'} · era ${fmtD(x.etapa.iso).slice(0,5)}</span>`:' <span style="font-size:.62rem;font-weight:800;color:#15803d;background:#dcfce7;border-radius:20px;padding:1px 7px;white-space:nowrap">adiantado</span>'):''}</td>
-      <td style="${th};white-space:nowrap">${p.tipo||'—'}</td>
-      <td style="${th};text-align:right;white-space:nowrap">${fmtR(x.valorLiquidoTotal)}</td>
-      <td style="${th};text-align:right">${x.pctValor.toFixed(0)}%</td>
-      <td style="${th};text-align:right;white-space:nowrap;color:#16a34a;font-weight:700">${fmtR(x.prodPeriodo)}${x.valorLiquidoTotal>0&&x.prodPeriodo>0.005&&x.prodPeriodo<x.valorLiquidoTotal-0.5?`<div style="font-size:.64rem;font-weight:600;color:#64748b">parcial · ${Math.round(x.prodPeriodo/x.valorLiquidoTotal*100)}% do pedido</div>`:''}</td>
-      <td style="${th};text-align:right;white-space:nowrap;color:${x.aProduzirTotal>0.005?'#dc2626':'#94a3b8'}">${fmtR(x.aProduzirTotal)}</td>
-      <td style="${th};white-space:nowrap">${fmtD(x.etapa.iso)}</td>
-      <td style="${th};font-size:.74rem;color:#15803d;font-weight:600">${_prodRealDatasHtml(x)}</td>
-      <td style="${th};white-space:nowrap">${x.calc.prazoIso?fmtD(x.calc.prazoIso):'—'}</td>
-    </tr>`;}).join('');
-  wrap.innerHTML=tilesHtml+`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.82rem">
-    <thead><tr style="background:#f8fafc;text-align:left">
-      <th style="${th}">OS</th><th style="${th}">Cliente</th><th style="${th}">Tipo</th>
-      <th style="${th};text-align:right">R$ Líquido</th><th style="${th};text-align:right" title="% do pedido inteiro já produzido">% Produzido</th>
-      <th style="${th};text-align:right" title="Quanto deste pedido foi produzido DENTRO do período, pela data da baixa">R$ Produzido no período</th><th style="${th};text-align:right" title="Quanto ainda falta produzir do pedido inteiro">R$ à Produzir</th>
-      <th style="${th}" title="Data original programada pra Produção">Data Produção (original)</th><th style="${th}" title="Dias em que a Produção deu baixa (dentro do período)">Realizado em</th><th style="${th}">Prazo Final</th>
-    </tr></thead><tbody>${linhas}</tbody>
-    <tfoot><tr style="background:#f1f5f9;font-weight:800">
-      <td colspan="5" style="${th}">TOTAL</td>
-      <td style="${th};text-align:right;white-space:nowrap;color:#166534">${fmtR(d.produzido)}</td>
-      <td style="${th};text-align:right;white-space:nowrap;color:#dc2626">${fmtR(d.aProduzir)}</td>
-      <td colspan="3" style="${th};font-size:.68rem;font-weight:600;color:var(--ink4)">Projeção (data original): ${fmtR(d.projecao)}</td>
-    </tr></tfoot></table></div>`;
+  const tiles=`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">${T.map(t=>`<div ${t.key!=='ocupacao'?`onclick="prodIndAbrirTile('${t.key}')" `:''}style="${t.key!=='ocupacao'?'cursor:pointer;':''}flex:1 1 220px;min-width:0;display:flex;align-items:center;gap:10px;background:${t.bg};border-radius:10px;padding:12px;box-sizing:border-box">
+    <div style="flex-shrink:0;width:34px;height:34px;border-radius:999px;background:rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-size:1rem">${t.icon}</div>
+    <div style="min-width:0;flex:1"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${t.fg}">${t.label}</div><div style="font-size:1.1rem;font-weight:800;color:${t.fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.val}</div><div style="font-size:.64rem;color:${t.fg};opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.sub}</div></div></div>`).join('')}</div>`;
+  const th='padding:8px 10px',tag=(txt,fg,bg)=>` <span style="font-size:.6rem;font-weight:800;color:${fg};background:${bg};border-radius:20px;padding:1px 7px;white-space:nowrap">${txt}</span>`;
+  const secProd=`<div class="dash-sec-title" style="margin:6px 0 8px">✅ Produzido em ${r.label} <span style="font-weight:600;color:#166534">· ${fmtR(c.produzido)}</span></div>
+    ${c.prods.length?`<div style="overflow-x:auto;margin-bottom:20px"><table style="width:100%;border-collapse:collapse;font-size:.82rem"><thead><tr style="background:#f0fdf4;text-align:left">
+      <th style="${th}">OS</th><th style="${th}">Cliente</th><th style="${th};text-align:right">R$ Líquido do pedido</th><th style="${th};text-align:right">Produzido no mês</th><th style="${th}">Baixas no mês</th><th style="${th};text-align:right">% do pedido hoje</th><th style="${th}">Programado para</th></tr></thead><tbody>
+      ${c.prods.map(o=>{const x=o.x,p=x.p;const parc=o.valor<x.valorLiquidoTotal-0.5;return`<tr style="border-top:1px solid #f1f5f9">
+        <td style="${th}">${p.os||'—'}</td><td style="${th}">${p.cliente||'—'}${o.origem==='adiantado'?tag('adiantado','#15803d','#dcfce7'):o.origem==='atrasado'?tag('atrasado','#b91c1c','#fee2e2'):''}</td>
+        <td style="${th};text-align:right;white-space:nowrap">${fmtR(x.valorLiquidoTotal)}</td>
+        <td style="${th};text-align:right;white-space:nowrap;color:#16a34a;font-weight:800">${fmtR(o.valor)}${parc&&x.valorLiquidoTotal>0?`<div style="font-size:.64rem;font-weight:600;color:#64748b">parcial · ${Math.round(o.valor/x.valorLiquidoTotal*100)}% do pedido</div>`:''}</td>
+        <td style="${th};font-size:.74rem;color:#15803d;font-weight:600">${_prodVDatasHtml(o)}</td>
+        <td style="${th};text-align:right">${x.pctValor.toFixed(0)}%</td><td style="${th};white-space:nowrap;color:#64748b">${fmtD(x.etapa.iso)}</td></tr>`;}).join('')}
+      </tbody></table></div>`:`<div style="color:var(--ink4);font-size:.8rem;padding:6px 0 18px">Nenhuma baixa de produção neste período.</div>`}`;
+  const listaA=c.aprod.filter(o=>!o.pendenteDoPassado);
+  const secA=c.passado?(c.aprod.length?`<div style="font-size:.76rem;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px">⚠️ ${c.aprod.length} pedido(s) programado(s) pra este mês ainda não terminaram (${fmtR(c.aprod.reduce((s,o)=>s+o.valor,0))}) — eles aparecem como <b>atrasados</b> no mês atual.</div>`:'')
+    :`<div class="dash-sec-title" style="margin:6px 0 8px">📋 A produzir em ${r.label} <span style="font-weight:600;color:#b45309">· ${fmtR(c.aProduzir)}</span></div>
+    ${listaA.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.82rem"><thead><tr style="background:#fffbeb;text-align:left">
+      <th style="${th}">OS</th><th style="${th}">Cliente</th><th style="${th}">Tipo</th><th style="${th};text-align:right">R$ Líquido do pedido</th><th style="${th};text-align:right">Já produzido</th><th style="${th};text-align:right">Falta produzir</th><th style="${th}">Programado para</th><th style="${th}">Prazo final</th></tr></thead><tbody>
+      ${listaA.map(o=>{const x=o.x,p=x.p;return`<tr style="border-top:1px solid #f1f5f9;${o.atrasado?'background:#fef2f2':''}">
+        <td style="${th}">${p.os||'—'}</td><td style="${th}">${p.cliente||'—'}${o.atrasado?tag('atrasado','#b91c1c','#fee2e2'):''}</td><td style="${th};white-space:nowrap">${p.tipo||'—'}</td>
+        <td style="${th};text-align:right;white-space:nowrap">${fmtR(x.valorLiquidoTotal)}</td>
+        <td style="${th};text-align:right;white-space:nowrap;color:#64748b">${x.pctValor>0?x.pctValor.toFixed(0)+'%':'—'}</td>
+        <td style="${th};text-align:right;white-space:nowrap;color:#b45309;font-weight:800">${fmtR(o.valor)}</td>
+        <td style="${th};white-space:nowrap;${o.atrasado?'color:#b91c1c;font-weight:700':''}">${fmtD(x.etapa.iso)}</td>
+        <td style="${th};white-space:nowrap">${x.calc.prazoIso?fmtD(x.calc.prazoIso):'—'}</td></tr>`;}).join('')}
+      </tbody></table></div>`:`<div style="color:var(--ink4);font-size:.8rem;padding:6px 0">Nada a produzir programado neste período.</div>`}`;
+  wrap.innerHTML=tlHtml+tiles+secProd+secA;
 }
 function prodIndAbrirTile(key){
-  const d=_prodIndDados();
-  const labelMap={projecao:'💰 Projeção (data original de produção no período)',produzido:'✅ Produzido no período (pela data da baixa)',aproduzir:'🔧 À produzir (programados no período)',pedidos:'📦 Pedidos no período'};
-  let infos=d.infos;
-  if(key==='projecao')infos=infos.filter(x=>x.planejadoNoPeriodo);
-  if(key==='produzido')infos=infos.filter(x=>x.prodPeriodo>0.005);
-  if(key==='aproduzir')infos=infos.filter(x=>(x.planejadoNoPeriodo||x.carregaAtraso)&&x.aProduzirTotal>0.005);
-  const lista=infos.map(x=>({p:x.p,valor:key==='produzido'?x.prodPeriodo:key==='aproduzir'?x.aProduzirTotal:x.valorLiquidoTotal,cor:key==='aproduzir'?'#dc2626':key==='produzido'?'#166534':'#1e40af'}));
-  _prodVGAbrirListaPedidos(labelMap[key]||'Pedidos',lista);
+  const r=_prodIndRange();const c=_prodVCalc(_prodVBase(),r.ini,r.fim);
+  if(key==='produzido')return _prodVGAbrirListaPedidos('✅ Produzido em '+r.label+' (pela data da baixa)',c.prods.map(o=>({p:o.x.p,valor:o.valor,cor:'#166534'})));
+  if(key==='aproduzir')return _prodVGAbrirListaPedidos('📋 A produzir em '+r.label+' (saldo)',c.aprod.filter(o=>!o.pendenteDoPassado).map(o=>({p:o.x.p,valor:o.valor,cor:o.atrasado?'#dc2626':'#b45309'})));
 }
-function _prodRealLinhasExport(d){
-  const body=d.infos.map(x=>[x.p.os||'',x.p.cliente||'',x.p.tipo||'',_fmtValorPdf(x.valorLiquidoTotal),Math.round(x.pctValor)+'%',_fmtValorPdf(x.prodPeriodo),_fmtValorPdf(x.aProduzirTotal),fmtD(x.etapa.iso),_prodRealDatasTxt(x),x.calc.prazoIso?fmtD(x.calc.prazoIso):'']);
-  const foot=['TOTAL ('+d.qtd+')','','','','',_fmtValorPdf(d.produzido),_fmtValorPdf(d.aProduzir),'Projeção: '+_fmtValorPdf(d.projecao),'',''];
-  return{headers:['OS','Cliente','Tipo','R$ Líquido','% Produzido','R$ Produzido no período','R$ à Produzir','Data Produção (original)','Realizado em','Prazo Final'],body,foot};
+function _prodVExport(){
+  const r=_prodIndRange();const c=_prodVCalc(_prodVBase(),r.ini,r.fim);
+  const rows=[];
+  c.prods.forEach(o=>rows.push(['Produzido',o.x.p.os||'',o.x.p.cliente||'',_fmtValorPdf(o.x.valorLiquidoTotal),_fmtValorPdf(o.valor),o.datas.map(i=>fmtD(i).slice(0,5)+' '+_fmtValorPdf(o.porDia[i])).join(' · ')+(o.estimado?' *':''),fmtD(o.x.etapa.iso),o.origem]));
+  c.aprod.filter(o=>!o.pendenteDoPassado).forEach(o=>rows.push(['A produzir',o.x.p.os||'',o.x.p.cliente||'',_fmtValorPdf(o.x.valorLiquidoTotal),_fmtValorPdf(o.valor),'',fmtD(o.x.etapa.iso),o.atrasado?'atrasado':'']));
+  return{r,c,headers:['Seção','OS','Cliente','R$ Líquido do pedido','Valor','Baixas no período','Programado para','Obs.'],rows};
 }
 function prodIndExportarListaExcel(){
-  const d=_prodIndDados();
-  if(!d.infos.length){toast('Nenhum pedido encontrado no período para exportar','terr');return;}
-  const t=_prodRealLinhasExport(d);
-  _csvDownload(`producao_indicadores_${_hojeIso()}.csv`,t.headers,t.body.concat([t.foot]));
+  const e=_prodVExport();
+  if(!e.rows.length){toast('Nada no período para exportar','terr');return;}
+  e.rows.push(['TOTAL PRODUZIDO','','','',_fmtValorPdf(e.c.produzido),'','',''],['TOTAL A PRODUZIR','','','',_fmtValorPdf(e.c.aProduzir),'','','']);
+  _csvDownload(`producao_indicadores_${_hojeIso()}.csv`,e.headers,e.rows);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
 }
 async function prodIndExportarListaPDF(){
   if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
-  const d=_prodIndDados();
-  if(!d.infos.length){toast('Nenhum pedido encontrado no período para gerar o PDF.','terr');return;}
+  const e=_prodVExport();
+  if(!e.rows.length){toast('Nada no período para gerar o PDF.','terr');return;}
   const{jsPDF}=window.jspdf;const doc=new jsPDF({orientation:'landscape'});
   const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
   const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight();
-  const logo=await _getLogoGrandaPDF();const periodo=_prodIndRange().label;
-  const cab=()=>{if(logo){try{doc.addImage(logo,'PNG',14,8,36,12.9);}catch(e){}}
+  const logo=await _getLogoGrandaPDF();
+  const cab=()=>{if(logo){try{doc.addImage(logo,'PNG',14,8,36,12.9);}catch(x){}}
     doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(14);doc.text('PRODUÇÃO — INDICADORES',W-14,14,{align:'right'});
-    doc.setTextColor(...PINK);doc.setFontSize(9);doc.text('Período: '+periodo,W-14,20,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(9);doc.text('Período: '+e.r.label,W-14,20,{align:'right'});
     doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,25,W-14,25);};
   cab();
-  doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(51,65,85);
-  doc.text(`Produzido no período: ${fmtR(d.produzido)}   ·   Projeção (data original): ${fmtR(d.projecao)}   ·   À produzir: ${fmtR(d.aProduzir)}   ·   Pedidos: ${d.qtd}`,14,31);
-  const t=_prodRealLinhasExport(d);
-  doc.autoTable({startY:35,head:[t.headers],body:t.body,foot:[t.foot],theme:'grid',
+  doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(51,65,85);
+  doc.text(`Produzido (baixas no período): ${fmtR(e.c.produzido)}   ·   A produzir (saldo programado${e.c.inclHoje?' + atrasados':''}): ${e.c.passado?'—':fmtR(e.c.aProduzir)}`,14,31);
+  doc.autoTable({startY:35,head:[e.headers],body:e.rows,theme:'grid',
     styles:{fontSize:7,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.6},
-    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:7},footStyles:{fillColor:LIGHT,textColor:[26,27,54],fontStyle:'bold',fontSize:7},
-    alternateRowStyles:{fillColor:LIGHT},columnStyles:{3:{halign:'right'},4:{halign:'right'},5:{halign:'right'},6:{halign:'right'}},
+    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:7},alternateRowStyles:{fillColor:LIGHT},
+    columnStyles:{3:{halign:'right'},4:{halign:'right',fontStyle:'bold'}},
     margin:{top:30,left:14,right:14,bottom:18},didDrawPage:()=>{cab();}});
   const n=doc.internal.getNumberOfPages();
   for(let i=1;i<=n;i++){doc.setPage(i);doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,H-12,W-14,H-12);doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(...GRAY);
-    doc.text('GRANDA Comunicação Visual · GCORE · Produzido = data da baixa; * = sem data de baixa registrada (usa a data original)',14,H-7.5);doc.text('Página '+i+' de '+n,W-14,H-7.5,{align:'right'});}
+    doc.text('GRANDA Comunicação Visual · GCORE · Produzido = data da baixa; * = sem data de baixa registrada (antes de 25/09/2026)',14,H-7.5);doc.text('Página '+i+' de '+n,W-14,H-7.5,{align:'right'});}
   doc.save(`producao_indicadores_${_hojeIso()}.pdf`);
   toast('PDF gerado!','tok');
 }
-
 
 // ── Registro exato de produção (2026-09-30, a pedido do usuário: "preciso que seja precisa essa
 // medição") ── a cada gravação de pedido, compara o % produzido ANTES (última versão do servidor)
