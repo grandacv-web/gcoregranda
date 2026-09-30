@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-30.30';</script>
+<script>const APP_BUILD_VERSION='2026-09-30.32';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -5390,6 +5390,8 @@ function _fbSaveMerge(col,id,data){
   });
 }
 window._fbSavePedido=(p)=>_fbSaveMerge('pedidos',p.id,p);
+// Última versão do pedido recebida do servidor — só leitura (usada pelo registro exato de produção, 2026-09-30).
+window._fbBasePedido=(id)=>(_fbBases.pedidos&&_fbBases.pedidos[String(id)])||null;
 // Transação (lê o documento FRESCO do servidor, aplica um patch, grava) — usada pelas ações
 // de Tarefas Comerciais (ver _salvarTarefaComercialFS/_excluirTarefaComercialFS mais abaixo)
 // pra nunca depender da cópia de `pedidos` que porventura esteja desatualizada na memória
@@ -53299,35 +53301,80 @@ function evxResumo(){
 //  • pedido sem itens (subtarefas): data da baixa de cada subtarefa (p.lpBaixas[etapa].data);
 //  • o que foi produzido ANTES de existir o histórico (ou sem registro) fica na data original de
 //    produção, igual era antes (marcado como "estimado").
+// v2 (2026-09-30, revisão pedida pelo usuário: "deu 2 milhões em setembro" / "como já produziu em
+// outubro se estamos em setembro?"):
+//  • cada baixa do histórico é REFEITA de trás pra frente a partir do estado atual do item (setores
+//    + N/A), então a variação de % de cada baixa é exata — inclusive marcar setor como N/A;
+//  • pedido sem itens: só a subtarefa PRODUZIR conta com data (recebimento de corte/adesivo é
+//    Compras, não é produção); baixa da "limpeza automática de atrasados" não vale como data;
+//  • o que não tem data de baixa (produção antes de 25/09/2026, quando o histórico começou) fica
+//    na data original, mas NUNCA depois de 24/09/2026 nem depois de hoje — nada aparece como
+//    "produzido" no futuro.
+const PRODREAL_LOG_INICIO='2026-09-25';
+function _prodRealPctEstado(st){
+  const ap=PROD_SETORES_ITEM.filter(k=>!st.na[k.key]);
+  if(!ap.length)return 100;
+  return Math.round(ap.reduce((s,k)=>s+(st.v[k.key]||0),0)/ap.length);
+}
 function _prodRealEntradas(x){
   const out=[];const p=x.p,L=x.valorLiquidoTotal||0,alvo=x.valorLiquidoProduzido||0;
   if(!(L>0))return out;
+  const hoje=_hojeIso();
+  let temLog=false;
+  // Registro EXATO (p.prodLedger, gravado a cada baixa a partir de 30/09/2026 — ver
+  // _prodLedgerRegistrar): vale por si só; a reconstrução abaixo só completa o período ANTERIOR a ele.
+  const led=(p.prodLedger&&typeof p.prodLedger==='object'?Object.values(p.prodLedger):[]).filter(e=>e&&e.em);
+  const ledIni=led.length?led.reduce((m,e)=>(!m||e.em<m)?e.em:m,''):'';
+  led.forEach(e=>{const d=new Date(e.em);if(!isNaN(d)){temLog=true;out.push({iso:_isoLocal(d),valor:Number(e.valor)||0,fonte:'registro exato'});}});
+  const antesDoLedger=h=>!ledIni||String(h.em)<ledIni;
   try{
     if(x.progItens&&x.progItens.temItens){
       const itens=(p.itensProducao||[]).filter(i=>!i.foraEscopo);
       const totalValor=itens.reduce((s,i)=>s+(Number(i.valor)||0),0);
-      (p.historicoProducao||[]).forEach(h=>{
-        if(!h||!h.em)return;
-        const it=itens.find(i=>String(i.nome||'').slice(0,120)===h.item);if(!it)return;
-        let delta=(Number(h.para)||0)-(Number(h.de)||0);if(!delta)return;
-        if(h.setor!=='TODOS OS SETORES'){
-          let n=1;try{n=PROD_SETORES_ITEM.filter(st=>!_prodItemSetorNA(it,st.key)).length||1;}catch(e){}
-          delta=delta/n;
-        }
+      const logs=(p.historicoProducao||[]).filter(h=>h&&h.em);
+      itens.forEach(it=>{
+        const nome=String(it.nome||'').slice(0,120);
+        const meus=logs.filter(h=>h.item===nome).sort((a,b)=>String(b.em).localeCompare(String(a.em)));
+        if(!meus.length)return;
+        // estado ATUAL do item
+        const st={v:{},na:{}};
+        PROD_SETORES_ITEM.forEach(k=>{st.v[k.key]=_prodItemSetorValor(it,k.key);st.na[k.key]=_prodItemSetorNA(it,k.key);});
         const peso=totalValor>0?(Number(it.valor)||0)/totalValor:1/itens.length;
-        const d=new Date(h.em);if(isNaN(d))return;
-        out.push({iso:_isoLocal(d),valor:L*peso*delta/100});
+        meus.forEach(h=>{
+          const depois=_prodRealPctEstado(st);
+          const setor=String(h.setor||'');
+          if(setor==='TODOS OS SETORES'){PROD_SETORES_ITEM.forEach(k=>{st.v[k.key]=Number(h.de)||0;});}
+          else{
+            const k=PROD_SETORES_ITEM.find(z=>setor===z.label||setor.indexOf(z.label+' →')===0);
+            if(!k)return;
+            if(setor.indexOf('→ N/A')>0)st.na[k.key]=false;
+            else if(setor.indexOf('→ voltou a contar')>0)st.na[k.key]=true;
+            else st.v[k.key]=Number(h.de)||0;
+          }
+          const antes=_prodRealPctEstado(st);
+          const delta=depois-antes;
+          if(!delta)return;
+          const d=new Date(h.em);if(isNaN(d))return;
+          if(!antesDoLedger(h))return;
+          temLog=true;
+          out.push({iso:_isoLocal(d),valor:L*peso*delta/100,fonte:'histórico de baixas'});
+        });
       });
     }else{
       const subs=x.subs||[];
-      subs.forEach(s=>{const b=p.lpBaixas&&p.lpBaixas[s.key];if(s.feito&&b&&b.data)out.push({iso:String(b.data).slice(0,10),valor:L/subs.length});});
+      const s=subs.find(z=>z.key==='producao');const b=p.lpBaixas&&p.lpBaixas.producao;
+      if(s&&s.feito&&b&&b.data&&!b.viaLimpezaLote&&subs.length&&(!ledIni||(b.dataHora||b.data)<ledIni)){temLog=true;out.push({iso:String(b.data).slice(0,10),valor:L/subs.length,fonte:'baixa PRODUZIR'});}
     }
   }catch(e){console.error('prodreal',e);}
   const soma=out.reduce((s,e)=>s+e.valor,0);
-  if(soma>alvo+0.5&&soma>0){const f=alvo/soma;out.forEach(e=>{e.valor*=f;});}
+  if(soma>alvo+0.5&&soma>0){const rec=out.filter(e=>e.fonte!=='registro exato');const sr=rec.reduce((s,e)=>s+e.valor,0),sl=soma-sr;if(sr>0&&alvo-sl>=0){const f=(alvo-sl)/sr;rec.forEach(e=>{e.valor*=f;});}}
   else if(alvo-soma>0.5){
     const b=p.lpBaixas&&p.lpBaixas.producao;
-    out.push({iso:(!out.length&&b&&b.data)?String(b.data).slice(0,10):(x.etapa&&x.etapa.iso),valor:alvo-soma,estimado:!(!out.length&&b&&b.data)});
+    let iso,est=true;
+    if(!temLog&&b&&b.data&&!b.viaLimpezaLote&&x.progItens&&x.progItens.temItens){iso=String(b.data).slice(0,10);est=false;}
+    else{iso=(x.etapa&&x.etapa.iso)||hoje;const lim='2026-09-24';if(iso>lim)iso=lim;}
+    if(iso>hoje)iso=hoje;
+    out.push({iso,valor:alvo-soma,estimado:est,fonte:est?'sem data':'conclusão'});
   }
   return out.filter(e=>e.iso&&Math.abs(e.valor)>0.004);
 }
@@ -53348,7 +53395,7 @@ function _prodIndDados(){
     const carregaAtraso=!planejado&&periodoAtual&&x.etapa.iso&&x.etapa.iso<ini&&restante>0.005;
     if(!planejado&&!(prodPer>0.005)&&!carregaAtraso)return;
     x.origemPeriodo=planejado?'periodo':(x.etapa.iso&&x.etapa.iso<ini?'atrasado':'adiantado');x.carregaAtraso=!!carregaAtraso;
-    const porDia={};ent.forEach(e=>{porDia[e.iso]=(porDia[e.iso]||0)+e.valor;});const datas=Object.keys(porDia).filter(k=>porDia[k]>0.004).sort();x.porDiaPeriodo=porDia;
+    x.entradasPeriodo=ent;const porDia={};ent.forEach(e=>{porDia[e.iso]=(porDia[e.iso]||0)+e.valor;});const datas=Object.keys(porDia).filter(k=>porDia[k]>0.004).sort();x.porDiaPeriodo=porDia;
     x.prodPeriodo=prodPer;x.datasPeriodo=datas;x.planejadoNoPeriodo=planejado;x.estimadoNoPeriodo=ent.some(e=>e.estimado);
     x.aProduzirTotal=Math.max(0,x.valorLiquidoTotal-x.valorLiquidoProduzido);
     infos.push(x);
@@ -53363,7 +53410,7 @@ function _prodIndDados(){
   return{infos,projecao,produzido,aProduzir,aProduzirAtrasado,qtd:infos.length,adiantados};
 }
 function _prodRealDatasTxt(x){return x.datasPeriodo.length?x.datasPeriodo.map(i=>fmtD(i).slice(0,5)+' '+fmtR(x.porDiaPeriodo[i])).join(' · ')+(x.estimadoNoPeriodo?' *':''):'—';}
-function _prodRealDatasHtml(x){return x.datasPeriodo.length?x.datasPeriodo.map(i=>`<div style="white-space:nowrap">${fmtD(i).slice(0,5)} · ${fmtR(x.porDiaPeriodo[i])}</div>`).join('')+(x.estimadoNoPeriodo?'<div style="font-size:.64rem;color:var(--ink4)">* sem data de baixa</div>':''):'—';}
+function _prodRealDatasHtml(x){const tip=(x.entradasPeriodo||[]).map(e=>fmtD(e.iso)+' · '+fmtR(e.valor)+' · '+(e.fonte||'')).join('\n').replace(/"/g,'&quot;');return x.datasPeriodo.length?`<div title="${tip}" style="cursor:help">`+x.datasPeriodo.map(i=>`<div style="white-space:nowrap">${fmtD(i).slice(0,5)} · ${fmtR(x.porDiaPeriodo[i])}</div>`).join('')+(x.estimadoNoPeriodo?'<div style="font-size:.64rem;color:var(--ink4)">* sem data de baixa</div>':'')+'</div>':'—';}
 function renderProdIndicadores(){
   const wrap=document.getElementById('prod-ind-body');
   if(!wrap)return;
@@ -53465,6 +53512,36 @@ async function prodIndExportarListaPDF(){
   toast('PDF gerado!','tok');
 }
 
+
+// ── Registro exato de produção (2026-09-30, a pedido do usuário: "preciso que seja precisa essa
+// medição") ── a cada gravação de pedido, compara o % produzido ANTES (última versão do servidor)
+// com o DEPOIS e, se mudou, grava em p.prodLedger[id]={em, valor(R$ líquido), de, para, por}. Pega
+// TODO caminho de baixa (setor, item inteiro, N/A, admin forçar, subtarefas, reabrir), porque todos
+// passam por savePedidoFS. Só a variação de PROGRESSO conta (mudar o valor do pedido não vira
+// "produção"). Qualquer erro aqui é engolido — o salvamento do pedido segue exatamente igual.
+function _prodLedgerPct(obj){try{const x=_prodInfo(obj,_hojeIso());return x&&x.ok?{pct:x.pctValor||0,L:x.valorLiquidoTotal||0}:null;}catch(e){return null;}}
+const _prodLedgerMem={};
+function _prodLedgerRegistrar(p){
+  try{
+    if(!p||!p.id||!window._fbBasePedido)return;
+    const base=window._fbBasePedido(p.id);if(!base)return;
+    let a=_prodLedgerPct(base);const d=_prodLedgerPct(p);if(!a||!d)return;
+    // Duas baixas seguidas antes do servidor devolver a 1ª: usa o "depois" da última registrada
+    // aqui mesmo (válido por 60s), senão a 2ª contaria a 1ª de novo.
+    const m=_prodLedgerMem[p.id];if(m&&Date.now()-m.t<60000)a={pct:m.pct,L:a.L};
+    const dp=(d.pct||0)-(a.pct||0);if(Math.abs(dp)<0.01)return;
+    const valor=Math.round(d.L*dp/100*100)/100;if(Math.abs(valor)<0.01)return;
+    // mapa por id (não array): o merge de 3 vias junta chave a chave, então duas pessoas dando
+    // baixa no mesmo pedido ao mesmo tempo nunca apagam o registro uma da outra.
+    if(!p.prodLedger||typeof p.prodLedger!=='object'||Array.isArray(p.prodLedger))p.prodLedger={};
+    const id='pl'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+    p.prodLedger[id]={em:new Date().toISOString(),valor,de:Math.round(a.pct*10)/10,para:Math.round(d.pct*10)/10,por:(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—'};
+    _prodLedgerMem[p.id]={pct:d.pct,t:Date.now()};
+  }catch(e){console.warn('prodLedger',e);}
+}
+(function(){
+  if(typeof savePedidoFS==='function'){const _o=savePedidoFS;savePedidoFS=async function(p){_prodLedgerRegistrar(p);return _o.apply(this,arguments);};}
+})();
 // ══ MENU ORÇAMENTOS — FASE 1: CUSTOS OPERACIONAIS (2026-09-30) ══════════════════════════════
 // A pedido do usuário: "criar um menu ORÇAMENTOS... usar ele mesmo pra gerar as paradas sem usar
 // um sistema externo... copiar o algoritmo" do sistema Orçamentação Granda
