@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-09-30.11';</script>
+<script>const APP_BUILD_VERSION='2026-09-30.18';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -5328,7 +5328,7 @@ select.fc{cursor:pointer}
 <script type="module" async>
 import{initializeApp,deleteApp}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
 import{getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged,createUserWithEmailAndPassword,sendPasswordResetEmail,EmailAuthProvider,reauthenticateWithCredential}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
-import{getFirestore,collection,doc,setDoc,updateDoc,deleteDoc,deleteField,onSnapshot,getDocs,FieldPath,writeBatch,runTransaction}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
+import{getFirestore,collection,doc,getDoc,setDoc,updateDoc,deleteDoc,deleteField,onSnapshot,getDocs,FieldPath,writeBatch,runTransaction}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-functions.js';
 
 const firebaseConfig={
@@ -5645,7 +5645,9 @@ window._fbSaveCfg=(data)=>{
     return Promise.reject(e);
   });
 };
-window._fbLoadCfg=()=>getDocs(collection(db,'sistema')).then(snap=>{const d=snap.docs.find(x=>x.id==='config');return d?d.data():null;});
+// (2026-09-30) Lê SÓ sistema/config — antes baixava a coleção 'sistema' inteira, o que ficaria pesado
+// no login com os documentos do menu Orçamentos (base de matérias-primas, orçamentos salvos).
+window._fbLoadCfg=()=>getDoc(doc(db,'sistema','config')).then(s=>s.exists()?s.data():null);
 window._fbWatchCfg=(cb)=>onSnapshot(doc(db,'sistema','config'),snap=>{if(snap.exists()){_fbGuardarBase('sistema','config',snap.data());cb(snap.data());}});
 // Escrita ATÔMICA de um campo aninhado só (2026-08-04) — usada por setPagConf() pra confirmar
 // recebimento/comissão sem correr risco de perder confirmações de outras parcelas. Motivo:
@@ -5779,6 +5781,7 @@ window._fbDeleteField=()=>deleteField();
 window._fbOrcWatch=(nome,cb)=>onSnapshot(doc(db,'sistema',nome),s=>cb(s.exists()?(s.data().itens||{}):{}),e=>console.warn('orc watch',e));
 window._fbOrcSalvar=(nome,id,entrada)=>setDoc(doc(db,'sistema',nome),{itens:{[id]:entrada}},{merge:true});
 window._fbOrcExcluir=(nome,id)=>updateDoc(doc(db,'sistema',nome),new FieldPath('itens',id),deleteField());
+window._fbOrcSubstituir=(nome,itens)=>setDoc(doc(db,'sistema',nome),{itens});
 const _BACKUP_COLS=['sistema','pedidos','crmEmpresas','prospEmpresas','contasPagar','contasReceberManual','simReservas','lixeira','rhPonto','rhAtestadosAnexos','dreCongelado'];
 window._fbBackupLerAtual=async()=>{
   const out={geradoEm:new Date().toISOString(),origem:'navegador',colecoes:{}};
@@ -53093,7 +53096,7 @@ _mesxAgendar();
 //  • todo o código deste menu vive neste bloco, prefixo orcx/ORCX — não altera nenhuma tela antiga;
 //  • dados em documento PRÓPRIO: sistema/orcamentosOperacionais (campo itens{id:...}), nunca em
 //    sistema/config, pedidos ou financeiro;
-//  • menu visível só pra ADMINISTRADOR nesta fase (teste antes de liberar).
+//  • menu visível pra COMERCIAL vendedor/orçamentista e administrador (ver _orcxAcesso).
 // CÁLCULO: cópia fiel de calcularCustosOperacionais() do sistema antigo — mesmas tabelas
 // (PAG2/FRETE/CADASTROS da planilha de parâmetros), mesmos índices e mesmas regras.
 const ORCX_ORIGEM={cidade:'Ponta Grossa',uf:'PR'};
@@ -53112,7 +53115,18 @@ const ORCX_DOC='orcamentosOperacionais';
 const ORCX_UFS=['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 let orcxEstado={resultado:null,editandoId:null,aba:'operacionais',salvos:{},watchOn:false,ultimaCidadeUF:'',geoTimer:null};
 
-function _orcxAcesso(){try{return _getUserCat().isAdm;}catch(e){return false;}}
+// Acesso (2026-09-30, a pedido do usuário: "deixe ele disponível apenas para usuários do comercial
+// categoria vendedor e orçamentista") — categoria COMERCIAL com tipo VENDEDOR ou ORCAMENTISTA
+// (cfg.comercialTipo[nome], definido no cadastro do usuário). Administrador continua vendo tudo.
+function _orcxAcesso(){
+  try{
+    const u=_getUserCat();if(u.isAdm)return true;
+    if(u.cat!=='COMERCIAL')return false;
+    const nome=(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
+    const tipo=(cfg.comercialTipo||{})[nome];
+    return tipo==='VENDEDOR'||tipo==='ORCAMENTISTA';
+  }catch(e){return false;}
+}
 function _orcxArred(v,d){const f=Math.pow(10,d);return Math.round(v*f)/f;}
 function _orcxBRL(v){return 'R$ '+(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function _orcxEsc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -53287,7 +53301,7 @@ function _orcxChips(id,opcoes,padrao){return `<input type="hidden" id="${id}" va
 function orcxMascaraMoeda(el){const d=String(el.value||'').replace(/\D/g,'');if(!d){el.value='';return;}const n=parseInt(d,10)/100;el.value=n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function _orcxInpMoeda(id,ph){return `<input class="fc no-upper" id="${id}" inputmode="numeric" placeholder="${ph||'0,00'}" oninput="orcxMascaraMoeda(this);orcxAoMudar()">`;}
 function _orcxCampo(label,html,hint,wrapId){return `<div class="fg"${wrapId?` id="${wrapId}"`:''}><label>${label}</label>${html}${hint?`<div class="orcx-hint">${hint}</div>`:''}</div>`;}
-function _orcxInp(id,ph,tipo,extra){return `<input class="fc no-upper" id="${id}" ${tipo?`type="${tipo}"`:''} placeholder="${ph||''}" oninput="orcxAoMudar()" ${extra||''}>`;}
+function _orcxInp(id,ph,tipo,extra){const temOninput=/oninput=/.test(extra||'');return `<input class="fc no-upper" id="${id}" ${tipo?`type="${tipo}"`:''} placeholder="${ph||''}" ${temOninput?'':'oninput="orcxAoMudar()"'} ${extra||''}>`;}
 function _orcxContainer(){
   let c=document.getElementById('sec-cat-ORCAMENTOS');
   if(!c){
@@ -53296,38 +53310,11 @@ function _orcxContainer(){
   }
   return c;
 }
-function orcxRender(){
-  _orcxCss();
-  const c=_orcxContainer();if(!c)return;
-  if(!_orcxAcesso()){c.innerHTML='<div class="dash-card" style="color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
-  const aba=orcxEstado.aba;
-  const nSalvos=Object.keys(orcxEstado.salvos||{}).length;
-  c.innerHTML=`
-    <div class="dash-tabs" style="margin-bottom:14px">
-      <button class="dash-tab ${aba==='operacionais'?'active':''}" onclick="orcxSetAba('operacionais')" type="button">🚚 Custos operacionais</button>
-      <button class="dash-tab ${aba==='salvos'?'active':''}" onclick="orcxSetAba('salvos')" type="button">🗂️ Operacionais salvos${nSalvos?` (${nSalvos})`:''}</button>
-    </div>
-    <div id="orcx-aba-operacionais" style="display:${aba==='operacionais'?'':'none'}">${_orcxHtmlOperacionais()}</div>
-    <div id="orcx-aba-salvos" style="display:${aba==='salvos'?'':'none'}"><div class="dash-card" id="orcx-salvos-body"></div></div>`;
-  if(aba==='operacionais'){orcxAtualizarVisibilidade();orcxRenderResultado();}
-  else orcxRenderSalvos();
-}
 function _orcxHtmlOperacionais(){
-  const ed=orcxEstado.editandoId&&orcxEstado.salvos[orcxEstado.editandoId];
   return `
-  ${ed?`<div class="orcx-editando">✏️ Editando o cálculo salvo de ${_orcxEsc(ed.empresa||'—')} (${_orcxEsc(ed.dataDisplay||'')}) — "Salvar" atualiza esse mesmo registro. <button type="button" class="dash-btn-conf" style="background:#94a3b8;margin-left:auto" onclick="orcxNovo()">Cancelar edição</button></div>`:''}
   <div class="orcx-grid">
     <div class="dash-card" style="margin:0">
-      <div class="dash-sec-title">🏢 Dados do projeto</div>
-      <div class="orcx-campos">
-        ${_orcxCampo('Empresa',_orcxInp('orcx-empresa','Nome da empresa'))}
-        ${_orcxCampo('Solicitante',_orcxInp('orcx-solicitante','Quem pediu'))}
-        ${_orcxCampo('Cidade de instalação',_orcxInp('orcx-cidade','Ex.: Curitiba','','oninput="orcxAoMudar();orcxAgendarDistancia()"'))}
-        ${_orcxCampo('UF',`<select class="fc" id="orcx-uf" onchange="orcxAoMudar();orcxAgendarDistancia()"><option value="">UF</option>${ORCX_UFS.map(u=>`<option>${u}</option>`).join('')}</select>`)}
-        ${_orcxCampo('Job / descrição',_orcxInp('orcx-job','Opcional'))}
-        ${_orcxCampo('Nº do pedido',_orcxInp('orcx-pedido','Opcional'))}
-      </div>
-      <div class="orcx-bloco">
+      <div>
         <div class="orcx-bloco-t">📍 Distância e pedido</div>
         <div class="orcx-campos">
           ${_orcxCampo('Distância (só ida) — km',_orcxInp('orcx-distancia','0','number','min="0"'),`<span id="orcx-dist-status">Calculada sozinha a partir da cidade/UF.</span> <a href="javascript:void(0)" onclick="orcxCalcularDistancia(true)">Recalcular</a>`)}
@@ -53365,13 +53352,10 @@ function _orcxHtmlOperacionais(){
       </div>
     </div>
     <div class="dash-card orcx-res" style="margin:0">
-      <div class="dash-sec-title">📊 Resultado</div>
+      <div class="dash-sec-title">📊 Custos operacionais</div>
       <div id="orcx-resultado"></div>
       <div class="orcx-acoes">
-        <button type="button" class="dash-btn-conf" style="background:#1a2b5e" onclick="orcxSalvar()">💾 Salvar</button>
-        <button type="button" class="dash-btn-conf" style="background:#dc2626" onclick="orcxPdf()">📄 PDF</button>
         <button type="button" class="dash-btn-conf" style="background:#0f766e" onclick="orcxCopiarResumo()">📋 Copiar resumo</button>
-        <button type="button" class="dash-btn-conf" style="background:#94a3b8" onclick="orcxNovo()">✕ Novo cálculo</button>
       </div>
     </div>
   </div>`;
@@ -53404,7 +53388,6 @@ let _orcxRascTimer=null;
 function _orcxGuardarRascunho(){clearTimeout(_orcxRascTimer);_orcxRascTimer=setTimeout(()=>{try{if(!document.getElementById('orcx-empresa'))return;localStorage.setItem(ORCX_LS_RASCUNHO,JSON.stringify({campos:_orcxColetar(),editandoId:orcxEstado.editandoId||null,em:Date.now()}));}catch(e){}},400);}
 function _orcxLerRascunho(){try{return JSON.parse(localStorage.getItem(ORCX_LS_RASCUNHO)||'null');}catch(e){return null;}}
 function _orcxLimparRascunho(){try{localStorage.removeItem(ORCX_LS_RASCUNHO);}catch(e){}}
-function orcxAoMudar(){orcxAtualizarVisibilidade();orcxCalcular();_orcxGuardarRascunho();}
 function orcxCopiarResumo(){
   const r=orcxEstado.resultado;if(!r||!r.itens.length){toast('Preencha os dados antes de copiar','terr');return;}
   const emp=_orcxVal('orcx-empresa').trim(),loc=[_orcxVal('orcx-cidade').trim(),_orcxVal('orcx-uf')].filter(Boolean).join('/');
@@ -53426,90 +53409,766 @@ function orcxRenderResultado(){
     <div class="orcx-total"><div><small>Total de custos operacionais</small>Instalação, frete, mobilização e extras</div><b>${_orcxBRL(r.total)}</b></div>
     <div class="orcx-info"><span>📍 Região: <b>${r.regiao||'—'}</b> (índice ${r.indiceRegiao}×)</span><span>🕒 Prazo estimado do frete dedicado: <b>${r.prazoDedicado||'—'}</b> ${r.prazoDedicado===1?'dia':'dias'}</span><span>🕒 Prazo estimado do frete fracionado: <b>${r.prazoFracionado||'—'}</b> ${r.prazoFracionado===1?'dia':'dias'}</span></div>`;
 }
-function orcxSetAba(a){if(orcxEstado.aba==='operacionais'&&document.getElementById('orcx-empresa'))orcxEstado._rascunho=_orcxColetar();orcxEstado.aba=a;orcxRender();if(a==='operacionais'&&orcxEstado._rascunho)_orcxRestaurar(orcxEstado._rascunho);}
 function _orcxColetar(){const d={};ORCX_CAMPOS.forEach(id=>{const el=document.getElementById(id);if(el)d[id]=el.value;});return d;}
 function _orcxRestaurar(d){if(!d)return;orcxEstado.elevExtra=1;ORCX_CAMPOS.forEach(id=>{const el=document.getElementById(id);if(el&&d[id]!==undefined)el.value=d[id];});
   // salvos antigos gravaram "SIM"/"NÃO" e máscara pode faltar — normaliza os campos de dinheiro
   ['orcx-valor-pedido','orcx-fracionado','orcx-el-pta-1','orcx-el-pta-2','orcx-el-pta-3'].forEach(id=>{const el=document.getElementById(id);if(el&&el.value&&el.value.indexOf(',')<0){const n=parseFloat(el.value);if(!isNaN(n))el.value=n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}});orcxEstado.ultimaCidadeUF=((d['orcx-cidade']||'').toLowerCase()+'|'+(d['orcx-uf']||''));orcxAoMudar();}
-function orcxNovo(){orcxEstado.editandoId=null;orcxEstado.resultado=null;orcxEstado._rascunho=null;orcxEstado.ultimaCidadeUF='';orcxEstado.elevExtra=1;orcxEstado.aba='operacionais';_orcxLimparRascunho();orcxRender();}
-function orcxDuplicar(id){const x=orcxEstado.salvos[id];if(!x)return;orcxEstado.editandoId=null;orcxEstado.aba='operacionais';orcxEstado._rascunho=null;orcxRender();_orcxRestaurar(x.campos);toast('Cópia aberta — ajuste o que precisar e salve como um cálculo novo','tinf');}
-
-// ── Salvar / listar (documento próprio: sistema/orcamentosOperacionais) ──
-function _orcxWatch(){
-  if(orcxEstado.watchOn||!window._fbOrcWatch)return;
-  orcxEstado.watchOn=true;
-  window._fbOrcWatch(ORCX_DOC,itens=>{orcxEstado.salvos=itens||{};if(currentSection==='cat:ORCAMENTOS'&&orcxEstado.aba==='salvos')orcxRenderSalvos();});
-}
-async function orcxSalvar(){
-  const r=orcxEstado.resultado;
-  if(!r||!r.itens.length){toast('Preencha os dados antes de salvar','terr');return;}
-  if(!window._fbOrcSalvar){toast('Não foi possível salvar agora (conexão)','terr');return;}
-  const id=orcxEstado.editandoId||('op_'+Date.now());
-  const antigo=orcxEstado.salvos[id]||{};
-  const agora=new Date();
-  const entrada={id,dataSalvo:antigo.dataSalvo||agora.toISOString(),dataDisplay:antigo.dataDisplay||agora.toLocaleDateString('pt-BR'),atualizadoEm:agora.toISOString(),
-    por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',empresa:_orcxVal('orcx-empresa').trim(),solicitante:_orcxVal('orcx-solicitante').trim(),cidade:_orcxVal('orcx-cidade').trim(),estado:_orcxVal('orcx-uf'),job:_orcxVal('orcx-job').trim(),pedido:_orcxVal('orcx-pedido').trim(),
-    campos:_orcxColetar(),resultado:JSON.parse(JSON.stringify(r)),totalNum:r.total||0};
-  try{await window._fbOrcSalvar(ORCX_DOC,id,entrada);orcxEstado.editandoId=id;orcxEstado.salvos[id]=entrada;toast(antigo.id?'Cálculo atualizado 💾':'Cálculo salvo 💾','tok');orcxRender();_orcxRestaurar(entrada.campos);}
-  catch(e){console.error('orcx salvar',e);toast('Erro ao salvar: '+(e.message||e),'terr');}
-}
-function orcxRenderSalvos(){
-  const b=document.getElementById('orcx-salvos-body');if(!b)return;
-  const f=orcxEstado.filtro||{};
-  let lista=Object.values(orcxEstado.salvos||{}).sort((a,b)=>String(b.dataSalvo).localeCompare(String(a.dataSalvo)));
-  const q=(f.busca||'').trim().toUpperCase();
-  if(q)lista=lista.filter(x=>[x.empresa,x.solicitante,x.cidade,x.job,x.pedido].join(' ').toUpperCase().includes(q));
-  // Filtro de mês PADRÃO do sistema (mês + ano + "Todos os meses" — ver _MESX_SELECTS)
-  const anoF=f.ano||String(new Date().getFullYear()),mesF=f.mes||'';
-  const _dLocal=iso=>{const d=new Date(iso);return isNaN(d)?null:d;};
-  lista=lista.filter(x=>{const d=_dLocal(x.dataSalvo);if(!d)return true;if(String(d.getFullYear())!==anoF)return false;return !mesF||String(d.getMonth()+1)===mesF;});
-  const anosDisp=[...new Set([new Date().getFullYear(),...Object.values(orcxEstado.salvos||{}).map(x=>{const d=_dLocal(x.dataSalvo);return d?d.getFullYear():null;}).filter(Boolean)])].sort((a,b)=>b-a);
-  b.innerHTML=`
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-      <input class="fc no-upper" style="flex:1;min-width:200px" placeholder="🔍 Buscar por empresa, cidade, job ou pedido" value="${_orcxEsc(f.busca||'')}" oninput="orcxFiltro('busca',this.value)">
-      <select id="orcx-fil-mes" class="fc" style="width:auto" onchange="orcxFiltro('mes',this.value)"><option value="">Todos os meses</option>${_MESX_MESES_ORCX().map((m,i)=>`<option value="${i+1}" ${mesF===String(i+1)?'selected':''}>${m}</option>`).join('')}</select>
-      <select id="orcx-fil-ano" class="fc" style="width:auto" onchange="orcxFiltro('ano',this.value)">${anosDisp.map(a=>`<option ${String(a)===anoF?'selected':''}>${a}</option>`).join('')}</select>
-    </div>
-    ${lista.length?`<div style="overflow-x:auto"><table class="dash-table"><thead><tr><th>Data</th><th>Empresa</th><th>Cidade/UF</th><th>Job / pedido</th><th>Por</th><th style="text-align:right">Total</th><th>Ações</th></tr></thead><tbody>
-      ${lista.map(x=>`<tr><td style="white-space:nowrap">${_orcxEsc(x.dataDisplay||'')}</td><td style="font-weight:700">${_orcxEsc(x.empresa||'—')}${x.solicitante?`<div style="font-size:.68rem;color:#64748b;font-weight:400">${_orcxEsc(x.solicitante)}</div>`:''}</td><td>${_orcxEsc([x.cidade,x.estado].filter(Boolean).join('/')||'—')}</td><td>${_orcxEsc([x.job,x.pedido].filter(Boolean).join(' · ')||'—')}</td><td style="font-size:.74rem;color:#64748b">${_orcxEsc(x.por||'—')}</td><td style="text-align:right;font-weight:800;color:#1a2b5e;white-space:nowrap">${_orcxBRL(x.totalNum)}</td>
-      <td style="white-space:nowrap"><button type="button" class="dash-btn-conf" style="background:#1a2b5e" onclick="orcxAbrirSalvo('${x.id}')">✏️ Abrir</button> <button type="button" class="dash-btn-conf" style="background:#0f766e" onclick="orcxDuplicar('${x.id}')" title="Abrir uma cópia pra fazer um cálculo parecido">⧉ Duplicar</button> <button type="button" class="dash-btn-conf" style="background:#dc2626" onclick="orcxPdf('${x.id}')">📄 PDF</button> <button type="button" class="dash-btn-conf" style="background:#fff;color:#dc2626;border:1px solid #fecaca" onclick="orcxExcluir('${x.id}')">🗑️</button></td></tr>`).join('')}
-    </tbody></table></div>`:`<div class="orcx-vazio">🗂️<br>${Object.keys(orcxEstado.salvos||{}).length?'Nenhum cálculo com esses filtros.':'Nenhum cálculo salvo ainda. Use "💾 Salvar" na aba Custos operacionais.'}</div>`}`;
-}
 function _MESX_MESES_ORCX(){return['JANEIRO','FEVEREIRO','MARÇO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO','SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'];}
 try{if(typeof _MESX_SELECTS!=='undefined'&&_MESX_SELECTS.indexOf('orcx-fil-mes')<0)_MESX_SELECTS.push('orcx-fil-mes');}catch(e){}
-function orcxFiltro(k,v){orcxEstado.filtro=orcxEstado.filtro||{};orcxEstado.filtro[k]=v;orcxRenderSalvos();const inp=document.querySelector('#orcx-salvos-body input.fc');if(k==='busca'&&inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);}}
-function orcxAbrirSalvo(id){const x=orcxEstado.salvos[id];if(!x)return;orcxEstado.editandoId=id;orcxEstado.aba='operacionais';orcxEstado._rascunho=null;orcxRender();_orcxRestaurar(x.campos);}
-async function orcxExcluir(id){
-  const x=orcxEstado.salvos[id];if(!x)return;
-  if(!confirm(`Excluir o cálculo de ${x.empresa||'—'} (${x.dataDisplay||''})? Essa ação não pode ser desfeita.`))return;
-  try{await window._fbOrcExcluir(ORCX_DOC,id);delete orcxEstado.salvos[id];if(orcxEstado.editandoId===id)orcxEstado.editandoId=null;toast('Cálculo excluído','tok');orcxRenderSalvos();}
-  catch(e){console.error('orcx excluir',e);toast('Erro ao excluir: '+(e.message||e),'terr');}
+
+// ════════════════════════════════════════════════════════════════════════════════════════════
+// ORÇAMENTOS — ETAPA 1 (2026-09-30): lista única de orçamentos + editor com abas
+// (Projeto · Produtos · Operacionais · Resumo) + Letra Caixa (cópia fiel do calcular() do sistema
+// Orçamentação Granda) + totais sempre visíveis. A pedido do usuário: "faça pra nós vermos o que dá,
+// manda ver, deixa bonito". Tipos de orçamento: 'completo' (produto + operacionais), 'produto',
+// 'operacionais'. Dados: documento PRÓPRIO sistema/orcamentos (itens{id:...}); preços dos
+// materiais em sistema/orcamentosConfig. Os cálculos antigos de sistema/orcamentosOperacionais
+// aparecem na lista como "Só operacionais" e migram pro documento novo quando salvos de novo.
+// ════════════════════════════════════════════════════════════════════════════════════════════
+const ORC2_DOC='orcamentos',ORC2_DOC_CFG='orcamentosConfig';
+const ORC2_TIPOS={completo:{l:'Produto e instalação',ic:'📦🚚',cls:'t1'},produto:{l:'Só produto',ic:'📦',cls:'t2'},operacionais:{l:'Só operacionais',ic:'🚚',cls:'t3'}};
+const ORC2_PLANILHA_URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vTQxUZECa-dH1Tc53pILYqTfBbdOWBb2lANWvFJxunGiVddyg5egJZdUVwu4cR2fA/pub?gid=184568639&single=true&output=csv';
+// Preços base = os mesmos que estão no sistema antigo hoje (campos "Preços dos Materiais").
+const ORC2_PRECOS_PADRAO={galv20:194.81,galv26:100,cant:37,paraf:0.03,tinta:150,primer:12.5,acm122:350,acm150:405,led:2.64,r35:34.24,r60:68.89,r100:88.17,r150:189.92,r200:106.58,pvc:149,acril2:218.53,acril3:730.06,poly:1980,metalon:52.77,galvimax:160,pvc10:149,pvc20:249};
+const ORC2_PRECOS_ROTULO={galv20:'Chapa galv. 20 (3×1,2m)',galv26:'Chapa galv. 26 (2×1,2m)',cant:'Cantoneira al. 25×25 1,5mm (6m)',paraf:'Parafuso brocante 4,2×13mm',tinta:'Tinta PU (por litro)',primer:'Wash primer c/ cat. (300ml)',acm122:'ACM branco fosco 5×1,22m',acm150:'ACM branco fosco 5×1,50m',led:'Módulo LED 6.500K 0,72W (Argia)',r35:'Reator 35W IP67',r60:'Reator 60W IP67',r100:'Reator 100W IP67',r150:'Reator 150W IP67',r200:'Reator 200W IP67',pvc:'PVC expandido 10mm (frente acrílico)',acril2:'Acrílico leitoso 3mm 2×1m',acril3:'Acrílico leitoso 3mm 3×2m',poly:'Policarbonato compacto 4mm 6×2m',metalon:'Metalon 20×30mm (barra 6m)',galvimax:'Tinta Galvimax preto (galão 3,6L)',pvc10:'PVC expandido 10mm (letra PVC)',pvc20:'PVC expandido 20mm (letra PVC)'};
+// Código da planilha de matéria-prima → preço (mesmo CODIGO_MAP do sistema antigo). A tinta (1628)
+// fica de fora de propósito: na planilha é o preço da LATA de 0,9L, e aqui o cálculo usa preço por litro.
+const ORC2_CODIGO_PRECO={1790:'galv20',1792:'galv26',1808:'cant',1253:'paraf',1676:'primer',1060:'acm122',1062:'acm150',1402:'led',1433:'r35',1434:'r60',1430:'r100',1431:'r150',1432:'r200',1826:['pvc10','pvc'],1827:'pvc20',1103:'acril2',1107:'acril3',1799:'poly',1471:'metalon',1670:'galvimax'};
+const ORC2_ADESIVOS=[[1124,'ADESIVO AMADEIRADO ALLTAK WOOD PAMPLONA 1220MM - ALLTAK'],[1125,'ADESIVO AMARELO MEDIO GOLD MAX 1220MM - IMPRIMAX'],[1126,'ADESIVO AZUL GENTIAN 1260MM 651 098 - ORACAL'],[1127,'ADESIVO AZUL KING BLUE 1260MM 651 049 - ORACAL'],[1128,'ADESIVO AZUL MARINHO GOLD MAX 1220MM - IMPRIMAX'],[1129,'ADESIVO BEGE SILVER MAX 1220MM - IMPRIMAX'],[1130,'ADESIVO BRANCO BLACKOUT 1270MM'],[1131,'ADESIVO BRANCO GOLD MAX 1220MM - IMPRIMAX'],[1132,'ADESIVO BRANCO TRANSLUCIDO 1220MM'],[1133,'ADESIVO CHOCOLATE GOLD MAX 1220MM - IMPRIMAX'],[1134,'ADESIVO CINZA ESCURO GOLD MAX - IMPRIMAX'],[1135,'ADESIVO DARK GREEN 1260MM 651 060 - ORACAL'],[1136,'ADESIVO DOURADO SILVER MAX - IMPRIMAX'],[2094,'ADESIVO IMPRESSO - TERCEIRIZACAO'],[1137,'ADESIVO JATEADO TRANSPARENTE 1270MM'],[1138,'ADESIVO JATEADO TRANSPARENTE COLOR MAX 1520MM - IMPRIMAX'],[1139,'ADESIVO LARANJA FOSCO MAX LUX 1220MM - IMPRIMAX'],[1140,'ADESIVO LARANJA GOLD MAX 1220MM - IMPRIMAX'],[1141,'ADESIVO LARANJA LIGHT ORANGE 1260MM 651 036 - ORACAL'],[1145,'ADESIVO PRATA GOLDMAX 1,22M'],[1146,'ADESIVO PRETO BRILHANTE 1220MM - IMPRIMAX'],[1147,'ADESIVO PRETO FOSCO GOLD MAX 1220MM - IMPRIMAX'],[1148,'ADESIVO REFLETIVO CORES DIVERSAS'],[1149,'ADESIVO ROSA PINK GOLD MAX - IMPRIMAX'],[1150,'ADESIVO ROXO SILVERMAX 1220MM - IMPRIMAX'],[1151,'ADESIVO TRANSPARENTE 1220MM'],[1152,'ADESIVO VERDE BANDEIRA MAX LUX - IMPRIMAX'],[1153,'ADESIVO VERMELHO 1260MM 651 031 - ORACAL'],[1154,'ADESIVO VERMELHO FOGO GOLD MAX 1220MM - IMPRIMAX'],[1144,'ADESIVO VERMELHO FOGO MAX LUX 1220MM - IMPRIMAX'],[1143,'ADESIVO VINIL INTENSE BLUE TRANSLUCIDO 1220MM 4100 327 - ARLON'],[2039,'ADESIVO VIOLETA GOLD MAX 1220MM - IMPRIMAX'],[1142,'ADESIVO YELLOW GREEN 1260MM 651 064 - ORACAL']];
+const ORC2_MODELOS=[{k:'galv',l:'Sem iluminação',sub:'Galvanizada ou ACM'},{k:'halo',l:'Efeito halo',sub:'LED atrás'},{k:'acril',l:'Frente acrílico',sub:'Iluminação interna LED'},{k:'pvc10',l:'PVC 10mm',sub:'Pintura PU'},{k:'pvc20',l:'PVC 20mm',sub:'Pintura PU'}];
+const ORC2_LS_RASC='gcore_orc2_rascunho',ORC2_LS_CMV='gcore_orc2_cmv';
+let orc2={view:'lista',doc:null,aba:'projeto',salvos:{},watchOn:false,cfg:{precos:{},cmvPadrao:30},cfgOn:false,adesivoPrecos:{},planilhaStatus:'',letra:null,letraEditId:null,filtro:{}};
+
+// ── utilidades ──
+function _orc2Cmv(){const v=parseFloat(orc2.cfg&&orc2.cfg.cmvPadrao);return(v>0&&v<=100)?v:30;}
+function _orc2CeilDec(v){return Math.ceil(v*10)/10;}
+function _orc2Qtd(v,d){return(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function _orc2PrecoFinal(custo,cmv){const c=(cmv>0&&cmv<=100)?cmv:_orc2Cmv();return custo/(c/100);}
+function _orc2Num(v){return parseFloat(String(v==null?'':v).replace(',','.'))||0;}
+function _orc2Id(){return 'orc_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+
+// ── LETRA CAIXA — cópia fiel do calcular() do sistema antigo (mesmas fórmulas e arredondamentos) ──
+function orc2CalcLetra(p,P,adesivoPrecos){
+  const tipo=p.modelo,largura=_orc2Num(p.largura),alturaVal=_orc2Num(p.altura),perimetro=_orc2Num(p.perimetro),caixaM=_orc2Num(p.caixa);
+  const isPVC=(tipo==='pvc10'||tipo==='pvc20');
+  if(largura<=0||alturaVal<=0||(!isPVC&&(perimetro<=0||caixaM<=0)))return{ok:false,items:[],totalMat:0};
+  const area=largura*alturaVal,usaACM=alturaVal>1.20,usaEstr=alturaVal>2.00;
+  const arred=(v,d)=>_orcxArred(v,d),ceilDec=_orc2CeilDec,fmtQtd=_orc2Qtd,fmtBRL=_orcxBRL;
+  const items=[];let totalMat=0,areaChapasTotal=0;
+  const push=(icon,name,detail,qty,cost)=>{items.push({icon,name,detail,qty,cost});totalMat+=cost;};
+  if(isPVC){
+    const isPVC20=tipo==='pvc20',pvcPreco=isPVC20?P.pvc20:P.pvc10,pvcNome=isPVC20?'PVC Expandido 20mm (1,22×2,44m)':'PVC Expandido 10mm (1,22×2,44m)';
+    const areaChPVC=2.44*1.22,qPVC=ceilDec(area/areaChPVC);areaChapasTotal+=qPVC*areaChPVC;
+    push('🟦',pvcNome,fmtQtd(area,3)+' m² ÷ '+fmtQtd(areaChPVC,3)+' m² → '+fmtQtd(qPVC,1)+' ch.',fmtQtd(qPVC,1)+' ch.',qPVC*pvcPreco);
+    const lt=arred(areaChapasTotal*0.20,2);push('🎨','Tinta PU (pintura externa)',fmtQtd(areaChapasTotal,2)+' m² × 0,20 L/m² → '+fmtQtd(lt,2)+' L',fmtQtd(lt,2)+' L',lt*P.tinta);
+    const qPr=Math.ceil(lt/0.30);push('🧪','Wash Primer c/ Cat. (300ml)',fmtQtd(lt,2)+' L tinta ÷ 0,30 → '+qPr+' frasco(s)',qPr+' fr.',qPr*P.primer);
+    const ins=arred(totalMat*0.10,2);push('🔩','Insumo para Fixação','10% do custo dos materiais → '+fmtBRL(ins),'1 vb.',ins);
+  }else{
+    if(usaACM){
+      const areaFace=largura*alturaVal,t122=areaFace/(5*1.22),t150=areaFace/(5*1.50),r122=ceilDec(t122),r150=ceilDec(t150),u122=t122/r122,u150=t150/r150;
+      if(u122>=u150){areaChapasTotal+=r122*5*1.22;push('🔶','ACM Branco Fosco 5×1,22m',fmtQtd(areaFace,3)+' m² ÷ 6,1 → '+fmtQtd(r122,1)+' ch. (aprov. '+Math.round(u122*100)+'%)',fmtQtd(r122,1)+' ch.',r122*P.acm122);}
+      else{areaChapasTotal+=r150*5*1.50;push('🔶','ACM Branco Fosco 5×1,50m',fmtQtd(areaFace,3)+' m² ÷ 7,5 → '+fmtQtd(r150,1)+' ch. (aprov. '+Math.round(u150*100)+'%)',fmtQtd(r150,1)+' ch.',r150*P.acm150);}
+      const lt122=(perimetro/5)*caixaM/1.22,lt150=(perimetro/5)*caixaM/1.50,lr122=ceilDec(lt122),lr150=ceilDec(lt150);
+      const lu122=caixaM<=1.22?lt122/lr122:0,lu150=lt150/lr150;
+      if(lu122>=lu150){areaChapasTotal+=lr122*5*1.22;push('🔶','ACM Branco Fosco 5×1,22m (lateral)',fmtQtd(perimetro,2)+'m ÷ 5 × '+fmtQtd(caixaM,2)+'m ÷ 1,22 → '+fmtQtd(lr122,1)+' ch. (aprov. '+Math.round(lu122*100)+'%)',fmtQtd(lr122,1)+' ch.',lr122*P.acm122);}
+      else{areaChapasTotal+=lr150*5*1.50;push('🔶','ACM Branco Fosco 5×1,50m (lateral)',fmtQtd(perimetro,2)+'m ÷ 5 × '+fmtQtd(caixaM,2)+'m ÷ 1,50 → '+fmtQtd(lr150,1)+' ch. (aprov. '+Math.round(lu150*100)+'%)',fmtQtd(lr150,1)+' ch.',lr150*P.acm150);}
+      const qCant=Math.ceil(perimetro/6);push('📐','Cantoneira Al. 25×25 1,5mm (6m)','Fixação interna — '+fmtQtd(perimetro,2)+'m ÷ 6m → '+qCant+' barra(s)',qCant+' barra(s)',qCant*P.cant);
+    }else{
+      const aF=largura*alturaVal,q20=ceilDec(aF/(3*1.20));areaChapasTotal+=q20*3*1.20;
+      push('🔩','Chapa Galv. 20 (face)',fmtQtd(aF,3)+' m² ÷ 3,6 → '+fmtQtd(q20,1)+' ch.',fmtQtd(q20,1)+' ch.',q20*P.galv20);
+      const q26=ceilDec((perimetro/2)*caixaM/1.20);areaChapasTotal+=q26*2*1.20;
+      push('🔩','Chapa Galv. 26 (lateral caixa)',fmtQtd(perimetro,2)+'m ÷ 2 × '+fmtQtd(caixaM,2)+'m ÷ 1,20 → '+fmtQtd(q26,1)+' ch.',fmtQtd(q26,1)+' ch.',q26*P.galv26);
+      if(tipo==='galv'){const m=perimetro*0.20,q=ceilDec(m/6);push('📐','Cantoneira Al. 25×25 1,55mm (6m)',fmtQtd(perimetro,2)+'m × 20% = '+fmtQtd(m,2)+'m ÷ 6m → '+fmtQtd(q,1)+' barra(s)',fmtQtd(q,1)+' barra(s)',q*P.cant);}
+    }
+    const qParaf=Math.ceil(perimetro*20);push('🔧','Parafuso Brocante 4,2×13mm',qParaf+' un. (20/m perímetro)',qParaf+' un.',qParaf*P.paraf);
+    const lt=arred(areaChapasTotal*0.20,2);push('🎨','Tinta PU (pintura externa)',fmtQtd(areaChapasTotal,2)+' m² × 0,20 L/m² → '+fmtQtd(lt,2)+' L',fmtQtd(lt,2)+' L',lt*P.tinta);
+    const qPr=Math.ceil(lt/0.30);push('🧪','Wash Primer c/ Cat. (300ml)',fmtQtd(lt,2)+' L tinta ÷ 0,30 → '+qPr+' frasco(s)',qPr+' fr.',qPr*P.primer);
+    const reatores=[{label:'Reator 35W',watts:35,preco:P.r35},{label:'Reator 60W',watts:60,preco:P.r60},{label:'Reator 100W',watts:100,preco:P.r100},{label:'Reator 150W',watts:150,preco:P.r150},{label:'Reator 200W',watts:200,preco:P.r200}];
+    const melhorReator=pot=>{let m=null;for(const op of reatores){const qty=Math.ceil(pot/op.watts),custo=qty*op.preco;if(!m||custo<m.custo)m={label:op.label,watts:op.watts,qty,custo};}return m;};
+    if(tipo==='halo'){
+      const qLed=Math.ceil(perimetro/0.12);push('💡','Módulo LED 6.500K 3P 12V 0,72W (Argia)',fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.',qLed+' un.',qLed*P.led);
+      const pot=arred(qLed*0.72*1.20,1),mr=melhorReator(pot);push('⚡',mr.label+' IP67 12V',fmtQtd(pot,1)+'W (c/ 20% margem) ÷ '+mr.watts+'W → '+mr.qty+' un.',mr.qty+' un.',mr.custo);
+    }
+    if(tipo==='acril'){
+      const aCh=2.44*1.22,qPVC=ceilDec(area/aCh);push('🔷','PVC Expandido 10mm (1,22×2,44m)',fmtQtd(area,3)+' m² ÷ '+fmtQtd(aCh,3)+' m² → '+fmtQtd(qPVC,1)+' ch.',fmtQtd(qPVC,1)+' ch.',qPVC*P.pvc);
+      const ops=[{nome:'Acrílico Leitoso 3mm 2×1m',areaChapa:2,preco:P.acril2},{nome:'Acrílico Leitoso 3mm 3×2m',areaChapa:6,preco:P.acril3}];
+      if(area>2)ops.push({nome:'Policarbonato Compacto 4mm Branco 6×2m',areaChapa:12,preco:P.poly});
+      let mf=null;for(const op of ops){const qty=ceilDec(area/op.areaChapa),util=area/(qty*op.areaChapa),custo=qty*op.preco;if(!mf||util>mf.util)mf={nome:op.nome,areaChapa:op.areaChapa,qty,util,custo};}
+      push('🔵',mf.nome,fmtQtd(area,3)+' m² ÷ '+fmtQtd(mf.areaChapa,1)+' m² → '+fmtQtd(mf.qty,1)+' ch. (aprov. '+Math.round(mf.util*100)+'%)',fmtQtd(mf.qty,1)+' ch.',mf.custo);
+      const qLed=Math.ceil(perimetro/0.12);push('💡','Módulo LED 6.500K 3P 12V 0,72W (Argia)',fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.',qLed+' un.',qLed*P.led);
+      const pot=arred(qLed*0.72*1.20,1),mr=melhorReator(pot);push('⚡',mr.label+' IP67 12V',fmtQtd(pot,1)+'W (c/ 20% margem) ÷ '+mr.watts+'W → '+mr.qty+' un.',mr.qty+' un.',mr.custo);
+    }
+    if(usaEstr){
+      const qM=Math.ceil(area*1.2);push('🔩','Metalon 20×30mm (6m) — estrutura interna',qM+' barras (alt. > 2m)',qM+' barras',qM*P.metalon);
+      const qG=Math.max(1,Math.ceil(qM*6*0.5/(10*3.6)));push('🎨','Tinta Galvimax Preto (galão 3,6L)',qG+' galão(s)',qG+' gl.',qG*P.galvimax);
+    }
+  }
+  (p.adesivos||[]).forEach(ad=>{
+    const l=_orc2Num(ad.largura),a=_orc2Num(ad.altura);if(!ad.codigo||!(l>0)||!(a>0))return;
+    const m2=l*a,pr=(adesivoPrecos||{})[ad.codigo]||0,nome=(ORC2_ADESIVOS.find(x=>String(x[0])===String(ad.codigo))||[0,''])[1];
+    push('🏷️','Adesivo (frente) — '+nome,fmtQtd(l,2)+'m × '+fmtQtd(a,2)+'m = '+fmtQtd(m2,3)+' m²'+(pr>0?'':'  ⚠️ preço não carregado'),fmtQtd(m2,3)+' m²',m2*pr);
+  });
+  return{ok:true,items,totalMat,area,usaACM,usaEstr};
 }
-// ── PDF (sem emoji — jsPDF não desenha emoji) ──
-function orcxPdf(idSalvo){
-  const x=idSalvo?orcxEstado.salvos[idSalvo]:null;
-  const r=x?x.resultado:orcxEstado.resultado;
-  if(!r||!r.itens||!r.itens.length){toast('Preencha os dados antes de gerar o PDF','terr');return;}
+function orc2DescLetra(modelo,usaACM,items){
+  if(modelo==='pvc10')return'Letra Caixa em PVC Expandido 10mm com pintura PU';
+  if(modelo==='pvc20')return'Letra Caixa em PVC Expandido 20mm com pintura PU';
+  const mat=usaACM?'ACM 3mm':'aço galvanizado';
+  if(modelo==='galv')return'Letra Caixa em '+mat+' com pintura PU - sem iluminação';
+  if(modelo==='halo')return'Letra Caixa em '+mat+' com pintura PU - instalada espaçada da superfície e aplicado led atrás (efeito halo)';
+  const poli=(items||[]).some(i=>/Policarbonato/.test(i.name));
+  return'Letra Caixa em '+mat+' com pintura PU - frente em '+(poli?'policarbonato':'acrílico')+' com iluminação interna em led 6500k';
+}
+
+// ── Preços (config própria) e planilha de matéria-prima ──
+function _orc2CfgWatch(){
+  if(orc2.cfgOn||!window._fbOrcWatch)return;orc2.cfgOn=true;
+  window._fbOrcWatch(ORC2_DOC_CFG,itens=>{orc2.cfg={precos:(itens&&itens.precos&&itens.precos.valores)||{},cmvPadrao:(itens&&itens.geral&&itens.geral.cmvPadrao)||30,precosEm:itens&&itens.precos&&itens.precos.em,precosPor:itens&&itens.precos&&itens.precos.por};if(currentSection==='cat:ORCAMENTOS'&&orc2.view==='config')orc2Render();});
+}
+function _orc2ParseValorBR(s){s=String(s||'').replace(/[R$\s]/g,'');if(!s)return NaN;if(s.indexOf(',')>=0)s=s.replace(/\./g,'').replace(',','.');return parseFloat(s);}
+async function _orc2LerPlanilha(){
+  const r=await fetch(ORC2_PLANILHA_URL);if(!r.ok)throw new Error('HTTP '+r.status);
+  const txt=await r.text();const mapa={};
+  txt.trim().split('\n').forEach(l=>{const c=[];let cur='',q=false;for(const ch of l){if(ch==='"')q=!q;else if(ch===','&&!q){c.push(cur.trim());cur='';}else cur+=ch;}c.push(cur.trim());const cod=parseInt(c[0]);const v=_orc2ParseValorBR(c[3]);if(!isNaN(cod)&&v>0)mapa[cod]=v;});
+  return mapa;
+}
+async function _orc2CarregarAdesivos(){
+  if(_orc3Tem()){_orc3AplicarAdesivos();return;}
+  if(orc2._adesivosLidos)return;orc2._adesivosLidos=true;
+  try{const m=await _orc2LerPlanilha();ORC2_ADESIVOS.forEach(([c])=>{if(m[c])orc2.adesivoPrecos[c]=m[c];});orc2.planilhaStatus='ok';}
+  catch(e){console.warn('orc2 planilha',e);orc2.planilhaStatus='erro';orc2._adesivosLidos=false;}
+  if(orc2.view==='editor'&&orc2.aba==='produtos')orc2AtualizarPreviewLetra();
+}
+async function orc2AtualizarPrecosPlanilha(){
+  if(!_getUserCat().isAdm){toast('Só administrador altera a tabela de preços','terr');return;}
+  toast('Buscando preços da planilha…','tinf');
+  try{
+    const m=await _orc2LerPlanilha();const novos=Object.assign({},(orc2.cfg&&orc2.cfg.precos)||{});let n=0;
+    Object.entries(ORC2_CODIGO_PRECO).forEach(([cod,k])=>{const v=m[cod];if(!(v>0))return;[].concat(k).forEach(kk=>{novos[kk]=v;n++;});});
+    await window._fbOrcSalvar(ORC2_DOC_CFG,'precos',{valores:novos,em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—'});
+    toast(n+' preço(s) atualizados da planilha ✅','tok');
+  }catch(e){console.error(e);toast('Não consegui ler a planilha: '+(e.message||e),'terr');}
+}
+async function orc2SalvarPrecosManuais(){
+  if(!_getUserCat().isAdm){toast('Só administrador altera a tabela de preços','terr');return;}
+  const novos={};Object.keys(ORC2_PRECOS_PADRAO).forEach(k=>{const el=document.getElementById('orc2-preco-'+k);if(el){const v=_orc2ParseValorBR(el.value);if(v>0)novos[k]=v;}});
+  const cmv=parseFloat(document.getElementById('orc2-cmv-padrao')?.value);
+  try{
+    await window._fbOrcSalvar(ORC2_DOC_CFG,'precos',{valores:novos,em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—'});
+    if(cmv>0&&cmv<=100)await window._fbOrcSalvar(ORC2_DOC_CFG,'geral',{cmvPadrao:cmv});
+    toast('Tabela de preços salva 💾','tok');
+  }catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+}
+
+// ── Documento do orçamento ──
+function _orc2NovoDoc(tipo){return{id:null,tipo,projeto:{},produtos:[],operacionais:{campos:null,resultado:null,instConta:'SIM',freteConta:'SIM',vpAuto:true},criadoEm:null};}
+function orc2Totais(d){
+  d=d||orc2.doc;if(!d)return{custoProd:0,precoProd:0,op:0,opConta:0,total:0,custo:0};
+  const custoProd=(d.produtos||[]).reduce((s,p)=>s+(p.custo||0),0);
+  const precoProd=(d.produtos||[]).reduce((s,p)=>s+_orc2PrecoFinal(p.custo||0,p.cmv),0);
+  const r=d.operacionais&&d.operacionais.resultado;
+  const sub=k=>r?_orcxArred(r.itens.filter(i=>i.categoria===k).reduce((s,i)=>s+i.valor,0),2):0;
+  let opConta=0;
+  if(r){
+    if(d.tipo==='operacionais')opConta=r.total||0;
+    else{if(d.operacionais.instConta==='SIM')opConta+=sub('instalacao')+sub('mobilizacao')+sub('extras');if(d.operacionais.freteConta==='SIM')opConta+=sub('frete');}
+  }
+  return{custoProd,precoProd,op:r?r.total:0,opConta,total:precoProd+opConta,custo:custoProd+opConta,sub};
+}
+// Guarda o formulário dos operacionais no documento
+function _orc2PuxarOperacionais(){
+  if(!orc2.doc||!document.getElementById('orcx-distancia'))return;
+  const c=_orcxColetar();
+  orc2.doc.projeto={empresa:c['orcx-empresa']||'',solicitante:c['orcx-solicitante']||'',cidade:c['orcx-cidade']||'',uf:c['orcx-uf']||'',job:c['orcx-job']||'',pedido:c['orcx-pedido']||''};
+  orc2.doc.operacionais.campos=c;
+  orc2.doc.operacionais.resultado=orcxEstado.resultado?JSON.parse(JSON.stringify(orcxEstado.resultado)):null;
+}
+// Valor do pedido dos operacionais vem sozinho dos produtos (mesma regra do sistema antigo: soma do
+// CUSTO dos materiais) enquanto o usuário não digitar outro valor.
+function _orc2SincronizarValorPedido(){
+  const d=orc2.doc;if(!d||d.tipo==='operacionais'||!d.operacionais.vpAuto)return;
+  const el=document.getElementById('orcx-valor-pedido');if(!el)return;
+  const t=orc2Totais(d);
+  el.value=t.custoProd>0?t.custoProd.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
+  const m2=(d.produtos||[]).filter(p=>p.usaACM).reduce((s,p)=>s+(_orc2Num(p.largura)*_orc2Num(p.altura)),0);
+  const acm=document.getElementById('orcx-m2-acm');if(acm&&!d.operacionais.acmManual)acm.value=m2>0?m2.toFixed(2):'';
+}
+function _orc2GuardarRascunho(){try{if(orc2.view!=='editor'||!orc2.doc)return;_orc2PuxarOperacionais();localStorage.setItem(ORC2_LS_RASC,JSON.stringify({doc:orc2.doc,aba:orc2.aba,em:Date.now()}));}catch(e){}}
+function _orc2LimparRascunho(){try{localStorage.removeItem(ORC2_LS_RASC);}catch(e){}}
+
+// ── Tela ──
+function _orc2Css(){
+  if(document.getElementById('orc2-css'))return;
+  const st=document.createElement('style');st.id='orc2-css';
+  st.textContent=`
+  #sec-cat-ORCAMENTOS .orc2-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+  #sec-cat-ORCAMENTOS .orc2-top h3{margin:0;font-size:1rem;font-weight:800;color:#0f172a;flex:1}
+  #sec-cat-ORCAMENTOS .orc2-btn{border:none;border-radius:10px;padding:9px 16px;font-size:.8rem;font-weight:800;cursor:pointer;font-family:inherit;white-space:nowrap}
+  #sec-cat-ORCAMENTOS .orc2-btn.pri{background:#e91e63;color:#fff;box-shadow:0 4px 12px rgba(233,30,99,.25)}
+  #sec-cat-ORCAMENTOS .orc2-btn.sec{background:#fff;color:#1a2b5e;border:1.5px solid #cbd5e1}
+  #sec-cat-ORCAMENTOS .orc2-btn.nav{background:#1a2b5e;color:#fff}
+  #sec-cat-ORCAMENTOS .orc2-tag{font-size:.66rem;font-weight:800;padding:3px 9px;border-radius:20px;white-space:nowrap}
+  #sec-cat-ORCAMENTOS .orc2-tag.t1{background:#ede9fe;color:#5b21b6}#sec-cat-ORCAMENTOS .orc2-tag.t2{background:#dcfce7;color:#166534}#sec-cat-ORCAMENTOS .orc2-tag.t3{background:#fef3c7;color:#92400e}
+  #sec-cat-ORCAMENTOS .orc2-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;gap:14px;align-items:center;background:#fff;border:1.5px solid #e5e7eb;border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;transition:border-color .12s,box-shadow .12s}
+  #sec-cat-ORCAMENTOS .orc2-row:hover{border-color:#94a3b8;box-shadow:0 2px 8px rgba(15,23,42,.06)}
+  #sec-cat-ORCAMENTOS .orc2-row .n{font-weight:800;color:#0f172a;font-size:.88rem}
+  #sec-cat-ORCAMENTOS .orc2-row .m{font-size:.72rem;color:#64748b;margin-top:2px}
+  #sec-cat-ORCAMENTOS .orc2-row .v{font-weight:800;color:#1a2b5e;font-size:.95rem;white-space:nowrap;text-align:right}
+  #sec-cat-ORCAMENTOS .orc2-row .a{display:flex;gap:4px}
+  #sec-cat-ORCAMENTOS .orc2-row .a button{border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:5px 8px;cursor:pointer;font-size:.78rem}
+  #sec-cat-ORCAMENTOS .orc2-row .a button:hover{background:#f1f5f9}
+  @media(max-width:700px){#sec-cat-ORCAMENTOS .orc2-row{grid-template-columns:1fr auto}}
+  #sec-cat-ORCAMENTOS .orc2-escolha{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  #sec-cat-ORCAMENTOS .orc2-opt{background:#fff;border:2px solid #e5e7eb;border-radius:14px;padding:20px;cursor:pointer;text-align:left;font-family:inherit;transition:all .15s}
+  #sec-cat-ORCAMENTOS .orc2-opt:hover{border-color:#e91e63;transform:translateY(-2px);box-shadow:0 8px 20px rgba(15,23,42,.08)}
+  #sec-cat-ORCAMENTOS .orc2-opt .ic{font-size:1.7rem;margin-bottom:8px}
+  #sec-cat-ORCAMENTOS .orc2-opt b{display:block;font-size:.95rem;color:#0f172a;margin-bottom:6px}
+  #sec-cat-ORCAMENTOS .orc2-opt span{font-size:.76rem;color:#64748b;line-height:1.45}
+  #sec-cat-ORCAMENTOS .orc2-barra{position:sticky;top:0;z-index:20;background:#1a2b5e;color:#fff;border-radius:14px;padding:12px 16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:12px;box-shadow:0 8px 22px rgba(26,43,94,.22)}
+  #sec-cat-ORCAMENTOS .orc2-barra .t{flex:1;min-width:160px}
+  #sec-cat-ORCAMENTOS .orc2-barra .t b{display:block;font-size:.95rem}
+  #sec-cat-ORCAMENTOS .orc2-barra .t small{font-size:.7rem;opacity:.75}
+  #sec-cat-ORCAMENTOS .orc2-k{text-align:right}
+  #sec-cat-ORCAMENTOS .orc2-k small{display:block;font-size:.62rem;opacity:.75;text-transform:uppercase;letter-spacing:.4px;font-weight:700}
+  #sec-cat-ORCAMENTOS .orc2-k b{font-size:.95rem;white-space:nowrap}
+  #sec-cat-ORCAMENTOS .orc2-k.total{background:#e91e63;border-radius:10px;padding:6px 12px}
+  #sec-cat-ORCAMENTOS .orc2-k.total b{font-size:1.15rem}
+  #sec-cat-ORCAMENTOS .orc2-barra .acs{display:flex;gap:6px}
+  #sec-cat-ORCAMENTOS .orc2-barra .acs button{border:1px solid rgba(255,255,255,.35);background:rgba(255,255,255,.1);color:#fff;border-radius:9px;padding:7px 11px;font-size:.74rem;font-weight:800;cursor:pointer;font-family:inherit;white-space:nowrap}
+  #sec-cat-ORCAMENTOS .orc2-barra .acs button:hover{background:rgba(255,255,255,.2)}
+  #sec-cat-ORCAMENTOS .orc2-barra .acs button.salvar{background:#fff;color:#1a2b5e;border-color:#fff}
+  #sec-cat-ORCAMENTOS .orc2-letra{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:14px;align-items:start}
+  @media(max-width:1000px){#sec-cat-ORCAMENTOS .orc2-letra{grid-template-columns:1fr}}
+  #sec-cat-ORCAMENTOS .orc2-prodbtns{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  #sec-cat-ORCAMENTOS .orc2-prodbtn{border:1.5px solid #e2e8f0;background:#fff;border-radius:12px;padding:10px 14px;font-size:.8rem;font-weight:800;color:#334155;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:8px}
+  #sec-cat-ORCAMENTOS .orc2-prodbtn.on{border-color:#1a2b5e;background:#1a2b5e;color:#fff}
+  #sec-cat-ORCAMENTOS .orc2-prodbtn[disabled]{opacity:.45;cursor:not-allowed}
+  #sec-cat-ORCAMENTOS .orc2-prodbtn small{font-size:.6rem;font-weight:800;background:#fef3c7;color:#92400e;border-radius:10px;padding:1px 6px}
+  #sec-cat-ORCAMENTOS .orc2-mat{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px dashed #eef2f7;font-size:.76rem}
+  #sec-cat-ORCAMENTOS .orc2-mat:last-child{border-bottom:none}
+  #sec-cat-ORCAMENTOS .orc2-mat .nm{flex:1;min-width:0}
+  #sec-cat-ORCAMENTOS .orc2-mat .nm b{display:block;color:#1e293b;font-weight:700}
+  #sec-cat-ORCAMENTOS .orc2-mat .nm span{color:#94a3b8;font-size:.68rem}
+  #sec-cat-ORCAMENTOS .orc2-mat .vl{text-align:right;white-space:nowrap;font-weight:800;color:#1a2b5e}
+  #sec-cat-ORCAMENTOS .orc2-mat .vl span{display:block;font-size:.66rem;color:#94a3b8;font-weight:600}
+  #sec-cat-ORCAMENTOS .orc2-item{border:1.5px solid #e5e7eb;border-radius:12px;padding:12px 14px;margin-bottom:8px;background:#fff}
+  #sec-cat-ORCAMENTOS .orc2-item.ed{border-color:#e91e63;box-shadow:0 0 0 3px #fce7f3}
+  #sec-cat-ORCAMENTOS .orc2-item .h{display:flex;gap:10px;align-items:flex-start}
+  #sec-cat-ORCAMENTOS .orc2-item .h .nm{flex:1;min-width:0;font-size:.8rem;font-weight:800;color:#0f172a}
+  #sec-cat-ORCAMENTOS .orc2-item .h .nm span{display:block;font-size:.7rem;font-weight:500;color:#64748b;margin-top:2px}
+  #sec-cat-ORCAMENTOS .orc2-item .b{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:.74rem;color:#64748b}
+  #sec-cat-ORCAMENTOS .orc2-item .b input{width:62px;padding:5px 7px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:.78rem;text-align:center;font-family:inherit}
+  #sec-cat-ORCAMENTOS .orc2-item .b .pf{margin-left:auto;font-size:.95rem;font-weight:800;color:#e91e63}
+  #sec-cat-ORCAMENTOS .orc2-ic{border:none;background:#f1f5f9;border-radius:8px;padding:5px 8px;cursor:pointer;font-size:.8rem}
+  #sec-cat-ORCAMENTOS .orc2-ades{background:#fdf2f8;border:1.5px dashed #f9a8d4;border-radius:12px;padding:10px 12px;margin-top:12px}
+  #sec-cat-ORCAMENTOS .orc2-ades-row{display:grid;grid-template-columns:minmax(0,1fr) 80px 80px 30px;gap:6px;margin-top:6px;align-items:center}
+  #sec-cat-ORCAMENTOS .orc2-res-tab td,#sec-cat-ORCAMENTOS .orc2-res-tab th{padding:8px 10px;border-bottom:1px solid #f1f5f9;font-size:.8rem;text-align:left}
+  #sec-cat-ORCAMENTOS .orc2-res-tab td.r,#sec-cat-ORCAMENTOS .orc2-res-tab th.r{text-align:right;white-space:nowrap}
+  #sec-cat-ORCAMENTOS .orc2-conta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  #sec-cat-ORCAMENTOS .orc2-vazio{text-align:center;color:#94a3b8;font-size:.82rem;padding:34px 10px}
+  #sec-cat-ORCAMENTOS .orc2-vazio .ic{font-size:2rem;margin-bottom:6px}
+  #sec-cat-ORCAMENTOS .orc2-precos{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+  `;
+  document.head.appendChild(st);
+}
+function orcxRender(){
+  _orcxCss();_orc2Css();
+  const c=_orcxContainer();if(!c)return;
+  if(!_orcxAcesso()){c.innerHTML='<div class="dash-card" style="color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
+  if(orc2.view==='editor'&&orc2.doc)return _orc2RenderEditor(c);
+  if(orc2.view==='novo')return _orc2RenderNovo(c);
+  if(orc2.view==='config')return _orc2RenderConfig(c);
+  return _orc2RenderLista(c);
+}
+const orc2Render=orcxRender;
+
+// ── Lista ──
+function _orc2ListaUnificada(){
+  const l=Object.values(orc2.salvos||{}).map(x=>Object.assign({_fonte:'novo'},x));
+  Object.values(orcxEstado.salvos||{}).forEach(x=>{if(x&&!x.migradoPara)l.push({_fonte:'legado',id:x.id,tipo:'operacionais',dataSalvo:x.dataSalvo,dataDisplay:x.dataDisplay,por:x.por,projeto:{empresa:x.empresa,solicitante:x.solicitante,cidade:x.cidade,uf:x.estado,job:x.job,pedido:x.pedido},produtos:[],totalCliente:x.totalNum,_legado:x});});
+  return l.sort((a,b)=>String(b.dataSalvo||'').localeCompare(String(a.dataSalvo||'')));
+}
+function _orc2RenderLista(c){
+  const f=orc2.filtro||{};const anoF=f.ano||String(new Date().getFullYear()),mesF=f.mes||'';
+  let lista=_orc2ListaUnificada();
+  const anos=[...new Set([new Date().getFullYear(),...lista.map(x=>{const d=new Date(x.dataSalvo);return isNaN(d)?null:d.getFullYear();}).filter(Boolean)])].sort((a,b)=>b-a);
+  lista=lista.filter(x=>{const d=new Date(x.dataSalvo);if(isNaN(d))return true;if(String(d.getFullYear())!==anoF)return false;return!mesF||String(d.getMonth()+1)===mesF;});
+  const q=(f.busca||'').trim().toUpperCase();
+  if(q)lista=lista.filter(x=>{const p=x.projeto||{};return[p.empresa,p.solicitante,p.cidade,p.job,p.pedido,...(x.produtos||[]).map(i=>i.nome)].join(' ').toUpperCase().includes(q);});
+  // sub-aba por tipo (conta sobre a lista já filtrada por mês/ano/busca)
+  const cont={'':lista.length,completo:0,produto:0,operacionais:0};lista.forEach(x=>{if(cont[x.tipo]!=null)cont[x.tipo]++;});
+  const tipoF=orc2SubAba();if(tipoF)lista=lista.filter(x=>x.tipo===tipoF);
+  const novoLbl={'':'＋ Novo orçamento',completo:'＋ Novo orçamento de produto e instalação',produto:'＋ Novo orçamento de produto',operacionais:'＋ Novo cálculo de operacionais'}[tipoF];
+  c.innerHTML=`
+  ${_orc2HtmlSubAbas()}
+  <div class="orc2-top"><h3>${tipoF?ORC2_TIPOS[tipoF].ic+' '+ORC2_TIPOS[tipoF].l:'Orçamentos'}</h3><button class="orc2-btn pri" type="button" onclick="${tipoF?`orc2Criar('${tipoF}')`:"orc2.view='novo';orc2Render()"}">${novoLbl}</button></div>
+  <div class="dash-card" style="padding:12px 14px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <input class="fc no-upper" style="flex:1;min-width:200px" placeholder="🔍 Buscar cliente, cidade, job, pedido ou produto" value="${_orcxEsc(f.busca||'')}" oninput="orc2Filtro('busca',this.value)" id="orc2-busca">
+      <select id="orcx-fil-mes" class="fc" style="width:auto" onchange="orc2Filtro('mes',this.value)"><option value="">Todos os meses</option>${_MESX_MESES_ORCX().map((m,i)=>`<option value="${i+1}" ${mesF===String(i+1)?'selected':''}>${m}</option>`).join('')}</select>
+      <select id="orcx-fil-ano" class="fc" style="width:auto" onchange="orc2Filtro('ano',this.value)">${anos.map(a=>`<option ${String(a)===anoF?'selected':''}>${a}</option>`).join('')}</select>
+    </div>
+    ${lista.length?lista.map(x=>{const p=x.projeto||{},t=ORC2_TIPOS[x.tipo]||ORC2_TIPOS.operacionais;const nP=(x.produtos||[]).length;
+      return`<div class="orc2-row" onclick="orc2Abrir('${x._fonte}','${x.id}')"><div><div class="n">${_orcxEsc(p.empresa||'Sem cliente')}</div><div class="m">${_orcxEsc([x.dataDisplay,[p.cidade,p.uf].filter(Boolean).join('/'),p.job,nP?(nP+' '+(nP===1?'produto':'produtos')):'',x.por?('por '+x.por):''].filter(Boolean).join(' · '))}</div></div>
+      <span class="orc2-tag ${t.cls}">${t.ic} ${t.l}</span><div class="v">${_orcxBRL(x.totalCliente||0)}</div>
+      <div class="a" onclick="event.stopPropagation()"><button type="button" title="Duplicar" onclick="orc2Duplicar('${x._fonte}','${x.id}')">⧉</button><button type="button" title="Excluir" onclick="orc2Excluir('${x._fonte}','${x.id}')">🗑️</button></div></div>`;}).join('')
+    :`<div class="orc2-vazio"><div class="ic">${tipoF?ORC2_TIPOS[tipoF].ic:'🧮'}</div>${_orc2ListaUnificada().length?'Nenhum orçamento com esses filtros.':'Nenhum orçamento ainda. Clique em <b>'+novoLbl+'</b> pra começar.'}</div>`}
+  </div>`;
+  // guarda a contagem pras sub-abas (desenhadas antes da lista)
+  const sub=c.querySelector?c.querySelector('.orc2-subabas'):null;
+  if(sub)sub.querySelectorAll('[data-sub]').forEach(b=>{const k=b.dataset.sub;const n=k==='config'?null:cont[k];const sp=b.querySelector('.cnt');if(sp&&n!=null)sp.textContent='('+n+')';});
+}
+// Sub-abas do menu (2026-09-30, a pedido do usuário: separar o que é só operacional dos demais —
+// sem virar menus separados, pra um orçamento que muda de tipo nunca "se perder"). Lembra a última
+// sub-aba usada por pessoa (localStorage).
+const ORC2_LS_SUB='gcore_orc2_subaba';
+function orc2SubAba(){if(orc2._sub==null){try{orc2._sub=localStorage.getItem(ORC2_LS_SUB)||'';}catch(e){orc2._sub='';}if(['','completo','produto','operacionais'].indexOf(orc2._sub)<0)orc2._sub='';}return orc2._sub;}
+function orc2SetSubAba(k){
+  if(k==='config'){orc2.view='config';orc2Render();return;}
+  orc2._sub=k;try{localStorage.setItem(ORC2_LS_SUB,k);}catch(e){}
+  orc3.imp=null;orc2.view='lista';orc2Render();
+}
+function _orc2HtmlSubAbas(){
+  const at=orc2.view==='config'?'config':orc2SubAba();
+  const b=(k,l)=>`<button type="button" class="dash-tab-sub ${at===k?'active':''}" data-sub="${k}" onclick="orc2SetSubAba('${k}')">${l}${k==='config'?'':' <span class="cnt"></span>'}</button>`;
+  return`<div class="dash-tabs-sub orc2-subabas" style="flex-wrap:wrap;gap:18px">${b('','Todos')}${b('completo','📦🚚 Produto e instalação')}${b('produto','📦 Só produto')}${b('operacionais','🚚 Só operacionais')}${_getUserCat().isAdm?`<span style="flex:1"></span>${b('config','⚙️ Matérias-primas e preços')}`:''}</div>`;
+}
+function orc2Filtro(k,v){orc2.filtro[k]=v;orc2Render();if(k==='busca'){const i=document.getElementById('orc2-busca');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}}
+
+// ── Novo ──
+function _orc2RenderNovo(c){
+  c.innerHTML=`${_orc2HtmlSubAbas()}<div class="orc2-top"><button class="orc2-btn sec" type="button" onclick="orc2.view='lista';orc2Render()">← Voltar</button><h3>O que você vai orçar?</h3></div>
+  <div class="orc2-escolha">
+    <button class="orc2-opt" type="button" onclick="orc2Criar('completo')"><div class="ic">📦🚚</div><b>Produto e instalação</b><span>Materiais do produto + instalação, frete e mobilização. O valor do pedido dos operacionais vem sozinho dos produtos.</span></button>
+    <button class="orc2-opt" type="button" onclick="orc2Criar('produto')"><div class="ic">📦</div><b>Só produto</b><span>Letra caixa e, nas próximas etapas, fachadas, placas, produtos configurados e tabela BK. Dá pra incluir operacionais depois.</span></button>
+    <button class="orc2-opt" type="button" onclick="orc2Criar('operacionais')"><div class="ic">🚚</div><b>Só custos operacionais</b><span>A calculadora de instalação, frete, mobilização e extras — pra quando o produto já está orçado.</span></button>
+  </div>`;
+}
+function orc2Criar(tipo){orc2.doc=_orc2NovoDoc(tipo);orc2.aba='projeto';orc2.letra=null;orc2.letraEditId=null;orcxEstado.resultado=null;orcxEstado.ultimaCidadeUF='';orcxEstado.elevExtra=1;orc2.view='editor';orc2Render();_orc2GuardarRascunho();}
+
+// ── Editor ──
+function _orc2RenderEditor(c){
+  const d=orc2.doc,t=ORC2_TIPOS[d.tipo];
+  const temProd=d.tipo!=='operacionais',temOp=d.tipo!=='produto';
+  if(!temProd&&orc2.aba==='produtos')orc2.aba='projeto';if(!temOp&&orc2.aba==='operacionais')orc2.aba='projeto';
+  const aba=orc2.aba,nP=d.produtos.length;
+  c.innerHTML=`
+  <div class="orc2-barra">
+    <div class="t"><small><span class="orc2-tag ${t.cls}" style="margin-right:6px">${t.ic} ${t.l}</span>${d.id?'Orçamento salvo':'Orçamento novo — ainda não salvo'}</small><b id="orc2-barra-nome">${_orcxEsc((d.projeto&&d.projeto.empresa)||'Sem cliente')}</b></div>
+    ${temProd?`<div class="orc2-k"><small>Produtos</small><b id="orc2-k-prod">—</b></div>`:''}
+    ${temOp?`<div class="orc2-k"><small>Operacionais</small><b id="orc2-k-op">—</b></div>`:''}
+    <div class="orc2-k total"><small>Total cliente</small><b id="orc2-k-total">—</b></div>
+    <div class="acs">
+      ${d.tipo==='produto'?`<button type="button" onclick="orc2IncluirOperacionais()" title="Transformar em Produto e instalação">＋ Operacionais</button>`:''}
+      <button type="button" class="salvar" onclick="orc2Salvar()">💾 Salvar</button>
+      <button type="button" onclick="orc2Pdf()">📄 PDF</button>
+      <button type="button" onclick="orc2Fechar()" title="Voltar pra lista">✕</button>
+    </div>
+  </div>
+  <div class="dash-tabs" style="margin-bottom:14px">
+    <button class="dash-tab ${aba==='projeto'?'active':''}" type="button" onclick="orc2SetAba('projeto')">📋 Projeto</button>
+    ${temProd?`<button class="dash-tab ${aba==='produtos'?'active':''}" type="button" onclick="orc2SetAba('produtos')">📦 Produtos${nP?` (${nP})`:''}</button>`:''}
+    ${temOp?`<button class="dash-tab ${aba==='operacionais'?'active':''}" type="button" onclick="orc2SetAba('operacionais')">🚚 Operacionais</button>`:''}
+    <button class="dash-tab ${aba==='resumo'?'active':''}" type="button" onclick="orc2SetAba('resumo')">💰 Resumo</button>
+  </div>
+  <div id="orc2-aba-projeto" style="display:${aba==='projeto'?'':'none'}">${_orc2HtmlProjeto()}</div>
+  ${temProd?`<div id="orc2-aba-produtos" style="display:${aba==='produtos'?'':'none'}">${_orc2HtmlProdutos()}</div>`:''}
+  <div id="orc2-aba-operacionais" style="display:${aba==='operacionais'?'':'none'}">${_orcxHtmlOperacionais()}</div>
+  <div id="orc2-aba-resumo" style="display:${aba==='resumo'?'':'none'}"><div id="orc2-resumo-body"></div></div>`;
+  // devolve o formulário dos operacionais/projeto
+  const campos=Object.assign({},d.operacionais.campos||{});
+  const pj=d.projeto||{};Object.assign(campos,{'orcx-empresa':pj.empresa||'','orcx-solicitante':pj.solicitante||'','orcx-cidade':pj.cidade||'','orcx-uf':pj.uf||'','orcx-job':pj.job||'','orcx-pedido':pj.pedido||''});
+  _orcxRestaurar(campos);
+  _orc2SincronizarValorPedido();orcxCalcular();
+  if(temProd)orc2AtualizarPreviewLetra();
+  _orc2AtualizarTotais();
+  if(aba==='resumo')_orc2RenderResumo();
+  _orc2CarregarAdesivos();
+}
+function _orc2HtmlProjeto(){
+  return`<div class="dash-card"><div class="dash-sec-title">🏢 Dados do projeto</div>
+  <div class="orcx-campos">
+    ${_orcxCampo('Cliente / empresa',_orcxInp('orcx-empresa','Nome da empresa'))}
+    ${_orcxCampo('Solicitante',_orcxInp('orcx-solicitante','Quem pediu'))}
+    ${_orcxCampo('Cidade de instalação',_orcxInp('orcx-cidade','Ex.: Curitiba','','oninput="orcxAoMudar();orcxAgendarDistancia()"'))}
+    ${_orcxCampo('UF',`<select class="fc" id="orcx-uf" onchange="orcxAoMudar();orcxAgendarDistancia()"><option value="">UF</option>${ORCX_UFS.map(u=>`<option>${u}</option>`).join('')}</select>`)}
+    ${_orcxCampo('Job / descrição',_orcxInp('orcx-job','Opcional'))}
+    ${_orcxCampo('Nº do pedido',_orcxInp('orcx-pedido','Opcional'))}
+  </div>
+  <div class="orcx-hint" style="margin-top:12px">Esses dados valem pro orçamento todo: aparecem no PDF e a cidade/UF calcula a distância dos operacionais sozinha.</div></div>`;
+}
+function orc2SetAba(a){_orc2PuxarOperacionais();orc2.aba=a;['projeto','produtos','operacionais','resumo'].forEach(x=>{const el=document.getElementById('orc2-aba-'+x);if(el)el.style.display=x===a?'':'none';});document.querySelectorAll('#sec-cat-ORCAMENTOS > .dash-tabs .dash-tab').forEach(b=>b.classList.toggle('active',(b.getAttribute('onclick')||'').indexOf("'"+a+"'")>=0));if(a==='resumo')_orc2RenderResumo();_orc2GuardarRascunho();}
+function orc2IncluirOperacionais(){orc2.doc.tipo='completo';orc2.aba='operacionais';_orc2PuxarOperacionais();orc2Render();toast('Operacionais incluídos — o valor do pedido vem dos produtos','tinf');}
+function _orc2AtualizarTotais(){
+  if(!orc2.doc)return;_orc2PuxarOperacionais();
+  const t=orc2Totais();
+  const s=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  s('orc2-k-prod',_orcxBRL(t.precoProd));s('orc2-k-op',_orcxBRL(orc2.doc.tipo==='operacionais'?t.op:t.opConta));s('orc2-k-total',_orcxBRL(t.total));
+  s('orc2-barra-nome',(orc2.doc.projeto&&orc2.doc.projeto.empresa)||'Sem cliente');
+}
+// o formulário dos operacionais chama orcxAoMudar a cada alteração — pendura o total e o rascunho nele
+function orcxAoMudar(){
+  orcxAtualizarVisibilidade();
+  const vp=document.activeElement&&document.activeElement.id==='orcx-valor-pedido';
+  if(vp&&orc2.doc)orc2.doc.operacionais.vpAuto=false;
+  if(document.activeElement&&document.activeElement.id==='orcx-m2-acm'&&orc2.doc)orc2.doc.operacionais.acmManual=true;
+  orcxCalcular();_orc2AtualizarTotais();_orc2GuardarRascunho();
+  const r=document.getElementById('orc2-aba-resumo');if(r&&r.style.display!=='none')_orc2RenderResumo();
+}
+
+// ── Produtos (Letra Caixa) ──
+function _orc2LetraVazia(){return{modelo:'galv',nome:'',largura:'',altura:'',perimetro:'',caixa:'',adesivos:[]};}
+// ── Preços congelados (2026-09-30, a pedido do usuário: "subir uma planilha atualizada não deve
+// mexer no valor do orçamento, a não ser que eu vá lá no orçamento e atualize") — cada produto
+// guarda o custo do momento em que foi adicionado (p.custo + p.materiais). Nada recalcula sozinho;
+// só o botão "Atualizar preços" (com confirmação) refaz o custo com a base atual.
+function _orc2Recalcular(p){if(p.tipo!=='letra')return null;const r=orc2CalcLetra({modelo:p.modelo,largura:p.largura,altura:p.altura,perimetro:p.perimetro,caixa:p.caixa,adesivos:p.adesivos||[]},_orc2Precos(),orc2.adesivoPrecos);return r.ok?r:null;}
+function _orc2Defasagem(){
+  const d=orc2.doc;if(!d||!(d.produtos||[]).length)return null;
+  let antes=0,depois=0,n=0;
+  d.produtos.forEach(p=>{const r=_orc2Recalcular(p);if(!r)return;antes+=p.custo||0;const novo=_orcxArred(r.totalMat,2);depois+=novo;if(Math.abs(novo-(p.custo||0))>0.009)n++;});
+  return n?{n,antes,depois}:null;
+}
+function _orc2HtmlAvisoPrecos(){
+  const df=_orc2Defasagem();if(!df)return'';
+  const dif=df.depois-df.antes;
+  return`<div class="orcx-alerta" style="margin:0 0 12px">💲 Os preços da base mudaram desde que ${df.n===1?'1 produto foi orçado':df.n+' produtos foram orçados'}. Este orçamento continua com os valores de quando foi feito (custo ${_orcxBRL(df.antes)}); com os preços de hoje ficaria ${_orcxBRL(df.depois)} (${dif>0?'+':''}${_orcxBRL(dif)}). <button type="button" class="dash-btn-conf" style="background:#92400e" onclick="orc2AtualizarPrecos()">🔄 Atualizar preços</button></div>`;
+}
+function orc2AtualizarPrecos(){
+  const df=_orc2Defasagem();if(!df){toast('Os preços já estão atualizados','tinf');return;}
+  if(!confirm('Atualizar os preços deste orçamento com a base de matérias-primas atual?\n\nCusto dos produtos: '+_orcxBRL(df.antes)+' → '+_orcxBRL(df.depois)+'\nO CMV de cada item continua o mesmo. Depois é só salvar.'))return;
+  const agora=new Date().toISOString();
+  orc2.doc.produtos.forEach(p=>{const r=_orc2Recalcular(p);if(!r)return;p.materiais=r.items.map(i=>({icon:i.icon,nome:i.name,detalhe:i.detail,qtd:i.qty,custo:_orcxArred(i.cost,2)}));p.custo=_orcxArred(r.totalMat,2);p.precosEm=agora;p.precosBase=(orc3.meta&&orc3.meta.em)||null;});
+  _orc2ReRenderProdutos();_orc2SincronizarValorPedido();orcxCalcular();_orc2AtualizarTotais();_orc2GuardarRascunho();
+  toast('Preços atualizados — clique em 💾 Salvar pra gravar','tok');
+}
+function _orc2HtmlProdutos(){
+  const L=orc2.letra||(orc2.letra=_orc2LetraVazia());
+  const isPVC=L.modelo==='pvc10'||L.modelo==='pvc20';
+  const inp=(k,ph,extra)=>`<input class="fc no-upper" id="orc2-l-${k}" type="number" min="0" step="0.01" placeholder="${ph}" value="${_orcxEsc(L[k])}" oninput="orc2Letra('${k}',this.value)" ${extra||''}>`;
+  return`${_orc2HtmlAvisoPrecos()}<div class="orc2-prodbtns">
+    <button type="button" class="orc2-prodbtn on">🔠 Letra caixa</button>
+    <button type="button" class="orc2-prodbtn" disabled title="Próxima etapa">🏢 Fachada <small>em breve</small></button>
+    <button type="button" class="orc2-prodbtn" disabled title="Próxima etapa">🪧 Placa <small>em breve</small></button>
+    <button type="button" class="orc2-prodbtn" disabled title="Próxima etapa">🧩 Configurado <small>em breve</small></button>
+    <button type="button" class="orc2-prodbtn" disabled title="Próxima etapa">🍔 Tabela BK <small>em breve</small></button>
+  </div>
+  <div class="orc2-letra">
+    <div class="dash-card" style="margin:0">
+      <div class="dash-sec-title">🔠 ${orc2.letraEditId?'Editando letra caixa':'Nova letra caixa'}</div>
+      ${orc2.letraEditId?'<div class="orcx-hint" style="margin:-6px 0 10px;color:#b45309">Ao salvar as alterações, este item é recalculado com os preços de hoje da base.</div>':''}
+      <div class="fg"><label>Modelo</label><div class="orcx-chips">${ORC2_MODELOS.map(m=>`<button type="button" class="orcx-chip ${L.modelo===m.k?'on':''}" onclick="orc2Letra('modelo','${m.k}',true)">${m.l}<small>${m.sub}</small></button>`).join('')}</div></div>
+      <div class="orcx-campos" style="margin-top:12px">
+        ${_orcxCampo('Nome do item (opcional)',`<input class="fc no-upper" id="orc2-l-nome" placeholder="Ex.: Logo fachada principal" value="${_orcxEsc(L.nome)}" oninput="orc2Letra('nome',this.value)">`)}
+        ${_orcxCampo('Largura total — m',inp('largura','0,00'))}
+        ${_orcxCampo('Altura total — m',inp('altura','0,00'),'<span id="orc2-l-area"></span>')}
+        ${isPVC?'':_orcxCampo('Perímetro total das letras — m',inp('perimetro','0,00'),'Soma do contorno externo de todas as letras')}
+        ${isPVC?'':_orcxCampo('Profundidade da caixa — m',inp('caixa','0,00'),'Ex.: 0,10 = 10 cm')}
+      </div>
+      <div class="orc2-ades">
+        <div style="display:flex;align-items:center;gap:8px"><b style="font-size:.76rem;color:#be185d;flex:1">🏷️ Frente adesivada ${L.adesivos.length?`(${L.adesivos.length})`:''}</b><button type="button" class="orcx-link" style="color:#be185d" onclick="orc2AddAdesivo()">＋ adicionar adesivo</button></div>
+        ${L.adesivos.map((a,i)=>`<div class="orc2-ades-row">
+          <select class="fc" onchange="orc2Adesivo(${i},'codigo',this.value)"><option value="">Escolha o adesivo…</option>${ORC2_ADESIVOS.map(([c,n])=>`<option value="${c}" ${String(a.codigo)===String(c)?'selected':''}>${_orcxEsc(n)}</option>`).join('')}</select>
+          <input class="fc no-upper" type="number" min="0" step="0.01" placeholder="Larg. m" value="${_orcxEsc(a.largura)}" oninput="orc2Adesivo(${i},'largura',this.value)">
+          <input class="fc no-upper" type="number" min="0" step="0.01" placeholder="Alt. m" value="${_orcxEsc(a.altura)}" oninput="orc2Adesivo(${i},'altura',this.value)">
+          <button type="button" class="orc2-ic" onclick="orc2RemAdesivo(${i})" title="Tirar">✕</button></div>`).join('')}
+        ${orc2.planilhaStatus==='erro'?'<div class="orcx-hint" style="color:#b45309">⚠️ Não consegui ler os preços dos adesivos da planilha agora.</div>':''}
+      </div>
+      <div id="orc2-l-preview" style="margin-top:14px"></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button type="button" class="orc2-btn pri" style="flex:1" onclick="orc2AdicionarLetra()">${orc2.letraEditId?'✔ Salvar alterações do item':'＋ Adicionar ao orçamento'}</button>
+        ${orc2.letraEditId?`<button type="button" class="orc2-btn sec" onclick="orc2CancelarEdicaoLetra()">Cancelar</button>`:''}
+      </div>
+    </div>
+    <div>
+      <div class="dash-card" style="margin:0"><div class="dash-sec-title">📦 Produtos do orçamento</div><div id="orc2-lista-prod"></div></div>
+    </div>
+  </div>`;
+}
+function orc2Letra(k,v,rerender){orc2.letra=orc2.letra||_orc2LetraVazia();orc2.letra[k]=v;if(rerender){_orc2ReRenderProdutos();return;}orc2AtualizarPreviewLetra();}
+function orc2AddAdesivo(){orc2.letra.adesivos.push({codigo:'',largura:'',altura:''});_orc2ReRenderProdutos();}
+function orc2RemAdesivo(i){orc2.letra.adesivos.splice(i,1);_orc2ReRenderProdutos();}
+function orc2Adesivo(i,k,v){orc2.letra.adesivos[i][k]=v;orc2AtualizarPreviewLetra();}
+function _orc2ReRenderProdutos(){const el=document.getElementById('orc2-aba-produtos');if(el){el.innerHTML=_orc2HtmlProdutos();orc2AtualizarPreviewLetra();}}
+function orc2AtualizarPreviewLetra(){
+  const box=document.getElementById('orc2-l-preview');const L=orc2.letra;
+  if(box&&L){
+    const r=orc2CalcLetra(L,_orc2Precos(),orc2.adesivoPrecos);
+    const ar=document.getElementById('orc2-l-area');if(ar)ar.textContent=(_orc2Num(L.largura)>0&&_orc2Num(L.altura)>0)?('Área: '+_orc2Qtd(_orc2Num(L.largura)*_orc2Num(L.altura),3)+' m²'+(_orc2Num(L.altura)>1.2&&!(L.modelo==='pvc10'||L.modelo==='pvc20')?' · acima de 1,20m usa ACM':'')):'';
+    box.innerHTML=r.ok?`<div style="border:1.5px solid #e5e7eb;border-radius:12px;padding:10px 12px;background:#fafbfd">
+      ${r.items.map(i=>`<div class="orc2-mat"><span>${i.icon}</span><div class="nm"><b>${_orcxEsc(i.name)}</b><span>${_orcxEsc(i.detail)}</span></div><div class="vl">${_orcxBRL(i.cost)}<span>${_orcxEsc(i.qty)}</span></div></div>`).join('')}
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1.5px solid #e5e7eb"><span style="font-size:.74rem;color:#64748b;font-weight:700">Custo dos materiais</span><b style="color:#1a2b5e">${_orcxBRL(r.totalMat)}</b></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><span style="font-size:.74rem;color:#64748b;font-weight:700">Preço ao cliente (CMV ${_orc2Cmv()}%)</span><b style="color:#e91e63">${_orcxBRL(_orc2PrecoFinal(r.totalMat,_orc2Cmv()))}</b></div></div>`
+      :`<div class="orc2-vazio" style="padding:16px"><div class="ic">📐</div>Preencha largura, altura${(L.modelo==='pvc10'||L.modelo==='pvc20')?'':', perímetro e profundidade'} pra ver os materiais.</div>`;
+  }
+  _orc2RenderListaProdutos();
+}
+function orc2AdicionarLetra(){
+  const L=orc2.letra;const r=orc2CalcLetra(L,_orc2Precos(),orc2.adesivoPrecos);
+  if(!r.ok){toast('Preencha as medidas antes de adicionar','terr');return;}
+  const desc=orc2DescLetra(L.modelo,r.usaACM,r.items);
+  const antigo=orc2.letraEditId?orc2.doc.produtos.find(p=>p.id===orc2.letraEditId):null;
+  const item={id:antigo?antigo.id:_orc2Id(),tipo:'letra',modelo:L.modelo,nomeCurto:L.nome||'',nome:(L.nome?L.nome+' — ':'')+desc,descricao:desc,largura:L.largura,altura:L.altura,perimetro:L.perimetro,caixa:L.caixa,adesivos:JSON.parse(JSON.stringify(L.adesivos||[])),usaACM:r.usaACM,materiais:r.items.map(i=>({icon:i.icon,nome:i.name,detalhe:i.detail,qtd:i.qty,custo:_orcxArred(i.cost,2)})),custo:_orcxArred(r.totalMat,2),cmv:antigo?antigo.cmv:_orc2Cmv(),precosEm:new Date().toISOString(),precosBase:(orc3.meta&&orc3.meta.em)||null};
+  if(antigo)orc2.doc.produtos[orc2.doc.produtos.indexOf(antigo)]=item;else orc2.doc.produtos.push(item);
+  orc2.letra=_orc2LetraVazia();orc2.letraEditId=null;
+  _orc2ReRenderProdutos();_orc2SincronizarValorPedido();orcxCalcular();_orc2AtualizarTotais();_orc2GuardarRascunho();_orc2AtualizarContadorAba();
+  toast(antigo?'Item atualizado ✔':'Letra caixa adicionada ✔','tok');
+}
+function _orc2AtualizarContadorAba(){const b=[...document.querySelectorAll('#sec-cat-ORCAMENTOS > .dash-tabs .dash-tab')].find(x=>(x.getAttribute('onclick')||'').indexOf("'produtos'")>=0);if(b){const n=orc2.doc.produtos.length;b.textContent='📦 Produtos'+(n?` (${n})`:'');}}
+function orc2EditarProduto(id){const p=orc2.doc.produtos.find(x=>x.id===id);if(!p)return;orc2.letra={modelo:p.modelo,nome:p.nomeCurto||'',largura:p.largura,altura:p.altura,perimetro:p.perimetro,caixa:p.caixa,adesivos:JSON.parse(JSON.stringify(p.adesivos||[]))};orc2.letraEditId=id;_orc2ReRenderProdutos();}
+function orc2CancelarEdicaoLetra(){orc2.letra=_orc2LetraVazia();orc2.letraEditId=null;_orc2ReRenderProdutos();}
+function orc2RemoverProduto(id){const p=orc2.doc.produtos.find(x=>x.id===id);if(!p)return;if(!confirm('Tirar "'+(p.nomeCurto||p.descricao)+'" do orçamento?'))return;orc2.doc.produtos=orc2.doc.produtos.filter(x=>x.id!==id);if(orc2.letraEditId===id){orc2.letra=_orc2LetraVazia();orc2.letraEditId=null;}_orc2ReRenderProdutos();_orc2SincronizarValorPedido();orcxCalcular();_orc2AtualizarTotais();_orc2GuardarRascunho();_orc2AtualizarContadorAba();}
+function orc2Cmv(id,v){const p=orc2.doc.produtos.find(x=>x.id===id);if(!p)return;let n=parseFloat(v);if(!(n>0))n=_orc2Cmv();if(n>100)n=100;p.cmv=n;const el=document.getElementById('orc2-pf-'+id);if(el)el.textContent=_orcxBRL(_orc2PrecoFinal(p.custo,p.cmv));_orc2AtualizarTotais();_orc2GuardarRascunho();}
+function orc2ToggleMat(id){const el=document.getElementById('orc2-mats-'+id);if(el)el.style.display=el.style.display==='none'?'':'none';}
+function _orc2RenderListaProdutos(){
+  const box=document.getElementById('orc2-lista-prod');if(!box)return;const ps=orc2.doc.produtos;
+  box.innerHTML=ps.length?ps.map(p=>`<div class="orc2-item ${orc2.letraEditId===p.id?'ed':''}">
+    <div class="h"><span style="font-size:1.1rem">🔠</span><div class="nm">${_orcxEsc(p.nomeCurto||'Letra caixa')}<span>${_orcxEsc(p.descricao)} · ${_orc2Qtd(_orc2Num(p.largura),2)} × ${_orc2Qtd(_orc2Num(p.altura),2)} m</span></div>
+    <button type="button" class="orc2-ic" title="Ver materiais" onclick="orc2ToggleMat('${p.id}')">📋</button><button type="button" class="orc2-ic" title="Editar" onclick="orc2EditarProduto('${p.id}')">✏️</button><button type="button" class="orc2-ic" title="Tirar" onclick="orc2RemoverProduto('${p.id}')">🗑️</button></div>
+    <div id="orc2-mats-${p.id}" style="display:none;margin-top:8px">${(p.materiais||[]).map(m=>`<div class="orc2-mat"><span>${m.icon||'•'}</span><div class="nm"><b>${_orcxEsc(m.nome)}</b><span>${_orcxEsc(m.detalhe||'')}</span></div><div class="vl">${_orcxBRL(m.custo)}<span>${_orcxEsc(m.qtd||'')}</span></div></div>`).join('')}</div>
+    <div class="b"><span title="${p.precosEm?'Preços de '+new Date(p.precosEm).toLocaleDateString('pt-BR'):''}">Custo <b style="color:#1a2b5e">${_orcxBRL(p.custo)}</b>${p.precosEm?` <small style="color:#94a3b8">· preços de ${new Date(p.precosEm).toLocaleDateString('pt-BR')}</small>`:''}</span><span>CMV <input type="number" min="1" max="100" step="1" value="${p.cmv}" onchange="orc2Cmv('${p.id}',this.value)">%</span><span class="pf" id="orc2-pf-${p.id}">${_orcxBRL(_orc2PrecoFinal(p.custo,p.cmv))}</span></div>
+  </div>`).join('')+`<div class="orcx-hint">Preço ao cliente = custo ÷ CMV. Ex.: custo R$ 850 com CMV 30% → R$ 2.833,33.</div>`
+  :`<div class="orc2-vazio"><div class="ic">📦</div>Nenhum produto ainda. Preencha a letra caixa ao lado e clique em <b>＋ Adicionar ao orçamento</b>.</div>`;
+}
+
+// ── Resumo ──
+function _orc2RenderResumo(){
+  const b=document.getElementById('orc2-resumo-body');if(!b||!orc2.doc)return;_orc2PuxarOperacionais();
+  const d=orc2.doc,t=orc2Totais(),r=d.operacionais.resultado;
+  const temProd=d.tipo!=='operacionais',temOp=d.tipo!=='produto';
+  const tg=(k,l)=>`<button type="button" class="orcx-tg ${d.operacionais[k]==='SIM'?'on':''}" onclick="orc2Conta('${k}')"><i></i>${l}</button>`;
+  b.innerHTML=`<div class="dash-card">
+    ${temProd&&temOp&&d.tipo==='completo'?`<div class="dash-sec-title">Quem faz?</div><div class="orc2-conta">${tg('instConta','🛠️ Instalação por nossa conta')}${tg('freteConta','🚛 Frete por nossa conta')}</div><div class="orcx-hint" style="margin:-4px 0 14px">Ligado = a Granda faz e o valor entra no total do cliente (igual ao sistema antigo).</div>`:''}
+    <table class="orc2-res-tab" style="width:100%;border-collapse:collapse">
+      <thead><tr><th>Item</th><th class="r">Custo</th><th class="r">Ao cliente</th></tr></thead><tbody>
+      ${temProd?(d.produtos.length?d.produtos.map(p=>`<tr><td>🔠 ${_orcxEsc(p.nome)}</td><td class="r">${_orcxBRL(p.custo)}</td><td class="r"><b>${_orcxBRL(_orc2PrecoFinal(p.custo,p.cmv))}</b></td></tr>`).join(''):`<tr><td colspan="3" style="color:#94a3b8">Nenhum produto</td></tr>`):''}
+      ${temOp&&r?(d.tipo==='operacionais'?ORCX_GRUPOS.map(g=>{const v=t.sub(g.key);return v>0?`<tr><td>${g.icon} ${g.label}</td><td class="r">${_orcxBRL(v)}</td><td class="r"><b>${_orcxBRL(v)}</b></td></tr>`:'';}).join('')
+        :[['instalacao','🛠️ Instalação','instConta'],['mobilizacao','🚐 Mobilização','instConta'],['extras','🏗️ Elevação / extras','instConta'],['frete','🚛 Frete','freteConta']].map(([k,l,c])=>{const v=t.sub(k);if(!(v>0))return'';const on=d.operacionais[c]==='SIM';return`<tr style="${on?'':'color:#94a3b8'}"><td>${l}${on?'':' <small>(por conta do cliente)</small>'}</td><td class="r">${on?_orcxBRL(v):'—'}</td><td class="r">${on?`<b>${_orcxBRL(v)}</b>`:'—'}</td></tr>`;}).join('')):''}
+      ${temOp&&!r?`<tr><td colspan="3" style="color:#94a3b8">Operacionais ainda não calculados — preencha a aba 🚚 Operacionais</td></tr>`:''}
+      </tbody>
+      <tfoot><tr><td style="font-weight:800">Total</td><td class="r" style="font-weight:800">${_orcxBRL(t.custo)}</td><td class="r" style="font-weight:800;color:#e91e63;font-size:1rem">${_orcxBRL(t.total)}</td></tr></tfoot>
+    </table>
+    ${t.total>0?`<div class="orcx-hint" style="margin-top:10px">Margem sobre o total: <b>${_orcxBRL(t.total-t.custo)}</b> (${t.total>0?Math.round((1-t.custo/t.total)*100):0}%)</div>`:''}
+  </div>`;
+}
+function orc2Conta(k){orc2.doc.operacionais[k]=orc2.doc.operacionais[k]==='SIM'?'NÃO':'SIM';_orc2RenderResumo();_orc2AtualizarTotais();_orc2GuardarRascunho();}
+
+// ── Salvar / abrir / duplicar / excluir ──
+function _orc2WatchLista(){
+  if(orc2.watchOn||!window._fbOrcWatch)return;orc2.watchOn=true;
+  window._fbOrcWatch(ORC2_DOC,itens=>{orc2.salvos=itens||{};if(currentSection==='cat:ORCAMENTOS'&&orc2.view==='lista')orc2Render();});
+  window._fbOrcWatch(ORCX_DOC,itens=>{orcxEstado.salvos=itens||{};if(currentSection==='cat:ORCAMENTOS'&&orc2.view==='lista')orc2Render();});
+}
+async function orc2Salvar(){
+  const d=orc2.doc;if(!d)return;_orc2PuxarOperacionais();
+  const t=orc2Totais();
+  if(!(d.produtos.length||(d.operacionais.resultado&&d.operacionais.resultado.itens.length))){toast('Adicione um produto ou calcule os operacionais antes de salvar','terr');return;}
+  if(!window._fbOrcSalvar){toast('Não foi possível salvar agora (conexão)','terr');return;}
+  const agora=new Date();
+  d.id=d.id||_orc2Id();
+  if(!d.criadoEm){d.criadoEm=agora.toISOString();d.dataSalvo=d.criadoEm;d.dataDisplay=agora.toLocaleDateString('pt-BR');d.por=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';}
+  d.atualizadoEm=agora.toISOString();d.atualizadoPor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  d.totalCliente=_orcxArred(t.total,2);d.totalCusto=_orcxArred(t.custo,2);
+  try{
+    await window._fbOrcSalvar(ORC2_DOC,d.id,JSON.parse(JSON.stringify(d)));
+    orc2.salvos[d.id]=JSON.parse(JSON.stringify(d));
+    if(d._legadoId){try{await window._fbOrcExcluir(ORCX_DOC,d._legadoId);}catch(e){}delete d._legadoId;}
+    toast('Orçamento salvo 💾','tok');const s=document.querySelector('#sec-cat-ORCAMENTOS .orc2-barra .t small');if(s)s.innerHTML=s.innerHTML.replace('Orçamento novo — ainda não salvo','Orçamento salvo');_orc2GuardarRascunho();
+  }catch(e){console.error('orc2 salvar',e);toast('Erro ao salvar: '+(e.message||e),'terr');}
+}
+function _orc2DocDeLegado(x){const d=_orc2NovoDoc('operacionais');d.projeto={empresa:x.empresa||'',solicitante:x.solicitante||'',cidade:x.cidade||'',uf:x.estado||'',job:x.job||'',pedido:x.pedido||''};d.operacionais.campos=x.campos||{};d.operacionais.resultado=x.resultado||null;d._legadoId=x.id;d.dataDisplay=x.dataDisplay;return d;}
+function orc2Abrir(fonte,id){
+  let d=null;
+  if(fonte==='legado'){const x=orcxEstado.salvos[id];if(!x)return;d=_orc2DocDeLegado(x);}
+  else{const x=orc2.salvos[id];if(!x)return;d=JSON.parse(JSON.stringify(x));d.produtos=d.produtos||[];d.operacionais=Object.assign({campos:null,resultado:null,instConta:'SIM',freteConta:'SIM',vpAuto:true},d.operacionais||{});}
+  orc2.doc=d;orc2.aba=d.tipo==='operacionais'?'operacionais':(d.produtos.length?'produtos':'projeto');orc2.letra=null;orc2.letraEditId=null;orcxEstado.ultimaCidadeUF='';orc2.view='editor';orc2Render();
+}
+function orc2Duplicar(fonte,id){
+  orc2Abrir(fonte,id);if(!orc2.doc)return;
+  const d=orc2.doc;d.id=null;d.criadoEm=null;delete d._legadoId;d.produtos=(d.produtos||[]).map(p=>Object.assign({},p,{id:_orc2Id()}));
+  orc2Render();toast('Cópia aberta — ajuste o que precisar e salve','tinf');
+}
+async function orc2Excluir(fonte,id){
+  const x=fonte==='legado'?orcxEstado.salvos[id]:orc2.salvos[id];if(!x)return;
+  const nome=fonte==='legado'?(x.empresa||'—'):((x.projeto&&x.projeto.empresa)||'—');
+  if(!confirm('Excluir o orçamento de '+nome+'? Essa ação não pode ser desfeita.'))return;
+  try{await window._fbOrcExcluir(fonte==='legado'?ORCX_DOC:ORC2_DOC,id);if(fonte==='legado')delete orcxEstado.salvos[id];else delete orc2.salvos[id];toast('Orçamento excluído','tok');orc2Render();}
+  catch(e){toast('Erro ao excluir: '+(e.message||e),'terr');}
+}
+function orc2Fechar(){_orc2PuxarOperacionais();const d=orc2.doc;const salvo=d&&d.id&&orc2.salvos[d.id];const mudou=d&&(!salvo||JSON.stringify(Object.assign({},salvo,{atualizadoEm:0}))!==JSON.stringify(Object.assign({},d,{atualizadoEm:0})));if(d&&mudou&&(d.produtos.length||(d.operacionais.resultado&&d.operacionais.resultado.itens.length))&&!confirm('Sair sem salvar? O que não foi salvo fica guardado só como rascunho neste navegador.'))return;if(d&&d.tipo&&orc2SubAba()&&orc2SubAba()!==d.tipo){orc2._sub=d.tipo;try{localStorage.setItem(ORC2_LS_SUB,d.tipo);}catch(e){}}orc2.view='lista';orc2.doc=null;_orc2LimparRascunho();orc2Render();}
+
+// ── PDF do orçamento (sem emoji — jsPDF não desenha emoji) ──
+function orc2Pdf(){
+  const d=orc2.doc;if(!d)return;_orc2PuxarOperacionais();const t=orc2Totais();
+  if(!(t.total>0)){toast('Monte o orçamento antes de gerar o PDF','terr');return;}
   if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
-  const d=x||{empresa:_orcxVal('orcx-empresa').trim(),solicitante:_orcxVal('orcx-solicitante').trim(),cidade:_orcxVal('orcx-cidade').trim(),estado:_orcxVal('orcx-uf'),job:_orcxVal('orcx-job').trim(),pedido:_orcxVal('orcx-pedido').trim(),dataDisplay:new Date().toLocaleDateString('pt-BR')};
-  const semEmoji=s=>String(s||'').replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}]/gu,'').replace(/→/g,'->').replace(/×/g,'x').replace(/—/g,'-').trim();
-  const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'mm',format:'a4'});
-  const W=doc.internal.pageSize.getWidth();
-  doc.setFillColor(26,43,94);doc.rect(0,0,W,24,'F');
-  doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(14);doc.text('RELATÓRIO DE CUSTOS OPERACIONAIS',14,11);
-  doc.setFont('helvetica','normal');doc.setFontSize(9);doc.text('Granda Comunicação Visual - origem Ponta Grossa/PR - '+semEmoji(d.dataDisplay),14,18);
-  doc.setTextColor(30,41,59);doc.setFontSize(9.5);
-  const info=[['Empresa',d.empresa||'-'],['Solicitante',d.solicitante||'-'],['Local',[d.cidade,d.estado].filter(Boolean).join(' / ')||'-'],['Job',d.job||'-'],['Pedido',d.pedido||'-']];
-  let y=32;info.forEach(([k,v])=>{doc.setFont('helvetica','bold');doc.text(k+':',14,y);doc.setFont('helvetica','normal');doc.text(semEmoji(v),40,y);y+=5.5;});
-  if(doc.autoTable){
-    doc.autoTable({startY:y+3,head:[['Item','Cálculo','Valor']],body:r.itens.map(i=>[semEmoji(i.nome),semEmoji(i.detalhe),_orcxBRL(i.valor)]),foot:[['TOTAL DE CUSTOS OPERACIONAIS','',_orcxBRL(r.total)]],
-      styles:{fontSize:8.5,cellPadding:2.4,valign:'middle'},headStyles:{fillColor:[26,43,94]},footStyles:{fillColor:[241,245,249],textColor:[26,43,94],fontStyle:'bold'},columnStyles:{0:{cellWidth:52,fontStyle:'bold'},2:{halign:'right',cellWidth:32}}});
-    y=doc.lastAutoTable.finalY+8;
-  }else{r.itens.forEach(i=>{doc.text(semEmoji(i.nome)+'  '+_orcxBRL(i.valor),14,y+=6);});y+=8;}
-  doc.setFontSize(8.5);doc.setTextColor(100,116,139);
-  doc.text('Região: '+(r.regiao||'-')+' (índice '+(r.indiceRegiao||1)+'x)   |   Prazo estimado frete dedicado: '+(r.prazoDedicado||'-')+'   |   Frete fracionado: '+(r.prazoFracionado||'-')+' (dias)',14,y);
-  const nome='Custos_Operacionais_'+(semEmoji(d.empresa)||'avulso').replace(/[^\w]+/g,'_').slice(0,40)+'.pdf';
-  doc.save(nome);
+  const se=s=>String(s||'').replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}]/gu,'').replace(/→/g,'->').replace(/×/g,'x').replace(/—/g,'-').trim();
+  const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'mm',format:'a4'});const W=doc.internal.pageSize.getWidth();const p=d.projeto||{};
+  doc.setFillColor(26,43,94);doc.rect(0,0,W,24,'F');doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(14);doc.text('ORÇAMENTO',14,11);
+  doc.setFont('helvetica','normal');doc.setFontSize(9);doc.text('Granda Comunicação Visual - '+new Date().toLocaleDateString('pt-BR'),14,18);
+  doc.setTextColor(30,41,59);doc.setFontSize(9.5);let y=32;
+  [['Cliente',p.empresa],['Solicitante',p.solicitante],['Local',[p.cidade,p.uf].filter(Boolean).join(' / ')],['Job',p.job],['Pedido',p.pedido]].forEach(([k,v])=>{if(!v)return;doc.setFont('helvetica','bold');doc.text(k+':',14,y);doc.setFont('helvetica','normal');doc.text(se(v),40,y);y+=5.5;});
+  const body=[];
+  (d.tipo!=='operacionais'?d.produtos:[]).forEach(pr=>body.push([se(pr.nome),_orc2Qtd(_orc2Num(pr.largura),2)+' x '+_orc2Qtd(_orc2Num(pr.altura),2)+' m',_orcxBRL(_orc2PrecoFinal(pr.custo,pr.cmv))]));
+  const r=d.operacionais.resultado;
+  if(r&&d.tipo!=='produto'){
+    const add=(l,k,on)=>{const v=t.sub(k);if(v>0&&on)body.push([l,'',_orcxBRL(v)]);};
+    const all=d.tipo==='operacionais';
+    add('Instalação','instalacao',all||d.operacionais.instConta==='SIM');add('Mobilização da equipe','mobilizacao',all||d.operacionais.instConta==='SIM');add('Elevação e serviços extras','extras',all||d.operacionais.instConta==='SIM');add('Frete','frete',all||d.operacionais.freteConta==='SIM');
+  }
+  if(doc.autoTable){doc.autoTable({startY:y+3,head:[['Descrição','Medidas','Valor']],body,foot:[['TOTAL','',_orcxBRL(t.total)]],styles:{fontSize:9,cellPadding:2.6,valign:'middle'},headStyles:{fillColor:[26,43,94]},footStyles:{fillColor:[252,231,243],textColor:[190,24,93],fontStyle:'bold'},columnStyles:{1:{cellWidth:32},2:{halign:'right',cellWidth:34}}});}
+  doc.save('Orcamento_'+(se(p.empresa)||'avulso').replace(/[^\w]+/g,'_').slice(0,40)+'.pdf');
+}
+
+// ── ⚙️ Preços e CMV (admin) ──
+
+// ── BASE DE MATÉRIAS-PRIMAS (2026-09-30) ─────────────────────────────────────────────────────
+// A pedido do usuário: "quero poder inserir uma planilha externa de matérias-primas... e também as
+// que já tá pedindo lá você cruza os dados com a planilha" / "será essa planilha sempre extraída do
+// outro sistema nosso". Formato da exportação (Lista_Materia_Prima_*.xlsx): Codigo, Materia prima,
+// Tipo, Venda Direta, NCM, Plano de contas Entrada, Plano de contas Saida, UnidCusto, Valor,
+// Data referencia. Guardada em sistema/orcamentosMaterias (itens{codigo:{n,u,v,d,g,va,da}} +
+// itens._meta). A Letra Caixa e os adesivos puxam o preço daqui PELO CÓDIGO — inclusive a tinta PU (convertida
+// de lata 0,9L pra litro, ver ORC3_CONVERSAO).
+const ORC3_DOC_MAT='orcamentosMaterias';
+const ORC3_MANUAIS=[];
+// "A planilha manda" (2026-09-30, a pedido do usuário) — TODOS os preços vêm da base importada,
+// inclusive a tinta: na planilha ela é a LATA de 0,9L (cód. 1628), então o preço por litro usado no
+// cálculo é valor da lata ÷ 0,9.
+const ORC3_CONVERSAO={tinta:{cod:'1628',fator:1/0.9,obs:'lata de 0,9L ÷ 0,9 = preço por litro'}};
+let orc3={base:{},meta:null,watchOn:false,imp:null,busca:''};
+function _orc3Watch(){
+  if(orc3.watchOn||!window._fbOrcWatch)return;orc3.watchOn=true;
+  window._fbOrcWatch(ORC3_DOC_MAT,itens=>{
+    const b=Object.assign({},itens||{});orc3.meta=b._meta||null;delete b._meta;orc3.base=b;
+    _orc3AplicarAdesivos();
+    if(currentSection==='cat:ORCAMENTOS'){if(orc2.view==='config')orc2Render();else if(orc2.view==='editor'&&orc2.aba==='produtos')orc2AtualizarPreviewLetra();}
+  });
+}
+function _orc3Tem(){return Object.keys(orc3.base||{}).length>0;}
+function _orc3Preco(cod){const m=(orc3.base||{})[String(cod)];return m&&m.v>0?m.v:null;}
+function _orc3AplicarAdesivos(){ORC2_ADESIVOS.forEach(([c])=>{const v=_orc3Preco(c);if(v)orc2.adesivoPrecos[c]=v;});if(_orc3Tem())orc2.planilhaStatus='ok';}
+// Preço de cada material da Letra Caixa: base importada (pelo código) > valor manual > padrão
+function _orc2Precos(){
+  const P=Object.assign({},ORC2_PRECOS_PADRAO,(orc2.cfg&&orc2.cfg.precos)||{});
+  Object.entries(ORC2_CODIGO_PRECO).forEach(([cod,k])=>{const v=_orc3Preco(cod);if(v)[].concat(k).forEach(kk=>{if(ORC3_MANUAIS.indexOf(kk)<0)P[kk]=v;});});
+  Object.entries(ORC3_CONVERSAO).forEach(([k,c])=>{const v=_orc3Preco(c.cod);if(v)P[k]=Math.round(v*c.fator*10000)/10000;});
+  return P;
+}
+function _orc3Fonte(k){
+  if(ORC3_MANUAIS.indexOf(k)>=0)return{tipo:'manual'};
+  if(ORC3_CONVERSAO[k]){const c=ORC3_CONVERSAO[k],m=(orc3.base||{})[c.cod];if(m&&m.v>0)return{tipo:'base',cod:c.cod,m,obs:c.obs};return{tipo:(orc2.cfg&&orc2.cfg.precos&&orc2.cfg.precos[k]!=null)?'manual':'padrao',cod:c.cod};}
+  const cod=Object.keys(ORC2_CODIGO_PRECO).find(c=>[].concat(ORC2_CODIGO_PRECO[c]).indexOf(k)>=0);
+  const m=cod&&(orc3.base||{})[cod];
+  if(m&&m.v>0)return{tipo:'base',cod,m};
+  return{tipo:(orc2.cfg&&orc2.cfg.precos&&orc2.cfg.precos[k]!=null)?'manual':'padrao',cod};
+}
+// ── Leitura da planilha exportada ──
+function _orc3Norm(s){return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();}
+function _orc3Valor(v){if(typeof v==='number')return v;return _orc2ParseValorBR(v);}
+function _orc3Data(v){if(v instanceof Date&&!isNaN(v))return String(v.getDate()).padStart(2,'0')+'/'+String(v.getMonth()+1).padStart(2,'0')+'/'+v.getFullYear();if(typeof v==='number'&&v>20000&&v<80000){const d=new Date(Math.round((v-25569)*86400000));return String(d.getUTCDate()).padStart(2,'0')+'/'+String(d.getUTCMonth()+1).padStart(2,'0')+'/'+d.getUTCFullYear();}return String(v||'').trim();}
+function _orc3Linhas(rows){
+  let h=-1;for(let i=0;i<Math.min(rows.length,20);i++){if((rows[i]||[]).some(c=>_orc3Norm(c)==='codigo')){h=i;break;}}
+  if(h<0)throw new Error('não achei a coluna "Codigo" — confira se é a exportação de matéria-prima');
+  const cab=rows[h].map(_orc3Norm);
+  const col=nomes=>cab.findIndex(c=>nomes.some(n=>c===n||c.indexOf(n)===0));
+  const iC=col(['codigo']),iN=col(['materia prima','materia-prima','nome']),iU=col(['unidcusto','unidade']),iV=col(['valor']),iD=col(['data referencia','data']),iG=col(['plano de contas saida']),iT=col(['tipo']);
+  if(iN<0||iV<0)throw new Error('faltam as colunas "Materia prima" ou "Valor"');
+  const out={};
+  rows.slice(h+1).forEach(r=>{
+    if(!r)return;const cod=parseInt(r[iC]);if(isNaN(cod))return;
+    const nome=String(r[iN]==null?'':r[iN]).trim();if(!nome)return;
+    const v=_orc3Valor(r[iV]);
+    out[String(cod)]={n:nome,u:iU>=0?String(r[iU]||'').trim():'',v:isNaN(v)?0:Math.round(v*10000)/10000,d:iD>=0?_orc3Data(r[iD]):'',g:iG>=0?String(r[iG]||'').replace(/^[\d.\-\s]+-?/,'').trim():'',t:iT>=0?String(r[iT]||'').trim():''};
+  });
+  if(!Object.keys(out).length)throw new Error('nenhuma linha com código encontrada');
+  return out;
+}
+function orc3EscolherArquivo(){const i=document.getElementById('orc3-arquivo');if(i){i.value='';i.click();}}
+async function orc3LerArquivo(inp){
+  const f=inp&&inp.files&&inp.files[0];if(!f)return;
+  if(!window.XLSX){toast('Biblioteca de Excel ainda carregando — tente de novo em alguns segundos','terr');return;}
+  try{
+    const buf=await f.arrayBuffer();
+    const wb=XLSX.read(buf,{type:'array',cellDates:true});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:''});
+    const novos=_orc3Linhas(rows);
+    const atual=orc3.base||{};const res={arquivo:f.name,itens:novos,novos:[],alterados:[],iguais:0,sairam:[]};
+    Object.entries(novos).forEach(([c,m])=>{const a=atual[c];if(!a)res.novos.push(c);else if(Math.abs((a.v||0)-(m.v||0))>0.00001){res.alterados.push(c);m.va=a.v;m.da=a.d||'';}else{res.iguais++;if(a.va!=null){m.va=a.va;m.da=a.da;}}});
+    Object.keys(atual).forEach(c=>{if(!novos[c])res.sairam.push(c);});
+    orc3.imp=res;orc2Render();
+  }catch(e){console.error('orc3 importar',e);toast('Não consegui ler a planilha: '+(e.message||e),'terr');}
+}
+async function orc3ConfirmarImportacao(){
+  const r=orc3.imp;if(!r)return;
+  if(!_getUserCat().isAdm){toast('Só administrador importa a base de matérias-primas','terr');return;}
+  if(!window._fbOrcSubstituir){toast('Não foi possível salvar agora (conexão)','terr');return;}
+  const itens=Object.assign({},r.itens);
+  itens._meta={arquivo:r.arquivo,em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',total:Object.keys(r.itens).length,novos:r.novos.length,alterados:r.alterados.length};
+  try{await window._fbOrcSubstituir(ORC3_DOC_MAT,itens);orc3.base=r.itens;orc3.meta=itens._meta;orc3.imp=null;_orc3AplicarAdesivos();toast('Base de matérias-primas atualizada ✅ ('+itens._meta.total+' itens)','tok');orc2Render();}
+  catch(e){console.error('orc3 salvar',e);toast('Erro ao salvar a base: '+(e.message||e),'terr');}
+}
+function orc3CancelarImportacao(){orc3.imp=null;orc2Render();}
+// ── Tela (⚙️ Preços e CMV) ──
+function _orc3HtmlImportacao(){
+  const r=orc3.imp;if(!r)return'';
+  const lin=c=>{const m=r.itens[c]||orc3.base[c]||{};return m;};
+  const linha=(c,antes)=>{const m=lin(c);return`<tr><td style="color:#64748b">${c}</td><td>${_orcxEsc(m.n||'')}</td><td class="r">${antes!=null?`<span style="color:#94a3b8;text-decoration:line-through">${_orcxBRL(antes)}</span> → `:''}<b>${_orcxBRL(m.v)}</b></td></tr>`;};
+  return`<div class="dash-card" style="border:2px solid #e91e63">
+    <div class="dash-sec-title">📥 Conferir antes de gravar — ${_orcxEsc(r.arquivo)}</div>
+    <div class="orc2-conta" style="margin-bottom:10px">
+      <span class="orc2-tag t2">＋ ${r.novos.length} ${r.novos.length===1?'novo':'novos'}</span>
+      <span class="orc2-tag t3">✎ ${r.alterados.length} com preço alterado</span>
+      <span class="orc2-tag t1">= ${r.iguais} iguais</span>
+      ${r.sairam.length?`<span class="orc2-tag" style="background:#fee2e2;color:#991b1b">− ${r.sairam.length} ${r.sairam.length===1?'saiu':'saíram'} da planilha</span>`:''}
+    </div>
+    ${r.alterados.length?`<div style="max-height:260px;overflow:auto;border:1px solid #f1f5f9;border-radius:10px"><table class="orc2-res-tab" style="width:100%;border-collapse:collapse"><thead><tr><th>Cód.</th><th>Matéria-prima com preço alterado</th><th class="r">Preço</th></tr></thead><tbody>${r.alterados.slice(0,300).map(c=>linha(c,r.itens[c].va)).join('')}</tbody></table></div>`:''}
+    ${r.novos.length&&_orc3Tem()?`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:.76rem;font-weight:700;color:#166534">Ver os ${r.novos.length} novos</summary><table class="orc2-res-tab" style="width:100%;border-collapse:collapse">${r.novos.slice(0,300).map(c=>linha(c)).join('')}</table></details>`:''}
+    ${r.sairam.length?`<div class="orcx-hint" style="margin-top:8px">Os que saíram da planilha deixam de existir na base (a exportação é a lista completa).</div>`:''}
+    <div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="orc2-btn pri" onclick="orc3ConfirmarImportacao()">✔ Gravar na base</button><button type="button" class="orc2-btn sec" onclick="orc3CancelarImportacao()">Cancelar</button></div>
+  </div>`;
+}
+function _orc3HtmlCruzamento(){
+  const P=_orc2Precos();
+  return`<div class="dash-card"><div class="dash-sec-title">🔗 Materiais da Letra Caixa × base de matérias-primas</div>
+  <div style="overflow-x:auto"><table class="orc2-res-tab" style="width:100%;border-collapse:collapse">
+  <thead><tr><th>Material</th><th>Cód.</th><th>De onde vem</th><th class="r">Preço usado</th></tr></thead><tbody>
+  ${Object.keys(ORC2_PRECOS_PADRAO).map(k=>{const f=_orc3Fonte(k);const adm=_getUserCat().isAdm;
+    const fonte=f.tipo==='base'?`<span class="orc2-tag t2">Base</span> <span style="font-size:.7rem;color:#64748b">${_orcxEsc(f.m.n)}${f.m.d?' · ref. '+_orcxEsc(f.m.d):''}${f.m.va!=null?` · antes ${_orcxBRL(f.m.va)}`:''}${f.obs?' · <b>'+_orcxEsc(f.obs)+'</b>':''}</span>`
+      :f.tipo==='manual'?`<span class="orc2-tag t3">Manual</span>${k==='tinta'?' <span style="font-size:.7rem;color:#64748b">na planilha é lata 0,9L; aqui é por litro</span>':''}`
+      :`<span class="orc2-tag" style="background:#f1f5f9;color:#475569">Padrão</span>${f.cod&&_orc3Tem()?' <span style="font-size:.7rem;color:#b45309">código '+f.cod+' sem preço na base</span>':''}`;
+    const val=f.tipo==='base'?`<b>${_orcxBRL(P[k])}</b>`:(adm?`<input class="fc no-upper" id="orc2-preco-${k}" style="width:110px;text-align:right" value="${P[k].toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}">`:`<b>${_orcxBRL(P[k])}</b>`);
+    return`<tr><td>${ORC2_PRECOS_ROTULO[k]}</td><td style="color:#64748b">${f.cod||'—'}</td><td>${fonte}</td><td class="r">${val}</td></tr>`;}).join('')}
+  </tbody></table></div></div>`;
+}
+function _orc3HtmlBase(){
+  const n=Object.keys(orc3.base||{}).length,m=orc3.meta;
+  const q=_orc3Norm(orc3.busca);
+  let lista=[];if(n){lista=Object.entries(orc3.base).filter(([c,x])=>!q||c.indexOf(q)===0||_orc3Norm(x.n).indexOf(q)>=0||_orc3Norm(x.g).indexOf(q)>=0).sort((a,b)=>a[1].n.localeCompare(b[1].n,'pt-BR'));}
+  return`<div class="dash-card"><div class="dash-sec-title">🧱 Base de matérias-primas</div>
+  ${n?`<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px"><span class="orc2-tag t2">${n} matérias-primas</span>${m?`<span style="font-size:.74rem;color:#64748b">Importada em ${new Date(m.em).toLocaleString('pt-BR')}${m.por?' por '+_orcxEsc(m.por):''}${m.arquivo?' · '+_orcxEsc(m.arquivo):''}</span>`:''}</div>
+  <input class="fc no-upper" id="orc3-busca" placeholder="🔍 Buscar por código, nome ou grupo (ex.: ACM, reator, 1060)" value="${_orcxEsc(orc3.busca)}" oninput="orc3.busca=this.value;const el=document.getElementById('orc3-base-lista');if(el)el.innerHTML=_orc3HtmlBaseLista();">
+  <div id="orc3-base-lista" style="margin-top:10px">${_orc3HtmlBaseLista()}</div>`
+  :`<div class="orc2-vazio"><div class="ic">🧱</div>Nenhuma base importada ainda. Exporte a <b>Lista de Matéria-Prima</b> do outro sistema e clique em <b>📥 Importar planilha</b>.<br><span style="font-size:.74rem">Enquanto isso, a Letra Caixa usa os preços da tabela abaixo.</span></div>`}
+  </div>`;
+}
+function _orc3HtmlBaseLista(){
+  const q=_orc3Norm(orc3.busca);
+  const lista=Object.entries(orc3.base||{}).filter(([c,x])=>!q||c.indexOf(q)===0||_orc3Norm(x.n).indexOf(q)>=0||_orc3Norm(x.g).indexOf(q)>=0).sort((a,b)=>a[1].n.localeCompare(b[1].n,'pt-BR'));
+  if(!lista.length)return'<div class="orcx-hint">Nenhuma matéria-prima com essa busca.</div>';
+  return`<div style="max-height:380px;overflow:auto;border:1px solid #f1f5f9;border-radius:10px"><table class="orc2-res-tab" style="width:100%;border-collapse:collapse"><thead><tr><th>Cód.</th><th>Matéria-prima</th><th>Grupo</th><th>Unidade</th><th class="r">Valor</th><th>Ref.</th></tr></thead><tbody>
+  ${lista.slice(0,200).map(([c,x])=>`<tr><td style="color:#64748b">${c}</td><td>${_orcxEsc(x.n)}</td><td style="font-size:.72rem;color:#64748b">${_orcxEsc(x.g||'')}</td><td style="font-size:.72rem;color:#64748b">${_orcxEsc((x.u||'').replace(/\(s\)|\(es\)/g,'').replace(/\s*\(.*\)/,''))}</td><td class="r"><b>${x.v>0?_orcxBRL(x.v):'<span style="color:#b45309">sem preço</span>'}</b>${x.va!=null?`<div style="font-size:.66rem;color:#94a3b8">antes ${_orcxBRL(x.va)}</div>`:''}</td><td style="font-size:.72rem;color:#64748b;white-space:nowrap">${_orcxEsc(x.d||'')}</td></tr>`).join('')}
+  </tbody></table></div>${lista.length>200?`<div class="orcx-hint">Mostrando 200 de ${lista.length} — refine a busca.</div>`:''}`;
+}
+function _orc2RenderConfig(c){
+  const adm=_getUserCat().isAdm;
+  c.innerHTML=`${_orc2HtmlSubAbas()}<div class="orc2-top"><h3>Matérias-primas, preços e CMV</h3>
+    ${adm?`<input type="file" id="orc3-arquivo" accept=".xlsx,.xls,.csv" style="display:none" onchange="orc3LerArquivo(this)"><button class="orc2-btn pri" type="button" onclick="orc3EscolherArquivo()">📥 Importar planilha</button><button class="orc2-btn nav" type="button" onclick="orc2SalvarPrecosManuais()">💾 Salvar preços manuais e CMV</button>`:''}</div>
+  ${_orc3HtmlImportacao()}
+  ${_orc3HtmlBase()}
+  ${_orc3HtmlCruzamento()}
+  <div class="dash-card"><div class="dash-sec-title">💰 CMV</div><div class="fg" style="max-width:260px"><label>CMV padrão dos itens novos — %</label><input class="fc no-upper" id="orc2-cmv-padrao" type="number" min="1" max="100" value="${_orc2Cmv()}" ${adm?'':'disabled'}></div><div class="orcx-hint">Preço ao cliente = custo ÷ CMV. Cada item do orçamento pode ter o seu CMV ajustado.</div></div>`;
 }
 
 // ── Integração com o menu (só embrulha — nada antigo é reescrito) ──
@@ -53525,7 +54184,7 @@ function orcxPdf(idSalvo){
           b.className='sb-btn';b.id='sb-cat-ORCAMENTOS';b.title='Orçamentos';b.style.fontSize='.7rem';
           b.setAttribute('onclick',"setSection('cat:ORCAMENTOS')");
           b.innerHTML='<span style="font-size:1rem;flex-shrink:0;width:18px;text-align:center">🧮</span><span class="sb-btn-label">Orçamentos</span>';
-          cont.appendChild(b);
+          cont.insertBefore(b,cont.firstChild); // logo abaixo de "Visão Comercial"
         }
       }catch(e){console.error('orcx sidebar',e);}
       return r;
@@ -53535,6 +54194,7 @@ function orcxPdf(idSalvo){
     const _origSet=setSection;
     setSection=function(sec){
       if(sec==='cat:ORCAMENTOS'&&!_orcxAcesso()){toast('ACESSO NÃO PERMITIDO','terr');return;}
+      if(currentSection==='cat:ORCAMENTOS'&&sec!=='cat:ORCAMENTOS')_orc2GuardarRascunho();
       const r=_origSet.apply(this,arguments);
       try{
         const c=_orcxContainer();
@@ -53543,12 +54203,12 @@ function orcxPdf(idSalvo){
         if(ativo){
           const gen=document.getElementById('sec-cat-generic');if(gen)gen.style.display='none';
           const n=document.getElementById('cat-hdr-name');if(n)n.textContent='🧮 Orçamentos';
-          const dsc=document.getElementById('cat-hdr-desc');if(dsc)dsc.textContent='Cálculo de custos operacionais (instalação, frete, mobilização e extras)';
+          const dsc=document.getElementById('cat-hdr-desc');if(dsc)dsc.textContent='Produtos, instalação, frete e proposta num lugar só';
           document.querySelectorAll('#sb-cats .sb-btn').forEach(x=>x.classList.toggle('active',x.id==='sb-cat-ORCAMENTOS'));
-          _orcxWatch();
-          if(orcxEstado.aba==='operacionais'&&document.getElementById('orcx-empresa'))orcxEstado._rascunho=_orcxColetar();
-          else if(!orcxEstado._rascunho&&!orcxEstado._rascLido){orcxEstado._rascLido=true;const rs=_orcxLerRascunho();if(rs&&rs.campos){orcxEstado._rascunho=rs.campos;if(rs.editandoId)orcxEstado.editandoId=rs.editandoId;}}
-          orcxRender();if(orcxEstado.aba==='operacionais'&&orcxEstado._rascunho)_orcxRestaurar(orcxEstado._rascunho);
+          _orc2WatchLista();_orc2CfgWatch();_orc3Watch();
+          // volta pro rascunho (orçamento aberto antes de sair do menu ou fechar a aba)
+          if(!orc2.doc&&!orc2._rascLido){orc2._rascLido=true;try{const rs=JSON.parse(localStorage.getItem(ORC2_LS_RASC)||'null');if(rs&&rs.doc){orc2.doc=rs.doc;orc2.aba=rs.aba||'projeto';orc2.view='editor';}}catch(e){}}
+          orc2Render();
         }
       }catch(e){console.error('orcx setSection',e);}
       return r;
