@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-01.9';</script>
+<script>const APP_BUILD_VERSION='2026-10-01.15';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -653,6 +653,11 @@ table.fx-t{font-size:.74rem;font-weight:400}
 .plx-agt .hj{background:#eff6ff}
 .plx-ag-n{text-align:left !important;white-space:nowrap;font-weight:700;color:#334155;background:#fff;position:sticky;left:0;z-index:1;min-width:120px !important;padding:4px 8px !important}
 .plx-ag{background:#dbeafe;color:#1e3a8a;border-radius:5px;padding:3px 2px;font-weight:800;cursor:pointer;white-space:nowrap}
+.plx-ag[draggable=true]{cursor:grab}
+.plx-drop{outline:2px dashed #0891b2;outline-offset:-2px;background:#ecfeff!important}
+.plv3-det{background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:12px 16px;margin-bottom:12px}
+.plv3-det>summary{cursor:pointer;font-weight:800;font-size:.85rem;color:var(--ink2,#334155);list-style:revert}
+.plv3-det[open]>summary{margin-bottom:12px}
 .plx-ag.conf{background:#dc2626;color:#fff}
 .plx-ag.sem{background:#fef3c7;color:#92400e}
 .plx-cap{border-radius:10px;padding:1px 6px;background:#f1f5f9;color:#475569}
@@ -808,6 +813,8 @@ table.fx-t{font-size:.74rem;font-weight:400}
 /* ── MODAL BACKDROP ── */
 .mov{display:none;position:fixed;inset:0;background:rgba(15,23,42,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:200;align-items:center;justify-content:center;padding:16px}
 .mov.open{display:flex}
+/* (2026-10-01) janelas abertas por cima de Configurações (Usuários) */
+#mo-vend-deslig,#mo-vend-transf,#mo-menus-usuario{z-index:400}
 /* mo-pwd (pedirSenhaAdmin) precisa SEMPRE ficar por cima de qualquer outro modal .mov já aberto
    — antes tinha o mesmo z-index:200 de todo mundo, então quando pedida a senha com outro modal
    já aberto (ex: Importar Contas a Pagar), o navegador empilhava pela ORDEM NO HTML, e como
@@ -2108,19 +2115,20 @@ select.fc{cursor:pointer}
          aqui é o gestor de planejamento ou equipe dele, precisa ver tudo. -->
     <div id="sec-cat-PLANEJAMENTO" style="display:none">
       <div class="dash-tabs" style="margin-bottom:14px" id="plan-main-tabs">
-        <button class="dash-tab active plan-main-tab" onclick="planMainSetTab('indicadores',this)">📊 Indicadores de Planejamento</button>
-        <button class="dash-tab plan-main-tab" onclick="planMainSetTab('obras',this)">🏗️ Obras</button>
-        <button class="dash-tab plan-main-tab" onclick="planMainSetTab('pendencias',this)">⚠️ Finalizados com Pendências</button>
-        <button class="dash-tab plan-main-tab" onclick="planMainSetTab('fornecedores',this)">🧰 Fornecedores</button>
-        <button class="dash-tab plan-main-tab" onclick="planMainSetTab('comissao',this)">🔒📈 Comissão</button>
+        <button class="dash-tab active plan-main-tab" data-main="hoje" onclick="planMainSetTab('hoje',this)">🗓️ Hoje</button>
+        <button class="dash-tab plan-main-tab" data-main="obras" onclick="planMainSetTab('obras',this)">🏗️ Obras</button>
+        <button class="dash-tab plan-main-tab" data-main="fornecedores" onclick="planMainSetTab('fornecedores',this)">🧰 Fornecedores</button>
+        <button class="dash-tab plan-main-tab" data-main="indicadores" onclick="planMainSetTab('indicadores',this)">📊 Indicadores</button>
       </div>
+      <!-- 🗓️ HOJE (2026-10-01, Planejamento v3) — página inicial: o que fazer hoje/nesta semana. Ver renderPlHoje(). -->
+      <div id="pl-sec-hoje"><div id="pl-hoje-body"></div></div>
       <!-- INDICADORES DE PLANEJAMENTO (2026-07-29) — era o "Dashboard" de dentro da aba
            Fornecedores; virou a página principal do menu a pedido do usuário, já que reúne
            todos os indicadores (KPIs, rankings, comparativo mensal) que fazem sentido ver
            primeiro ao entrar em Planejamento. Mesmos ids/filtros de sempre (fornecedor,
            status) — só mudou de casa, a lógica em renderFgDashboard() continua a mesma. Mês
            do filtro trocado no mesmo dia pra usar a entrega DE FATO (_fgMesEntregaReal). -->
-      <div id="pl-sec-indicadores">
+      <div id="pl-sec-indicadores" style="display:none">
         <!-- Indicadores de Fornecedores virou SUBMENU daqui de dentro (2026-09-04, a pedido
              do usuário: "indicadores de fornecedores tem que ser um sub menu abaixo de
              indicadores de planejamento") — antes era aba irmã lá em cima, ao lado de
@@ -2128,11 +2136,11 @@ select.fc{cursor:pointer}
         <div class="dash-tabs" style="margin-bottom:14px" id="pl-ind-sub-tabs">
           <button class="dash-tab active pl-ind-sub-tab" onclick="planIndicadoresSetSubTab('geral',this)">📊 Geral</button>
           <button class="dash-tab pl-ind-sub-tab" onclick="planIndicadoresSetSubTab('fornecedores',this)">🏢 Indicadores de Fornecedores</button>
+          <button class="dash-tab pl-ind-sub-tab" onclick="planIndComissaoSub(this)">🔒📈 Comissão</button>
         </div>
         <div id="pl-ind-sub-geral">
-          <div id="pl-ind-extras"></div>
           <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
-            📊 Indicadores de Planejamento — Budget x Fechado x Save por categoria, rankings e evolução mensal. Baseado no mês em que a obra foi ENTREGUE DE FATO (Data de Finalização); enquanto ainda pendente, usa o prazo previsto como mês provisório.
+            📊 Indicadores de Planejamento — Budget x Fechado x Save por categoria, rankings e evolução mensal. Só o REALIZADO: entram apenas obras finalizadas, no mês da Data de Finalização (o dia em que a obra terminou de fato). Obra em andamento não aparece aqui. "Todos os meses" = últimos 12 meses.
           </div>
           <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
             <div class="dash-mes-nav" style="margin:0">
@@ -2141,15 +2149,20 @@ select.fc{cursor:pointer}
               <button onclick="_fgMesMov(1)" type="button">▶</button>
             </div>
           </div>
+          <div id="pl-ind-top4"></div>
+          <details class="plv3-det"><summary>💰 Por categoria — Vendido, Budget, Realizado e Save</summary>
           <div id="fg-dash-kpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px"></div>
           <div id="fg-dash-categorias" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-bottom:16px"></div>
+          </details>
+          <details class="plv3-det"><summary>📈 Pontualidade e estouros de prazo</summary><div id="pl-ind-extras"></div></details>
+          <details class="plv3-det" ontoggle="if(this.open){try{renderFgDashboard();}catch(e){}}"><summary>📊 Gráficos, rankings, comparativo mensal e lista de pedidos</summary>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px" class="fg-dash-3col">
             <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
               <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Mais contratados</h3>
               <div id="fg-dash-contratados" style="font-size:.82rem;line-height:1.9"></div>
             </div>
             <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
-              <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Save por área</h3>
+              <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">Sem fornecedor lançado <span style="font-weight:500;color:var(--ink4);font-size:.72rem">(budget de obras finalizadas sem fornecedor registrado — conferir)</span></h3>
               <div id="fg-dash-save-areas"></div>
             </div>
             <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px">
@@ -2170,7 +2183,7 @@ select.fc{cursor:pointer}
           <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:16px;margin-top:14px">
             <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;flex-wrap:wrap;gap:6px">
               <h3 style="margin:0;font-size:.85rem;font-weight:700">Comparativo Mensal</h3>
-              <span style="font-size:.72rem;color:var(--ink4)">Pedidos finalizados, por mês da Data de Finalização</span>
+              <span style="font-size:.72rem;color:var(--ink4)">Obras finalizadas, por mês da Data de Finalização · últimos 12 meses</span>
             </div>
             <div id="fg-dash-comparativo-mensal"></div>
           </div>
@@ -2187,6 +2200,7 @@ select.fc{cursor:pointer}
             </div>
             <div id="fg-dash-lista-planejamento" style="overflow-x:auto"></div>
           </div>
+          </details>
         </div>
         <div id="pl-ind-sub-fornecedores" style="display:none">
           <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
@@ -2214,6 +2228,7 @@ select.fc{cursor:pointer}
           <button class="dash-tab-sub pl-obras-main-tab" onclick="plObrasSetTab('kanban',this)">🗂️ Kanban</button>
           <button class="dash-tab-sub pl-obras-main-tab" onclick="plObrasSetTab('calendario',this)">📅 Calendário</button>
           <button class="dash-tab-sub pl-obras-main-tab" onclick="plObrasSetTab('proximas',this)" title="Pode sair? · Agenda de instaladores · Rotas">🚦 Próximas Obras</button>
+          <button class="dash-tab-sub pl-obras-main-tab" data-sub="pendencias" onclick="plObrasSetTab('pendencias',this)">⚠️ Pendências</button>
         </div>
         <div id="pl-obras-info" style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
           🏗️ Lista única de obras emitidas — registre o Diário de Obra, defina os Fornecedores contratados (instalador/frete/munque) ou finalize a obra, tudo direto por aqui. Tipo de pedido, cliente, OS, cidade/UF e e-mails de contato já vêm automáticos da emissão. Ao finalizar, um resumo é enviado por e-mail aos contatos do pedido e para pedidos@granda.ind.br.
@@ -7161,6 +7176,15 @@ function setupRealtimeSync(){
   window._fbWatchPedidos(function(snapshot){
     pedidos=snapshot.docs.map(d=>d.data());
     try{pedidos.forEach(_projNormExpedicao);}catch(e){}
+    // (2026-10-01) Pedido emitido com Data do Conselho DEPOIS da emissão (data planejada que
+    // foi confirmada sem corrigir) — o Conselho não pode ter sido depois; usa a data da emissão
+    // e guarda a planejada em conselhoDataPlanejada.
+    try{pedidos.forEach(p=>{
+      if(p&&p.origemComercial&&p.conselhoData&&p.emissaoEm&&!p.importadoPlanilha){
+        const em=_normPrazoIso(p.emissaoEm)||'';
+        if(em&&p.conselhoData>em){p.conselhoDataPlanejada=p.conselhoDataPlanejada||p.conselhoData;p.conselhoData=em;p.conselhoDataAjustada=true;}
+      }
+    });}catch(e){}
     try{pedidos.forEach(_prodNormLetraCaixa);}catch(e){}
     // Roda em TODA sessão nova (sem flag "só 1x", ao contrário das migrações abaixo) — é uma
     // limpeza de segurança que precisa continuar rodando se algum resíduo antigo reaparecer;
@@ -8951,9 +8975,11 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
     if(isPlan)setTimeout(()=>{try{
       document.querySelectorAll('.plan-main-tab').forEach(b=>b.classList.remove('active'));
       document.getElementById('plan-main-tabs')?.querySelector('.plan-main-tab')?.classList.add('active');
+      try{_plv3MontarAbas();}catch(e){}
       const si=document.getElementById('pl-sec-indicadores'),so=document.getElementById('pl-sec-obras'),sp=document.getElementById('pl-sec-pendencias'),sf=document.getElementById('pl-sec-fornecedores'),sc=document.getElementById('pl-sec-comissao');
-      if(si)si.style.display='';if(so)so.style.display='none';if(sp)sp.style.display='none';if(sf)sf.style.display='none';if(sc)sc.style.display='none';
-      if(typeof renderIndicadoresPlanejamento==='function')renderIndicadoresPlanejamento();
+      if(si)si.style.display='none';if(so)so.style.display='none';if(sp)sp.style.display='none';if(sf)sf.style.display='none';if(sc)sc.style.display='none';
+      const shj=document.getElementById('pl-sec-hoje');if(shj)shj.style.display='';
+      if(typeof renderPlHoje==='function')renderPlHoje();
     }catch(e){console.error('Erro ao abrir Planejamento',e);}},120);
     // Lista de Pedidos sempre reabre na aba Lista (2026-07-30, mesmo padrão do Planejamento).
     if(isListaPedidos)setTimeout(()=>{try{
@@ -13509,7 +13535,7 @@ function _confirmarDataConselho(dataAtual){
         <div><div style="font-size:.95rem;font-weight:800;color:#111">Confirmar data do Conselho</div><div style="font-size:.75rem;color:#6b7280;margin-top:2px">Última checagem antes de emitir de verdade</div></div>
       </div>
       <div style="font-size:.85rem;font-weight:700;color:#374151;margin-bottom:10px">VOCÊ REALIZOU A REUNIÃO DE CONSELHO NESTA DATA?</div>
-      <input class="fc" type="date" id="conf-conselho-data" value="${dataAtual||''}" style="width:100%;padding:10px 12px;border:1.5px solid #ddd6fe;border-radius:8px;font-size:.85rem;font-family:inherit;box-sizing:border-box;margin-bottom:4px">
+      <input class="fc" type="date" id="conf-conselho-data" max="${_hojeIso()}" value="${(dataAtual&&dataAtual>_hojeIso())?_hojeIso():(dataAtual||'')}" style="width:100%;padding:10px 12px;border:1.5px solid #ddd6fe;border-radius:8px;font-size:.85rem;font-family:inherit;box-sizing:border-box;margin-bottom:4px">
       <div style="font-size:.68rem;color:#94a3b8;margin-bottom:4px">Se a reunião foi em outro dia, corrija a data acima antes de confirmar.</div>
       <div style="display:flex;gap:10px;margin-top:14px">
         <button onclick="_resolveConfirmacaoConselhoData(null)" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid #e5e7eb;background:#fff;font-size:.82rem;font-weight:700;cursor:pointer;color:#374151">Voltar e revisar</button>
@@ -13527,6 +13553,10 @@ function _resolveConfirmacaoConselhoData(ok){
   if(ok){
     const v=document.getElementById('conf-conselho-data')?.value||'';
     if(!v){toast('Informe a data em que a reunião de Conselho aconteceu','terr');return;}
+    // (2026-10-01, a pedido do usuário: "como a data de emissão é menor que conselho?") — o
+    // Conselho sempre acontece ANTES (ou no mesmo dia) da emissão; a data planejada no rascunho
+    // podia ficar no futuro e era confirmada assim mesmo.
+    if(v>_hojeIso()){toast('A reunião de Conselho não pode ser depois de hoje (dia da emissão). Corrija a data.','terr');return;}
     resultado=v;
   }
   m.style.display='none';
@@ -24602,11 +24632,23 @@ function planIndicadoresSetSubTab(tab,btn){
   const sg=document.getElementById('pl-ind-sub-geral'),sf=document.getElementById('pl-ind-sub-fornecedores');
   if(sg)sg.style.display=tab==='fornecedores'?'none':'';
   if(sf)sf.style.display=tab==='fornecedores'?'':'none';
+  const scm=document.getElementById('pl-sec-comissao');if(scm)scm.style.display='none';
   if(tab==='fornecedores'){if(typeof renderIndicadoresFornecedores==='function')renderIndicadoresFornecedores();}
   else{if(typeof renderIndicadoresPlanejamento==='function')renderIndicadoresPlanejamento();}
 }
 async function planMainSetTab(tab,btn){
+  try{_plv3MontarAbas();}catch(e){}
+  // v3 (2026-10-01): Pendências virou sub-aba de Obras e Comissão sub-aba de Indicadores —
+  // chamadas antigas com essas abas são redirecionadas.
+  if(tab==='pendencias'){
+    await planMainSetTab('obras',document.querySelector('.plan-main-tab[data-main="obras"]'));
+    plObrasSetTab('pendencias',document.querySelector('.pl-obras-main-tab[data-sub="pendencias"]'));return;
+  }
   if(tab==='comissao'){
+    await planMainSetTab('indicadores',document.querySelector('.plan-main-tab[data-main="indicadores"]'));
+    planIndComissaoSub([...document.querySelectorAll('.pl-ind-sub-tab')].find(b=>b.textContent.includes('Comissão')));return;
+  }
+  if(tab==='comissao_legado'){
     const{isAdm}=_getUserCat();
     if(!isAdm){
       const senha=await pedirSenhaAdmin('Comissão Planejamento','Esta aba é restrita a administradores. Digite a senha/PIN de administrador para abrir:');
@@ -24623,6 +24665,8 @@ async function planMainSetTab(tab,btn){
   if(sf)sf.style.display=tab==='fornecedores'?'':'none';
   if(sc)sc.style.display=tab==='comissao'?'':'none';
   const spx=document.getElementById('pl-sec-proximas');if(spx)spx.style.display=tab==='proximas'?'':'none';
+  const shj=document.getElementById('pl-sec-hoje');if(shj)shj.style.display=tab==='hoje'?'':'none';
+  if(tab==='hoje'){try{renderPlHoje();}catch(e){console.error('Hoje',e);}return;}
   // Indicadores de Planejamento (2026-07-29) — era o Dashboard de dentro de Fornecedores,
   // virou a 1ª aba/página padrão do menu, a pedido do usuário. Indicadores de Fornecedores
   // (2026-09-04) deixou de ser aba irmã aqui e virou SUBMENU dentro desta — ver
@@ -33274,11 +33318,22 @@ function _fgCalc(p){
   // fornecedor JÁ foi escolhido e o valor fechado é genuinamente 0 (ex.: equipe própria, sem
   // custo), aí sim o save cheio é real e continua contando normalmente.
   const temInst=!!fg.instalador,temFrete=!!fg.transportadora,temMunque=!!fg.munque;
-  const saveInst=temInst?budgetInst-fechadoInst:0;
-  const saveFrete=temFrete?budgetFrete-fechadoFrete:0;
-  const saveMunque=temMunque?budgetMunque-fechadoMunque:0;
+  // (2026-10-01, a pedido do usuário: "só mostrar save do que foi realizado, o que não foi não
+  // mostrar save") — save só existe depois que a OBRA FOI FINALIZADA (Data de Finalização) e o
+  // fornecedor daquele papel foi contratado. Obra em andamento não tem save nenhum ainda.
+  const obraFinalizada=!!(p.finalizacao&&p.finalizacao.dataFinalizacao);
+  const saveInst=(temInst&&obraFinalizada)?budgetInst-fechadoInst:0;
+  const saveFrete=(temFrete&&obraFinalizada)?budgetFrete-fechadoFrete:0;
+  const saveMunque=(temMunque&&obraFinalizada)?budgetMunque-fechadoMunque:0;
+  // (2026-10-01) Vendido de verdade (100% do que foi cobrado do cliente) e budget só dos papéis
+  // já contratados — pros cards de categoria mostrarem números que fecham entre si.
+  const vendidoInst=r.mo+r.vi+r.rem+r.pintub,vendidoFrete=r.ft,vendidoMunque=r.el;
+  const budgetContrInst=temInst?budgetInst:0,budgetContrFrete=temFrete?budgetFrete:0,budgetContrMunque=temMunque?budgetMunque:0;
+  const aContratarInst=temInst?0:budgetInst,aContratarFrete=temFrete?0:budgetFrete,aContratarMunque=temMunque?0:budgetMunque;
   return{
     r,fg,budgetInst,budgetFrete,budgetMunque,fechadoInst,fechadoFrete,fechadoMunque,
+    vendidoInst,vendidoFrete,vendidoMunque,budgetContrInst,budgetContrFrete,budgetContrMunque,
+    aContratarInst,aContratarFrete,aContratarMunque,temInst,temFrete,temMunque,obraFinalizada,
     saveInst,saveFrete,saveMunque,saveTotal:saveInst+saveFrete+saveMunque,
     gastosExtras,totalGasto:fechadoInst+fechadoFrete+fechadoMunque+gastosExtras
   };
@@ -33314,7 +33369,7 @@ function planAbrirDetalhePedido(pedidoId){
       <div style="display:flex;gap:14px;flex-wrap:wrap">
         <div style="flex:1;min-width:110px"><div style="font-size:.64rem;color:var(--ink4);text-transform:uppercase;letter-spacing:.02em">Valor Vendido</div><div style="font-size:.86rem;font-weight:700;color:#1a1f36">${fmtR(vendido)}</div></div>
         <div style="flex:1;min-width:110px"><div style="font-size:.64rem;color:var(--ink4);text-transform:uppercase;letter-spacing:.02em">Valor Realizado</div><div style="font-size:.86rem;font-weight:700;color:#1a1f36">${fmtR(realizado)}</div></div>
-        <div style="flex:1;min-width:110px"><div style="font-size:.64rem;color:var(--ink4);text-transform:uppercase;letter-spacing:.02em">Save</div><div style="font-size:.86rem;font-weight:800;color:${saveCor}">${fmtR(save)}</div></div>
+        <div style="flex:1;min-width:110px"><div style="font-size:.64rem;color:var(--ink4);text-transform:uppercase;letter-spacing:.02em">Save</div><div style="font-size:.86rem;font-weight:800;color:${c.obraFinalizada?saveCor:'#94a3b8'}">${c.obraFinalizada?fmtR(save):'— só após finalizar'}</div></div>
       </div>
     </div>`;
   };
@@ -33341,7 +33396,7 @@ function planAbrirDetalhePedido(pedidoId){
     ${linhas||'<div style="text-align:center;padding:14px;color:var(--ink4);font-size:.8rem">Sem itens de planejamento pra este pedido.</div>'}
     <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0 4px;margin-top:6px">
       <div style="font-size:.85rem;font-weight:800;color:#1a1f36">Total (Instalação + Frete + Munque)</div>
-      <div style="font-size:.9rem;font-weight:800;color:${totalCor}">Save ${fmtR(c.saveTotal)}</div>
+      <div style="font-size:.9rem;font-weight:800;color:${c.obraFinalizada?totalCor:'#94a3b8'}">${c.obraFinalizada?'Save '+fmtR(c.saveTotal):'Save aparece quando a obra for finalizada'}</div>
     </div>
     <div style="margin:18px 0 10px;font-size:.78rem;font-weight:700;color:var(--ink4);text-transform:uppercase;letter-spacing:.03em">🧾 Gastos Extras (não entram no save)</div>
     ${extrasHtml}
@@ -33370,7 +33425,11 @@ function _fgCalcAtribuido(c,fg,forn){
   const budgetInst=temInst?c.budgetInst:0,budgetFrete=temFrete?c.budgetFrete:0,budgetMunque=temMunque?c.budgetMunque:0;
   const fechadoInst=temInst?c.fechadoInst:0,fechadoFrete=temFrete?c.fechadoFrete:0,fechadoMunque=temMunque?c.fechadoMunque:0;
   const saveInst=temInst?c.saveInst:0,saveFrete=temFrete?c.saveFrete:0,saveMunque=temMunque?c.saveMunque:0;
+  const z=(t,v)=>t?v:0;
   return{budgetInst,budgetFrete,budgetMunque,fechadoInst,fechadoFrete,fechadoMunque,saveInst,saveFrete,saveMunque,gastosExtras:0,
+    vendidoInst:z(temInst,c.vendidoInst),vendidoFrete:z(temFrete,c.vendidoFrete),vendidoMunque:z(temMunque,c.vendidoMunque),
+    budgetContrInst:z(temInst,c.budgetContrInst),budgetContrFrete:z(temFrete,c.budgetContrFrete),budgetContrMunque:z(temMunque,c.budgetContrMunque),
+    aContratarInst:0,aContratarFrete:0,aContratarMunque:0,temInst,temFrete,temMunque,obraFinalizada:c.obraFinalizada,
     totalGasto:fechadoInst+fechadoFrete+fechadoMunque,saveTotal:saveInst+saveFrete+saveMunque};
 }
 // Soma N dias ÚTEIS (considerando feriados nacionais, ver getFeriadosNacionais — mais
@@ -33632,11 +33691,30 @@ function _fgMesPrazo(p){
 // não têm essa data ainda, então caem no prazo previsto (_fgMesPrazo) como mês provisório até
 // serem finalizados de verdade.
 function _fgMesEntregaReal(p){
-  if(p.finalizacao&&p.finalizacao.dataFinalizacao){
-    return parseInt(String(p.finalizacao.dataFinalizacao).slice(5,7),10)||0;
-  }
-  return _fgMesPrazo(p);
+  // (2026-10-01, a pedido do usuário: "o indicador é por realizado e não por projetado, é no
+  // mês que ele terminou de fato a obra") — obra sem Data de Finalização NÃO entra em mês
+  // nenhum dos Indicadores (antes caía no prazo previsto como mês provisório).
+  const d=_fgDataFinIso(p);
+  return d?(parseInt(d.slice(5,7),10)||0):0;
 }
+// Data de Finalização real em ISO (aceita registro antigo em DD/MM/AAAA).
+function _fgDataFinIso(p){
+  const d=p&&p.finalizacao&&p.finalizacao.dataFinalizacao;
+  if(!d)return'';
+  const iso=_normPrazoIso(String(d));
+  return /^\d{4}-\d{2}-\d{2}$/.test(iso)?iso:'';
+}
+// O filtro de mês não tem ano: vale sempre os últimos 12 meses corridos — mês igual ou antes
+// do atual = este ano; mês depois do atual = ano passado (ex.: em out/2026, "Novembro" é
+// nov/2025). Antes, Outubro/2025 e Outubro/2026 somavam juntos.
+function _fgAnoDoMes(m){const h=new Date();return m>h.getMonth()+1?h.getFullYear()-1:h.getFullYear();}
+function _fgInicio12m(){const h=new Date();return _isoLocal(new Date(h.getFullYear(),h.getMonth()-11,1));}
+function _fgNoPeriodo(p){
+  const d=_fgDataFinIso(p);if(!d)return false;
+  if(_fgMes)return d.slice(0,7)===_fgAnoDoMes(_fgMes)+'-'+String(_fgMes).padStart(2,'0');
+  return d>=_fgInicio12m();
+}
+function _fgMesLbl(){return _fgMes?MESES_PT[_fgMes]+' '+_fgAnoDoMes(_fgMes):'Todos os meses (12 meses)';}
 function _fgPreencherFiltroFornecedor(){
   const el=document.getElementById('fg-fil-fornecedor');
   if(!el)return;
@@ -33647,8 +33725,8 @@ function _fgPreencherFiltroFornecedor(){
 // ENTREGA DE FATO (_fgMesEntregaReal: Data de Finalização real se já concluída, senão o prazo
 // previsto) — não no mês da venda (2026-07-29, a pedido do usuário).
 function _fgFiltradosBase(){
-  let lista=_plPedidosElegiveis();
-  if(_fgMes)lista=lista.filter(p=>_fgMesEntregaReal(p)===_fgMes);
+  // Só obras FINALIZADAS de fato, pelo mês da Data de Finalização (2026-10-01).
+  let lista=_plPedidosElegiveis().filter(_fgNoPeriodo);
   const forn=document.getElementById('fg-fil-fornecedor')?.value||'';
   if(forn)lista=lista.filter(p=>{const fg=p.fornGestao||{};return fg.instalador===forn||fg.transportadora===forn||fg.munque===forn;});
   const st=document.getElementById('fg-fil-status-geral')?.value||'';
@@ -33659,10 +33737,11 @@ function _fgFiltradosBase(){
 // status).
 function renderIndicadoresPlanejamento(){
   setTimeout(()=>{try{_plIndExtrasRender();}catch(e){console.error(e);}},0);
+  setTimeout(()=>{try{_plv3IndRender();}catch(e){console.error(e);}},0);
   _fgSeedFornecedoresIniciais();
   _fgPreencherFiltroFornecedor();
   const lblEl=document.getElementById('fg-mes-lbl');
-  if(lblEl)lblEl.textContent=(_fgMes?MESES_PT[_fgMes]:'Todos os meses')+' ▾';
+  if(lblEl)lblEl.textContent=_fgMesLbl()+' ▾';
   renderFgDashboard();
 }
 // Entrada da aba "Fornecedores" (cadastro + resumo, sem filtro nenhum).
@@ -33723,7 +33802,8 @@ function renderFgDashboard(){
     <div>🚛 Transportadora: <b>${topF[0]}</b> <span style="color:var(--ink4)">(${topF[1]}x)</span></div>
     <div>🏗️ Munque: <b>${topM[0]}</b> <span style="color:var(--ink4)">(${topM[1]}x)</span></div>`;
   const saveAreasEl=document.getElementById('fg-dash-save-areas');
-  if(saveAreasEl)saveAreasEl.innerHTML=_fgMiniBars([['Instalação',soma('saveInst')],['Frete',soma('saveFrete')],['Munque',soma('saveMunque')]],true);
+  // (2026-10-01) O antigo "Save por área" repetia o save dos cards de categoria — virou "A contratar".
+  if(saveAreasEl)saveAreasEl.innerHTML=_fgMiniBars([['Instalação',soma('aContratarInst')],['Frete',soma('aContratarFrete')],['Munque',soma('aContratarMunque')]],false);
   const compEl=document.getElementById('fg-dash-comparativo');
   if(compEl)compEl.innerHTML=_fgMiniBars([['Bruto',bruto],['Líquido',liquido],['Gasto',totalGasto]],false);
   const rankInstEl=document.getElementById('fg-dash-rank-inst');
@@ -33746,7 +33826,17 @@ function renderFgDashboard(){
       ['Munque','🏗️ Munque / Elevação']
     ];
     const categoriasHtml=cards.map(([key,label])=>{
-      const vendido=soma('budget'+key),realizado=soma('fechado'+key),save=vendido-realizado;
+      // (2026-10-01, a pedido do usuário: "tem um save em cima e outro embaixo... os dois
+      // errados... estamos em 01/10 como pode ter 70 mil de save?") — antes Save = budget de
+      // TODOS os pedidos − realizado, então pedido ainda sem fornecedor contratado contava o
+      // budget inteiro como economia. Agora o Save é um só (o mesmo do card Save Total): só
+      // dos papéis já contratados, budget (70%) − valor fechado.
+      const vendido=soma('vendido'+key),realizado=soma('fechado'+key),save=soma('save'+key);
+      const budgetContr=soma('budgetContr'+key),aContratar=soma('aContratar'+key);
+      const tem='tem'+key;
+      const nTot=calcs.filter(x=>(x.c['budget'+key]||0)>0.005).length;
+      const nContr=calcs.filter(x=>(x.c['budget'+key]||0)>0.005&&x.c[tem]).length;
+      const nFin=calcs.filter(x=>(x.c['budget'+key]||0)>0.005&&x.c[tem]&&x.c.obraFinalizada).length;
       const saveCor=save>=0?'#0E7A45':'#C1440E';
       const bloco=(rotulo,valor,cor)=>`<div onclick="fgAbrirListaCategoria('${key}')" style="cursor:pointer;flex:1;min-width:88px">
         <div style="font-size:.62rem;color:var(--ink4);text-transform:uppercase;letter-spacing:.02em">${rotulo}</div>
@@ -33756,9 +33846,11 @@ function renderFgDashboard(){
         <h3 style="margin:0 0 10px;font-size:.85rem;font-weight:700">${label}</h3>
         <div style="display:flex;gap:10px;flex-wrap:wrap">
           ${bloco('Vendido',vendido,'#101B3D')}
+          ${bloco('Budget contratado (70%)',budgetContr,'#475569')}
           ${bloco('Realizado',realizado,'#0B2A3D')}
           ${bloco('Save',save,saveCor)}
         </div>
+        <div onclick="fgAbrirListaCategoria('${key}')" style="cursor:pointer;font-size:.68rem;color:var(--ink4);margin-top:8px">${nContr} de ${nTot} obra(s) com fornecedor lançado${aContratar>0.005?` · <b style="color:#b45309">${fmtR(aContratar)}</b> de budget sem fornecedor lançado`:''}</div>
       </div>`;
     }).join('');
     // Gastos Extras (2026-09-10, a pedido do usuário: "quero um indicador clicavel de
@@ -33829,18 +33921,19 @@ function fgAbrirListaCategoria(catKey){
   modal.id='fg-cat-lista-modal';
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
   _dynModalSemFechaClique(modal);
-  const totalVendido=lista.reduce((s,x)=>s+(x.c['budget'+catKey]||0),0);
+  const totalVendido=lista.reduce((s,x)=>s+(x.c['vendido'+catKey]||0),0);
   const totalRealizado=lista.reduce((s,x)=>s+(x.c['fechado'+catKey]||0),0);
-  const totalSave=totalVendido-totalRealizado;
+  const totalSave=lista.reduce((s,x)=>s+(x.c['save'+catKey]||0),0);
   const corpo=lista.length?lista.map(x=>{
-    const vendido=x.c['budget'+catKey]||0,realizado=x.c['fechado'+catKey]||0,save=vendido-realizado;
-    const saveCor=save>=0?'#16a34a':'#dc2626';
+    const vendido=x.c['vendido'+catKey]||0,realizado=x.c['fechado'+catKey]||0,save=x.c['save'+catKey]||0;
+    const contratado=!!x.c['tem'+catKey];
+    const saveCor=(!contratado||!x.c.obraFinalizada)?'#94a3b8':save>=0?'#16a34a':'#dc2626';
     return `<div onclick="document.getElementById('fg-cat-lista-modal').remove();planAbrirDetalhePedido('${x.p.id}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <div style="flex:1;min-width:0">
         <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${x.p.cliente||'—'}</div>
-        <div style="font-size:.7rem;color:var(--ink4)">Vendido ${fmtR(vendido)} · Realizado ${fmtR(realizado)}</div>
+        <div style="font-size:.7rem;color:var(--ink4)">Vendido ${fmtR(vendido)} · Budget ${fmtR(x.c['budget'+catKey]||0)} · Realizado ${fmtR(realizado)}</div>
       </div>
-      <div style="font-size:.82rem;font-weight:800;color:${saveCor};white-space:nowrap">Save ${fmtR(save)}</div>
+      <div style="font-size:.82rem;font-weight:800;color:${saveCor};white-space:nowrap">${!contratado?'⏳ ainda não contratado':!x.c.obraFinalizada?'⏳ obra não finalizada':'Save '+fmtR(save)}</div>
     </div>`;
   }).join(''):'<div style="text-align:center;padding:30px;color:var(--ink4);font-size:.85rem">Nenhum pedido nesta categoria pra este período.</div>';
   modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:560px;width:92%;max-height:80vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
@@ -34010,7 +34103,7 @@ async function fgExportarListaPlanejamentoPDF(){
   const NAVY=[26,43,94],PINK=[233,30,99],LIGHT=[241,245,249],GRAY=[100,116,139];
   const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
   const logo=await _getLogoGrandaPDF();
-  const filtroLbl=_fgMes?MESES_PT[_fgMes]:'Todos os meses';
+  const filtroLbl=_fgMesLbl();
   const drawnFooterPages=new Set();
   function drawHeader(titulo){
     if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
@@ -34074,7 +34167,7 @@ const FGIF_CATEGORIAS=[
 function renderIndicadoresFornecedores(){
   setTimeout(()=>{try{_plRankingRender();}catch(e){console.error(e);}},0);
   const lblEl=document.getElementById('fgif-mes-lbl');
-  if(lblEl)lblEl.textContent=(_fgMes?MESES_PT[_fgMes]:'Todos os meses')+' ▾';
+  if(lblEl)lblEl.textContent=_fgMesLbl()+' ▾';
   const lista=_fgFiltradosBase();
   // Um mapa {nome->{contratado,pedidos}} POR categoria — antes (até 2026-09-04) era um único
   // mapa somando os 3 papéis juntos, o que escondia o quanto foi gasto especificamente com
@@ -34184,17 +34277,20 @@ function _fgComparativoMensalDados(){
   if(forn)base=base.filter(p=>{const fg=p.fornGestao||{};return fg.instalador===forn||fg.transportadora===forn||fg.munque===forn;});
   const byMes={};
   base.forEach(p=>{
-    const m=_cplMesDaData(p.finalizacao.dataFinalizacao);
-    if(!m)return;
-    (byMes[m]=byMes[m]||[]).push(p);
+    const d=_fgDataFinIso(p);
+    if(!d)return;
+    (byMes[d.slice(0,7)]=byMes[d.slice(0,7)]||[]).push(p);
   });
   const meses=[];
-  for(let m=1;m<=12;m++){
-    const rows=byMes[m]||[];
+  const h0=new Date();
+  for(let i=11;i>=0;i--){
+    const dt=new Date(h0.getFullYear(),h0.getMonth()-i,1);
+    const m=dt.getMonth()+1,k=dt.getFullYear()+'-'+String(m).padStart(2,'0');
+    const rows=byMes[k]||[];
     const calcs=rows.map(p=>_fgCalc(p));
     const liquido=calcs.reduce((s,c)=>s+(c.r.lq||0),0);
     const save=calcs.reduce((s,c)=>s+(c.saveTotal||0),0);
-    meses.push({mes:m,qtd:rows.length,liquido,save});
+    meses.push({mes:m,ano:dt.getFullYear(),qtd:rows.length,liquido,save});
   }
   return meses;
 }
@@ -34219,7 +34315,8 @@ function _fgRenderComparativoMensal(){
   const el=document.getElementById('fg-dash-comparativo-mensal');
   if(!el)return;
   const data=_fgComparativoMensalDados();
-  const nomesCurtos=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const _nc=['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const nomesCurtos=data.map(d=>_nc[d.mes-1]+'/'+String(d.ano).slice(2));
   const serie=(titulo,values,cor)=>`<div style="margin-bottom:16px">
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;flex-wrap:wrap;gap:6px">
       <h4 style="margin:0;font-size:.8rem;font-weight:700">${titulo}</h4>
@@ -37144,6 +37241,7 @@ function _rcAvisos(){
 }
 
 function renderPlanejamentoObras(){
+  if(_plObrasTabAtiva==='pendencias'){try{_plv3MontarAbas();}catch(e){}const sp=document.getElementById('pl-sec-pendencias');if(sp)sp.style.display='';if(typeof renderPendenciasFinalizacao==='function')renderPendenciasFinalizacao();return;}
   if(_plObrasTabAtiva==='proximas'){try{renderPlProximasObras();}catch(err){console.error(err);}return;}
   if(_plObrasTabAtiva==='kanban')_plObrasRenderKanban();
   else if(_plObrasTabAtiva==='calendario')_plObrasRenderCalendario();
@@ -37158,8 +37256,10 @@ function plObrasSetTab(tab,btn){
   if(sc)sc.style.display=tab==='calendario'?'':'none';
   const spx=document.getElementById('pl-obras-sec-proximas');if(spx)spx.style.display=tab==='proximas'?'':'none';
   // Filtros de mês/busca/status e o texto explicativo não valem pra Próximas Obras (visão fixa dos próximos dias).
-  const fil=document.getElementById('pl-obras-filtros');if(fil)fil.style.display=tab==='proximas'?'none':'flex';
-  const inf=document.getElementById('pl-obras-info');if(inf)inf.style.display=tab==='proximas'?'none':'';
+  const fil=document.getElementById('pl-obras-filtros');if(fil)fil.style.display=(tab==='proximas'||tab==='pendencias')?'none':'flex';
+  const inf=document.getElementById('pl-obras-info');if(inf)inf.style.display=(tab==='proximas'||tab==='pendencias')?'none':'';
+  try{_plv3MontarAbas();}catch(e){}
+  const spd=document.getElementById('pl-sec-pendencias');if(spd)spd.style.display=tab==='pendencias'?'':'none';
   _plObrasTabAtiva=tab;
   renderPlanejamentoObras();
 }
@@ -37324,6 +37424,385 @@ function _plPodeSairHtml(){
   </div>`;
 }
 // ── 2) Agenda de instaladores ──
+// ===================== PLANEJAMENTO v3 (2026-10-01) =====================
+// A pedido do usuário ("pode fazer tudo menos a parte de celular"):
+//  1) Ficha da Obra (plAbrirFicha): um pedido, um lugar só — tarefas com baixa ali mesmo,
+//     contratação de fornecedor inline, linha do tempo, custos, arquivos, diário, pendências.
+//  2) Aba "🗓️ Hoje" (renderPlHoje): o que fazer hoje/nesta semana, com ação do lado.
+//  3) Lista de Obras: clicar na linha abre a Ficha (o ▸ continua abrindo o painel antigo).
+//  4) Contratar fornecedor em 1 passo, com budget, semáforo, quem está livre e a nota.
+//  6) Agenda de instaladores: arrastar a obra pra outro dia abre "Alterar prazo" já preenchido.
+//  7) Abas de cima: Hoje · Obras · Fornecedores · Indicadores (Pendências dentro de Obras,
+//     Comissão dentro de Indicadores).
+//  8) Indicadores: 4 números grandes no topo, o resto recolhido.
+const _PLV3_PAPEL={
+  instalador:{fg:'instalador',fech:'fechadoInst',bud:'budgetInst',tipo:'instalador',est:'inst',label:'Instalação',nome:'instalador',art:'o'},
+  frete:{fg:'transportadora',fech:'fechadoFrete',bud:'budgetFrete',tipo:'frete',est:'frete',label:'Frete',nome:'transportadora',art:'a'},
+  elevacao:{fg:'munque',fech:'fechadoMunque',bud:'budgetMunque',tipo:'munque',est:'munque',label:'Munque / Elevação',nome:'munque',art:'o'}
+};
+function _plv3DataSem(iso){try{return _tlDataSem(iso);}catch(e){return fmtD(iso);}}
+function _plv3Dia(iso){try{return _tlDiaSemana(iso);}catch(e){return'';}}
+function _plv3NotasFornecedores(){
+  const o={};
+  (pedidos||[]).forEach(p=>{
+    const fin=p.finalizacao;if(!fin||!fin.dataFinalizacao)return;
+    const av=fin.avaliacao;const inst=((p.fornGestao&&p.fornGestao.instalador)||'').trim();
+    if(!inst||!av||!av.prazo)return;
+    (o[inst]=o[inst]||[]).push((+av.prazo+ +av.qualidade+ +av.limpeza)/3);
+  });
+  const r={};Object.keys(o).forEach(k=>{r[k]=o[k].reduce((s,v)=>s+v,0)/o[k].length;});
+  return r;
+}
+function _plv3OcupacaoInstalador(nome,a,b,exceto){
+  if(!nome||!a||!b)return[];
+  return _plObrasAbertas().filter(q=>q.id!==exceto&&q.fornGestao&&q.fornGestao.instalador===nome).map(q=>{
+    const c=_lpCalcEtapas(q);if(!c||!c.ok||!c.temInst)return null;
+    if(c.chegadaIso>b||c.prazoIso<a)return null;
+    return q;
+  }).filter(Boolean);
+}
+function _plv3SemaforoHtml(fech,bud){
+  if(!(bud>0))return'';
+  const pct=fech/bud*100;
+  const cor=pct>100?'#dc2626':pct>90?'#b45309':'#15803d';
+  return`<span style="color:${cor};font-weight:800">${pct>100?'🔴':pct>90?'🟡':'🟢'} ${pct.toFixed(0)}% do budget</span>`;
+}
+// ---------- Ficha da Obra ----------
+let _plFichaAberta=null;
+const _plFichaForm={};
+function plFichaClick(pid,ev){
+  if(ev){const t=ev.target;if(t.closest&&t.closest('a,button,input,select,.plan-acoes-btn,[onclick]:not(tr)'))return;}
+  plAbrirFicha(pid);
+}
+function plFecharFicha(){const m=document.getElementById('pl-ficha-modal');if(m)m.remove();_plFichaAberta=null;}
+function _plFichaReabrir(pid){if(_plFichaAberta===pid&&document.getElementById('pl-ficha-modal'))plAbrirFicha(pid);}
+function _plFichaSai(fn){plFecharFicha();try{fn();}catch(e){console.error(e);}}
+function plAbrirFicha(pid){
+  const p=pedidos.find(x=>x.id===pid);if(!p){toast('Pedido não encontrado','terr');return;}
+  const hoje=_hojeIso();
+  const old=document.getElementById('pl-ficha-modal');
+  let scrollAnt=null;if(old){const bx=old.querySelector('#pl-ficha-box');scrollAnt=bx?bx.scrollTop:null;old.remove();}
+  _plFichaAberta=pid;
+  const concl=!!(p.finalizacao&&p.finalizacao.dataFinalizacao);
+  const et=_plEtapasPedido(p,hoje);
+  const calc=et.calc;
+  const pront=(!concl&&et.ok)?_plProntidao(p,hoje):null;
+  const podeEditar=_isPlanejamentoUser();
+  const lc=_plCidadeObra(p);
+  const c=_fgCalc(p);
+  const fg=p.fornGestao||{};
+  const esc=_plEsc;
+  const sec=(tit,html,extra)=>`<div style="border:1px solid var(--border-lt);border-radius:12px;padding:12px 14px;margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap"><div style="font-size:.82rem;font-weight:800;color:var(--ink)">${tit}</div>${extra||''}</div>${html}</div>`;
+  const btn=(lbl,fn,cor)=>`<button type="button" onclick="${fn}" style="background:${cor||'#fff'};color:${cor?'#fff':'#334155'};border:1.5px solid ${cor||'#e2e8f0'};border-radius:9px;padding:7px 12px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap">${lbl}</button>`;
+  // Cabeçalho
+  let farol='';
+  if(concl)farol=`<span style="background:#dcfce7;color:#166534;border-radius:20px;padding:4px 12px;font-weight:800;font-size:.76rem">✅ Obra finalizada em ${fmtD(p.finalizacao.dataFinalizacao)}</span>`;
+  else if(pront){const pct=Math.round(pront.feitos/pront.total*100);farol=`<span title="${esc(pront.falta.map(f=>f.l).join(', '))}" style="background:${pront.pronta?'#16a34a':'#f59e0b'};color:#fff;border-radius:20px;padding:4px 12px;font-weight:800;font-size:.76rem">${pront.pronta?'✅ Pronta pra sair':pct+'% pronta'}</span>`;}
+  const prazoIso=_normPrazoIso(p.prazo);
+  const cab=`<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px">
+      <div style="min-width:0">
+        <div style="font-size:1.05rem;font-weight:800;color:#1a1f36">🏗️ OS ${esc(p.os||'—')} · ${esc(p.cliente||'—')}</div>
+        <div style="font-size:.76rem;color:var(--ink3);margin-top:3px">${[p.job?'JOB '+esc(p.job):'',lc.cid?esc(lc.cid)+(lc.uf?'/'+esc(lc.uf):''):'',p.responsavel?'Vendedor: '+esc(p.responsavel):'',p.tipo?esc(p.tipo):''].filter(Boolean).join(' · ')}</div>
+        <div style="font-size:.78rem;color:var(--ink2);margin-top:4px">📅 Prazo final com o cliente: <b>${prazoIso?_plv3DataSem(prazoIso):'—'}</b>${p.prazoOriginal&&p.prazoOriginal!==p.prazo?` <span style="color:#b45309" title="Prazo original ${fmtD(p.prazoOriginal)}">(adiado)</span>`:''}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">${farol}<button onclick="plFecharFicha()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.3rem;line-height:1" title="Fechar">✕</button></div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">
+      ${podeEditar&&!concl?btn('⏱️ Alterar prazo',`_plFichaSai(()=>abrirAlterarPrazoObra('${pid}'))`):''}
+      ${btn('📔 Diário de obra'+((p.diarios||[]).length?' ('+p.diarios.length+')':''),`_plFichaSai(()=>abrirDiarioObra('${pid}'))`)}
+      ${btn('🧰 Lançamento completo de fornecedores',`_plFichaSai(()=>abrirFgLancar('${pid}'))`)}
+      ${typeof rcAbrir==='function'&&!concl?btn('💬 Roteiro do cliente',`_plFichaSai(()=>rcAbrir('${pid}'))`):''}
+      ${btn('🔍 Histórico',`_plFichaSai(()=>abrirHistoricoPedido('${pid}','${esc(String(p.os||''))}'))`)}
+      ${btn(concl?'👁️ Ver finalização':'🏁 Finalizar obra',`_plFichaSai(()=>abrirFinalizacaoObra('${pid}'))`,concl?'':'#e91e63')}
+    </div>`;
+  // Tarefas
+  let tarefasHtml='';
+  if(!et.ok){
+    tarefasHtml=`<div style="font-size:.78rem;color:#b45309">⚠️ ${calc&&calc.curto?'Prazo curto demais — confira o prazo do pedido':esc(_lpProblemasTexto((calc&&calc.problemas)||[]))}</div>`;
+  }else if(!et.tarefas.length){
+    tarefasHtml='<div style="font-size:.78rem;color:var(--ink4)">Este pedido não tem tarefas de planejamento.</div>';
+  }else{
+    tarefasHtml=et.tarefas.map(t=>_plFichaTarefaHtml(p,t,hoje,calc,c,fg,concl,podeEditar)).join('');
+  }
+  if(et.ok&&et.marcos.length)tarefasHtml+=`<div style="font-size:.72rem;color:var(--ink4);margin-top:6px">${et.marcos.map(m=>`${m.ico} ${m.label}: ${_plv3DataSem(m.ini)} → ${_plv3DataSem(m.fim)}`).join(' · ')}</div>`;
+  // Linha do tempo
+  let tl='';try{if(calc&&calc.ok)tl=_lpTimelinePedidoHtml({p,calc,concluido:concl},hoje);}catch(e){}
+  // Custos
+  const lin=(l,vend,bud,fech,save,tem,forn)=>(!vend&&!fech&&!forn)?'':`<tr><td style="font-weight:700">${l}${forn?`<div style="font-size:.66rem;color:var(--ink4);font-weight:600">${esc(forn)}</div>`:''}</td><td>${fmtR(vend)}</td><td>${fmtR(bud)}</td><td>${tem?fmtR(fech):'<span style="color:#94a3b8">a contratar</span>'}</td><td>${!tem?'—':!concl?'<span style="color:#94a3b8" title="O save aparece quando a obra for finalizada">após finalizar</span>':`<b style="color:${save>=0?'#16a34a':'#dc2626'}">${fmtR(save)}</b>`}</td></tr>`;
+  const custos=`<table class="dash-table" style="width:100%"><thead><tr><th>Área</th><th>Vendido</th><th>Budget (70%)</th><th>Fechado</th><th>Save</th></tr></thead><tbody>
+    ${lin('🔧 Instalação',c.vendidoInst,c.budgetInst,c.fechadoInst,c.saveInst,c.temInst,fg.instalador)}
+    ${lin('🚚 Frete',c.vendidoFrete,c.budgetFrete,c.fechadoFrete,c.saveFrete,c.temFrete,fg.transportadora)}
+    ${lin('🏗️ Munque / Elevação',c.vendidoMunque,c.budgetMunque,c.fechadoMunque,c.saveMunque,c.temMunque,fg.munque)}
+    </tbody></table>${c.gastosExtras?`<div style="font-size:.72rem;color:#b45309;margin-top:6px">🧾 Gastos extras: <b>${fmtR(c.gastosExtras)}</b> (não entram no save)</div>`:''}`;
+  // Arquivos do projeto
+  const arqs=(p.projArquivos||[]);
+  const tipos={instalacao:'🔧 Projeto Instalação',expedicao:'📦 Projeto Expedição',producao:'🏭 Projeto Produção'};
+  const arqHtml=arqs.length?Object.keys(tipos).map(k=>{const l=arqs.filter(a=>(a.tipo||'producao')===k);return l.length?`<div style="font-size:.74rem;margin-bottom:4px"><b>${tipos[k]}:</b> ${l.map(a=>`<a href="${esc(a.url)}" target="_blank" style="margin-right:8px">📄 ${esc(a.nome||'arquivo')}</a>`).join('')}</div>`:'';}).join(''):'<div style="font-size:.74rem;color:var(--ink4)">Nenhum arquivo do projeto anexado.</div>';
+  // Diário
+  const dia=(p.diarios||[]).slice().sort((a,b)=>String(b.registradoEm||b.data||'').localeCompare(String(a.registradoEm||a.data||''))).slice(0,3);
+  const diaHtml=dia.length?dia.map(d=>`<div style="font-size:.74rem;padding:4px 0;border-bottom:1px dashed #f1f5f9"><b>${fmtD(d.data)}</b> — ${esc(String(d.andamento||'').slice(0,160))}${String(d.andamento||'').length>160?'…':''}${(d.fotos||[]).length?` <span style="color:var(--ink4)">📷 ${d.fotos.length}</span>`:''}</div>`).join(''):'<div style="font-size:.74rem;color:var(--ink4)">Nenhum registro ainda.</div>';
+  // Pendências
+  let pendHtml='';
+  if(concl&&(p.finalizacao.pendenciasObs||'').trim()){
+    const pf=p.pendenciaFin||{};
+    pendHtml=sec('⚠️ Pendência da obra',`<div style="font-size:.78rem">${esc(p.finalizacao.pendenciasObs)}</div><div style="font-size:.72rem;color:var(--ink4);margin-top:4px">${pf.resolvido?'✅ Resolvida':pf.dataResolucaoPrevista?'Resolução prevista: '+_plv3DataSem(pf.dataResolucaoPrevista):'Sem data de resolução definida'}${pf.responsavel?' · Responsável: '+esc(pf.responsavel):''}</div>`,btn('Abrir pendências',`_plFichaSai(()=>{planMainSetTab('obras',document.querySelectorAll('.plan-main-tab')[1]);plObrasSetTab('pendencias',document.querySelector('.pl-obras-main-tab[data-sub=pendencias]'));})`));
+  }
+  const m=document.createElement('div');
+  m.id='pl-ficha-modal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:150;display:flex;align-items:center;justify-content:center;padding:16px';
+  m.innerHTML=`<div id="pl-ficha-box" style="background:#fff;border-radius:16px;padding:20px 22px;max-width:1080px;width:96%;max-height:94vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+    ${cab}
+    ${sec('✅ Tarefas de planejamento',tarefasHtml,et.ok&&et.tarefas.length?`<span style="font-size:.72rem;color:var(--ink4)">${et.tarefas.filter(t=>t.st==='ok').length}/${et.tarefas.length} feitas</span>`:'')}
+    ${tl}
+    ${sec('💰 Fornecedores e custos',custos)}
+    ${pendHtml}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px">
+      ${sec('📎 Arquivos do projeto',arqHtml)}
+      ${sec('📔 Diário de obra (últimos registros)',diaHtml)}
+    </div>
+  </div>`;
+  document.body.appendChild(m);
+  if(scrollAnt!=null){const bx=m.querySelector('#pl-ficha-box');if(bx)bx.scrollTop=scrollAnt;}
+}
+function _plFichaTarefaHtml(p,t,hoje,calc,c,fg,concl,podeEditar){
+  const esc=_plEsc;
+  const dt=t.st==='ok'?{txt:'✅ feito'+(t.dataFeito?' em '+fmtD(t.dataFeito):''),cor:'#16a34a'}:_plDiasTxt(t.iso,hoje);
+  const papel=_PLV3_PAPEL[t.key];
+  let acao='';
+  if(!concl&&podeEditar){
+    if(t.key==='art'||t.key==='rao')acao=`<button type="button" onclick="plFichaToggleTarefa('${p.id}','${t.key}')" style="border:1.5px solid ${t.st==='ok'?'#e2e8f0':'#16a34a'};background:#fff;color:${t.st==='ok'?'#64748b':'#16a34a'};border-radius:8px;padding:5px 11px;font-size:.72rem;font-weight:800;cursor:pointer">${t.st==='ok'?'↩️ Desfazer':'✅ Marcar feito'}</button>`;
+    else if(t.key==='embalagem')acao=`<button type="button" onclick="plFichaEmbalagem('${p.id}',${t.st==='ok'})" style="border:1.5px solid ${t.st==='ok'?'#e2e8f0':'#16a34a'};background:#fff;color:${t.st==='ok'?'#64748b':'#16a34a'};border-radius:8px;padding:5px 11px;font-size:.72rem;font-weight:800;cursor:pointer">${t.st==='ok'?'↩️ Desfazer':'✅ Embalado'}</button>`;
+  }
+  let extra='';
+  if(papel){
+    const nomeAtual=fg[papel.fg]||'';
+    const fech=c[papel.fech]||0,bud=c[papel.bud]||0;
+    const formAberto=_plFichaForm[p.id+'|'+t.key]||(!nomeAtual&&!concl&&podeEditar);
+    if(nomeAtual&&!formAberto){
+      extra=`<div style="font-size:.74rem;margin-top:4px">Contratado: <b>${esc(nomeAtual)}</b> · ${fmtR(fech)} · budget ${fmtR(bud)} · ${_plv3SemaforoHtml(fech,bud)}${!concl&&podeEditar?` <a href="#" onclick="_plFichaForm['${p.id}|${t.key}']=true;plAbrirFicha('${p.id}');return false;" style="margin-left:6px">✏️ trocar</a>`:''}</div>`;
+    }else if(!concl&&podeEditar){
+      const forns=_fgFornecedores(papel.tipo).map(f=>f.nome).sort();
+      const notas=_plv3NotasFornecedores();
+      let a=null,b=null;if(calc&&calc.ok&&calc.temInst){a=calc.chegadaIso;b=calc.prazoIso;}
+      const opts=forns.map(n=>{
+        let info='';
+        if(t.key==='instalador'){
+          const oc=_plv3OcupacaoInstalador(n,a,b,p.id);
+          info=oc.length?` — ⚠️ ocupado (${oc.length} obra${oc.length===1?'':'s'} no período)`:' — ✅ livre no período';
+          if(notas[n]!=null)info+=` · ★ ${notas[n].toFixed(1).replace('.',',')}`;
+        }
+        return`<option value="${esc(n)}" ${n===nomeAtual?'selected':''}>${esc(n)}${info}</option>`;
+      }).join('');
+      extra=`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px;padding:8px 10px;background:#f8fafc;border-radius:10px">
+        <select id="plf-forn-${t.key}" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.78rem;min-width:240px"><option value="">— escolha ${papel.art} ${papel.nome} —</option>${opts}</select>
+        <input id="plf-valor-${t.key}" placeholder="Valor fechado (R$)" oninput="fmtMoney(this);plFichaPreviewValor('${t.key}',${bud})" value="${fech?fmtR(fech):''}" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.78rem;width:150px">
+        <span id="plf-sem-${t.key}" style="font-size:.72rem">${fech?_plv3SemaforoHtml(fech,bud):'budget '+fmtR(bud)}</span>
+        <button type="button" onclick="plFichaContratar('${p.id}','${t.key}')" style="background:#0891b2;color:#fff;border:none;border-radius:8px;padding:7px 13px;font-size:.74rem;font-weight:800;cursor:pointer">✅ Contratar</button>
+        ${nomeAtual?`<a href="#" onclick="delete _plFichaForm['${p.id}|${t.key}'];plAbrirFicha('${p.id}');return false;" style="font-size:.72rem">cancelar</a>`:''}
+        ${!forns.length?`<span style="font-size:.7rem;color:#b45309">Nenhum fornecedor desse tipo cadastrado — cadastre em 🧰 Fornecedores.</span>`:''}
+      </div>`;
+    }
+  }
+  return`<div style="padding:8px 0;border-bottom:1px dashed #f1f5f9">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><b style="font-size:.82rem">${t.ico} ${esc(t.label)}</b> <span style="font-size:.72rem;color:var(--ink4)">· até ${_plv3DataSem(t.iso)}</span></div>
+      <span style="font-size:.72rem;font-weight:800;color:${dt.cor};white-space:nowrap">${dt.txt}</span>
+      ${acao}
+    </div>${extra}
+  </div>`;
+}
+function plFichaPreviewValor(key,bud){
+  const v=moneyToNum(document.getElementById('plf-valor-'+key)?.value||'0')||0;
+  const el=document.getElementById('plf-sem-'+key);if(el)el.innerHTML=v?_plv3SemaforoHtml(v,bud):'budget '+fmtR(bud);
+}
+async function plFichaToggleTarefa(pid,key){await _lpToggleTarefa(pid,key);_plFichaReabrir(pid);try{if(_plHojeVisivel())renderPlHoje();}catch(e){}}
+async function plFichaEmbalagem(pid,ja){await _lpTogglePlanejamentoEmbalagem(pid,ja);_plFichaReabrir(pid);try{if(_plHojeVisivel())renderPlHoje();}catch(e){}}
+// Contratação em 1 passo — mesma gravação de salvarFgLancamento (p.fornGestao + p.planTarefas
+// + motivo obrigatório quando passa do budget), só pro papel escolhido; o resto do lançamento
+// (outros papéis, gastos extras) fica intacto.
+async function plFichaContratar(pid,key){
+  const p=pedidos.find(x=>x.id===pid);if(!p)return;
+  const papel=_PLV3_PAPEL[key];if(!papel)return;
+  const nome=(document.getElementById('plf-forn-'+key)?.value||'').trim();
+  const valor=moneyToNum(document.getElementById('plf-valor-'+key)?.value||'0')||0;
+  if(!nome){toast('Escolha '+papel.art+' '+papel.nome,'terr');return;}
+  if(!(valor>=0)){toast('Informe o valor fechado','terr');return;}
+  if(key==='instalador'){
+    const c0=_lpCalcEtapas(p);
+    if(c0&&c0.ok&&c0.temInst){const oc=_plv3OcupacaoInstalador(nome,c0.chegadaIso,c0.prazoIso,pid);if(oc.length&&!confirm(nome+' já está em '+oc.length+' obra(s) nesse período:\n'+oc.map(q=>'OS '+q.os+' · '+q.cliente).join('\n')+'\n\nContratar assim mesmo?'))return;}
+  }
+  const c=_fgCalc(p);
+  const bud=c[papel.bud]||0;
+  const fgAnt=p.fornGestao||{};
+  const est=Object.assign({},fgAnt.estouro||{});
+  if(valor>bud+0.5){
+    const ant=est[papel.est];
+    if(!(ant&&ant.motivo&&Math.abs((ant.valor||0)-valor)<0.5)){
+      const mot=window.prompt(papel.label+': o valor fechado ('+fmtR(valor)+') está '+fmtR(valor-bud)+' acima do previsto ('+fmtR(bud)+').\n\nInforme o motivo pra salvar:',(ant&&ant.motivo)||'');
+      if(mot===null||!mot.trim()){toast('Informe o motivo de fechar acima do previsto pra salvar','terr');return;}
+      est[papel.est]={motivo:mot.trim(),valor,budget:bud,por:usuarioLogado?.nomeExibicao||usuarioLogado?.email||'',em:new Date().toISOString()};
+    }
+  }else delete est[papel.est];
+  const quem=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
+  p.fornGestao=Object.assign({},fgAnt,{[papel.fg]:nome,[papel.fech]:fmtR(valor),status:fgAnt.status||'aberto',atualizadoPor:quem,atualizadoEm:new Date().toISOString(),estouro:est});
+  p.planTarefas=p.planTarefas||{};
+  p.planTarefas[key]={concluido:true,data:_hojeIso(),por:quem};
+  delete _plFichaForm[pid+'|'+key];
+  await savePedidoFS(p);
+  toast(papel.label+': '+nome+' contratado ✅','tok');
+  _plFichaReabrir(pid);
+  try{renderPlanejamentoObras();}catch(e){}
+  try{if(_plHojeVisivel())renderPlHoje();}catch(e){}
+}
+// ---------- Aba Hoje ----------
+function _plHojeVisivel(){const s=document.getElementById('pl-sec-hoje');return !!(s&&s.style.display!=='none');}
+function renderPlHoje(){
+  const el=document.getElementById('pl-hoje-body');if(!el)return;
+  const hoje=_hojeIso();
+  const prox=(iso,n)=>{let x=iso;for(let i=0;i<n;i++){x=_agProxDiaUtil(x);}return x;};
+  const amanha=_agProxDiaUtil(hoje),lim3=prox(hoje,3);
+  const atr=[],hj=[],pr=[],campo=[];
+  const podeEditar=_isPlanejamentoUser();
+  _plObrasAbertas().forEach(p=>{
+    const et=_plEtapasPedido(p,hoje);if(!et.ok)return;
+    et.tarefas.filter(t=>t.st!=='ok').forEach(t=>{
+      const it={p,t};
+      if(t.iso<hoje)atr.push(it);else if(t.iso===hoje)hj.push(it);else if(t.iso<=lim3)pr.push(it);
+    });
+    const c=et.calc;
+    if(c.temFrete&&c.coletaIso&&(c.coletaIso===hoje||c.coletaIso===amanha))campo.push({p,iso:c.coletaIso,txt:'🚚 Saída do frete'});
+    if(c.temInst&&c.chegadaIso&&(c.chegadaIso===hoje||c.chegadaIso===amanha))campo.push({p,iso:c.chegadaIso,txt:'🔧 Início da instalação'+(p.fornGestao&&p.fornGestao.instalador?' · '+p.fornGestao.instalador:' · ⚠️ sem instalador')});
+    if(c.prazoIso&&(c.prazoIso===hoje||c.prazoIso===amanha))campo.push({p,iso:c.prazoIso,txt:'🏁 Prazo final com o cliente'});
+  });
+  atr.sort((a,b)=>a.t.iso.localeCompare(b.t.iso));pr.sort((a,b)=>a.t.iso.localeCompare(b.t.iso));campo.sort((a,b)=>a.iso.localeCompare(b.iso));
+  let pend=[];
+  try{pend=_pfPedidosElegiveis().filter(p=>!(p.pendenciaFin&&p.pendenciaFin.resolvido)).map(p=>({p,iso:(p.pendenciaFin&&p.pendenciaFin.dataResolucaoPrevista)||''})).filter(x=>!x.iso||x.iso<=lim3).sort((a,b)=>(a.iso||'0').localeCompare(b.iso||'0'));}catch(e){}
+  const esc=_plEsc;
+  const linhaT=({p,t})=>{
+    const papel=_PLV3_PAPEL[t.key];
+    let b='';
+    if(podeEditar){
+      if(t.key==='art'||t.key==='rao')b=`<button type="button" onclick="event.stopPropagation();plFichaToggleTarefa('${p.id}','${t.key}')" class="plh-b ok">✅ Feito</button>`;
+      else if(t.key==='embalagem')b=`<button type="button" onclick="event.stopPropagation();plFichaEmbalagem('${p.id}',false)" class="plh-b ok">✅ Embalado</button>`;
+      else if(papel)b=`<button type="button" onclick="event.stopPropagation();plAbrirFicha('${p.id}')" class="plh-b">${t.ico} Contratar</button>`;
+    }
+    const d=_plDiasTxt(t.iso,hoje);
+    return`<div class="plh-l" onclick="plAbrirFicha('${p.id}')"><div class="plh-t">${t.ico} <b>${esc(t.label)}</b><div class="plh-s">OS ${esc(p.os)} · ${esc(p.cliente)}</div></div><div class="plh-d"><div>${_plv3DataSem(t.iso)}</div><div style="color:${d.cor};font-weight:800">${d.txt}</div></div>${b}</div>`;
+  };
+  const bloco=(tit,cor,arr,fn,vazio)=>`<div class="plh-card"><div class="plh-h" style="color:${cor}">${tit} <span class="plh-n" style="background:${cor}">${arr.length}</span></div>${arr.length?arr.map(fn).join(''):`<div class="plh-v">${vazio}</div>`}</div>`;
+  const kpi=(l,v,cor,bg)=>`<div style="background:${bg};border-radius:12px;padding:12px 14px"><div style="font-size:.64rem;font-weight:800;text-transform:uppercase;color:${cor}">${l}</div><div style="font-size:1.5rem;font-weight:800;color:${cor}">${v}</div></div>`;
+  el.innerHTML=`<style>
+    .plh-card{background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:14px;margin-bottom:12px}
+    .plh-h{font-size:.86rem;font-weight:800;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+    .plh-n{color:#fff;border-radius:20px;padding:1px 9px;font-size:.7rem}
+    .plh-l{display:flex;align-items:center;gap:10px;padding:8px 6px;border-bottom:1px dashed #f1f5f9;cursor:pointer;border-radius:8px}
+    .plh-l:hover{background:#f8fafc}
+    .plh-t{flex:1;min-width:0;font-size:.8rem}
+    .plh-s{font-size:.7rem;color:var(--ink4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .plh-d{font-size:.72rem;text-align:right;white-space:nowrap}
+    .plh-b{border:1.5px solid #0891b2;background:#fff;color:#0891b2;border-radius:8px;padding:5px 10px;font-size:.72rem;font-weight:800;cursor:pointer;white-space:nowrap}
+    .plh-b.ok{border-color:#16a34a;color:#16a34a}
+    .plh-v{font-size:.76rem;color:var(--ink4);padding:6px}
+  </style>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px">
+    ${kpi('🔴 Atrasadas',atr.length,'#b91c1c','#fee2e2')}
+    ${kpi('📌 Vencem hoje',hj.length,'#c2410c','#ffedd5')}
+    ${kpi('🔜 Próximos 3 dias úteis',pr.length,'#334155','#f1f5f9')}
+    ${kpi('🚚 Em campo hoje/amanhã',campo.length,'#0f766e','#ccfbf1')}
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:12px">
+    <div>
+      ${bloco('🔴 Atrasadas','#dc2626',atr,linhaT,'Nada atrasado 🎉')}
+      ${bloco('📌 Vencem hoje','#ea580c',hj,linhaT,'Nenhuma tarefa vence hoje.')}
+      ${bloco(`🔜 Próximos 3 dias úteis (até ${fmtD(lim3).slice(0,5)})`,'#475569',pr,linhaT,'Nada nos próximos dias.')}
+    </div>
+    <div>
+      ${bloco('🚚 Em campo hoje e amanhã','#0f766e',campo,x=>`<div class="plh-l" onclick="plAbrirFicha('${x.p.id}')"><div class="plh-t"><b>${esc(x.txt)}</b><div class="plh-s">OS ${esc(x.p.os)} · ${esc(x.p.cliente)}</div></div><div class="plh-d">${x.iso===hoje?'<b style="color:#c2410c">hoje</b>':'amanhã'}<div>${_plv3Dia(x.iso)}</div></div></div>`,'Nenhuma saída ou instalação hoje/amanhã.')}
+      ${bloco('⚠️ Pendências de obra pra resolver','#b45309',pend,x=>`<div class="plh-l" onclick="plAbrirFicha('${x.p.id}')"><div class="plh-t"><b>OS ${esc(x.p.os)} · ${esc(x.p.cliente)}</b><div class="plh-s">${esc(String(x.p.finalizacao.pendenciasObs||'').slice(0,90))}</div></div><div class="plh-d">${x.iso?(x.iso<hoje?'<b style="color:#dc2626">atrasada</b>':_plv3DataSem(x.iso)):'<b style="color:#7c3aed">sem data</b>'}</div></div>`,'Nenhuma pendência vencendo.')}
+    </div>
+  </div>
+  <div style="font-size:.68rem;color:var(--ink4)">Clique em qualquer linha pra abrir a Ficha da Obra com tudo do pedido.</div>`;
+}
+// ---------- Abas (7) ----------
+function _plv3MontarAbas(){
+  if(window._plv3Montado)return;
+  const so=document.getElementById('pl-sec-obras'),sp=document.getElementById('pl-sec-pendencias');
+  const si=document.getElementById('pl-sec-indicadores'),sc=document.getElementById('pl-sec-comissao');
+  if(so&&sp&&sp.parentNode!==so)so.appendChild(sp);
+  if(si&&sc&&sc.parentNode!==si)si.appendChild(sc);
+  window._plv3Montado=true;
+}
+async function planIndComissaoSub(btn){
+  const{isAdm}=_getUserCat();
+  if(!isAdm){
+    const senha=await pedirSenhaAdmin('Comissão Planejamento','Esta aba é restrita a administradores. Digite a senha/PIN de administrador para abrir:');
+    if(!senha){toast('Acesso não permitido','terr');return;}
+    if(senha!==_PIN_OK){toast('Senha incorreta','terr');return;}
+  }
+  _plv3MontarAbas();
+  document.querySelectorAll('.pl-ind-sub-tab').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  const sg=document.getElementById('pl-ind-sub-geral'),sf=document.getElementById('pl-ind-sub-fornecedores'),sc=document.getElementById('pl-sec-comissao');
+  if(sg)sg.style.display='none';if(sf)sf.style.display='none';if(sc)sc.style.display='';
+  _cplMes=new Date().getMonth()+1;
+  if(typeof renderComissaoPlanejamento==='function')renderComissaoPlanejamento();
+}
+// ---------- Indicadores enxutos (8) ----------
+function _plv3Top4Html(){
+  const hoje=_hojeIso();
+  // (2026-10-01) Tudo REALIZADO: obras finalizadas no período do filtro (mês da Data de Finalização).
+  let base=[];try{base=_fgFiltradosBase();}catch(e){}
+  let noPrazo=0,comPrazo=0;
+  base.forEach(p=>{
+    const f=_fgDataFinIso(p);if(!f)return;
+    let po='';try{po=_plPrazoOrigIso(p);}catch(e){po=_normPrazoIso(p.prazoOriginal||p.prazo)||'';}
+    if(!po)return;comPrazo++;if(f<=po)noPrazo++;
+  });
+  const pont=comPrazo?Math.round(noPrazo/comPrazo*100):null;
+  const forn=document.getElementById('fg-fil-fornecedor')?.value||'';
+  let save=0,gasto=0;
+  base.forEach(p=>{try{const c=_fgCalcAtribuido(_fgCalc(p),p.fornGestao||{},forn);save+=c.saveTotal||0;gasto+=c.totalGasto||0;}catch(e){}});
+  let pendAb=0,pendAtr=0;try{const l=_pfPedidosElegiveis().filter(p=>!(p.pendenciaFin&&p.pendenciaFin.resolvido));pendAb=l.length;pendAtr=l.filter(p=>p.pendenciaFin&&p.pendenciaFin.dataResolucaoPrevista&&p.pendenciaFin.dataResolucaoPrevista<hoje).length;}catch(e){}
+  const per=_fgMesLbl();
+  const card=(l,v,sub,cor,bg)=>`<div style="background:${bg};border-radius:14px;padding:16px"><div style="font-size:.66rem;font-weight:800;text-transform:uppercase;color:${cor};letter-spacing:.03em">${l}</div><div style="font-size:1.6rem;font-weight:800;color:${cor};margin:2px 0">${v}</div><div style="font-size:.7rem;color:${cor};opacity:.8">${sub}</div></div>`;
+  return`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px">
+    ${card('⏱️ Pontualidade',pont==null?'—':pont+'%',`${noPrazo} de ${comPrazo} obra${comPrazo===1?'':'s'} entregue${comPrazo===1?'':'s'} no prazo · ${per}`,pont==null?'#334155':pont>=90?'#166534':pont>=70?'#92400e':'#991b1b',pont==null?'#f1f5f9':pont>=90?'#dcfce7':pont>=70?'#fef3c7':'#fee2e2')}
+    ${card('💚 Save',fmtR(save),`${base.length} obra${base.length===1?'':'s'} finalizada${base.length===1?'':'s'} · ${per}`,save>=0?'#166534':'#991b1b',save>=0?'#dcfce7':'#fee2e2')}
+    ${card('💸 Total gasto',fmtR(gasto),`fornecedores + gastos extras · ${per}`,'#0B2A3D','#f1f5f9')}
+    ${card('⚠️ Pendências abertas',pendAb,`${pendAtr} com data vencida · hoje`,pendAb?'#991b1b':'#166534',pendAb?'#fee2e2':'#dcfce7')}
+  </div>`;
+}
+function _plv3IndRender(){
+  const el=document.getElementById('pl-ind-top4');if(el){try{el.innerHTML=_plv3Top4Html();}catch(e){console.error('top4',e);el.innerHTML='';}}
+}
+// ---------- Agenda: arrastar e soltar (6) ----------
+function plAgDragStart(ev,pid,a){try{ev.dataTransfer.setData('text/plain',pid+'|'+a);ev.dataTransfer.effectAllowed='move';}catch(e){}}
+function plAgDragOver(ev){ev.preventDefault();const td=ev.currentTarget;if(td)td.classList.add('plx-drop');}
+function plAgDragLeave(ev){const td=ev.currentTarget;if(td)td.classList.remove('plx-drop');}
+function plAgDrop(ev,novoIni){
+  ev.preventDefault();
+  const td=ev.currentTarget;if(td)td.classList.remove('plx-drop');
+  let dados='';try{dados=ev.dataTransfer.getData('text/plain');}catch(e){}
+  const [pid,iniAnt]=String(dados||'').split('|');
+  if(!pid||!iniAnt||iniAnt===novoIni)return;
+  const p=pedidos.find(x=>x.id===pid);if(!p)return;
+  if(!_isPlanejamentoUser()){toast('Só Planejamento ou administrador pode reprogramar','terr');return;}
+  const prazoAtual=_normPrazoIso(p.prazo);if(!prazoAtual)return;
+  const delta=Math.round((new Date(novoIni+'T12:00:00')-new Date(iniAnt+'T12:00:00'))/86400000);
+  const novoPrazo=_opAddDias(prazoAtual,delta);
+  // capacidade do dia de destino
+  try{
+    const cap=_lpCapInstalacoesDia();
+    const nDia=_plObrasAbertas().filter(q=>q.id!==pid).filter(q=>{const c=_lpCalcEtapas(q);return c&&c.ok&&c.temInst&&c.chegadaIso<=novoIni&&c.prazoIso>=novoIni;}).length;
+    if(nDia>=cap)toast(`⚠️ ${fmtD(novoIni)} já tem ${nDia} obra(s) em instalação (capacidade ${cap}/dia)`,'twar');
+  }catch(e){}
+  abrirAlterarPrazoObra(pid);
+  setTimeout(()=>{
+    const el=document.getElementById('pz-novo-prazo');if(el)el.value=novoPrazo;
+    const mot=document.getElementById('pz-motivo');if(mot&&!mot.value)mot.value=`Instalação reprogramada na agenda: início ${fmtD(iniAnt)} → ${fmtD(novoIni)}`;
+  },60);
+}
+
 function _plAgendaHtml(){
   const hoje=_hojeIso();
   const seg=new Date(hoje+'T00:00:00');seg.setDate(seg.getDate()-((seg.getDay()+6)%7));
@@ -37344,16 +37823,16 @@ function _plAgendaHtml(){
   const linhas=nomes.map(n=>{
     const cel=dias.map(d=>{
       const obras=porInst[n].filter(o=>o.a<=d&&o.b>=d);
-      if(!obras.length)return`<td class="${d===hoje?'hj':''}"></td>`;
+      if(!obras.length)return`<td class="${d===hoje?'hj':''}" ondragover="plAgDragOver(event)" ondragleave="plAgDragLeave(event)" ondrop="plAgDrop(event,'${d}')"></td>`;
       const conf=n!=='__sem__'&&obras.length>1;if(conf)conflitos++;
-      return`<td class="${d===hoje?'hj':''}"><div class="plx-ag ${conf?'conf':(n==='__sem__'?'sem':'')}" title="${obras.map(o=>'OS '+_plEsc(o.p.os)+' · '+_plEsc(o.p.cliente)+' ('+_plDdMm(o.a)+'→'+_plDdMm(o.b)+')').join('\n')}${conf?'\n⚠️ Mesmo instalador em '+obras.length+' obras no mesmo dia':''}" onclick="planAbrirDetalhePedido('${obras[0].p.id}')">${obras.length>1?obras.length+' obras':'OS '+_plEsc(obras[0].p.os)}</div></td>`;
+      return`<td class="${d===hoje?'hj':''}" ondragover="plAgDragOver(event)" ondragleave="plAgDragLeave(event)" ondrop="plAgDrop(event,'${d}')"><div ${obras.length===1?`draggable="true" ondragstart="plAgDragStart(event,'${obras[0].p.id}','${obras[0].a}')"`:''} class="plx-ag ${conf?'conf':(n==='__sem__'?'sem':'')}" title="${obras.map(o=>'OS '+_plEsc(o.p.os)+' · '+_plEsc(o.p.cliente)+' ('+_plDdMm(o.a)+'→'+_plDdMm(o.b)+')').join('\n')}${conf?'\n⚠️ Mesmo instalador em '+obras.length+' obras no mesmo dia':''}${obras.length===1?'\n↔️ Arraste pra outro dia pra reprogramar':''}" onclick="plAbrirFicha('${obras[0].p.id}')">${obras.length>1?obras.length+' obras':'OS '+_plEsc(obras[0].p.os)}</div></td>`;
     }).join('');
     return`<tr><th class="plx-ag-n">${n==='__sem__'?'<span style="color:#b45309">⚠️ Sem instalador</span>':_plEsc(n)}</th>${cel}</tr>`;
   }).join('');
   const dsem=['D','S','T','Q','Q','S','S'];
   return`<div class="gc-chart-card">
     <div class="gc-chart-title">👷 Agenda de Instaladores — próximas 3 semanas</div>
-    <div class="gc-chart-sub">Período de instalação de cada obra (chegada → prazo final), por instalador lançado em Fornecedores · capacidade: ${cap} instalações/dia${conflitos?` · <b style="color:#dc2626">⚠️ ${conflitos} dia${conflitos===1?'':'s'} com o mesmo instalador em 2+ obras</b>`:''}</div>
+    <div class="gc-chart-sub">Período de instalação de cada obra (chegada → prazo final), por instalador lançado em Fornecedores · capacidade: ${cap} instalações/dia · <b>arraste uma obra pra outro dia pra reprogramar</b>${conflitos?` · <b style="color:#dc2626">⚠️ ${conflitos} dia${conflitos===1?'':'s'} com o mesmo instalador em 2+ obras</b>`:''}</div>
     ${nomes.length?`<div style="overflow-x:auto;margin-top:8px"><table class="plx-agt"><thead><tr><th></th>${dias.map(d=>{const dt=new Date(d+'T00:00:00');return`<th class="${d===hoje?'hj':''}">${dsem[dt.getDay()]}<br>${d.slice(8,10)}/${d.slice(5,7)}</th>`;}).join('')}</tr>
       <tr><th class="plx-ag-n" style="font-size:.6rem;color:#64748b">Obras no dia</th>${totDia.map((t,i)=>`<th class="${dias[i]===hoje?'hj':''}"><span class="plx-cap ${t>cap?'over':(t===cap?'full':'')}">${t}/${cap}</span></th>`).join('')}</tr></thead>
       <tbody>${linhas}</tbody></table></div>`:'<div style="padding:14px 0;color:#94a3b8;font-size:.8rem">Nenhuma instalação nas próximas 3 semanas.</div>'}
@@ -37660,11 +38139,11 @@ function _plObrasRenderLista(){
             <div style="font-size:.72rem;color:var(--ink4);margin-top:8px">Conselho: <b>${p.conselhoData?fmtD(p.conselhoData):'—'}</b> · Data da Venda: <b>${p.emissaoEm?fmtD(p.emissaoEm):'—'}</b></div>
           </div></td></tr>`;
       }
-      return`<tr onclick="_plObrasToggleExpandir('${p.id}',event)" style="border-bottom:1px solid var(--border-lt);cursor:pointer;box-shadow:inset 3px 0 0 ${bordaEsq};${aberto?'background:#f8fafc':''}" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='${aberto?'#f8fafc':''}'">
-        <td style="padding:10px 4px 10px 10px;color:var(--ink4);font-size:.75rem">${aberto?'▾':'▸'}</td>
+      return`<tr onclick="plFichaClick('${p.id}',event)" title="Clique pra abrir a Ficha da Obra" style="border-bottom:1px solid var(--border-lt);cursor:pointer;box-shadow:inset 3px 0 0 ${bordaEsq};${aberto?'background:#f8fafc':''}" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='${aberto?'#f8fafc':''}'">
+        <td onclick="event.stopPropagation();_plObrasToggleExpandir('${p.id}',event)" title="Ver etapas aqui mesmo" style="padding:10px 4px 10px 10px;color:var(--ink4);font-size:.75rem">${aberto?'▾':'▸'}</td>
         <td style="padding:10px 12px;font-weight:800;color:${corTxt}">${p.os||'—'}</td>
         <td style="padding:10px 12px;min-width:180px;max-width:280px">
-          <a href="#" onclick="planAbrirDetalhePedido('${p.id}');return false;" title="${esc(p.cliente)}" style="color:${corTxt};font-weight:700;text-decoration:none">${esc(p.cliente||'—')}</a>
+          <a href="#" onclick="event.stopPropagation();plAbrirFicha('${p.id}');return false;" title="${esc(p.cliente)}" style="color:${corTxt};font-weight:700;text-decoration:none">${esc(p.cliente||'—')}</a>
           <div style="font-size:.72rem;color:var(--ink4);margin-top:2px">${sub}</div>${verFormLink}
         </td>
         <td style="padding:10px 12px;white-space:nowrap">${p.emissaoEm?fmtD(p.emissaoEm):'—'}${p.conselhoData?`<div style="font-size:.7rem;color:var(--ink4)">Conselho ${fmtD(p.conselhoData)}</div>`:''}</td>
@@ -37698,7 +38177,7 @@ function _plObrasRenderKanban(){
       <div style="padding:8px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:8px">
         ${itens.length?itens.map(x=>{
           const p=x.p;
-          return `<div onclick="planAbrirDetalhePedido('${p.id}')" style="background:#fff;border:1px solid ${col.key==='atrasado'?'#dc2626':'var(--border-lt)'};border-radius:10px;padding:10px;cursor:pointer">
+          return `<div onclick="plAbrirFicha('${p.id}')" style="background:#fff;border:1px solid ${col.key==='atrasado'?'#dc2626':'var(--border-lt)'};border-radius:10px;padding:10px;cursor:pointer">
             <div style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'}</div>
             <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(p.cliente||'').replace(/"/g,'&quot;')}">${p.cliente||'—'}</div>
             ${p.job?`<div style="font-size:.66rem;color:var(--ink4);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(p.job).replace(/"/g,'&quot;')}">JOB: ${p.job}</div>`:''}
@@ -37816,6 +38295,7 @@ function _planAbrirMenuAcoes(btn,pedidoId,concl){
   _planAcoesMenuBtn=btn;
   const r=btn.getBoundingClientRect();
   const itens=[
+    {icone:'📂',label:'Ficha da Obra',fn:`plAbrirFicha('${pedidoId}')`},
     {icone:'📔',label:'Diário de Obra',fn:`abrirDiarioObra('${pedidoId}')`},
     {icone:'🧰',label:'Fornecedores',fn:`abrirFgLancar('${pedidoId}')`},
     {icone:concl?'👁️':'🏗️',label:concl?'Ver / Editar':'Finalizar Obra',fn:`abrirFinalizacaoObra('${pedidoId}')`}
@@ -41492,6 +41972,13 @@ function renderFinNaoRecebimento(){
 // vírgula como separador decimal; com "," como delimitador de coluna, qualquer valor
 // como "1.234,56" quebraria em duas colunas. BOM (﻿) no início pra acentuação
 // (Líquido, não recebido etc.) não vir corrompida ao abrir no Excel do Windows.
+// Relatórios (Excel/PDF) de Contas a Receber saem na ordem da DATA PREVISTA de pagamento
+// (2026-10-01, a pedido do usuário: "quero que saia na ordem de previsão de pagamento e não do mês
+// da venda"). Parcela sem data vai pro fim. Só a ordem do relatório — a tela não muda.
+function _finOrdemPrevisao(items){
+  const iso=i=>{try{return _finIsoDeBR(i.dataAtiva)||'';}catch(e){return'';}};
+  return (items||[]).slice().sort((a,b)=>{const x=iso(a),y=iso(b);if(!x&&!y)return 0;if(!x)return 1;if(!y)return -1;return x.localeCompare(y)||String(a.cliente||'').localeCompare(String(b.cliente||''));});
+}
 function exportarExcelFinanceiro(){
   if(!_isFinanceiroUser()){toast('Apenas Financeiro/Admin podem exportar','terr');return;}
   // Exporta conforme o filtro Tipo da tela (🔀 Ambos / 📥 Receber / 📤 Pagar) — antes sempre
@@ -41514,7 +42001,7 @@ function exportarExcelFinanceiro(){
     });
     filename=`contas_a_pagar_${_hojeIso()}.csv`;
   }else if(tipo==='receber'){
-    const items=_finFilteredItems();
+    const items=_finOrdemPrevisao(_finFilteredItems());
     if(!items.length){toast('Nenhuma conta encontrada com esses filtros para exportar','terr');return;}
     headers=['Mês Venda','Pedido','Cliente','Vendedor','Parcela','Valor Bruto (R$)','Data Prevista','Dias em Atraso','Status','Motivo'];
     rows=items.map(i=>[
@@ -41526,7 +42013,7 @@ function exportarExcelFinanceiro(){
   }else{
     // 🔀 Ambos — mesmo relatório combinado que a tela mostra com esse filtro, coluna Tipo
     // pra diferenciar Receber de Pagar dentro do mesmo arquivo.
-    const itemsReceber=_finFilteredItems();
+    const itemsReceber=_finOrdemPrevisao(_finFilteredItems());
     const itemsPagar=_cpFilteredItems();
     if(!itemsReceber.length&&!itemsPagar.length){toast('Nenhuma conta encontrada com esses filtros para exportar','terr');return;}
     headers=['Tipo','Data','Cliente/Fornecedor','Detalhe','Valor (R$)','Dias em Atraso','Status'];
@@ -41595,7 +42082,7 @@ async function gerarPDFFinanceiro(){
     });
     valorColIdx=5;atrasoColIdx=6;slugBase='contas_a_pagar';
   }else if(tipo==='receber'){
-    const items=_finFilteredItems();
+    const items=_finOrdemPrevisao(_finFilteredItems());
     if(!items.length){toast('Nenhuma conta encontrada com esses filtros para gerar o PDF.','terr');return;}
     subtitulo='Contas a Receber';
     const fv=document.getElementById('fc-fil-vend')?.value||'';
@@ -41630,7 +42117,7 @@ async function gerarPDFFinanceiro(){
     valorColIdx=5;atrasoColIdx=7;slugBase='contas_a_receber';
   }else{
     // 🔀 Ambos
-    const itemsReceber=_finFilteredItems();
+    const itemsReceber=_finOrdemPrevisao(_finFilteredItems());
     const itemsPagar=_cpFilteredItems();
     if(!itemsReceber.length&&!itemsPagar.length){toast('Nenhuma conta encontrada com esses filtros para gerar o PDF.','terr');return;}
     subtitulo='Contas a Pagar e a Receber';
@@ -44462,7 +44949,7 @@ function renderDashVendas(){
         </div>
         <div class="dtv-l2">
           ${r.job?`<span title="JOB">🏷️ ${r.job}</span>`:''}
-          <span title="Data do Conselho">🗳️ ${pedFin&&pedFin.conselhoData?fmtD(pedFin.conselhoData):'—'}</span>
+          <span title="Data do Conselho${pedFin&&pedFin.conselhoDataAjustada?' — ajustada pra data da emissão (a planejada era '+fmtD(pedFin.conselhoDataPlanejada)+')':''}">🗳️ ${pedFin&&pedFin.conselhoData?fmtD(pedFin.conselhoData):'—'}</span>
           <span title="${_emTitle}">📝 ${pedFin&&pedFin.emissaoEm?fmtD(pedFin.emissaoEm):'—'}</span>
           <span title="Prazo de finalização">🏗️ ${r.entrega?`${fmtD(r.entrega)}${r.prazoOriginal&&r.prazoOriginal!==r.entrega?` <span title="Prazo original: ${fmtD(r.prazoOriginal)}" style="color:#d97706;cursor:help">(adiado)</span>`:''}`:'—'}</span>
           <span title="Próximo pagamento">💳 ${fmtProximoPagamento(r.p)}</span>
