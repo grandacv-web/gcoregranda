@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-01.5';</script>
+<script>const APP_BUILD_VERSION='2026-10-01.9';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -2603,7 +2603,7 @@ select.fc{cursor:pointer}
         <button class="dash-tab compras-main-tab" onclick="comprasSetTab('calendario',this)">📅 Calendário</button>
       </div>
       <div style="font-size:.78rem;color:var(--ink4);margin-bottom:14px;padding:10px 14px;background:#f8fafc;border-radius:10px;border:1px solid var(--border)">
-        🛒 Chegada de Compras passa por um checklist de 5 subtarefas — Cotação → Negociação → Comprado → Esperando Chegar → Chegou — antes de a etapa ser considerada pronta. Ao marcar Comprado, registre cada compra (fornecedor, valor, condição de pagamento e previsão de chegada): ela entra no fluxo de caixa projetado, é comparada com a RM do projeto e, se a chegada passar do prazo, o pedido ganha ⚠️ no Pipeline. Pedido com projeto ainda não encaminhado fica como ⏳ Aguardando projeto. Clique em "Iniciar Compra" pra abrir; dá pra fechar e retomar depois de onde parou. Ao marcar a última subtarefa, a baixa é dada automaticamente (data e hora exatas ficam no Histórico do pedido). Prazo e pedidos vêm da Lista de Pedidos. (Corte Galvanizado e Adesivo agora ficam na Lista de Tarefas de Produção; Recebimento ART fica no Planejamento — 2026-08-04.)
+        🛒 Compras dá baixa por setor de produção em cada item do pedido — Router, Plasma, Solda, ACM, Letra caixa, Adesivo/P1, Elétrica e Pintura — do mesmo jeito da Produção (0/25/50/75/100% ou Não se aplica). Setor marcado N/A na Produção já vem N/A aqui. Quando todos os setores de todos os itens chegam a 100% (ou N/A), a etapa de Compras é concluída sozinha. Registre também cada compra (fornecedor, valor, condição de pagamento e previsão de chegada): ela entra no fluxo de caixa projetado, é comparada com a RM do projeto e, se a chegada passar do prazo, o pedido ganha ⚠️ no Pipeline. Pedido com projeto ainda não encaminhado fica como ⏳ Aguardando projeto. Clique em "Iniciar Compra" pra abrir; dá pra fechar e retomar depois de onde parou. Ao marcar a última subtarefa, a baixa é dada automaticamente (data e hora exatas ficam no Histórico do pedido). Prazo e pedidos vêm da Lista de Pedidos. (Corte Galvanizado e Adesivo agora ficam na Lista de Tarefas de Produção; Recebimento ART fica no Planejamento — 2026-08-04.)
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
         <input id="compras-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="comprasRenderAtivo()" style="flex:1;min-width:220px;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit">
@@ -7161,6 +7161,7 @@ function setupRealtimeSync(){
   window._fbWatchPedidos(function(snapshot){
     pedidos=snapshot.docs.map(d=>d.data());
     try{pedidos.forEach(_projNormExpedicao);}catch(e){}
+    try{pedidos.forEach(_prodNormLetraCaixa);}catch(e){}
     // Roda em TODA sessão nova (sem flag "só 1x", ao contrário das migrações abaixo) — é uma
     // limpeza de segurança que precisa continuar rodando se algum resíduo antigo reaparecer;
     // o próprio corpo da função já é idempotente (não faz nada se não achar nenhum "__x__").
@@ -7943,8 +7944,8 @@ function _agendaSetorAvisos(){
     const it=[];
     _comprasLinhasInfo(hoje).forEach(l=>{
       if(l.statusPedido==='concluido'||l.statusPedido==='aguardando')return;
-      const prox=COMPRAS_CHECKLIST_ITENS.find(c=>!(l.checklist&&l.checklist.itens&&l.checklist.itens[c.key]&&l.checklist.itens[c.key].feito));
-      it.push({iso:l.etapa.iso,txt:`${_agPedLbl(l.p)} — ${l.etapa.label} até ${fmtD(l.etapa.iso)} · ${l.itensFeitos}/${l.totalItens}${prox?' · próximo: '+prox.label:''}`});
+      const prox=null;
+      it.push({iso:l.etapa.iso,txt:`${_agPedLbl(l.p)} — ${l.etapa.label} até ${fmtD(l.etapa.iso)} · ${l.itensFeitos}% comprado`});
     });
     push('COMPRAS',_agMontar(it,hoje,lim),'Abra Compras pra atualizar o checklist.');
   }catch(err){console.error('agenda compras',err);}
@@ -26895,9 +26896,10 @@ function _comprasLinhasInfo(hojeIso){
     if(!calc.ok)return;
     calc.etapas.filter(e=>e.aplicavel&&stages.includes(e.key)).forEach(etapa=>{
       const checklist=(p.comprasChecklist&&p.comprasChecklist[etapa.key])||null;
-      const itensFeitos=checklist?COMPRAS_CHECKLIST_ITENS.filter(it=>checklist.itens[it.key]&&checklist.itens[it.key].feito).length:0;
+      // (2026-10-01) progresso = % comprado por setor de produção (ver _cmpPedidoPct), 0–100.
+      let itensFeitos=0;try{itensFeitos=_lpEtapaConcluida(p,etapa.key)?100:Math.round(_cmpPedidoPct(p));}catch(e){}
       const statusPedido=_comprasStatusLinha(p,etapa,hojeIso,itensFeitos);
-      linhas.push({p,calc,etapa,checklist,itensFeitos,totalItens:COMPRAS_CHECKLIST_ITENS.length,statusPedido});
+      linhas.push({p,calc,etapa,checklist,itensFeitos,totalItens:100,statusPedido});
     });
   });
   return linhas;
@@ -27124,12 +27126,8 @@ async function cmpSalvarForm(pedidoId,etapaKey,regId){
   }else{
     p.comprasRegistros.push({id:uid(),etapaKey,fornecedor:forn,descricao:desc,valor,dataCompra:data,condicao:cond,previsaoChegada:prev,chegouEm:'',chegouPor:'',por:quem,em:agora});
   }
-  // Registrar a compra já dá como feitas Cotação → Esperando chegar (o que faltar).
-  p.comprasChecklist=p.comprasChecklist||{};
-  const ck=p.comprasChecklist[etapaKey]=p.comprasChecklist[etapaKey]||{iniciadoEm:agora,itens:{}};
-  ck.itens=ck.itens||{};
-  ['cotacao','negociacao','comprado','esperandoChegar'].forEach(k=>{const d=ck.itens[k]=ck.itens[k]||{feito:false,quando:null,obs:''};if(!d.feito){d.feito=true;d.quando=agora;}});
-  _cmpSincronizarChegou(p,etapaKey);
+  // (2026-10-01) A baixa de Compras agora é por setor de produção — o registro da compra só guarda
+  // fornecedor/valor/previsão (fluxo de caixa, Comprado × RM, aviso de chegada).
   await savePedidoFS(p);
   const m=document.getElementById('cmp-reg-modal');if(m)m.remove();
   toast('Compra salva ✅','tok');
@@ -27138,6 +27136,7 @@ async function cmpSalvarForm(pedidoId,etapaKey,regId){
 }
 // CHEGOU do checklist acompanha as compras: tudo chegou = marcado (dá a baixa); falta algo = desmarcado.
 function _cmpSincronizarChegou(p,etapaKey){
+  return; // (2026-10-01) baixa de Compras passou a ser por setor de produção — ver _cmpSyncBaixa
   const regs=_cmpRegs(p);
   const ck=p.comprasChecklist&&p.comprasChecklist[etapaKey];if(!ck)return;
   ck.itens=ck.itens||{};
@@ -27161,7 +27160,6 @@ async function cmpMarcarChegou(pedidoId,etapaKey,regId){
 async function cmpDesfazerChegou(pedidoId,etapaKey,regId){
   const p=pedidos.find(x=>x.id===pedidoId);if(!p)return;
   const r=_cmpRegs(p).find(x=>x.id===regId);if(!r)return;
-  if(p.lpBaixas&&p.lpBaixas[etapaKey]&&!confirm('A etapa de Compras já está concluída. Desfazer a chegada reabre a etapa. Continuar?'))return;
   r.chegouEm='';r.chegouPor='';
   _cmpSincronizarChegou(p,etapaKey);
   await savePedidoFS(p);
@@ -27224,10 +27222,10 @@ function _cmpTopoHtml(){
 function _cmpLinhasExport(){
   return _comprasListaFiltrada().map(x=>{
     const rm=_cmpRm(x.p),tot=_cmpTotal(x.p),prev=_cmpPrevisaoChegada(x.p),rc=_cmpRiscoChegada(x.p,x.calc);
-    return[x.p.os||'',x.p.cliente||'',x.p.job||'',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens,tot?fmtR(tot):'',rm?fmtR(rm.v):'',rm&&tot?(tot/rm.v*100).toFixed(0)+'%':'',prev?fmtD(prev)+(rc?' (atrasada)':''):(_cmpRegs(x.p).length?'chegou':''),_projStatusLabel(x.statusPedido).replace(/^\S+\s/,'')];
+    return[x.p.os||'',x.p.cliente||'',x.p.job||'',fmtD(x.etapa.iso),x.itensFeitos+'%',tot?fmtR(tot):'',rm?fmtR(rm.v):'',rm&&tot?(tot/rm.v*100).toFixed(0)+'%':'',prev?fmtD(prev)+(rc?' (atrasada)':''):(_cmpRegs(x.p).length?'chegou':''),_projStatusLabel(x.statusPedido).replace(/^\S+\s/,'')];
   });
 }
-const CMP_EXPORT_HEAD=['OS','Cliente','JOB','Prazo Esperado','Checklist','Comprado','RM do projeto','Comprado/RM','Chegada prevista','Status'];
+const CMP_EXPORT_HEAD=['OS','Cliente','JOB','Prazo Esperado','% comprado','Comprado','RM do projeto','Comprado/RM','Chegada prevista','Status'];
 function comprasExportarListaExcel(){
   const rows=_cmpLinhasExport();
   if(!rows.length){toast('Nenhuma compra encontrada com esses filtros para exportar','terr');return;}
@@ -27279,7 +27277,7 @@ async function comprasIniciarOuAbrirChecklist(pedidoId,etapaKey){
 // Adesivo — cada uma com seu próprio prazo), dividido igualmente pelas 5 subtarefas — mesmo
 // critério de PROJETOS (ver _horasUteisEntre/_addHorasUteis), só trocando qual prazo entra na
 // conta.
-function comprasAbrirChecklist(pedidoId,etapaKey){
+function _comprasAbrirChecklistAntigo(pedidoId,etapaKey){ // (2026-10-01) substituído pela baixa por setor — mantido só como referência
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
   const calc=_lpCalcEtapas(p);
@@ -27371,6 +27369,239 @@ function comprasAbrirChecklist(pedidoId,etapaKey){
   </div>`;
   document.body.appendChild(modal);
 }
+// ===================== COMPRAS POR SETOR DE PRODUÇÃO (2026-10-01) =====================
+// A pedido do usuário: "parte de compras nós vamos deixar igual produção, vai dar baixa por
+// setores, pode colocar os mesmos de produção exceto acabamento. Não vai ser por etapa do
+// processo e sim por etapa de produção que ele dá baixa." — o checklist antigo (Cotação →
+// Negociação → Comprado → Esperando chegar → Chegou) sai da tela; Compras dá baixa em cada item
+// do pedido (p.itensProducao, os mesmos da Produção), por setor, com 0/25/50/75/100% ou N/A.
+// Dados: item.comprasSetores={setor:%}, item.comprasSetoresNA={setor:true|false}. Pedido sem
+// itens cadastrados usa um "item" único p.comprasGeral (mesmos campos). Setor N/A na Produção já
+// vem N/A aqui (dá pra mudar). Tudo 100%/N/A → p.lpBaixas.compras com viaSetores:true; se algum
+// setor cair, desfaz só a baixa que veio daqui (nunca a manual nem a do checklist antigo).
+function _cmpSetores(){return PROD_SETORES_ITEM.filter(s=>s.key!=='acabamento');}
+function _cmpUnidades(p){
+  const its=(p.itensProducao||[]).filter(i=>i&&!i.foraEscopo);
+  if(its.length)return its.map(i=>({id:i.id,nome:i.nome||'—',valor:Number(i.valor)||0,ref:i,item:i}));
+  p.comprasGeral=p.comprasGeral||{};
+  return[{id:'__pedido__',nome:'Pedido inteiro (sem itens cadastrados)',valor:0,ref:p.comprasGeral,item:null}];
+}
+function _cmpSetorNA(u,k){
+  const r=u.ref;
+  if(r.comprasSetoresNA&&Object.prototype.hasOwnProperty.call(r.comprasSetoresNA,k))return !!r.comprasSetoresNA[k];
+  if(r.comprasSetores&&r.comprasSetores[k]!=null)return false;
+  return !!(u.item&&typeof _prodItemSetorNA==='function'&&_prodItemSetorNA(u.item,k));
+}
+function _cmpSetorVal(u,k){const r=u.ref;return Math.min(100,Math.max(0,Math.round(Number(r.comprasSetores&&r.comprasSetores[k])||0)));}
+function _cmpUnidPct(u){
+  const ap=_cmpSetores().filter(s=>!_cmpSetorNA(u,s.key));
+  if(!ap.length)return 100;
+  return Math.round(ap.reduce((a,s)=>a+_cmpSetorVal(u,s.key),0)/ap.length);
+}
+function _cmpPedidoPct(p){
+  const us=_cmpUnidades(p);if(!us.length)return 0;
+  const tv=us.reduce((s,u)=>s+u.valor,0);
+  if(tv>0)return us.reduce((s,u)=>s+u.valor*_cmpUnidPct(u),0)/tv;
+  return us.reduce((s,u)=>s+_cmpUnidPct(u),0)/us.length;
+}
+function _cmpPedidoCompleto(p){return _cmpUnidades(p).every(u=>_cmpUnidPct(u)>=100);}
+function _cmpSyncBaixa(p,etapaKey){
+  etapaKey=etapaKey||'compras';
+  const completo=_cmpPedidoCompleto(p);
+  const bx=p.lpBaixas&&p.lpBaixas[etapaKey];
+  const quem=(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—';
+  if(completo&&!bx){
+    p.lpBaixas=p.lpBaixas||{};const agora=new Date();
+    p.lpBaixas[etapaKey]={data:_isoLocal(agora),dataHora:agora.toISOString(),por:quem,viaSetores:true};
+  }else if(!completo&&bx&&bx.viaSetores){
+    p.lpBaixasDesfeitas=p.lpBaixasDesfeitas||[];
+    p.lpBaixasDesfeitas.push({etapaKey,baixaOriginal:bx,desfeitaEm:new Date().toISOString(),desfeitaPor:quem});
+    delete p.lpBaixas[etapaKey];
+  }
+}
+function _cmpLogHist(p,u,setorLabel,de,para){
+  try{
+    if(!Array.isArray(p.historicoCompras))p.historicoCompras=[];
+    p.historicoCompras.push({em:new Date().toISOString(),por:_cmpQuem(),item:String(u.nome||'—').slice(0,120),setor:setorLabel,de:Math.round(Number(de)||0),para:Math.round(Number(para)||0)});
+    if(p.historicoCompras.length>400)p.historicoCompras=p.historicoCompras.slice(-400);
+  }catch(e){}
+}
+window._cmpPilulaSel=null;
+let _cmpPilulaUlt={k:'',t:0};
+function _cmpAchar(pedidoId,uid){
+  const p=pedidos.find(x=>x.id===pedidoId);if(!p)return{};
+  const u=_cmpUnidades(p).find(x=>x.id===uid);
+  return{p,u};
+}
+function cmpPilulaClick(pedidoId,etapaKey,uid,setor){
+  const k=pedidoId+'|'+uid+'|'+setor,agora=Date.now();
+  if(_cmpPilulaUlt.k===k&&agora-_cmpPilulaUlt.t<380){_cmpPilulaUlt={k:'',t:0};window._cmpPilulaSel=null;cmpSetSetor(pedidoId,etapaKey,uid,setor,100);return;}
+  _cmpPilulaUlt={k,t:agora};
+  const s=window._cmpPilulaSel;
+  window._cmpPilulaSel=(s&&s.u===uid&&s.setor===setor)?null:{u:uid,setor};
+  comprasAbrirChecklist(pedidoId,etapaKey);
+}
+function _cmpConfirmaReabrir(p,etapaKey,baixando){
+  if(baixando)return true;
+  const bx=p.lpBaixas&&p.lpBaixas[etapaKey];
+  if(!bx)return true;
+  return confirm('AS COMPRAS DESTE PEDIDO JÁ ESTÃO CONCLUÍDAS.\n\nEssa alteração reabre a etapa de Compras e o pedido volta pra lista de pendentes. Quer mesmo reabrir?');
+}
+async function _cmpSalvarERender(p,etapaKey){
+  _cmpSyncBaixa(p,etapaKey);
+  comprasAbrirChecklist(p.id,etapaKey);
+  await savePedidoFS(p);
+  comprasAbrirChecklist(p.id,etapaKey);
+  if(typeof comprasRenderAtivo==='function')comprasRenderAtivo();
+}
+async function cmpSetSetor(pedidoId,etapaKey,uid,setor,val){
+  window._cmpPilulaSel=null;
+  const{p,u}=_cmpAchar(pedidoId,uid);if(!p||!u)return;
+  let v=Math.min(100,Math.max(0,Math.round(Number(val)||0)));
+  const antes=_cmpSetorNA(u,setor)?0:_cmpSetorVal(u,setor);
+  const bx=p.lpBaixas&&p.lpBaixas[etapaKey];
+  if(bx&&bx.viaSetores&&v<100&&!_cmpConfirmaReabrir(p,etapaKey,false)){comprasAbrirChecklist(pedidoId,etapaKey);return;}
+  u.ref.comprasSetores=u.ref.comprasSetores||{};
+  u.ref.comprasSetoresNA=u.ref.comprasSetoresNA||{};
+  u.ref.comprasSetores[setor]=v;
+  u.ref.comprasSetoresNA[setor]=false;
+  const lbl=(_cmpSetores().find(x=>x.key===setor)||{}).label||setor;
+  if(antes!==v)_cmpLogHist(p,u,lbl,antes,v);
+  await _cmpSalvarERender(p,etapaKey);
+}
+async function cmpSetNA(pedidoId,etapaKey,uid,setor,on){
+  window._cmpPilulaSel=null;
+  const{p,u}=_cmpAchar(pedidoId,uid);if(!p||!u)return;
+  const bx=p.lpBaixas&&p.lpBaixas[etapaKey];
+  if(bx&&bx.viaSetores&&!on&&!_cmpConfirmaReabrir(p,etapaKey,false)){comprasAbrirChecklist(pedidoId,etapaKey);return;}
+  u.ref.comprasSetoresNA=u.ref.comprasSetoresNA||{};
+  u.ref.comprasSetoresNA[setor]=!!on;
+  const lbl=(_cmpSetores().find(x=>x.key===setor)||{}).label||setor;
+  _cmpLogHist(p,u,lbl+(on?' → N/A (não se aplica)':' → voltou a contar'),0,0);
+  await _cmpSalvarERender(p,etapaKey);
+}
+async function cmpUnidTudo(pedidoId,etapaKey,uid,on){
+  window._cmpPilulaSel=null;
+  const{p,u}=_cmpAchar(pedidoId,uid);if(!p||!u)return;
+  const bx=p.lpBaixas&&p.lpBaixas[etapaKey];
+  if(bx&&bx.viaSetores&&!on&&!_cmpConfirmaReabrir(p,etapaKey,false)){comprasAbrirChecklist(pedidoId,etapaKey);return;}
+  const antes=_cmpUnidPct(u);
+  u.ref.comprasSetores=u.ref.comprasSetores||{};
+  _cmpSetores().forEach(s=>{if(!_cmpSetorNA(u,s.key))u.ref.comprasSetores[s.key]=on?100:0;});
+  _cmpLogHist(p,u,'TODOS OS SETORES',antes,on?100:0);
+  await _cmpSalvarERender(p,etapaKey);
+}
+function cmpSetorCustom(pedidoId,etapaKey,uid,setor,atual){
+  const raw=prompt('Digite o % exato deste setor (0 a 100):',String(atual));
+  if(raw===null)return;
+  let v=parseFloat(String(raw).replace(',','.'));
+  if(isNaN(v)){toast('Valor inválido','terr');return;}
+  cmpSetSetor(pedidoId,etapaKey,uid,setor,v);
+}
+function _cmpUnidadesHtml(p,etapaKey){
+  const us=_cmpUnidades(p);
+  const sel=window._cmpPilulaSel;
+  return us.map(u=>{
+    const pct=_cmpUnidPct(u),p100=pct>=100;
+    const nomeTxt=String(u.nome||'—'),corte=nomeTxt.indexOf(' - ');
+    const nomeCurto=corte>0?nomeTxt.slice(0,corte):nomeTxt,nomeResto=corte>0?nomeTxt.slice(corte+3):'';
+    const nomeEsc=_cmpEsc(nomeTxt);
+    const selAqui=sel&&sel.u===u.id?sel.setor:'';
+    const pilulas=_cmpSetores().map(st=>{
+      const na=_cmpSetorNA(u,st.key),v=na?0:_cmpSetorVal(u,st.key);
+      let bg='#fff',bd='#cbd5e1',cor='#334155',extra='',txt=st.label;
+      if(na){bg='#f8fafc';cor='#94a3b8';extra='text-decoration:line-through;border-style:dashed;';}
+      else if(v>=100){bg='#dcfce7';bd='#16a34a';cor='#166534';txt='✓ '+st.label;}
+      else if(v>0){bg=`linear-gradient(90deg,#a5f3fc ${v}%,#fff ${v}%)`;bd='#0891b2';cor='#0e7490';txt=st.label+' · '+v+'%';}
+      return`<button type="button" onclick="cmpPilulaClick('${p.id}','${etapaKey}','${u.id}','${st.key}')" title="${st.label}: ${na?'não se aplica':v+'% comprado'} — clique pra ajustar · 2 cliques rápidos = 100%" style="background:${bg};border:1.5px solid ${bd};color:${cor};${extra}border-radius:20px;padding:6px 13px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;${selAqui===st.key?'box-shadow:0 0 0 3px #bae6fd;':''}">${txt}</button>`;
+    }).join('');
+    let opcoes='';
+    if(selAqui){
+      const stSel=_cmpSetores().find(x=>x.key===selAqui)||{label:selAqui};
+      const naSel=_cmpSetorNA(u,selAqui),vSel=naSel?-1:_cmpSetorVal(u,selAqui);
+      const bOp=(on,lbl,fn,tt)=>`<button type="button" onclick="${fn}" title="${tt||lbl}" style="border:1.5px solid ${on?'#0891b2':'#e2e8f0'};background:${on?'#0891b2':'#fff'};color:${on?'#fff':'#334155'};border-radius:8px;padding:6px 12px;font-size:.74rem;font-weight:700;cursor:pointer">${lbl}</button>`;
+      opcoes=`<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:9px;padding:8px 10px;background:#f1f5f9;border-radius:10px">
+        <span style="font-size:.72rem;font-weight:800;color:#0f172a;margin-right:4px">${stSel.label}</span>
+        ${[0,25,50,75,100].map(val=>bOp(vSel===val,val+'%',`cmpSetSetor('${p.id}','${etapaKey}','${u.id}','${selAqui}',${val})`)).join('')}
+        ${bOp(vSel>0&&[25,50,75,100].indexOf(vSel)<0,'Outro…',`window._cmpPilulaSel=null;cmpSetorCustom('${p.id}','${etapaKey}','${u.id}','${selAqui}',${Math.max(0,vSel)})`,'Digitar valor exato')}
+        ${bOp(naSel,'Não se aplica',`cmpSetNA('${p.id}','${etapaKey}','${u.id}','${selAqui}',${naSel?'false':'true'})`,naSel?'Voltar a contar este setor':'Este setor não precisa de compra neste item')}
+        <button type="button" onclick="window._cmpPilulaSel=null;comprasAbrirChecklist('${p.id}','${etapaKey}')" title="Fechar" style="margin-left:auto;border:none;background:none;color:#64748b;font-size:.9rem;cursor:pointer;padding:2px 6px">✕</button>
+      </div>`;
+    }
+    return`<div style="padding:12px 14px;margin-bottom:10px;border:1px solid ${p100?'#bbf7d0':'var(--border-lt)'};border-radius:12px;background:${p100?'#f0fdf4':'#fff'}">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.9rem;font-weight:800;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${nomeEsc}">${_cmpEsc(nomeCurto)}</div>
+          <div style="font-size:.7rem;color:var(--ink4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${nomeEsc}">${u.valor?fmtR(u.valor):''}${nomeResto?(u.valor?' · ':'')+_cmpEsc(nomeResto):''}</div>
+        </div>
+        <span style="font-weight:800;font-size:.92rem;color:${p100?'#16a34a':'#0f172a'};white-space:nowrap">${pct}%</span>
+        ${p100
+          ?`<button onclick="cmpUnidTudo('${p.id}','${etapaKey}','${u.id}',false)" type="button" title="Zerar todos os setores deste item" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:8px;padding:5px 10px;font-size:.7rem;font-weight:700;cursor:pointer">↺ Zerar</button>`
+          :`<button onclick="cmpUnidTudo('${p.id}','${etapaKey}','${u.id}',true)" type="button" title="Marcar todos os setores deste item como 100%" style="border:1.5px solid #16a34a;background:#fff;color:#16a34a;border-radius:8px;padding:5px 10px;font-size:.72rem;font-weight:800;cursor:pointer">✓✓ Tudo</button>`}
+      </div>
+      <div style="background:#e2e8f0;border-radius:20px;height:5px;overflow:hidden;margin:9px 0 10px"><div style="background:${p100?'#16a34a':'#00bac7'};height:100%;width:${pct}%"></div></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${pilulas}</div>
+      ${opcoes}
+    </div>`;
+  }).join('');
+}
+function comprasAbrirChecklist(pedidoId,etapaKey){
+  const p=pedidos.find(x=>x.id===pedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  const calc=_lpCalcEtapas(p);
+  if(!calc.ok){toast('Não foi possível calcular o prazo deste pedido','terr');return;}
+  const etapa=calc.etapas.find(e=>e.key===etapaKey);
+  if(!etapa){toast('Etapa não encontrada neste pedido','terr');return;}
+  const old=document.getElementById('compras-check-modal');
+  let _scrollAnt=null;
+  if(old&&old.dataset.pedidoId===pedidoId){const bx=old.querySelector('#compras-check-box');_scrollAnt=bx?bx.scrollTop:null;}
+  if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='compras-check-modal';
+  modal.dataset.pedidoId=pedidoId;
+  modal.dataset.etapaKey=etapaKey;
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  document.removeEventListener('keydown',_comprasEscHandler);
+  document.addEventListener('keydown',_comprasEscHandler);
+  const baixa=p.lpBaixas&&p.lpBaixas[etapaKey];
+  const concluido=_lpEtapaConcluida(p,etapaKey);
+  const pct=concluido?100:Math.round(_cmpPedidoPct(p));
+  const semItens=!(p.itensProducao||[]).filter(i=>i&&!i.foraEscopo).length;
+  // Checklist antigo (até 01/10/2026) — só informativo, pra não perder o que já tinha sido marcado.
+  let antigo='';
+  try{
+    const ck=p.comprasChecklist&&p.comprasChecklist[etapaKey];
+    if(ck&&ck.itens){
+      const feitos=COMPRAS_CHECKLIST_ITENS.filter(it=>ck.itens[it.key]&&ck.itens[it.key].feito);
+      if(feitos.length)antigo=`<div style="font-size:.7rem;color:var(--ink4);margin-bottom:10px">📋 Pelo checklist antigo este pedido estava em: <b>${feitos[feitos.length-1].label}</b> (${feitos.length}/${COMPRAS_CHECKLIST_ITENS.length}).</div>`;
+    }
+  }catch(e){}
+  const quandoTxt=baixa&&baixa.dataHora?` em ${new Date(baixa.dataHora).toLocaleDateString('pt-BR')}`:'';
+  const{isAdm}=_getUserCat();
+  modal.innerHTML=`<div id="compras-check-box" style="background:#fff;border-radius:16px;padding:22px 24px;max-width:1180px;width:96%;max-height:94vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px">
+      <div>
+        <div style="font-size:1rem;font-weight:800;color:#1a1f36">🛒 Compras por setor — OS ${_cmpEsc(p.os||'—')}</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_cmpEsc(p.cliente||'—')}${p.job?' · '+_cmpEsc(p.job):''} · Prazo de chegada: ${fmtD(etapa.iso)}</div>
+      </div>
+      <button onclick="comprasFecharChecklist('${pedidoId}','${etapaKey}')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar (Esc)">✕</button>
+    </div>
+    ${concluido?`<div style="padding:10px 12px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.8rem;font-weight:700;margin-bottom:12px">✅ Compras concluídas${quandoTxt}${baixa&&baixa.por?' por '+_cmpEsc(baixa.por):''}.</div>`:''}
+    <div style="font-size:.74rem;color:var(--ink4);margin-bottom:6px">${pct}% comprado</div>
+    <div style="background:#e2e8f0;border-radius:20px;height:8px;overflow:hidden;margin-bottom:14px"><div style="background:${concluido?'#16a34a':'#00bac7'};height:100%;width:${pct}%"></div></div>
+    ${_cmpBannersHtml(p,calc)}
+    ${antigo}
+    <div style="font-size:.84rem;font-weight:800;color:var(--ink);margin-bottom:6px">📦 Baixa por setor de produção${semItens?'':' — por item ('+(p.itensProducao||[]).filter(i=>i&&!i.foraEscopo).length+')'}</div>
+    ${semItens?`<div style="font-size:.74rem;color:#92400e;background:#fffbeb;border-radius:8px;padding:8px 10px;margin-bottom:8px">Este pedido ainda não tem os itens cadastrados — a baixa fica no pedido inteiro. Se quiser por item, cadastre os itens: <button type="button" onclick="prodAbrirEditorItens('${pedidoId}')" class="dash-btn-conf" style="background:#64748b;padding:4px 9px;font-size:.68rem">✏️ Cadastrar itens</button></div>`:''}
+    ${_cmpUnidadesHtml(p,etapaKey)}
+    <div style="font-size:.66rem;color:var(--ink4);margin:-2px 0 6px">Toque no setor pra ajustar · 2 toques rápidos = 100% · setor marcado N/A na Produção já vem N/A aqui. Quando tudo chega a 100% (ou N/A), a etapa de Compras é concluída sozinha.</div>
+    ${_cmpSecaoHtml(p,etapaKey)}
+    ${isAdm&&!concluido?`<button onclick="comprasFecharChecklist('${pedidoId}','${etapaKey}');lpDarBaixa('${pedidoId}','${etapaKey}','COMPRAS');if(typeof comprasRenderAtivo==='function')comprasRenderAtivo();" class="dash-btn-conf" style="background:#94a3b8;width:100%;margin-top:6px" type="button">🔒 Admin: marcar concluído manualmente</button>`:''}
+  </div>`;
+  document.body.appendChild(modal);
+  if(_scrollAnt!=null){const bx=modal.querySelector('#compras-check-box');if(bx)bx.scrollTop=_scrollAnt;}
+}
+
 async function comprasMarcarItem(pedidoId,etapaKey,itemKey,feito){
   const p=pedidos.find(x=>x.id===pedidoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
@@ -27453,13 +27684,13 @@ function renderComprasLista(){
   body.innerHTML=`<div style="overflow-x:auto"><table class="tbl-acoes-fixa" style="width:100%;border-collapse:collapse;font-size:.82rem">
     <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
       <th style="padding:8px 10px">OS</th><th style="padding:8px 10px">Cliente</th><th style="padding:8px 10px">JOB</th>
-      <th style="padding:8px 10px">Etapa</th><th style="padding:8px 10px">Prazo Esperado</th><th style="padding:8px 10px">Checklist</th><th style="padding:8px 10px">Comprado × RM</th><th style="padding:8px 10px">Chegada prevista</th><th style="padding:8px 10px">Status</th><th style="padding:8px 10px"></th>
+      <th style="padding:8px 10px">Etapa</th><th style="padding:8px 10px">Prazo Esperado</th><th style="padding:8px 10px">% comprado</th><th style="padding:8px 10px">Comprado × RM</th><th style="padding:8px 10px">Chegada prevista</th><th style="padding:8px 10px">Status</th><th style="padding:8px 10px"></th>
     </tr></thead><tbody>
     ${linhas.map(x=>{
       const{p,etapa,itensFeitos,totalItens,statusPedido}=x;
       const corLinha=statusPedido==='atrasado'?'color:#dc2626':'';
       const pct=Math.round(itensFeitos/totalItens*100);
-      const acaoLbl=statusPedido==='concluido'?'👁️ Ver Checklist':statusPedido==='aguardando'?'👁️ Ver':itensFeitos>0?'🔄 Retomar Compra':'🚀 Iniciar Compra';
+      const acaoLbl=statusPedido==='concluido'?'👁️ Ver':statusPedido==='aguardando'?'👁️ Ver':itensFeitos>0?'🔄 Retomar Compra':'🚀 Iniciar Compra';
       const corEtapa=_lpCorEtapa(etapa.key);
       return `<tr onclick="comprasIniciarOuAbrirChecklist('${p.id}','${etapa.key}')" style="border-bottom:1px solid var(--border-lt);cursor:pointer;${corLinha}">
         <td style="padding:8px 10px;font-weight:700;${corLinha}">${p.os||'—'}</td>
@@ -27467,7 +27698,7 @@ function renderComprasLista(){
         <td style="padding:8px 10px;${corLinha}">${p.job||'—'}</td>
         <td style="padding:8px 10px"><span style="background:${corEtapa}22;color:${corEtapa};padding:3px 8px;border-radius:20px;font-size:.68rem;font-weight:700;white-space:nowrap">${etapa.label}</span></td>
         <td style="padding:8px 10px;${corLinha}">${fmtD(etapa.iso)}</td>
-        <td style="padding:8px 10px"><div style="background:#e2e8f0;border-radius:20px;height:7px;width:90px;overflow:hidden"><div style="background:${statusPedido==='atrasado'?'#dc2626':'#00bac7'};height:100%;width:${pct}%"></div></div><div style="font-size:.68rem;color:var(--ink4);margin-top:2px">${itensFeitos}/${totalItens}</div></td>
+        <td style="padding:8px 10px"><div style="background:#e2e8f0;border-radius:20px;height:7px;width:90px;overflow:hidden"><div style="background:${statusPedido==='atrasado'?'#dc2626':'#00bac7'};height:100%;width:${pct}%"></div></div><div style="font-size:.68rem;color:var(--ink4);margin-top:2px">${itensFeitos}%</div></td>
         <td style="padding:8px 10px;white-space:nowrap">${_cmpCompradoRmCell(p)}</td>
         <td style="padding:8px 10px;white-space:nowrap">${_cmpChegadaCell(p,x.calc)}</td>
         <td style="padding:8px 10px;font-weight:700;color:${_projStatusCor(statusPedido)}">${_projStatusLabel(statusPedido)}</td>
@@ -27499,7 +27730,7 @@ function renderComprasKanban(){
             ${p.job?`<div style="font-size:.66rem;color:var(--ink4);margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(p.job).replace(/"/g,'&quot;')}">JOB: ${p.job}</div>`:''}
             <span style="background:${corEtapa}22;color:${corEtapa};padding:2px 7px;border-radius:20px;font-size:.62rem;font-weight:700;white-space:nowrap">${etapa.label}</span>
             <div style="font-size:.68rem;color:var(--ink4);margin-top:3px">Prazo: <strong>${fmtD(etapa.iso)}</strong></div>
-            <div style="font-size:.68rem;font-weight:700;margin-top:2px;color:${cor}">${itensFeitos}/${totalItens} subtarefas</div>
+            <div style="font-size:.68rem;font-weight:700;margin-top:2px;color:${cor}">${itensFeitos}% comprado</div>
             ${_cmpMiniInfoHtml(p,x.calc)}
           </div>`;
         }).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.72rem">—</div>'}
@@ -27548,7 +27779,7 @@ function renderComprasCalendario(){
       <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
         ${itens.slice(0,3).map(x=>`<div onclick="event.stopPropagation();comprasIniciarOuAbrirChecklist('${x.p.id}','${x.etapa.key}')" title="OS ${x.p.os||''} — ${(x.p.cliente||'').replace(/"/g,'&quot;')}${x.p.job?' — JOB '+String(x.p.job).replace(/"/g,'&quot;'):''} — ${x.etapa.label}" style="cursor:pointer;font-size:.6rem;background:${_projStatusCor(x.statusPedido)}22;color:${_projStatusCor(x.statusPedido)};border-radius:4px;padding:1px 4px;margin-bottom:1px">
           <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${x.p.os||''} · ${x.p.cliente||'—'}</div>
-          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.85">${x.etapa.label} · ${x.itensFeitos}/${x.totalItens}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.85">${x.etapa.label} · ${x.itensFeitos}%</div>
         </div>`).join('')}
         ${itens.length>3?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${itens.length-3} outro(s) — ver dia</div>`:''}
       </div>
@@ -27574,7 +27805,7 @@ function comprasAbrirDia(iso){
       <span style="background:${cor}22;color:${cor};padding:3px 8px;border-radius:20px;font-size:.68rem;font-weight:700;white-space:nowrap;flex-shrink:0">${_projStatusLabel(x.statusPedido)}</span>
       <div style="flex:1;min-width:0">
         <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${x.p.cliente||'—'}</div>
-        <div style="font-size:.7rem;color:var(--ink4)"><span style="color:${corEtapa};font-weight:700">${x.etapa.label}</span> · ${x.p.job||''} · ${x.itensFeitos}/${x.totalItens} subtarefas</div>
+        <div style="font-size:.7rem;color:var(--ink4)"><span style="color:${corEtapa};font-weight:700">${x.etapa.label}</span> · ${x.p.job||''} · ${x.itensFeitos}% comprado</div>
       </div>
     </div>`;
   }).join(''):'<div style="text-align:center;padding:30px;color:var(--ink4);font-size:.85rem">Nenhuma compra programada pra este dia.</div>';
@@ -27607,7 +27838,7 @@ const PROD_CHECKLIST_ITENS=[
   {key:'producao',label:'PRODUZIR'}
 ];
 // Baixa por SETOR dentro de cada item de produção (2026-09-21, a pedido do usuário: "abaixo de
-// cada item eu quero que tenha 6 setores para ele dizer qual porcentagem ele produziu de cada
+// cada item eu quero que tenha 6 setores (hoje 9: + ROUTER, PLASMA e LETRA CAIXA) para ele dizer qual porcentagem ele produziu de cada
 // setor e com base nessa media... vc calcula automatico qual porcentagem ta concluido o item").
 // Setores padrão, iguais pra TODO item que entra na Produção — item.setores={solda:0..100,
 // acm:0..100,...}; item.percentual (usado por _prodProgressoItens/histórico/etc., NUNCA mudou
@@ -27616,8 +27847,10 @@ const PROD_CHECKLIST_ITENS=[
 // ROUTER (corte) adicionado em 2026-09-25, a pedido do usuário — 1º setor do fluxo.
 const PROD_SETORES_ITEM=[
   {key:'router',label:'ROUTER (CORTE)'},
+  {key:'plasma',label:'PLASMA'},
   {key:'solda',label:'SOLDA'},
   {key:'acm',label:'ACM'},
+  {key:'letraCaixa',label:'LETRA CAIXA'},
   {key:'adesivoP1',label:'ADESIVO/P1'},
   {key:'acabamento',label:'ACABAMENTO'},
   {key:'eletrica',label:'ELÉTRICA'},
@@ -27637,6 +27870,28 @@ function _prodItemSetorValor(item,key){
 // DA PRODUÇÃO COLOCAR UM N/A pq nem tudo tem para fazer no produto". Fica em item.setoresNA
 // ({key:true}) separado de item.setores, e o setor N/A sai da média do item.
 function _prodItemSetorNA(item,key){return !!(item&&item.setoresNA&&item.setoresNA[key]);}
+// LETRA CAIXA (2026-10-01, a pedido do usuário: "nas etapas de produção acrescentar letra caixa
+// para dar baixa") — setor novo. Nos itens de pedidos emitidos até 01/10/2026 ele entra como N/A
+// automático (não muda o % de nenhum item que já estava em produção nem reabre item pronto); dá
+// pra reativar no próprio item. Pedido emitido a partir de 02/10 já começa com o setor normal.
+const PROD_LETRA_CAIXA_DESDE='2026-10-02';
+function _prodNormLetraCaixa(p){
+  try{
+    if(!p||!Array.isArray(p.itensProducao)||!p.itensProducao.length)return;
+    const em=p.emissaoEm?(_normPrazoIso(p.emissaoEm)||''):'';
+    if(em&&em>=PROD_LETRA_CAIXA_DESDE)return;
+    // PLASMA (2026-10-01, a pedido do usuário: "acrescente plasma também nas etapas de produção")
+    // segue exatamente a mesma regra da LETRA CAIXA.
+    p.itensProducao.forEach(it=>{
+      if(!it)return;
+      ['letraCaixa','plasma'].forEach(k=>{
+        if(it.setores&&it.setores[k]!=null)return;
+        if(it.setoresNA&&Object.prototype.hasOwnProperty.call(it.setoresNA,k))return;
+        it.setoresNA=Object.assign({},it.setoresNA||{},{[k]:true});
+      });
+    });
+  }catch(e){}
+}
 function _prodItemPercentualCalc(item){
   const aplic=PROD_SETORES_ITEM.filter(st=>!_prodItemSetorNA(item,st.key));
   if(!aplic.length)return 100; // tudo N/A = nada a produzir neste item
@@ -28082,6 +28337,9 @@ async function prodItemSetSetorNA(pedidoId,itemId,setorKey,on){
     PROD_SETORES_ITEM.forEach(st=>{item.setores[st.key]=base;});
   }
   if(!item.setoresNA)item.setoresNA={};
+  // Reativar um setor que o item ainda não tinha (ex.: LETRA CAIXA em item antigo) grava o valor
+  // dele, senão a normalização de _prodNormLetraCaixa marcaria N/A de novo no próximo carregamento.
+  if(!on&&item.setores[setorKey]==null)item.setores[setorKey]=_prodItemSetorValor(item,setorKey);
   if(on)item.setoresNA[setorKey]=true;else delete item.setoresNA[setorKey];
   item.percentual=_prodItemPercentualCalc(item);
   const lbl=(PROD_SETORES_ITEM.find(x=>x.key===setorKey)||{}).label||setorKey;
@@ -30450,14 +30708,22 @@ function _simUsarData(iso){
 // colunas fixas (Etapa | barra | Prazo | Dias do setor | Situação) pra ficar tudo alinhado.
 // Bolinha verde só quando o setor tem tempo normal E o dia não está cheio — antes ela só olhava
 // quantos pedidos caíam no dia e ficava verde mesmo com 0/1 dia útil pro setor.
+// Dia da semana por extenso ao lado das datas da linha do tempo (2026-10-01, a pedido do usuário:
+// "onde tiver essas datas em números quero que fale o dia da semana do lado, ex.: segunda-feira").
+function _tlDiaSemana(iso){
+  if(!iso||!/^\d{4}-\d{2}-\d{2}/.test(String(iso)))return'';
+  const d=new Date(String(iso).slice(0,10)+'T12:00:00');
+  return isNaN(d)?'':['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'][d.getDay()];
+}
+function _tlDataSem(iso){const w=_tlDiaSemana(iso);return fmtD(iso)+(w?' ('+w+')':'');}
 function _tlEsc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
 function _tlLinhasHtml(rows,iniIso,fimIso,titulo){
   const t0=new Date(iniIso+'T00:00:00').getTime(),t1=new Date(fimIso+'T00:00:00').getTime()+86400000;
   const tot=Math.max(1,t1-t0);
   const pos=iso=>Math.max(0,Math.min(100,(new Date(iso+'T00:00:00').getTime()-t0)/tot*100));
-  const G='display:grid;grid-template-columns:150px minmax(140px,1fr) 78px 118px 170px;gap:10px;align-items:center';
+  const G='display:grid;grid-template-columns:150px minmax(140px,1fr) 96px 118px 170px;gap:10px;align-items:center';
   const head=`<div style="${G};font-size:.62rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;padding:0 0 6px;border-bottom:1px solid var(--border-lt);margin-bottom:6px">
-    <div>Etapa</div><div style="display:flex;justify-content:space-between;text-transform:none;letter-spacing:0;font-weight:600"><span>Emissão ${fmtD(iniIso)}</span><span>Entrega ${fmtD(fimIso)}</span></div>
+    <div>Etapa</div><div style="display:flex;justify-content:space-between;text-transform:none;letter-spacing:0;font-weight:600"><span>Emissão ${_tlDataSem(iniIso)}</span><span>Entrega ${_tlDataSem(fimIso)}</span></div>
     <div style="text-align:right">Prazo</div><div style="text-align:right">Dias do setor</div><div>Situação</div></div>`;
   const body=rows.map(r=>{
     const a=pos(r.inicio||iniIso);
@@ -30465,8 +30731,8 @@ function _tlLinhasHtml(rows,iniIso,fimIso,titulo){
     const du=r.du!=null?`<b style="color:${r.duCor||'var(--ink2)'}">${r.du} d.ú.</b>${r.duNormal!=null?`<div style="font-size:.62rem;color:#94a3b8">normal ${r.duNormal}</div>`:''}`:'<span style="color:#cbd5e1">—</span>';
     return`<div style="${G};padding:5px 0;border-bottom:1px dashed #f1f5f9">
       <div style="font-size:.74rem;font-weight:700;color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${_tlEsc(r.label)}">${_tlEsc(r.label)}</div>
-      <div style="position:relative;height:14px;background:#f1f5f9;border-radius:5px"><div title="${_tlEsc(r.label)}: ${fmtD(r.inicio||iniIso)} → ${fmtD(r.iso)}" style="position:absolute;left:${a}%;width:${Math.min(100-a,b-a)}%;top:0;bottom:0;background:${r.barCor||'#0ea5e9'};border-radius:5px;opacity:.9"></div></div>
-      <div style="text-align:right;font-size:.74rem;font-variant-numeric:tabular-nums;color:var(--ink2)">${fmtD(r.iso)}</div>
+      <div style="position:relative;height:14px;background:#f1f5f9;border-radius:5px"><div title="${_tlEsc(r.label)}: ${_tlDataSem(r.inicio||iniIso)} → ${_tlDataSem(r.iso)}" style="position:absolute;left:${a}%;width:${Math.min(100-a,b-a)}%;top:0;bottom:0;background:${r.barCor||'#0ea5e9'};border-radius:5px;opacity:.9"></div></div>
+      <div style="text-align:right;font-size:.74rem;font-variant-numeric:tabular-nums;color:var(--ink2);line-height:1.15">${fmtD(r.iso)}<div style="font-size:.62rem;color:#94a3b8">${_tlDiaSemana(r.iso)}</div></div>
       <div style="text-align:right;font-size:.74rem;font-variant-numeric:tabular-nums;line-height:1.15">${du}</div>
       <div style="font-size:.7rem;line-height:1.2">${r.situacao||''}</div>
     </div>${r.extra?`<div style="padding:2px 0 6px 160px;font-size:.66rem;color:var(--ink3)">${r.extra}</div>`:''}`;
@@ -30495,7 +30761,7 @@ function _simTimelineHtml(r,ctx){
     const cor=nivel==='critico'?'#dc2626':nivel==='atencao'?'#d97706':'';
     let extra='';
     if(e.key==='producao'&&r.aloc&&r.aloc.chunks&&r.aloc.chunks.length){
-      extra=`🏭 Produção por dia: ${r.aloc.chunks.map(c=>`<span style="white-space:nowrap;${c.estouro?'color:#b91c1c;font-weight:700':''}">${fmtD(c.iso).slice(0,5)} ${fmtR(c.valor)}${c.estouro?' ⚠️':''}</span>`).join(' · ')} <span style="color:var(--ink4)">(limite ${fmtR(_lpCapProducaoDia())}/dia)</span>`;
+      extra=`🏭 Produção por dia: ${r.aloc.chunks.map(c=>`<span style="white-space:nowrap;${c.estouro?'color:#b91c1c;font-weight:700':''}">${fmtD(c.iso).slice(0,5)} (${_tlDiaSemana(c.iso)}) ${fmtR(c.valor)}${c.estouro?' ⚠️':''}</span>`).join(' · ')} <span style="color:var(--ink4)">(limite ${fmtR(_lpCapProducaoDia())}/dia)</span>`;
     }
     return{label:e.label,iso:e.iso,inicio,du,duNormal,duCor:cor,barCor:cor||(e.key==='producao'?'#0284c7':'#38bdf8'),situacao:_tlSituacaoSetor(nivel,q,lim),extra};
   });
@@ -30521,7 +30787,7 @@ function _lpTimelinePedidoHtml(x,hoje){
       let sit,bar;
       if(real){
         const noPrazo=real==='feito'||real<=e.iso;
-        sit=`<span style="color:${noPrazo?'#15803d':'#dc2626'};font-weight:800">✅ Feito${real!=='feito'?' '+fmtD(real):''}</span>${noPrazo?'':'<div style="font-size:.62rem;color:#dc2626">depois do prazo</div>'}`;
+        sit=`<span style="color:${noPrazo?'#15803d':'#dc2626'};font-weight:800">✅ Feito${real!=='feito'?' '+fmtD(real):''}</span>${real!=='feito'?`<div style="font-size:.62rem;color:#94a3b8">${_tlDiaSemana(real)}</div>`:''}${noPrazo?'':'<div style="font-size:.62rem;color:#dc2626">depois do prazo</div>'}`;
         bar=noPrazo?'#22c55e':'#f87171';
       }else if(ehFinal||temBaixa){
         const atr=e.iso<hoje;
