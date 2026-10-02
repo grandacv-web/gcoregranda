@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-02.12';</script>
+<script>const APP_BUILD_VERSION='2026-10-02.15';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -5920,6 +5920,26 @@ function _pedNome(p){
   if(c.toUpperCase().includes(j.toUpperCase()))return c;
   return j+' · '+c;
 }
+// Tipo do pedido (VENDA, PERMUTA, GARANTIA, INTERNO, AMOSTRA, BRINDE, CHUMBADOR) junto do nome
+// em todas as listas operacionais e exportações (2026-10-02, a pedido do usuário).
+function _pedTipoTxt(p){
+  if(!p)return'';
+  if(p.isChumbador)return'CHUMBADOR';
+  if(p.importadoPlanilha)return'VENDA';
+  const t=String(p.tipo||'').trim().toUpperCase();
+  if(!t)return'';
+  if(t.startsWith('GARANTIA'))return'GARANTIA';
+  return t;
+}
+const _PED_TIPO_COR={VENDA:['#dcfce7','#166534'],PERMUTA:['#dbeafe','#1e40af'],GARANTIA:['#fee2e2','#991b1b'],INTERNO:['#e2e8f0','#334155'],AMOSTRA:['#fef3c7','#92400e'],BRINDE:['#fce7f3','#9d174d'],CHUMBADOR:['#e0f2fe','#075985']};
+function _pedTipoTag(p){
+  const t=_pedTipoTxt(p);if(!t)return'';
+  const c=_PED_TIPO_COR[t]||['#f1f5f9','#475569'];
+  return ` <span class="ped-tipo-tag" title="Categoria do pedido" style="display:inline-block;background:${c[0]};color:${c[1]};border-radius:20px;padding:0 6px;font-size:.6rem;font-weight:800;line-height:1.5;vertical-align:middle;white-space:nowrap">${t}</span>`;
+}
+function _pedTipoSuf(p){const t=_pedTipoTxt(p);return t?' · '+t:'';}
+function _pedCliTipo(p){return (String((p&&p.cliente)||'').trim()||'—')+_pedTipoSuf(p);}
+function _pedTipoCurto(p){const t=_pedTipoTxt(p);return t?' '+t.slice(0,3):'';}
 const fmtD=d=>{if(!d)return'';if(d.includes('/'))return d;try{const[y,m,dd]=d.split('-');return`${dd}/${m}/${y}`}catch(e){return d}};
 // Data+hora da tarefa formatada junto (2026-09-17, a pedido do usuário: "quero que as
 // tarefas tenham hora para conclusão") — hora é opcional; sem ela, mostra só a data como
@@ -10921,6 +10941,14 @@ function getTabs(){
 
 // E-mail do Comprador/Engenheiro não é obrigatório pra pedido Interno ou Garantia/Retrabalho
 // (2026-09-28, a pedido do usuário). Os demais tipos continuam obrigatórios.
+// (2026-10-02, a pedido do usuário: "garantia/retrabalho se tiver produção precisa ir pra produção,
+// se tiver instalação vai pra planejamento, assim sucessivamente"). Pedido que não é Venda/Permuta
+// responde na Emissão se tem produção na fábrica; "Não" tira Projeto, Compras, Corte, Adesivo,
+// Produção e Embalagem do pipeline dele (some desses menus). Instalação/frete/medição/ART seguem
+// as regras de sempre e levam o pedido pro Planejamento.
+function _emPerguntaProducao(){return typeof ed!=='undefined'&&ed&&!!ed.tipo&&ed.tipo!=='Venda'&&ed.tipo!=='Permuta';}
+const LP_ETAPAS_FABRICA=['projeto','compras','corteGalv','adesivo','producao','embalagem'];
+function _lpTemFabrica(p){return !(p&&p.temProducao==='Não');}
 function _emEmailsOpcionais(){return typeof ed!=='undefined'&&ed&&(ed.tipo==='Interno'||ed.tipo==='Garantia / Retrabalho');}
 function _qualidadeTipoDefault(){
   // Perfil QUALIDADE (2026-09-08) só pode emitir Garantia/Retrabalho ou Interno —
@@ -11044,7 +11072,7 @@ async function openEmissao(eid2){
       // tendo sido calculado e salvo antes. Restaura direto do que já foi salvo em
       // fr['Prazo Estimado de Entrega'].
       prazo_frete_txt:fr['Prazo Estimado de Entrega']||'',
-      fend:fr['Endereço de Entrega']||'',fie:fr['Inscrição Estadual']||'',chumbador:p.chumbador||'',arq_chumb:p.arq_chumb_url?'Arquivo já enviado':'',arq_chumb_url:p.arq_chumb_url||'',os_chumb:p.os_chumb||'',dt_chumb:p.dt_chumb||'',_dtChumbOrig:p.dt_chumb||'',
+      fend:fr['Endereço de Entrega']||'',fie:fr['Inscrição Estadual']||'',chumbador:p.chumbador||'',arq_chumb:p.arq_chumb_url?'Arquivo já enviado':'',arq_chumb_url:p.arq_chumb_url||'',os_chumb:p.os_chumb||'',temProducao:p.temProducao||'',dt_chumb:p.dt_chumb||'',_dtChumbOrig:p.dt_chumb||'',
       // RNC (Relatório de Não Conformidade, 2026-09-08) — mesmo padrão de restauração do
       // arq_chumb acima.
       arq_rnc:p.arq_rnc_url?'Arquivo já enviado':'',arq_rnc_url:p.arq_rnc_url||'',rncOrigem:p.rncPedidoOrigem||null,
@@ -11197,6 +11225,7 @@ function validarAba(id){
   }
   if(id==='valores'&&!_tipoDispensaValores(ed.tipo)){
     if(!ed.vtotal)erros.push('Valor total do pedido não informado');
+    if(_emPerguntaProducao()&&!ed.temProducao)erros.push('Informe se este pedido tem produção na fábrica');
     if(!ed.i_tipo)erros.push('Instalação não selecionada');
     if(ed.i_tipo==='Por nossa conta'&&!ed.vinst)erros.push('Valor da instalação não informado');
     if(ed.i_tipo==='Por nossa conta'&&!ed.vmob)erros.push('Valor da mobilização não informado');
@@ -11429,6 +11458,7 @@ function saveSt(){
     ed.remocao=gon('tg_rem');ed.vrem=gmv('em-vr');
     ed.f_tipo=gsel('rc-frt');ed.fmod=gmv('em-fm');ed.vfrete=gmv('em-vf');
     ed.frete_chumb=gon('tg_frchumb');ed.vfrete_chumb=gmv('em-vfch');
+    if(_emPerguntaProducao())ed.temProducao=gon('tg_temprod');
     ed.elev_tipo=gsel('rc-elv');ed.elevacoes=(ed.elev_tipo==='Não tem elevações neste pedido')?'Não':(ed.elev_tipo?'Sim':'');ed.medicao=gon('tg_med');
     if(ed.elev_tipo==='Por nossa conta'){const vv=gmv('em-velv');if(vv)ed.velev=vv;}
     ed.vmed=gmv('em-vmed');
@@ -11731,7 +11761,7 @@ function selRC(el,cls){
 function rTG(cls,val,label,cur,yes){const on=cur===val;
   return`<button class="tgb${yes?' yes':' no'}${on?' on':''} ${cls}" data-val="${val}" onclick="togBtn(this,'${cls}')">${label}</button>`}
 function togBtn(el,cls){
-  const map={tg_frchumb:'frete_chumb',tg_oc:'tem_oc',tg_art:'art',tg_elv:'elevacoes',tg_med:'medicao',tg_itg:'iinteg',tg_seg:'iseg',tg_rem:'remocao',tg_chumb:'chumbador',tg_bloqenergia:'ibloqenergia',tg_bloqvia:'elevBloqVia',tg_laudo:'laudo',tg_pintub:'pintubo',tg_cons_escopo:'conselhoEscopo',tg_cons_assin:'conselhoAssin',tg_cons_wpp:'conselhoGrupoWpp'};
+  const map={tg_temprod:'temProducao',tg_frchumb:'frete_chumb',tg_oc:'tem_oc',tg_art:'art',tg_elv:'elevacoes',tg_med:'medicao',tg_itg:'iinteg',tg_seg:'iseg',tg_rem:'remocao',tg_chumb:'chumbador',tg_bloqenergia:'ibloqenergia',tg_bloqvia:'elevBloqVia',tg_laudo:'laudo',tg_pintub:'pintubo',tg_cons_escopo:'conselhoEscopo',tg_cons_assin:'conselhoAssin',tg_cons_wpp:'conselhoGrupoWpp'};
   el.closest('.tg-grp').querySelectorAll('button').forEach(b=>b.classList.remove('on'));
   el.classList.add('on');if(map[cls])ed[map[cls]]=el.dataset.val;
   if(cls==='tg_elv'||cls==='tg_med'){saveSt();renderEM();}else updCond();
@@ -11897,7 +11927,9 @@ function _renderStepBase(id){
     </div>`;
   }else if(id==='valores'){
     const si=ed.i_tipo==='Por nossa conta',sf=ed.f_tipo==='Por nossa conta';
-    bd.innerHTML=`<div class="fsec">
+    bd.innerHTML=`${_emPerguntaProducao()?`<div class="fsec"><div class="fg" style="margin:0"><label>🏭 Este pedido tem produção na fábrica? <span class="r">*</span></label>
+        <div class="tg-grp">${rTG('tg_temprod','Sim','Sim',ed.temProducao,true)}${rTG('tg_temprod','Não','Não',ed.temProducao,false)}</div>
+        <div style="font-size:.7rem;color:var(--ink4);margin-top:4px">Sim = vai pra Projeto, Compras e Produção. Não = só o que tiver de instalação/frete/medição (Planejamento).</div></div></div>`:''}<div class="fsec">
       <div class="fsec-t"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> VALORES DO PEDIDO</div>
       <div style="border:1.5px solid #eef0f5;border-radius:12px;padding:16px">
         <div class="fg"><label>Valor Total deste Pedido <span class="r">*</span></label>
@@ -12828,6 +12860,7 @@ function buildEmissaoEmailContent(p){
       </td></tr>
       ${p.bases?`
       <tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Tipo de Base/Fundação</td><td style="padding:10px 0;color:#111827;font-size:13px;font-weight:600">${p.bases}</td></tr>
+      ${p.temProducao?`<tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Tem produção na fábrica?</td><td style="padding:10px 0;color:#111827;font-size:13px;font-weight:600">${p.temProducao==='Não'?'NÃO':'SIM'}</td></tr>`:''}
       ${p.chumbador==='Sim'?`<tr style="background:#fafafa"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Chumbador</td><td style="padding:10px 0;color:#111827;font-size:13px;font-weight:600">SERÁ ENVIADO CHUMBADOR</td></tr>`:''}
       ${p.dt_chumb?`<tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Entrega do Chumbador no Cliente</td><td style="padding:10px 0;color:#111827;font-size:13px;font-weight:600">${(typeof _tlDataSem==='function')?_tlDataSem(p.dt_chumb):fmtD(p.dt_chumb)}</td></tr>`:''}
       ${p.os_chumb?`<tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">OS do Chumbador</td><td style="padding:10px 0;color:#111827;font-size:13px;font-weight:600">${p.os_chumb}</td></tr>`:''}
@@ -13864,7 +13897,7 @@ function _buildPedidoBaseDoEd(){
     // porque undefined no objeto quebra o savePedidoFS (ver [[project_firestore_undefined_fields]]).
     arq_os_url:ed.arq_os_url||'',arq_oc_url:ed.arq_oc_url||'',arq_chumb_url:ed.arq_chumb_url||'',arq_rnc_url:ed.arq_rnc_url||'',
     rncPedidoOrigem:(ed.tipo==='Garantia / Retrabalho'&&ed.rncOrigem)?{id:ed.rncOrigem.id||'',os:ed.rncOrigem.os||'',cliente:ed.rncOrigem.cliente||'',job:ed.rncOrigem.job||''}:null,
-    chumbador:ed.chumbador||'',os_chumb:ed.os_chumb||'',dt_chumb:(ed.chumbador==='Sim'&&ed.dt_chumb)?ed.dt_chumb:'',
+    temProducao:(ed.tipo!=='Venda'&&ed.tipo!=='Permuta'&&ed.temProducao)?ed.temProducao:'',chumbador:ed.chumbador||'',os_chumb:ed.os_chumb||'',dt_chumb:(ed.chumbador==='Sim'&&ed.dt_chumb)?ed.dt_chumb:'',
     // Congela a config de Etapas de Pedidos (percentuais/removidas/extras) NO MOMENTO da
     // emissão — se for edição de um pedido que já tinha isso, mantém o snapshot antigo (nunca
     // sobrescreve), pra mudanças feitas depois em Configurações → Etapas de Pedidos nunca
@@ -14264,6 +14297,7 @@ async function submit(){
   const idxVal=idx('valores');
   if(!_tipoDispensaValores(ed.tipo)){
   if(!ed.vtotal)erros.push({msg:'Valor total do pedido não informado',aba:idxVal,label:'Valores'});
+  if(_emPerguntaProducao()&&!ed.temProducao)erros.push({msg:'Informe se este pedido tem produção na fábrica',aba:idxVal,label:'Valores'});
   if(!ed.i_tipo)erros.push({msg:'Instalação não selecionada',aba:idxVal,label:'Valores'});
   if(ed.i_tipo==='Por nossa conta'&&!ed.vinst)erros.push({msg:'Valor da instalação não informado',aba:idxVal,label:'Valores'});
   if(ed.i_tipo==='Por nossa conta'&&!ed.vmob)erros.push({msg:'Valor da mobilização não informado',aba:idxVal,label:'Valores'});
@@ -24916,7 +24950,8 @@ function _plPedidosElegiveis(){
     // que zero (pode ser cortesia, incluída no produto, valor 0 digitado etc.) — mesmo
     // raciocínio já aplicado pra Medição Técnica logo acima.
     const temInstPorNossaConta=(p.instalacao&&p.instalacao['Tipo de Instalação'])==='Por nossa conta';
-    return temInst||temFrete||temMedicao||temInstPorNossaConta;
+    let temFreteNaoVenda=false;try{temFreteNaoVenda=_lpEhNaoVenda(p)&&_lpTemFrete(p);}catch(e){}
+    return temInst||temFrete||temMedicao||temInstPorNossaConta||temFreteNaoVenda;
   });
 }
 
@@ -25435,7 +25470,8 @@ function _lpCalcEtapas(p){
       const _doPlanejamento=def.key==='art'||def.key==='saidaFrete';
       iso=_lpAjustaDiaUtil(_opAddDias(emissaoIso,Math.round((_doPlanejamento?prazoInternoDias:_prazoInternoDiasProducao)*def.pct/100)));
     }
-    return Object.assign({},def,{iso,aplicavel:def.cond?CONDS[def.cond]:true});
+    const _semFab=!_lpTemFabrica(p)&&LP_ETAPAS_FABRICA.includes(def.key);
+    return Object.assign({},def,{iso,aplicavel:_semFab?false:(def.cond?CONDS[def.cond]:true)});
   });
   return{ok:true,emissaoIso,prazoIso,diasInst,diasFrete,temInst,temFrete,temArt,coletaIso,chegadaIso,prazoInternoDias,etapas};
 }
@@ -25486,8 +25522,18 @@ function _lpEtapaConcluida(p,key){return !!((p&&p.lpBaixas&&p.lpBaixas[key])||_l
 // Pedidos que não são venda (garantia/interno/amostra...) entram no pipeline só a partir desta data
 // — os antigos nunca tinham passado pelos setores e voltavam como "pendente/atrasado".
 const LP_NAO_VENDA_DESDE='2026-09-29';
+// (2026-10-02, a pedido do usuário) Garantia/Retrabalho e Interno emitidos pelo sistema ANTES de
+// 29/09 também entram no Pipeline/Produção/Compras/Projetos se o prazo final de entrega for de
+// 02/10/2026 em diante (data fixa, pra não sumirem quando o prazo vencer) — os setores dão baixa.
+const LP_NAO_VENDA_PRAZO_DESDE='2026-10-02';
+function _lpNaoVendaAntigaAtiva(p){
+  const t=String((p&&p.tipo)||'');
+  if(!(t==='Interno'||t.startsWith('Garantia')))return false;
+  return (_normPrazoIso(p.prazo)||'')>=LP_NAO_VENDA_PRAZO_DESDE;
+}
 function _lpEhNaoVenda(p){return !!(p&&p.origemComercial&&!isComercialPedido(p));}
 function _lpTipoBadge(p){
+  if(p&&!p.isChumbador)return _pedTipoTag(p).trim()+' ';
   if(p&&p.isChumbador)return`<span title="Pedido do chumbador, separado da OS ${String(p.osPai||'').replace(/"/g,'')} — prazo = entrega do chumbador no cliente" style="display:inline-block;background:#e0f2fe;color:#075985;border-radius:20px;padding:0 7px;font-size:.62rem;font-weight:800;margin-left:4px">🔩 Chumbador · OS ${_plEsc(p.osPai||'—')}</span>`;
   if(!_lpEhNaoVenda(p))return'';
   const t=String(p.tipo||'Não venda');
@@ -25499,7 +25545,7 @@ function _lpPedidosElegiveis(){
   // ver project memory) — esta função alimenta 15+ telas (Lista de Pedidos, Kanban,
   // Calendário, projeções de Produção/Compras/ART etc.), então sem este filtro um pedido
   // cancelado continuava "vivo" em TODAS elas, não só em Planejamento.
-  return pedidos.filter(p=>!(p.os&&isVendaCancelada(p.os))&&!_chumbInativo(p)&&p.origemComercial&&!p.importadoPlanilha&&(!_lpEhNaoVenda(p)||p.isChumbador||_normPrazoIso(p.emissaoEm)>=LP_NAO_VENDA_DESDE)&&p.emissaoEm&&_normPrazoIso(p.emissaoEm)>=LP_DATA_CORTE&&!LP_CLIENTES_EXCLUIR.includes((p.cliente||'').trim().toUpperCase()));
+  return pedidos.filter(p=>!(p.os&&isVendaCancelada(p.os))&&!_chumbInativo(p)&&p.origemComercial&&!p.importadoPlanilha&&(!_lpEhNaoVenda(p)||p.isChumbador||_normPrazoIso(p.emissaoEm)>=LP_NAO_VENDA_DESDE||_lpNaoVendaAntigaAtiva(p))&&p.emissaoEm&&_normPrazoIso(p.emissaoEm)>=LP_DATA_CORTE&&!LP_CLIENTES_EXCLUIR.includes((p.cliente||'').trim().toUpperCase()));
 }
 // Etapa "atual" de um pedido hoje — a primeira etapa aplicável cuja data ainda não passou (a
 // próxima meta); se todas já passaram, fica na última (Final da Instalação). Concluído usa
@@ -27402,7 +27448,7 @@ function _cmpTopoHtml(){
 function _cmpLinhasExport(){
   return _comprasListaFiltrada().map(x=>{
     const rm=_cmpRm(x.p),tot=_cmpTotal(x.p),prev=_cmpPrevisaoChegada(x.p),rc=_cmpRiscoChegada(x.p,x.calc);
-    return[x.p.os||'',x.p.cliente||'',x.p.job||'',fmtD(x.etapa.iso),x.itensFeitos+'%',tot?fmtR(tot):'',rm?fmtR(rm.v):'',rm&&tot?(tot/rm.v*100).toFixed(0)+'%':'',prev?fmtD(prev)+(rc?' (atrasada)':''):(_cmpRegs(x.p).length?'chegou':''),_projStatusLabel(x.statusPedido).replace(/^\S+\s/,'')];
+    return[x.p.os||'',_pedCliTipo(x.p),x.p.job||'',fmtD(x.etapa.iso),x.itensFeitos+'%',tot?fmtR(tot):'',rm?fmtR(rm.v):'',rm&&tot?(tot/rm.v*100).toFixed(0)+'%':'',prev?fmtD(prev)+(rc?' (atrasada)':''):(_cmpRegs(x.p).length?'chegou':''),_projStatusLabel(x.statusPedido).replace(/^\S+\s/,'')];
   });
 }
 const CMP_EXPORT_HEAD=['OS','Cliente','JOB','Prazo Esperado','% comprado','Comprado','RM do projeto','Comprado/RM','Chegada prevista','Status'];
@@ -27762,7 +27808,7 @@ function comprasAbrirChecklist(pedidoId,etapaKey){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px">
       <div>
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">🛒 Compras por setor — OS ${_cmpEsc(p.os||'—')}</div>
-        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_cmpEsc(_pedNome(p))}${p.job?' · '+_cmpEsc(p.job):''} · Prazo de chegada: ${fmtD(etapa.iso)}</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_cmpEsc(_pedNome(p))}${_pedTipoTag(p)}${p.job?' · '+_cmpEsc(p.job):''} · Prazo de chegada: ${fmtD(etapa.iso)}</div>
       </div>
       <button onclick="comprasFecharChecklist('${pedidoId}','${etapaKey}')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar (Esc)">✕</button>
     </div>
@@ -27874,7 +27920,7 @@ function renderComprasLista(){
       const corEtapa=_lpCorEtapa(etapa.key);
       return `<tr onclick="comprasIniciarOuAbrirChecklist('${p.id}','${etapa.key}')" style="border-bottom:1px solid var(--border-lt);cursor:pointer;${corLinha}">
         <td style="padding:8px 10px;font-weight:700;${corLinha}">${p.os||'—'}</td>
-        <td style="padding:8px 10px;${corLinha}" title="${(_pedNome(p)).replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_pedNome(p)}</div></td>
+        <td style="padding:8px 10px;${corLinha}" title="${(_pedNome(p)).replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_pedNome(p)}${_pedTipoTag(p)}</div></td>
         <td style="padding:8px 10px;${corLinha}">${p.job||'—'}</td>
         <td style="padding:8px 10px"><span style="background:${corEtapa}22;color:${corEtapa};padding:3px 8px;border-radius:20px;font-size:.68rem;font-weight:700;white-space:nowrap">${etapa.label}</span></td>
         <td style="padding:8px 10px;${corLinha}">${fmtD(etapa.iso)}</td>
@@ -27906,7 +27952,7 @@ function renderComprasKanban(){
           const corEtapa=_lpCorEtapa(etapa.key);
           return `<div onclick="comprasIniciarOuAbrirChecklist('${p.id}','${etapa.key}')" style="background:#fff;border:1px solid ${col.key==='atrasado'?'#dc2626':'var(--border-lt)'};border-radius:10px;padding:10px;cursor:pointer">
             <div style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'}</div>
-            <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}</div>
+            <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}${_pedTipoTag(p)}</div>
             <span style="background:${corEtapa}22;color:${corEtapa};padding:2px 7px;border-radius:20px;font-size:.62rem;font-weight:700;white-space:nowrap">${etapa.label}</span>
             <div style="font-size:.68rem;color:var(--ink4);margin-top:3px">Prazo: <strong>${fmtD(etapa.iso)}</strong></div>
             <div style="font-size:.68rem;font-weight:700;margin-top:2px;color:${cor}">${itensFeitos}% comprado</div>
@@ -27957,7 +28003,7 @@ function renderComprasCalendario(){
       ${nomeFeriado?`<div style="font-size:.6rem;color:#b45309;font-weight:700;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎌 ${nomeFeriado}</div>`:''}
       <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
         ${itens.slice(0,3).map(x=>`<div onclick="event.stopPropagation();comprasIniciarOuAbrirChecklist('${x.p.id}','${x.etapa.key}')" title="OS ${x.p.os||''} — ${(_pedNome(x.p)).replace(/"/g,'&quot;')}${x.p.job?' — JOB '+String(x.p.job).replace(/"/g,'&quot;'):''} — ${x.etapa.label}" style="cursor:pointer;font-size:.6rem;background:${_projStatusCor(x.statusPedido)}22;color:${_projStatusCor(x.statusPedido)};border-radius:4px;padding:1px 4px;margin-bottom:1px">
-          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${x.p.os||''} · ${_pedNome(x.p)}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${x.p.os||''} · ${_pedNome(x.p)}${_pedTipoTag(x.p)}</div>
           <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.85">${x.etapa.label} · ${x.itensFeitos}%</div>
         </div>`).join('')}
         ${itens.length>3?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${itens.length-3} outro(s) — ver dia</div>`:''}
@@ -27983,7 +28029,7 @@ function comprasAbrirDia(iso){
     return `<div onclick="document.getElementById('compras-dia-modal').remove();comprasIniciarOuAbrirChecklist('${x.p.id}','${x.etapa.key}')" style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <span style="background:${cor}22;color:${cor};padding:3px 8px;border-radius:20px;font-size:.68rem;font-weight:700;white-space:nowrap;flex-shrink:0">${_projStatusLabel(x.statusPedido)}</span>
       <div style="flex:1;min-width:0">
-        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${_pedNome(x.p)}</div>
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${_pedNome(x.p)}${_pedTipoTag(x.p)}</div>
         <div style="font-size:.7rem;color:var(--ink4)"><span style="color:${corEtapa};font-weight:700">${x.etapa.label}</span> · ${x.p.job||''} · ${x.itensFeitos}% comprado</div>
       </div>
     </div>`;
@@ -28270,7 +28316,7 @@ function prodAbrirChecklist(pedidoId){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px">
       <div>
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">🏭 Checklist de Produção — OS ${p.os||'—'}</div>
-        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_pedNome(p)}${p.job?' · '+p.job:''}</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_pedNome(p)}${_pedTipoTag(p)}${p.job?' · '+p.job:''}</div>
       </div>
       <button onclick="prodFecharChecklist()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar (Esc)">✕</button>
     </div>
@@ -28802,7 +28848,7 @@ function _prodAntecipacoes(){
 function _prodAntecipacoesHtml(){
   if(!_isSetorUser('PRODUÇÃO'))return'';
   const a=_prodAntecipacoes();
-  const lbl=p=>`OS ${p.os||'—'} · ${(_pedNome(p)).replace(/</g,'&lt;')}${p.job?' · '+String(p.job).replace(/</g,'&lt;'):''}`;
+  const lbl=p=>`OS ${p.os||'—'} · ${(_pedNome(p)).replace(/</g,'&lt;')}${_pedTipoTag(p)}`;
   const diasHtml=a.dias.map(d=>{
     const ocup=(a.mapa[d]&&a.mapa[d].soma)||0;
     const pct=Math.min(100,ocup/a.cap*100);
@@ -28861,7 +28907,7 @@ function renderProdLista(){
       const horasUteis=etapa.iso&&etapa.iso>hojeIso?_horasUteisEntre(agora,fimDiaEtapa):0;
       return `<tr onclick="prodIniciarOuAbrirChecklist('${p.id}')" style="border-bottom:1px solid var(--border-lt);cursor:pointer;${corLinha}">
         <td style="padding:8px 10px;font-weight:700;${corLinha}">${p.os||'—'}</td>
-        <td style="padding:8px 10px;${corLinha}" title="${(_pedNome(p)).replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_pedNome(p)}</div></td>
+        <td style="padding:8px 10px;${corLinha}" title="${(_pedNome(p)).replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_pedNome(p)}${_pedTipoTag(p)}</div></td>
         <td style="padding:8px 10px;${corLinha}">${p.job||'—'}</td>
         <td style="padding:8px 10px;${corLinha};white-space:nowrap">${p.tipo||'—'}</td>
         <td style="padding:8px 10px;${corLinha}">${p.conselhoData?fmtD(p.conselhoData):'—'}</td>
@@ -28919,7 +28965,7 @@ function prodExportarListaExcel(){
     const fimDiaEtapa=new Date((etapa.iso||hojeIso)+'T23:59:59');
     const horasUteis=etapa.iso&&etapa.iso>hojeIso?_horasUteisEntre(agora,fimDiaEtapa):0;
     return[
-      p.os||'',p.cliente||'',p.job||'',p.tipo||'',p.conselhoData?fmtD(p.conselhoData):'',p.emissaoEm?fmtD(p.emissaoEm):'',
+      p.os||'',_pedCliTipo(p),p.job||'',p.tipo||'',p.conselhoData?fmtD(p.conselhoData):'',p.emissaoEm?fmtD(p.emissaoEm):'',
       fmtD(etapa.iso),p.prazo?fmtD(p.prazo):'',feitos.toFixed(1).replace(/\.0$/,'')+'/'+totalItens,
       _fmtValorPdf(valorLiquidoProduzido),_fmtValorPdf(valorLiquidoTotal),Math.round(pctValor)+'%',
       statusPedido==='atrasado'?'Atrasado':diasUteis+' dias',
@@ -28970,7 +29016,7 @@ async function prodExportarListaPDF(){
   const head=['OS','Cliente','JOB','Prazo Produção','Prazo Final','Checklist','Status'];
   const bodyPdf=infos.map(x=>{
     const{p,etapa,feitos,totalItens,statusPedido}=x;
-    return[p.os||'—',p.cliente||'—',p.job||'—',fmtD(etapa.iso),p.prazo?fmtD(p.prazo):'—',feitos.toFixed(1).replace(/\.0$/,'')+'/'+totalItens,statusTxtMap[statusPedido]||statusPedido];
+    return[p.os||'—',_pedCliTipo(p),p.job||'—',fmtD(etapa.iso),p.prazo?fmtD(p.prazo):'—',feitos.toFixed(1).replace(/\.0$/,'')+'/'+totalItens,statusTxtMap[statusPedido]||statusPedido];
   });
   doc.autoTable({
     startY:curY,head:[head],body:bodyPdf,theme:'grid',
@@ -29056,7 +29102,7 @@ function prodExportarKanbanExcel(){
     (porDia[iso]||[]).forEach(ev=>{
       if(ev.isSimulacao){linhas.push([fmtD(iso),'SIMULAÇÃO',(ev.reserva&&ev.reserva.cliente)||'Reserva','','','',_fmtValorPdf(ev.valorChunk||0)]);return;}
       const statusTxt=ev.statusPedido==='atrasado'?'Atrasado':ev.statusPedido==='concluido'?'Concluído':ev.statusPedido==='andamento'?'Em andamento':'Não iniciado';
-      linhas.push([fmtD(iso),'Pedido',ev.p.cliente||'',ev.p.os||'',ev.p.job||'',ev.sub&&ev.sub.label||'',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'',statusTxt]);
+      linhas.push([fmtD(iso),'Pedido',_pedCliTipo(ev.p),ev.p.os||'',ev.p.job||'',ev.sub&&ev.sub.label||'',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'',statusTxt]);
     });
   });
   if(!linhas.length){toast('Nenhum evento encontrado no período selecionado para exportar','terr');return;}
@@ -29118,7 +29164,7 @@ async function prodExportarKanbanPDF(){
     const body=itens.map(ev=>{
       if(ev.isSimulacao)return['SIMULAÇÃO',(ev.reserva&&ev.reserva.cliente)||'Reserva','—','—','—',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'—','—'];
       const statusTxt=ev.statusPedido==='atrasado'?'Atrasado':ev.statusPedido==='concluido'?'Concluído':ev.statusPedido==='andamento'?'Em andamento':'Não iniciado';
-      return['Pedido',ev.p.cliente||'—',ev.p.os||'—',ev.p.job||'—',(ev.sub&&ev.sub.label)||'—',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'—',statusTxt];
+      return['Pedido',_pedCliTipo(ev.p),ev.p.os||'—',ev.p.job||'—',(ev.sub&&ev.sub.label)||'—',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'—',statusTxt];
     });
     doc.autoTable({
       startY:curY,head,body,theme:'grid',
@@ -29192,7 +29238,7 @@ function prodIndExportarListaExcel_antigo(){
   const body=d.infos.map(x=>{
     const aProduzirPedido=x.valorLiquidoTotal-x.valorLiquidoProduzido;
     return[
-      x.p.os||'',x.p.cliente||'',x.p.tipo||'',_fmtValorPdf(x.valorLiquidoTotal),Math.round(x.pctValor)+'%',
+      x.p.os||'',_pedCliTipo(x.p),x.p.tipo||'',_fmtValorPdf(x.valorLiquidoTotal),Math.round(x.pctValor)+'%',
       _fmtValorPdf(x.valorLiquidoProduzido),_fmtValorPdf(aProduzirPedido),fmtD(x.etapa.iso),x.calc.prazoIso?fmtD(x.calc.prazoIso):''
     ];
   });
@@ -29237,7 +29283,7 @@ async function prodIndExportarListaPDF_antigo(){
   const head=['OS','Cliente','Tipo','R$ Líquido','% Prod.','R$ Produzido','R$ à Produzir','Data Prod.','Prazo Final'];
   const bodyPdf=d.infos.map(x=>{
     const aProduzirPedido=x.valorLiquidoTotal-x.valorLiquidoProduzido;
-    return[x.p.os||'—',_pedNome(x.p),x.p.tipo||'—',_fmtValorPdf(x.valorLiquidoTotal),Math.round(x.pctValor)+'%',_fmtValorPdf(x.valorLiquidoProduzido),_fmtValorPdf(aProduzirPedido),fmtD(x.etapa.iso),x.calc.prazoIso?fmtD(x.calc.prazoIso):'—'];
+    return[x.p.os||'—',(_pedNome(x.p)+_pedTipoSuf(x.p)),x.p.tipo||'—',_fmtValorPdf(x.valorLiquidoTotal),Math.round(x.pctValor)+'%',_fmtValorPdf(x.valorLiquidoProduzido),_fmtValorPdf(aProduzirPedido),fmtD(x.etapa.iso),x.calc.prazoIso?fmtD(x.calc.prazoIso):'—'];
   });
   const footPdf=['TOTAL ('+d.qtd+')','','',_fmtValorPdf(d.projecao),'',_fmtValorPdf(d.produzido),_fmtValorPdf(d.aProduzir),'',''];
   doc.autoTable({
@@ -29391,7 +29437,7 @@ function _prodVGAbrirListaPedidos(titulo,lista){
   const total=lista.reduce((s,x)=>s+(x.valor||0),0);
   const corpo=lista.length?lista.map(x=>`<div onclick="document.getElementById('prod-vg-lista-modal').remove();prodIniciarOuAbrirChecklist('${x.p.id}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <div style="flex:1;min-width:0">
-        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${_pedNome(x.p)}</div>
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${_pedNome(x.p)}${_pedTipoTag(x.p)}</div>
         ${x.sub?`<div style="font-size:.7rem;color:var(--ink4)">${x.sub}</div>`:''}
       </div>
       <div style="font-size:.82rem;font-weight:800;color:${x.cor||'#1a1f36'};white-space:nowrap">${fmtR(x.valor||0)}</div>
@@ -29646,7 +29692,7 @@ function _prodDiaCardHtml(ev){
       <span style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${ev.p.os||'—'}</span>
       ${ev.estouroChunk?'<span title="Requer atenção — estourou a janela de recuo">⚠️</span>':''}
     </div>
-    <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(_pedNome(ev.p)).replace(/"/g,'&quot;')}">${_pedNome(ev.p)}</div>
+    <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(_pedNome(ev.p)).replace(/"/g,'&quot;')}">${_pedNome(ev.p)}${_pedTipoTag(ev.p)}</div>
     <div style="font-size:.66rem;color:var(--ink4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ev.sub.label}</div>
     <div style="font-size:.7rem;font-weight:700;color:${cor};margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${valorTxt||'&nbsp;'}</div>
     ${parteTxt}
@@ -29729,7 +29775,7 @@ function renderProdDiasPorPedido(){
       return `<tr onclick="prodIniciarOuAbrirChecklist('${p.id}')" style="border-bottom:1px solid var(--border-lt);cursor:pointer">
         <td style="padding:8px 10px">
           <div style="font-weight:700;color:var(--ink)">OS ${p.os||'—'}</div>
-          <div style="font-size:.72rem;color:var(--ink4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}${p.job?' · '+p.job:''}</div>
+          <div style="font-size:.72rem;color:var(--ink4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}${_pedTipoTag(p)}${p.job?' · '+p.job:''}</div>
         </td>
         <td style="padding:8px 10px;white-space:nowrap">${fmtD(etapa.iso)}</td>
         <td style="padding:8px 10px;font-weight:800;color:${cor};white-space:nowrap">${atrasado?'🔴 Atrasado':dias+' dia'+(dias===1?'':'s')}</td>
@@ -29816,7 +29862,7 @@ function renderProdKanban(){
           const{p,etapa,feitos,totalItens,inicioSugeridoIso,estourou}=x;
           return `<div onclick="prodIniciarOuAbrirChecklist('${p.id}')" style="background:#fff;border:1px solid ${col.key==='atrasado'?'#dc2626':'var(--border-lt)'};border-radius:10px;padding:10px;cursor:pointer">
             <div style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'}</div>
-            <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}</div>
+            <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}${_pedTipoTag(p)}</div>
             <div style="font-size:.68rem;color:var(--ink4)">Prazo: <strong>${fmtD(etapa.iso)}</strong></div>
             ${inicioSugeridoIso?`<div style="font-size:.68rem;color:${estourou?'#b45309':'var(--ink4)'}">Início sugerido: <strong>${fmtD(inicioSugeridoIso)}</strong>${estourou?' ⚠️':''}</div>`:''}
             <div style="font-size:.68rem;font-weight:700;margin-top:2px;color:${cor}">${feitos.toFixed(1).replace(/\.0$/,'')}/${totalItens} subtarefas</div>
@@ -29899,7 +29945,7 @@ function renderProdCalendario(){
       ${capBar}
       <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
         ${itens.slice(0,2).map(ev=>`<div onclick="event.stopPropagation();prodIniciarOuAbrirChecklist('${ev.p.id}')" title="OS ${ev.p.os||''} — ${(_pedNome(ev.p)).replace(/"/g,'&quot;')} — ${ev.sub.label}" style="cursor:pointer;font-size:.6rem;background:${_projStatusCor(ev.statusPedido)}22;color:${_projStatusCor(ev.statusPedido)};border-radius:4px;padding:1px 4px">
-          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${ev.p.os||''} · ${_pedNome(ev.p)}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${ev.p.os||''} · ${_pedNome(ev.p)}${_pedTipoTag(ev.p)}</div>
         </div>`).join('')}
         ${itens.length>2?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${itens.length-2} outro(s) — ver dia</div>`:''}
       </div>
@@ -29930,7 +29976,7 @@ function prodExportarCalendarioExcel(){
   const headers=['Data','OS','Cliente','JOB','Etapa','Valor','Status'];
   const body=ordenados.map(ev=>{
     const statusTxt=ev.statusPedido==='atrasado'?'Atrasado':ev.statusPedido==='concluido'?'Concluído':ev.statusPedido==='andamento'?'Em andamento':'Não iniciado';
-    return[fmtD(ev.iso),ev.p.os||'',ev.p.cliente||'',ev.p.job||'',(ev.sub&&ev.sub.label)||'',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'',statusTxt];
+    return[fmtD(ev.iso),ev.p.os||'',_pedCliTipo(ev.p),ev.p.job||'',(ev.sub&&ev.sub.label)||'',ev.valorChunk!=null?_fmtValorPdf(ev.valorChunk):'',statusTxt];
   });
   const{y,m}=_prodCalMes;
   _csvDownload(`producao_calendario_${y}_${String(m).padStart(2,'0')}.csv`,headers,body);
@@ -30005,7 +30051,7 @@ async function prodExportarCalendarioPDF(){
         doc.setFont('helvetica','normal');doc.setFontSize(5.4);
         cel.eventos.slice(0,maxLinhas).forEach(ev=>{
           doc.setTextColor(..._hexToRgb(_projStatusCor(ev.statusPedido)));
-          const txt=(ev.p.os||'—')+'·'+((ev.sub&&ev.sub.label)||'');
+          const txt=(ev.p.os||'—')+_pedTipoCurto(ev.p)+'·'+((ev.sub&&ev.sub.label)||'');
           doc.text(doc.splitTextToSize(txt,colW-4)[0],x+2,ly);
           ly+=3.2;
         });
@@ -30045,7 +30091,7 @@ function prodAbrirDia(iso){
     return `<div onclick="document.getElementById('prod-dia-modal').remove();prodIniciarOuAbrirChecklist('${ev.p.id}')" style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <span style="background:${cor}22;color:${cor};padding:3px 8px;border-radius:20px;font-size:.68rem;font-weight:700;white-space:nowrap;flex-shrink:0">${_projStatusLabel(ev.statusPedido)}</span>
       <div style="flex:1;min-width:0">
-        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${ev.p.os||'—'} · ${_pedNome(ev.p)}</div>
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${ev.p.os||'—'} · ${_pedNome(ev.p)}${_pedTipoTag(ev.p)}</div>
         <div style="font-size:.7rem;color:var(--ink4)">${ev.sub.label}${ev.valorChunk?' · '+fmtR(ev.valorChunk):''}${ev.estouroChunk?' ⚠️':''}</div>
       </div>
     </div>`;
@@ -30215,7 +30261,7 @@ function _lpAbrirModalAtencao(){
   const linhas=_lpPedidosAtencaoCache.map(x=>{
     const{p,_atencao}=x;
     return `<div onclick="_lpFecharEFiltrarAtencao('${p.id}','${(p.os||'').replace(/'/g,"\\'")}')" style="cursor:pointer;border:1px solid #fecaca;background:#fef2f2;border-radius:10px;padding:12px;margin-bottom:8px">
-      <div style="font-size:.84rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'} · ${(_pedNome(p)).replace(/</g,'&lt;')}</div>
+      <div style="font-size:.84rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'} · ${(_pedNome(p)).replace(/</g,'&lt;')}${_pedTipoTag(p)}</div>
       <div style="font-size:.74rem;color:#b91c1c;font-weight:700;margin-top:4px">⚠️ ${(_atencao||[]).join(' | ')}</div>
     </div>`;
   }).join('');
@@ -30468,7 +30514,7 @@ function _lpSemanaHtml(infos,hoje){
   }catch(err){console.error('semana producao',err);}
   const ks=Object.keys(por);
   return`<details class="lpx-sem"><summary>📆 Entregas desta semana (${fmtD(segIso)} a ${fmtD(sexIso)}) — <b>${tot}</b> etapa${tot===1?'':'s'} pra entregar${atrAnt?` · <span style="color:#dc2626">+${atrAnt} atrasada${atrAnt===1?'':'s'} de semanas anteriores</span>`:''}</summary>
-    ${ks.length?`<div class="lpx-sem-g">${ks.map(k=>`<div class="lpx-sem-c"><div class="lpx-sem-t">${_plEsc(k)} <span>${por[k].length}</span></div>${por[k].length?por[k].sort((a,b)=>a.e.iso<b.e.iso?-1:1).map(({x,e,extra})=>{const dt=new Date(e.iso+'T00:00:00');return`<div class="lpx-sem-i${e.iso<hoje?' atr':''}" onclick="lpAbrirDetalhe('${x.p.id}')" title="${_plEsc('OS '+x.p.os+' · '+_pedNome(x.p)+(extra?' · '+extra:''))}"><span>${dsem[dt.getDay()]} ${e.iso.slice(8,10)}/${e.iso.slice(5,7)}</span> OS ${_plEsc(x.p.os)}${extra?` <b style="color:#0f766e">${_plEsc(extra)}</b>`:''} · ${_plEsc(_pedNome(x.p))}</div>`;}).join(''):`<div style="font-size:.7rem;color:#94a3b8;padding:3px 0">Nada agendado nesta semana${por[k]._vazio?` · próxima: ${fmtD(por[k]._vazio.iso)} (OS ${_plEsc(por[k]._vazio.x.p.os)})`:''}</div>`}</div>`).join('')}</div>`:'<div style="padding:8px 2px;color:#94a3b8;font-size:.76rem">Nenhuma entrega prevista pra esta semana.</div>'}
+    ${ks.length?`<div class="lpx-sem-g">${ks.map(k=>`<div class="lpx-sem-c"><div class="lpx-sem-t">${_plEsc(k)} <span>${por[k].length}</span></div>${por[k].length?por[k].sort((a,b)=>a.e.iso<b.e.iso?-1:1).map(({x,e,extra})=>{const dt=new Date(e.iso+'T00:00:00');return`<div class="lpx-sem-i${e.iso<hoje?' atr':''}" onclick="lpAbrirDetalhe('${x.p.id}')" title="${_plEsc('OS '+x.p.os+' · '+_pedNome(x.p)+(extra?' · '+extra:''))}"><span>${dsem[dt.getDay()]} ${e.iso.slice(8,10)}/${e.iso.slice(5,7)}</span> OS ${_plEsc(x.p.os)}${extra?` <b style="color:#0f766e">${_plEsc(extra)}</b>`:''} · ${_plEsc(_pedNome(x.p))}${_pedTipoTag(x.p)}</div>`;}).join(''):`<div style="font-size:.7rem;color:#94a3b8;padding:3px 0">Nada agendado nesta semana${por[k]._vazio?` · próxima: ${fmtD(por[k]._vazio.iso)} (OS ${_plEsc(por[k]._vazio.x.p.os)})`:''}</div>`}</div>`).join('')}</div>`:'<div style="padding:8px 2px;color:#94a3b8;font-size:.76rem">Nenhuma entrega prevista pra esta semana.</div>'}
   </details>`;
 }
 function lpSetModoLista(m){_lpModoLista=m;lpRenderAtivo();}
@@ -30498,7 +30544,7 @@ function _lpCompactaHtml(infos,colunasEtapas,hoje){
       const linha=`<tr class="lpx-tr" style="border-bottom:1px solid var(--border-lt);box-shadow:inset 4px 0 0 ${borda};cursor:pointer" onclick="lpToggleLinha('${p.id}')">
         <td style="padding:8px 6px;color:#94a3b8">${aberto?'▾':'▸'}</td>
         <td style="padding:8px 10px;font-weight:800">${_plEsc(p.os||'—')}</td>
-        <td style="padding:8px 10px;max-width:240px"><div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_plEsc(p.cliente||'')}">${_plEsc(_pedNome(p))}</div><div style="font-size:.68rem;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_lpTipoBadge(p)}${[p.job,p.responsavel].filter(Boolean).map(_plEsc).join(' · ')||'—'}</div></td>
+        <td style="padding:8px 10px;max-width:240px"><div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_plEsc(p.cliente||'')}">${_plEsc(_pedNome(p))}</div><div style="font-size:.68rem;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_lpTipoBadge(p)}${[p.responsavel].filter(Boolean).map(_plEsc).join(' · ')||'—'}</div></td>
         <td style="padding:8px 10px;white-space:nowrap">${fmtD(x.calc.prazoIso)}<div style="font-size:.66rem;color:#94a3b8">emitido ${fmtD(x.calc.emissaoIso)}</div></td>
         <td style="padding:8px 10px">${onde}</td>
         <td style="padding:8px 10px">${_lpTrilhaHtml(x,hoje)}</td>
@@ -30526,7 +30572,7 @@ function _lpKanbanAgoraHtml(){
     const it=(por[d.key]&&por[d.key].itens||[]).sort((a,b)=>(b.o.atrasoDu-a.o.atrasoDu)||(a.o.e.iso<b.o.e.iso?-1:1));
     const atr=it.filter(i=>i.o.atrasada).length;
     return`<div class="lpx-kc${it.length?'':' vazia'}"><div class="lpx-kc-h"><span title="${_plEsc(d.label)}">${_plEsc(d.label)}</span><span class="lpx-kc-n">${it.length}${atr?` · 🔴${atr}`:''}</span></div>
-      <div class="lpx-kc-b">${it.map(({x,o})=>`<div class="lpx-kk" style="border-left-color:${x.atrasado||o.atrasada?'#dc2626':(o.risco?'#f59e0b':'#0ea5e9')}" onclick="lpAbrirDetalhe('${x.p.id}')"><div class="lpx-kk-t">OS ${_plEsc(x.p.os)}</div><div class="lpx-kk-c" title="${_plEsc(_pedNome(x.p))}">${_plEsc(_pedNome(x.p))}</div><div class="lpx-kk-f">${o.atrasada?`<span style="color:#dc2626;font-weight:800">atrasada ${o.atrasoDu} du</span>`:`até ${fmtD(o.e.iso)}`}<span>prazo ${fmtD(x.calc.prazoIso)}</span></div>${o.risco&&!o.atrasada?`<div style="font-size:.62rem;color:#c2410c;margin-top:3px">🟠 ${_plEsc(o.risco)}</div>`:''}</div>`).join('')||'<div style="text-align:center;color:#94a3b8;font-size:.7rem;padding:10px">—</div>'}</div></div>`;
+      <div class="lpx-kc-b">${it.map(({x,o})=>`<div class="lpx-kk" style="border-left-color:${x.atrasado||o.atrasada?'#dc2626':(o.risco?'#f59e0b':'#0ea5e9')}" onclick="lpAbrirDetalhe('${x.p.id}')"><div class="lpx-kk-t">OS ${_plEsc(x.p.os)}</div><div class="lpx-kk-c" title="${_plEsc(_pedNome(x.p))}">${_plEsc(_pedNome(x.p))}${_pedTipoTag(x.p)}</div><div class="lpx-kk-f">${o.atrasada?`<span style="color:#dc2626;font-weight:800">atrasada ${o.atrasoDu} du</span>`:`até ${fmtD(o.e.iso)}`}<span>prazo ${fmtD(x.calc.prazoIso)}</span></div>${o.risco&&!o.atrasada?`<div style="font-size:.62rem;color:#c2410c;margin-top:3px">🟠 ${_plEsc(o.risco)}</div>`:''}</div>`).join('')||'<div style="text-align:center;color:#94a3b8;font-size:.7rem;padding:10px">—</div>'}</div></div>`;
   }).join('');
 }
 
@@ -30613,7 +30659,7 @@ function renderListaPedidos(){
         const prazoCell=problPrazo?`<span style="color:#dc2626;font-weight:700" title="Data inválida">⚠️ ${fmtD(p.prazo)}</span>`:(p.prazo?fmtD(p.prazo):'—');
         return `<tr style="border-bottom:1px solid var(--border-lt);color:var(--ink4)">
           <td style="padding:8px 10px;font-weight:700">${p.os||'—'}</td>
-          <td style="padding:8px 10px" title="${(_pedNome(p)).replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_pedNome(p)}</div></td>
+          <td style="padding:8px 10px" title="${(_pedNome(p)).replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_pedNome(p)}${_pedTipoTag(p)}</div></td>
           <td style="padding:8px 10px">${p.job||'—'}</td>
           <td style="padding:8px 10px">${p.responsavel||'—'}</td>
           <td style="padding:8px 10px">${p.conselhoData?fmtD(p.conselhoData):'—'}</td>
@@ -30635,7 +30681,7 @@ function renderListaPedidos(){
       const atencaoHtml=_atencao?`<div style="margin-top:4px"><span style="background:#fee2e2;color:#b91c1c;font-weight:800;font-size:.66rem;padding:2px 8px;border-radius:20px;white-space:nowrap;cursor:help" title="${_atencao.join(' | ').replace(/"/g,'&quot;')}">⚠️ Requer Atenção</span></div>`:'';
       return `<tr style="border-bottom:1px solid var(--border-lt);${corLinha}">
         <td style="padding:8px 10px;font-weight:700;${corLinha}">${p.os||'—'}</td>
-        <td style="padding:8px 10px;${corLinha}" title="${(_pedNome(p)).replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_pedNome(p)}</div></td>
+        <td style="padding:8px 10px;${corLinha}" title="${(_pedNome(p)).replace(/"/g,'&quot;')}"><div style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_pedNome(p)}${_pedTipoTag(p)}</div></td>
         <td style="padding:8px 10px;${corLinha}">${p.job||'—'}</td>
         <td style="padding:8px 10px;${corLinha}">${p.responsavel||'—'}</td>
         <td style="padding:8px 10px;${corLinha}">${p.conselhoData?fmtD(p.conselhoData):'—'}</td>
@@ -31667,7 +31713,7 @@ function renderListaPedidosKanban(){
           const chunkHtml=valorChunk!=null?`<div style="font-size:.68rem;font-weight:800;margin-top:2px;color:${estouroChunk?'#b45309':'var(--ink2)'}">💰 ${fmtR(valorChunk)} neste dia${estouroChunk?' ⚠️ acima da capacidade':''}</div>`:'';
           return `<div onclick="lpAbrirDetalhe('${p.id}')" style="background:${corCard};border:1px solid ${borda};border-radius:10px;padding:10px;cursor:pointer">
             <div style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'}</div>
-            <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}</div>
+            <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}${_pedTipoTag(p)}</div>
             <div style="font-size:.68rem;color:var(--ink4)">${valorChunk!=null?'Data desta fatia':'Prazo desta etapa'}: <strong>${fmtD(etapa.iso)}</strong></div>
             ${chunkHtml}
             <div style="font-size:.68rem;font-weight:700;margin-top:2px;color:${statusCor}">${statusTxt}</div>
@@ -31901,7 +31947,7 @@ function _lpDiaCardHtml(ev){
       <span style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${ev.p.os||'—'}</span>
       ${ev.estouroChunk?'<span title="Requer atenção — estourou a janela de recuo">⚠️</span>':''}
     </div>
-    <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(_pedNome(ev.p)).replace(/"/g,'&quot;')}">${_pedNome(ev.p)}</div>
+    <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${String(_pedNome(ev.p)).replace(/"/g,'&quot;')}">${_pedNome(ev.p)}${_pedTipoTag(ev.p)}</div>
     <div style="font-size:.66rem;color:var(--ink4)">${ev.etapa.label}</div>
     ${valorTxt?`<div style="font-size:.7rem;font-weight:700;color:${cor};margin-top:2px">${valorTxt}</div>`:''}
     <div style="font-size:.62rem;font-weight:700;margin-top:2px;color:${cor}">${statusTxt}</div>
@@ -32001,7 +32047,7 @@ function renderListaPedidosCalendario(){
       ${nomeFeriado?`<div style="font-size:.6rem;color:#b45309;font-weight:700;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎌 ${nomeFeriado}</div>`:''}
       <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
         ${eventos.slice(0,3).map(ev=>`<div onclick="event.stopPropagation();lpAbrirDetalhe('${ev.p.id}')" title="${ev.etapa.label} — OS ${ev.p.os||''} — ${(_pedNome(ev.p)).replace(/"/g,'&quot;')}${ev.p.job?' — JOB '+String(ev.p.job).replace(/"/g,'&quot;'):''}${ev.valorChunk!=null?' — '+fmtR(ev.valorChunk)+' neste dia'+(ev.estouroChunk?' (acima da capacidade)':''):''}" style="cursor:pointer;font-size:.6rem;background:${ev.estouroChunk?'#fef3c7':_lpCorEtapa(ev.etapa.key)+'22'};color:${ev.estouroChunk?'#b45309':_lpCorEtapa(ev.etapa.key)};border-radius:4px;padding:1px 4px;margin-bottom:1px">
-          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${ev.p.os||''} · ${_pedNome(ev.p)}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${ev.p.os||''} · ${_pedNome(ev.p)}${_pedTipoTag(ev.p)}</div>
           <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.85">${ev.etapa.label}${ev.valorChunk!=null?' · '+fmtR(ev.valorChunk):''}</div>
         </div>`).join('')}
         ${eventos.length>3?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${eventos.length-3} outro(s) — ver dia</div>`:''}
@@ -32031,7 +32077,7 @@ function lpAbrirDia(iso){
     return `<div onclick="document.getElementById('lp-dia-modal').remove();lpAbrirDetalhe('${ev.p.id}','${iso}')" style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <span style="background:${cor}22;color:${cor};padding:3px 8px;border-radius:20px;font-size:.68rem;font-weight:700;white-space:nowrap;flex-shrink:0">${ev.etapa.label}</span>
       <div style="flex:1;min-width:0">
-        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${ev.p.os||'—'} · ${_pedNome(ev.p)}</div>
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${ev.p.os||'—'} · ${_pedNome(ev.p)}${_pedTipoTag(ev.p)}</div>
         <div style="font-size:.7rem;color:var(--ink4)">${ev.p.job||''}${ev.p.responsavel?' · '+ev.p.responsavel:''}</div>
         ${ev.valorChunk!=null?`<div style="font-size:.7rem;font-weight:700;color:${ev.estouroChunk?'#b45309':'var(--ink3)'}">💰 ${fmtR(ev.valorChunk)} neste dia${ev.estouroChunk?' ⚠️ acima da capacidade':''}</div>`:''}
       </div>
@@ -32128,7 +32174,7 @@ function lpAbrirDetalhe(pedidoId,voltarParaDia){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:10px">
       <div>
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">📦 Etapas do Pedido — OS ${p.os||'—'}</div>
-        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_pedNome(p)}${p.job?' · '+p.job:''}</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_pedNome(p)}${_pedTipoTag(p)}${p.job?' · '+p.job:''}</div>
       </div>
       <button onclick="document.getElementById('lp-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
     </div>
@@ -32192,9 +32238,9 @@ function lpExportarListaExcel(){
   const headers=['OS','Cliente','JOB','Vendedor','Emissão','Prazo Final','Assertividade %','Progresso %','Status','Comentários (data hora · autor [etapa]: texto)'];
   const body=infos.map(x=>{
     const com=_lpComentariosTodosTexto(x.p);
-    if(!x.ok)return[x.p.os||'',x.p.cliente||'',x.p.job||'',x.p.responsavel||'',x.p.emissaoEm?fmtD(x.p.emissaoEm):'',x.p.prazo?fmtD(x.p.prazo):'','—','—',_lpProblemasTexto(x.calc.problemas)||'Dados incompletos',com];
+    if(!x.ok)return[x.p.os||'',_pedCliTipo(x.p),x.p.job||'',x.p.responsavel||'',x.p.emissaoEm?fmtD(x.p.emissaoEm):'',x.p.prazo?fmtD(x.p.prazo):'','—','—',_lpProblemasTexto(x.calc.problemas)||'Dados incompletos',com];
     const statusTxt=x.concluido?'Concluído':x.atrasado?'Atrasado':(_lpRisco(x)?'Em risco':'Em andamento');
-    return[x.p.os||'',x.p.cliente||'',x.p.job||'',x.p.responsavel||'',fmtD(x.calc.emissaoIso),fmtD(x.calc.prazoIso),x.assert&&x.assert.pct!=null?x.assert.pct+'%':'—',x.progresso+'%',statusTxt,com];
+    return[x.p.os||'',_pedCliTipo(x.p),x.p.job||'',x.p.responsavel||'',fmtD(x.calc.emissaoIso),fmtD(x.calc.prazoIso),x.assert&&x.assert.pct!=null?x.assert.pct+'%':'—',x.progresso+'%',statusTxt,com];
   });
   _csvDownload(`lista_de_pedidos_${_hojeIso()}.csv`,headers,body);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
@@ -32238,9 +32284,9 @@ async function lpExportarListaPDF(){
   const head=['OS','Cliente','JOB','Vendedor','Emissão','Prazo Final','Assert.','Progr.','Status','Comentários'];
   const bodyPdf=infos.map(x=>{
     const com=_stripEmojiPdf(_lpComentariosTodosTexto(x.p))||'—';
-    if(!x.ok)return[x.p.os||'—',x.p.cliente||'—',x.p.job||'—',x.p.responsavel||'—',x.p.emissaoEm?fmtD(x.p.emissaoEm):'—',x.p.prazo?fmtD(x.p.prazo):'—','—','—','Incompleto',com];
+    if(!x.ok)return[x.p.os||'—',_pedCliTipo(x.p),x.p.job||'—',x.p.responsavel||'—',x.p.emissaoEm?fmtD(x.p.emissaoEm):'—',x.p.prazo?fmtD(x.p.prazo):'—','—','—','Incompleto',com];
     const statusTxt=x.concluido?'Concluído':x.atrasado?'Atrasado':(_lpRisco(x)?'Em risco':'Andamento');
-    return[x.p.os||'—',x.p.cliente||'—',x.p.job||'—',x.p.responsavel||'—',fmtD(x.calc.emissaoIso),fmtD(x.calc.prazoIso),x.assert&&x.assert.pct!=null?x.assert.pct+'%':'—',x.progresso+'%',statusTxt,com];
+    return[x.p.os||'—',_pedCliTipo(x.p),x.p.job||'—',x.p.responsavel||'—',fmtD(x.calc.emissaoIso),fmtD(x.calc.prazoIso),x.assert&&x.assert.pct!=null?x.assert.pct+'%':'—',x.progresso+'%',statusTxt,com];
   });
   doc.autoTable({
     startY:curY,head:[head],body:bodyPdf,theme:'grid',
@@ -32268,7 +32314,7 @@ function lpExportarEtapaExcel(key){
   const ordenados=eventos.slice().sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso));
   const headers=['OS','Cliente','JOB','Prazo desta Etapa','Status','Comentários'];
   const body=ordenados.map(ev=>[
-    ev.p.os||'',ev.p.cliente||'',ev.p.job||'',fmtD(ev.etapa.iso),
+    ev.p.os||'',_pedCliTipo(ev.p),ev.p.job||'',fmtD(ev.etapa.iso),
     ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada',
     _lpComentariosTexto(ev.p,key)
   ]);
@@ -32316,7 +32362,7 @@ async function lpExportarEtapaPDF(key){
   const curY=drawHeader();
   const head=[['OS','Cliente','JOB','Prazo desta Etapa','Status','Comentários']];
   const bodyPdf=itensOrdenados.map(ev=>[
-    ev.p.os||'—',ev.p.cliente||'—',ev.p.job||'—',fmtD(ev.etapa.iso),
+    ev.p.os||'—',_pedCliTipo(ev.p),ev.p.job||'—',fmtD(ev.etapa.iso),
     ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada',
     _lpComentariosTexto(ev.p,key)||'—'
   ]);
@@ -32346,7 +32392,7 @@ function lpExportarKanbanExcel(){
   const ordenados=eventos.slice().sort((a,b)=>a.etapa.label.localeCompare(b.etapa.label,'pt-BR')||a.etapa.iso.localeCompare(b.etapa.iso));
   const headers=['Etapa','OS','Cliente','JOB','Prazo desta Etapa','Status','Comentários'];
   const body=ordenados.map(ev=>[
-    ev.etapa.label,ev.p.os||'',ev.p.cliente||'',ev.p.job||'',fmtD(ev.etapa.iso),
+    ev.etapa.label,ev.p.os||'',_pedCliTipo(ev.p),ev.p.job||'',fmtD(ev.etapa.iso),
     ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada',
     _lpComentariosTexto(ev.p,ev.etapa.key)
   ]);
@@ -32412,7 +32458,7 @@ async function lpExportarKanbanPDF(){
     const head=[['OS','Cliente','JOB','Prazo desta Etapa','Status','Comentários']];
     const itensOrdenados=grupo.itens.slice().sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso));
     const body=itensOrdenados.map(ev=>[
-      ev.p.os||'—',ev.p.cliente||'—',ev.p.job||'—',fmtD(ev.etapa.iso),
+      ev.p.os||'—',_pedCliTipo(ev.p),ev.p.job||'—',fmtD(ev.etapa.iso),
       ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada',
       _lpComentariosTexto(ev.p,key)||'—'
     ]);
@@ -32452,7 +32498,7 @@ function lpExportarCalendarioExcel(){
   const ordenados=eventosMes.slice().sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso)||String(a.p.os||'').localeCompare(String(b.p.os||''),'pt-BR',{numeric:true}));
   const headers=['Data','Etapa','OS','Cliente','JOB','Status'];
   const body=ordenados.map(ev=>[
-    fmtD(ev.etapa.iso),ev.etapa.label,ev.p.os||'',ev.p.cliente||'',ev.p.job||'',
+    fmtD(ev.etapa.iso),ev.etapa.label,ev.p.os||'',_pedCliTipo(ev.p),ev.p.job||'',
     ev.statusEtapa==='ok'?'Baixa dada':ev.statusEtapa==='atrasado'?'Atrasado':'Programada'
   ]);
   const _lpCalRef=new Date(_lpDiasView.refIso+'T00:00:00');const y=_lpCalRef.getFullYear(),m=_lpCalRef.getMonth()+1;
@@ -32528,7 +32574,7 @@ async function lpExportarCalendarioPDF(){
         doc.setFont('helvetica','normal');doc.setFontSize(5.4);
         cel.eventos.slice(0,maxLinhas).forEach(ev=>{
           doc.setTextColor(..._hexToRgb(_lpCorEtapa(ev.etapa.key)));
-          const txt=(ev.p.os||'—')+'·'+ev.etapa.label;
+          const txt=(ev.p.os||'—')+_pedTipoCurto(ev.p)+'·'+ev.etapa.label;
           doc.text(doc.splitTextToSize(txt,colW-4)[0],x+2,ly);
           ly+=3.2;
         });
@@ -32986,7 +33032,7 @@ function renderProjCalendario(){
       ${nomeFeriado?`<div style="font-size:.6rem;color:#b45309;font-weight:700;margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🎌 ${nomeFeriado}</div>`:''}
       <div style="display:flex;flex-direction:column;gap:2px;margin-top:2px">
         ${itens.slice(0,3).map(x=>`<div onclick="event.stopPropagation();projIniciarOuAbrirChecklist('${x.p.id}')" title="OS ${x.p.os||''} — ${(_pedNome(x.p)).replace(/"/g,'&quot;')}${x.p.job?' — JOB '+String(x.p.job).replace(/"/g,'&quot;'):''}" style="cursor:pointer;font-size:.6rem;background:${_projStatusCor(x.statusPedido)}22;color:${_projStatusCor(x.statusPedido)};border-radius:4px;padding:1px 4px;margin-bottom:1px">
-          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${x.p.os||''} · ${_pedNome(x.p)}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${x.p.os||''} · ${_pedNome(x.p)}${_pedTipoTag(x.p)}</div>
           <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.85">${x.itensFeitos}/${x.totalItens}</div>
         </div>`).join('')}
         ${itens.length>3?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${itens.length-3} outro(s) — ver dia</div>`:''}
@@ -33011,7 +33057,7 @@ function projAbrirDia(iso){
     return `<div onclick="document.getElementById('proj-dia-modal').remove();projIniciarOuAbrirChecklist('${x.p.id}')" style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <span style="background:${cor}22;color:${cor};padding:3px 8px;border-radius:20px;font-size:.68rem;font-weight:700;white-space:nowrap;flex-shrink:0">${_projStatusLabel(x.statusPedido)}</span>
       <div style="flex:1;min-width:0">
-        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${_pedNome(x.p)}</div>
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${_pedNome(x.p)}${_pedTipoTag(x.p)}</div>
         <div style="font-size:.7rem;color:var(--ink4)">${x.p.job||''} · ${x.itensFeitos}/${x.totalItens} etapas do checklist</div>
       </div>
     </div>`;
@@ -33047,7 +33093,7 @@ function projExportarListaExcel(){
   const infos=_projListaFiltrada();
   if(!infos.length){toast('Nenhum pedido encontrado com esses filtros para exportar','terr');return;}
   const headers=['OS','Cliente','JOB','Prazo do Projeto','Checklist','Status'];
-  const body=infos.map(x=>[x.p.os||'',x.p.cliente||'',x.p.job||'',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens,_projStatusLabel(x.statusPedido).replace(/^\S+\s/,'')]);
+  const body=infos.map(x=>[x.p.os||'',_pedCliTipo(x.p),x.p.job||'',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens,_projStatusLabel(x.statusPedido).replace(/^\S+\s/,'')]);
   _csvDownload(`menu_projetos_${_hojeIso()}.csv`,headers,body);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
 }
@@ -33088,7 +33134,7 @@ async function projExportarListaPDF(){
   }
   const curY=drawHeader();
   const head=['OS','Cliente','JOB','Prazo do Projeto','Checklist','Status'];
-  const bodyPdf=infos.map(x=>[x.p.os||'—',x.p.cliente||'—',x.p.job||'—',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens,_stripEmojiPdf(_projStatusLabel(x.statusPedido))]);
+  const bodyPdf=infos.map(x=>[x.p.os||'—',_pedCliTipo(x.p),x.p.job||'—',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens,_stripEmojiPdf(_projStatusLabel(x.statusPedido))]);
   doc.autoTable({
     startY:curY,head:[head],body:bodyPdf,theme:'grid',
     styles:{fontSize:7,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.8},
@@ -33106,7 +33152,7 @@ function projExportarKanbanExcel(){
   if(!infos.length){toast('Nenhum pedido encontrado com esses filtros para exportar','terr');return;}
   const ordenados=infos.slice().sort((a,b)=>a.statusPedido.localeCompare(b.statusPedido)||a.etapa.iso.localeCompare(b.etapa.iso));
   const headers=['Status','OS','Cliente','JOB','Prazo do Projeto','Checklist'];
-  const body=ordenados.map(x=>[_projStatusLabel(x.statusPedido).replace(/^\S+\s/,''),x.p.os||'',x.p.cliente||'',x.p.job||'',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens]);
+  const body=ordenados.map(x=>[_projStatusLabel(x.statusPedido).replace(/^\S+\s/,''),x.p.os||'',_pedCliTipo(x.p),x.p.job||'',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens]);
   _csvDownload(`menu_projetos_kanban_${_hojeIso()}.csv`,headers,body);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
 }
@@ -33157,7 +33203,7 @@ async function projExportarKanbanPDF(){
     doc.text(col.label+' ('+itens.length+')',18,curY+5);
     curY+=10;
     const head=[['OS','Cliente','JOB','Prazo do Projeto','Checklist']];
-    const body=itens.map(x=>[x.p.os||'—',x.p.cliente||'—',x.p.job||'—',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens]);
+    const body=itens.map(x=>[x.p.os||'—',_pedCliTipo(x.p),x.p.job||'—',fmtD(x.etapa.iso),x.itensFeitos+'/'+x.totalItens]);
     doc.autoTable({
       startY:curY,head,body,theme:'grid',
       styles:{fontSize:7,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.6},
@@ -33183,7 +33229,7 @@ function projExportarCalendarioExcel(){
   if(!itensMes.length){toast('Nenhum projeto encontrado neste mês com esses filtros','terr');return;}
   const ordenados=itensMes.slice().sort((a,b)=>a.etapa.iso.localeCompare(b.etapa.iso)||String(a.p.os||'').localeCompare(String(b.p.os||''),'pt-BR',{numeric:true}));
   const headers=['Data','OS','Cliente','JOB','Checklist','Status'];
-  const body=ordenados.map(x=>[fmtD(x.etapa.iso),x.p.os||'',x.p.cliente||'',x.p.job||'',x.itensFeitos+'/'+x.totalItens,_projStatusLabel(x.statusPedido).replace(/^\S+\s/,'')]);
+  const body=ordenados.map(x=>[fmtD(x.etapa.iso),x.p.os||'',_pedCliTipo(x.p),x.p.job||'',x.itensFeitos+'/'+x.totalItens,_projStatusLabel(x.statusPedido).replace(/^\S+\s/,'')]);
   const{y,m}=_projCalMes;
   _csvDownload(`menu_projetos_calendario_${y}_${String(m).padStart(2,'0')}.csv`,headers,body);
   toast('Exportado! Abra o arquivo baixado no Excel.','tok');
@@ -33254,7 +33300,7 @@ async function projExportarCalendarioPDF(){
         doc.setFont('helvetica','normal');doc.setFontSize(5.4);
         cel.itens.slice(0,maxLinhas).forEach(x2=>{
           doc.setTextColor(..._hexToRgb(_projStatusCor(x2.statusPedido)));
-          const txt=(x2.p.os||'—')+'·'+x2.itensFeitos+'/'+x2.totalItens;
+          const txt=(x2.p.os||'—')+_pedTipoCurto(x2.p)+'·'+x2.itensFeitos+'/'+x2.totalItens;
           doc.text(doc.splitTextToSize(txt,colW-4)[0],x+2,ly);
           ly+=3.2;
         });
@@ -33382,7 +33428,7 @@ function projIndAbrirLista(tipo){
     const difTxt=tipo==='atraso'?`${diasDif} dia(s) corrido(s) após o prazo (${fmtD(x.etapa.iso)})`:`Finalizado em ${fmtD(x.baixa.data)} · prazo era ${fmtD(x.etapa.iso)}`;
     return `<div onclick="document.getElementById('proj-ind-lista-modal').remove();lpAbrirDetalhe('${x.p.id}')" style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <div style="flex:1;min-width:0">
-        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${_pedNome(x.p)}</div>
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${_pedNome(x.p)}${_pedTipoTag(x.p)}</div>
         <div style="font-size:.7rem;color:var(--ink4)">${x.p.job?x.p.job+' · ':''}${difTxt}${x.cmv!=null?' · CMV '+x.cmv.toFixed(2).replace('.',',')+'%':''}</div>
       </div>
     </div>`;
@@ -33519,7 +33565,7 @@ function planAbrirDetalhePedido(pedidoId){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;gap:10px">
       <div>
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">📋 Planejamento — OS ${p.os||'—'}</div>
-        <div style="font-size:.78rem;color:var(--ink4);margin-top:2px">${_pedNome(p)}${p.job?' · '+p.job:''}</div>
+        <div style="font-size:.78rem;color:var(--ink4);margin-top:2px">${_pedNome(p)}${_pedTipoTag(p)}${p.job?' · '+p.job:''}</div>
       </div>
       <button onclick="document.getElementById('plan-detalhe-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
     </div>
@@ -34168,7 +34214,7 @@ function _fgRenderListaPlanejamento(){
   const linhasHtml=linhas.map(x=>{
     const setoresTxt=x.setores.length?x.setores.join(', '):'—';
     return `<tr>
-      <td style="cursor:pointer;font-weight:700;color:var(--brand-d);white-space:nowrap;padding:6px 8px" onclick="planAbrirDetalhePedido('${x.p.id}')">OS ${x.p.os||'—'} · ${String(_pedNome(x.p)).replace(/</g,'&lt;')}</td>
+      <td style="cursor:pointer;font-weight:700;color:var(--brand-d);white-space:nowrap;padding:6px 8px" onclick="planAbrirDetalhePedido('${x.p.id}')">OS ${x.p.os||'—'} · ${String(_pedNome(x.p)).replace(/</g,'&lt;')}${_pedTipoTag(x.p)}</td>
       ${cel(x.vendidoInst)}${cel(x.budgetInst)}${celReal(x.realizadoInst,x.budgetInst)}
       ${cel(x.vendidoFrete)}${cel(x.budgetFrete)}${celReal(x.realizadoFrete,x.budgetFrete)}
       ${cel(x.vendidoMunque)}${cel(x.budgetMunque)}${celReal(x.realizadoMunque,x.budgetMunque)}
@@ -34216,7 +34262,7 @@ function fgExportarListaPlanejamentoExcel(){
   if(!linhas.length){toast('Nenhum pedido encontrado com esses filtros para exportar','terr');return;}
   const headers=['OS','Cliente','Inst. Vendido','Inst. Budget','Inst. Realizado','Frete Vendido','Frete Budget','Frete Realizado','Munque Vendido','Munque Budget','Munque Realizado','Gastos Extras','Setor(es)'];
   const body=linhas.map(x=>[
-    x.p.os||'',x.p.cliente||'',
+    x.p.os||'',_pedCliTipo(x.p),
     x.vendidoInst,x.budgetInst,x.realizadoInst,
     x.vendidoFrete,x.budgetFrete,x.realizadoFrete,
     x.vendidoMunque,x.budgetMunque,x.realizadoMunque,
@@ -34261,7 +34307,7 @@ async function fgExportarListaPlanejamentoPDF(){
   const curY=drawHeader('LISTA DE PLANEJAMENTO');
   const head=['OS','Cliente','Inst. Vendido','Inst. Budget','Inst. Realiz.','Frete Vendido','Frete Budget','Frete Realiz.','Munque Vendido','Munque Budget','Munque Realiz.','Gastos Extras','Setor(es)'];
   const bodyPdf=linhas.map(x=>[
-    x.p.os||'—',x.p.cliente||'—',
+    x.p.os||'—',_pedCliTipo(x.p),
     x.vendidoInst?fmtR(x.vendidoInst):'—',x.budgetInst?fmtR(x.budgetInst):'—',x.realizadoInst?fmtR(x.realizadoInst):'—',
     x.vendidoFrete?fmtR(x.vendidoFrete):'—',x.budgetFrete?fmtR(x.budgetFrete):'—',x.realizadoFrete?fmtR(x.realizadoFrete):'—',
     x.vendidoMunque?fmtR(x.vendidoMunque):'—',x.budgetMunque?fmtR(x.budgetMunque):'—',x.realizadoMunque?fmtR(x.realizadoMunque):'—',
@@ -37539,7 +37585,7 @@ function _plPodeSairHtml(){
     const cor=x.pronta?'#16a34a':(d<=3?'#dc2626':'#d97706');
     return`<div class="plx-ps" style="border-left-color:${cor}">
       <div class="plx-ps-top">
-        <div style="min-width:0"><b onclick="planAbrirDetalhePedido('${x.p.id}')" style="cursor:pointer">OS ${_plEsc(x.p.os)} · ${_plEsc(_pedNome(x.p))}</b><div class="plx-ps-sub">${x.calc.temInst?'🔧 Instalação':(x.calc.temFrete?'🚚 Saída do frete':'🏁 Prazo')} ${quando}${(function(){const lc=_plCidadeObra(x.p);return(lc.cid||lc.uf)?' · 📍 '+_plEsc([lc.cid,lc.uf].filter(Boolean).join('/')):'';})()}</div></div>
+        <div style="min-width:0"><b onclick="planAbrirDetalhePedido('${x.p.id}')" style="cursor:pointer">OS ${_plEsc(x.p.os)} · ${_plEsc(_pedNome(x.p))}${_pedTipoTag(x.p)}</b><div class="plx-ps-sub">${x.calc.temInst?'🔧 Instalação':(x.calc.temFrete?'🚚 Saída do frete':'🏁 Prazo')} ${quando}${(function(){const lc=_plCidadeObra(x.p);return(lc.cid||lc.uf)?' · 📍 '+_plEsc([lc.cid,lc.uf].filter(Boolean).join('/')):'';})()}</div></div>
         <div class="plx-ps-farol" style="background:${cor}">${x.pronta?'✅ Pode sair':pct+'% pronta'}</div>
       </div>
       <div class="plx-ps-chips">${x.itens.map(i=>`<span class="plx-chip ${i.ok?'ok':'no'}" title="${_plEsc(i.l)}${i.det?' — '+_plEsc(i.det):''}">${i.ok?'✓':'✗'} ${_plEsc(i.l)}${!i.ok&&i.det?' <small>'+_plEsc(i.det)+'</small>':''}</span>`).join('')}</div>
@@ -37633,7 +37679,7 @@ function plAbrirFicha(pid){
   const prazoIso=_normPrazoIso(p.prazo);
   const cab=`<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px">
       <div style="min-width:0">
-        <div style="font-size:1.05rem;font-weight:800;color:#1a1f36">🏗️ OS ${esc(p.os||'—')} · ${esc(_pedNome(p))}</div>
+        <div style="font-size:1.05rem;font-weight:800;color:#1a1f36">🏗️ OS ${esc(p.os||'—')} · ${esc(_pedNome(p))}${_pedTipoTag(p)}</div>
         <div style="font-size:.76rem;color:var(--ink3);margin-top:3px">${[lc.cid?esc(lc.cid)+(lc.uf?'/'+esc(lc.uf):''):'',p.responsavel?'Vendedor: '+esc(p.responsavel):'',p.tipo?esc(p.tipo):''].filter(Boolean).join(' · ')}</div>
         <div style="font-size:.78rem;color:var(--ink2);margin-top:4px">📅 Prazo final com o cliente: <b>${prazoIso?_plv3DataSem(prazoIso):'—'}</b>${p.prazoOriginal&&p.prazoOriginal!==p.prazo?` <span style="color:#b45309" title="Prazo original ${fmtD(p.prazoOriginal)}">(adiado)</span>`:''}</div>
       </div>
@@ -37819,7 +37865,7 @@ function renderPlHoje(){
       else if(papel)b=`<button type="button" onclick="event.stopPropagation();plAbrirFicha('${p.id}')" class="plh-b">${t.ico} Contratar</button>`;
     }
     const d=_plDiasTxt(t.iso,hoje);
-    return`<div class="plh-l" onclick="plAbrirFicha('${p.id}')"><div class="plh-t">${t.ico} <b>${esc(t.label)}</b><div class="plh-s">OS ${esc(p.os)} · ${esc(_pedNome(p))}</div></div><div class="plh-d"><div>${_plv3DataSem(t.iso)}</div><div style="color:${d.cor};font-weight:800">${d.txt}</div></div>${b}</div>`;
+    return`<div class="plh-l" onclick="plAbrirFicha('${p.id}')"><div class="plh-t">${t.ico} <b>${esc(t.label)}</b><div class="plh-s">OS ${esc(p.os)} · ${esc(_pedNome(p))}${_pedTipoTag(p)}</div></div><div class="plh-d"><div>${_plv3DataSem(t.iso)}</div><div style="color:${d.cor};font-weight:800">${d.txt}</div></div>${b}</div>`;
   };
   const bloco=(tit,cor,arr,fn,vazio)=>`<div class="plh-card"><div class="plh-h" style="color:${cor}">${tit} <span class="plh-n" style="background:${cor}">${arr.length}</span></div>${arr.length?arr.map(fn).join(''):`<div class="plh-v">${vazio}</div>`}</div>`;
   const kpi=(l,v,cor,bg)=>`<div style="background:${bg};border-radius:12px;padding:12px 14px"><div style="font-size:.64rem;font-weight:800;text-transform:uppercase;color:${cor}">${l}</div><div style="font-size:1.5rem;font-weight:800;color:${cor}">${v}</div></div>`;
@@ -37849,8 +37895,8 @@ function renderPlHoje(){
       ${bloco(`🔜 Próximos 3 dias úteis (até ${fmtD(lim3).slice(0,5)})`,'#475569',pr,linhaT,'Nada nos próximos dias.')}
     </div>
     <div>
-      ${bloco('🚚 Em campo hoje e amanhã','#0f766e',campo,x=>`<div class="plh-l" onclick="plAbrirFicha('${x.p.id}')"><div class="plh-t"><b>${esc(x.txt)}</b><div class="plh-s">OS ${esc(x.p.os)} · ${esc(_pedNome(x.p))}</div></div><div class="plh-d">${x.iso===hoje?'<b style="color:#c2410c">hoje</b>':'amanhã'}<div>${_plv3Dia(x.iso)}</div></div></div>`,'Nenhuma saída ou instalação hoje/amanhã.')}
-      ${bloco('⚠️ Pendências de obra pra resolver','#b45309',pend,x=>`<div class="plh-l" onclick="plAbrirFicha('${x.p.id}')"><div class="plh-t"><b>OS ${esc(x.p.os)} · ${esc(_pedNome(x.p))}</b><div class="plh-s">${esc(String(x.p.finalizacao.pendenciasObs||'').slice(0,90))}</div></div><div class="plh-d">${x.iso?(x.iso<hoje?'<b style="color:#dc2626">atrasada</b>':_plv3DataSem(x.iso)):'<b style="color:#7c3aed">sem data</b>'}</div></div>`,'Nenhuma pendência vencendo.')}
+      ${bloco('🚚 Em campo hoje e amanhã','#0f766e',campo,x=>`<div class="plh-l" onclick="plAbrirFicha('${x.p.id}')"><div class="plh-t"><b>${esc(x.txt)}</b><div class="plh-s">OS ${esc(x.p.os)} · ${esc(_pedNome(x.p))}${_pedTipoTag(x.p)}</div></div><div class="plh-d">${x.iso===hoje?'<b style="color:#c2410c">hoje</b>':'amanhã'}<div>${_plv3Dia(x.iso)}</div></div></div>`,'Nenhuma saída ou instalação hoje/amanhã.')}
+      ${bloco('⚠️ Pendências de obra pra resolver','#b45309',pend,x=>`<div class="plh-l" onclick="plAbrirFicha('${x.p.id}')"><div class="plh-t"><b>OS ${esc(x.p.os)} · ${esc(_pedNome(x.p))}${_pedTipoTag(x.p)}</b><div class="plh-s">${esc(String(x.p.finalizacao.pendenciasObs||'').slice(0,90))}</div></div><div class="plh-d">${x.iso?(x.iso<hoje?'<b style="color:#dc2626">atrasada</b>':_plv3DataSem(x.iso)):'<b style="color:#7c3aed">sem data</b>'}</div></div>`,'Nenhuma pendência vencendo.')}
     </div>
   </div>
   <div style="font-size:.68rem;color:var(--ink4)">Clique em qualquer linha pra abrir a Ficha da Obra com tudo do pedido.</div>`;
@@ -38143,7 +38189,7 @@ function _plRotasHtml(){
       const trans=[...new Set(g.arr.map(o=>(o.p.fornGestao&&o.p.fornGestao.transportadora)||'').filter(Boolean))];
       return`<div class="plx-rota ${g.tipo}">
         <div class="plx-rota-h">${g.tipo==='cidade'?'📍':'🧭'} <b>${_plEsc(g.k)}</b> <span>${g.arr.length} obras em ${span===0?'1 dia':(span+1)+' dias'}${g.tipo==='uf'?' · cidades diferentes':''}</span></div>
-        ${g.arr.map(o=>`<div class="plx-rota-o" onclick="planAbrirDetalhePedido('${o.p.id}')"><span>${_plDdMm(o.d)}</span> OS ${_plEsc(o.p.os)} · ${_plEsc(_pedNome(o.p))}${g.tipo==='uf'?' <small>('+_plEsc(o.cid||'—')+')</small>':''}</div>`).join('')}
+        ${g.arr.map(o=>`<div class="plx-rota-o" onclick="planAbrirDetalhePedido('${o.p.id}')"><span>${_plDdMm(o.d)}</span> OS ${_plEsc(o.p.os)} · ${_plEsc(_pedNome(o.p))}${_pedTipoTag(o.p)}${g.tipo==='uf'?' <small>('+_plEsc(o.cid||'—')+')</small>':''}</div>`).join('')}
         <div class="plx-rota-f">${insts.length>1?`👷 hoje com ${insts.length} instaladores diferentes · `:''}${trans.length>1?`🚚 ${trans.length} transportadoras diferentes · `:''}${insts.length<=1&&trans.length<=1?'Ainda dá tempo de combinar frete/equipe':'Vale conversar pra unificar'}</div>
       </div>`;}).join('')}</div>`:'<div style="padding:14px 0;color:#94a3b8;font-size:.8rem">Nenhuma combinação de obras próximas no período.</div>'}
   </div>`;
@@ -38441,7 +38487,7 @@ function _plObrasRenderLista(){
         <td onclick="event.stopPropagation();_plObrasToggleExpandir('${p.id}',event)" title="Ver etapas aqui mesmo" style="padding:10px 4px 10px 10px;color:var(--ink4);font-size:.75rem">${aberto?'▾':'▸'}</td>
         <td style="padding:10px 12px;font-weight:800;color:${corTxt}">${p.os||'—'}</td>
         <td style="padding:10px 12px;min-width:180px;max-width:280px">
-          <a href="#" onclick="event.stopPropagation();plAbrirFicha('${p.id}');return false;" title="${esc(_pedNome(p))}" style="color:${corTxt};font-weight:700;text-decoration:none">${esc(_pedNome(p))}</a>
+          <a href="#" onclick="event.stopPropagation();plAbrirFicha('${p.id}');return false;" title="${esc(_pedNome(p))}" style="color:${corTxt};font-weight:700;text-decoration:none">${esc(_pedNome(p))}${_pedTipoTag(p)}</a>
           <div style="font-size:.72rem;color:var(--ink4);margin-top:2px">${sub}</div>${verFormLink}
         </td>
         <td style="padding:10px 12px;white-space:nowrap">${p.emissaoEm?fmtD(p.emissaoEm):'—'}${p.conselhoData?`<div style="font-size:.7rem;color:var(--ink4)">Conselho ${fmtD(p.conselhoData)}</div>`:''}</td>
@@ -38477,7 +38523,7 @@ function _plObrasRenderKanban(){
           const p=x.p;
           return `<div onclick="plAbrirFicha('${p.id}')" style="background:#fff;border:1px solid ${col.key==='atrasado'?'#dc2626':'var(--border-lt)'};border-radius:10px;padding:10px;cursor:pointer">
             <div style="font-size:.72rem;font-weight:800;color:var(--ink)">OS ${p.os||'—'}</div>
-            <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}</div>
+            <div style="font-size:.76rem;color:var(--ink2);margin:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}${_pedTipoTag(p)}</div>
             <div style="font-size:.68rem;color:var(--ink4);margin-top:3px">Prazo: <strong>${x.prazoIso?fmtD(x.prazoIso):'—'}</strong></div>
           </div>`;
         }).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.72rem">—</div>'}
@@ -38526,7 +38572,7 @@ function _plObrasRenderCalendario(){
         ${itens.slice(0,3).map(x=>{
           const cor=x.concl?'#16a34a':(x.atrasado?'#dc2626':'#d97706');
           return `<div onclick="event.stopPropagation();planAbrirDetalhePedido('${x.p.id}')" title="OS ${x.p.os||''} — ${(_pedNome(x.p)).replace(/"/g,'&quot;')}" style="cursor:pointer;font-size:.6rem;background:${cor}22;color:${cor};border-radius:4px;padding:1px 4px;margin-bottom:1px">
-            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${x.p.os||''} · ${_pedNome(x.p)}</div>
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700">${x.p.os||''} · ${_pedNome(x.p)}${_pedTipoTag(x.p)}</div>
           </div>`;
         }).join('')}
         ${itens.length>3?`<div style="font-size:.6rem;color:var(--brand-d);font-weight:700">+${itens.length-3} outro(s) — ver dia</div>`:''}
@@ -38548,7 +38594,7 @@ function _plObrasAbrirDia(iso){
     const statusTxt=x.concl?'✅ Concluída':(x.atrasado?'🔴 Atrasada':'⏳ Pendente');
     return `<div onclick="document.getElementById('pl-obras-dia-modal').remove();planAbrirDetalhePedido('${x.p.id}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--border-lt);border-radius:10px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'">
       <div style="flex:1;min-width:0">
-        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${_pedNome(x.p)}</div>
+        <div style="font-size:.82rem;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">OS ${x.p.os||'—'} · ${_pedNome(x.p)}${_pedTipoTag(x.p)}</div>
       </div>
       <div style="font-size:.78rem;font-weight:800;color:${cor};white-space:nowrap">${statusTxt}</div>
     </div>`;
@@ -38800,7 +38846,7 @@ function renderPendenciasFinalizacao(){
         :`<button onclick="abrirBaixaPendencia('${p.id}')" class="dash-btn-conf" style="white-space:nowrap">✅ Dar Baixa</button>`;
       return`<tr style="border-bottom:1px solid var(--border-lt);${corLinha}">
         <td style="padding:8px 10px;font-weight:700;${corLinha}">${p.os||'—'}</td>
-        <td style="padding:8px 10px;${corLinha}" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}</td>
+        <td style="padding:8px 10px;${corLinha}" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}${_pedTipoTag(p)}</td>
         <td style="padding:8px 10px;${corLinha}">${p.tipo||'—'}</td>
         <td style="padding:8px 10px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${corLinha}" title="${pendTxt}">${p.finalizacao.pendenciasObs||'—'}</td>
         <td style="padding:8px 10px;font-size:.76rem">${_plEsc((p.fornGestao&&p.fornGestao.instalador)||'—')}</td>
@@ -55626,7 +55672,7 @@ function renderProdIndicadores(){
     ${c.prods.length?`<div style="overflow-x:auto;margin-bottom:20px"><table style="width:100%;border-collapse:collapse;font-size:.82rem"><thead><tr style="background:#f0fdf4;text-align:left">
       <th style="${th}">OS</th><th style="${th}">Cliente</th><th style="${th};text-align:right">R$ Líquido do pedido</th><th style="${th};text-align:right">Produzido no mês</th><th style="${th}">Baixas no mês</th><th style="${th};text-align:right">% do pedido hoje</th><th style="${th}">Programado para</th></tr></thead><tbody>
       ${c.prods.map(o=>{const x=o.x,p=x.p;const parc=o.valor<x.valorLiquidoTotal-0.5;return`<tr style="border-top:1px solid #f1f5f9">
-        <td style="${th}">${p.os||'—'}</td><td style="${th}">${_pedNome(p)}${o.origem==='adiantado'?tag('adiantado','#15803d','#dcfce7'):o.origem==='atrasado'?tag('atrasado','#b91c1c','#fee2e2'):''}</td>
+        <td style="${th}">${p.os||'—'}</td><td style="${th}">${_pedNome(p)}${_pedTipoTag(p)}${o.origem==='adiantado'?tag('adiantado','#15803d','#dcfce7'):o.origem==='atrasado'?tag('atrasado','#b91c1c','#fee2e2'):''}</td>
         <td style="${th};text-align:right;white-space:nowrap">${fmtR(x.valorLiquidoTotal)}</td>
         <td style="${th};text-align:right;white-space:nowrap;color:#16a34a;font-weight:800">${fmtR(o.valor)}${parc&&x.valorLiquidoTotal>0?`<div style="font-size:.64rem;font-weight:600;color:#64748b">parcial · ${Math.round(o.valor/x.valorLiquidoTotal*100)}% do pedido</div>`:''}</td>
         <td style="${th};font-size:.74rem;color:#15803d;font-weight:600">${_prodVDatasHtml(o)}</td>
@@ -55638,7 +55684,7 @@ function renderProdIndicadores(){
     ${listaA.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.82rem"><thead><tr style="background:#fffbeb;text-align:left">
       <th style="${th}">OS</th><th style="${th}">Cliente</th><th style="${th}">Tipo</th><th style="${th};text-align:right">R$ Líquido do pedido</th><th style="${th};text-align:right">Já produzido</th><th style="${th};text-align:right">Falta produzir</th><th style="${th}">Programado para</th><th style="${th}">Prazo final</th></tr></thead><tbody>
       ${listaA.map(o=>{const x=o.x,p=x.p;return`<tr style="border-top:1px solid #f1f5f9;${o.atrasado?'background:#fef2f2':''}">
-        <td style="${th}">${p.os||'—'}</td><td style="${th}">${_pedNome(p)}${o.atrasado?tag('atrasado','#b91c1c','#fee2e2'):''}</td><td style="${th};white-space:nowrap">${p.tipo||'—'}</td>
+        <td style="${th}">${p.os||'—'}</td><td style="${th}">${_pedNome(p)}${_pedTipoTag(p)}${o.atrasado?tag('atrasado','#b91c1c','#fee2e2'):''}</td><td style="${th};white-space:nowrap">${p.tipo||'—'}</td>
         <td style="${th};text-align:right;white-space:nowrap">${fmtR(x.valorLiquidoTotal)}</td>
         <td style="${th};text-align:right;white-space:nowrap;color:#64748b">${x.pctValor>0?x.pctValor.toFixed(0)+'%':'—'}</td>
         <td style="${th};text-align:right;white-space:nowrap;color:#b45309;font-weight:800">${fmtR(o.valor)}</td>
@@ -55655,8 +55701,8 @@ function prodIndAbrirTile(key){
 function _prodVExport(){
   const r=_prodIndRange();const c=_prodVCalc(_prodVBase(),r.ini,r.fim);
   const rows=[];
-  c.prods.forEach(o=>rows.push(['Produzido',o.x.p.os||'',_pedNome(o.x.p),_fmtValorPdf(o.x.valorLiquidoTotal),_fmtValorPdf(o.valor),o.datas.map(i=>fmtD(i).slice(0,5)+' '+_fmtValorPdf(o.porDia[i])).join(' · ')+(o.estimado?' *':''),fmtD(o.x.etapa.iso),o.origem]));
-  c.aprod.filter(o=>!o.pendenteDoPassado).forEach(o=>rows.push(['A produzir',o.x.p.os||'',_pedNome(o.x.p),_fmtValorPdf(o.x.valorLiquidoTotal),_fmtValorPdf(o.valor),'',fmtD(o.x.etapa.iso),o.atrasado?'atrasado':'']));
+  c.prods.forEach(o=>rows.push(['Produzido',o.x.p.os||'',(_pedNome(o.x.p)+_pedTipoSuf(o.x.p)),_fmtValorPdf(o.x.valorLiquidoTotal),_fmtValorPdf(o.valor),o.datas.map(i=>fmtD(i).slice(0,5)+' '+_fmtValorPdf(o.porDia[i])).join(' · ')+(o.estimado?' *':''),fmtD(o.x.etapa.iso),o.origem]));
+  c.aprod.filter(o=>!o.pendenteDoPassado).forEach(o=>rows.push(['A produzir',o.x.p.os||'',(_pedNome(o.x.p)+_pedTipoSuf(o.x.p)),_fmtValorPdf(o.x.valorLiquidoTotal),_fmtValorPdf(o.valor),'',fmtD(o.x.etapa.iso),o.atrasado?'atrasado':'']));
   return{r,c,headers:['Seção','OS','Cliente','R$ Líquido do pedido','Valor','Baixas no período','Programado para','Obs.'],rows};
 }
 function prodIndExportarListaExcel(){
