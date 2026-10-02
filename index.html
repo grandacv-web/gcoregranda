@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-02.15';</script>
+<script>const APP_BUILD_VERSION='2026-10-02.17';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -55817,7 +55817,7 @@ function _orcxVal(id){const el=document.getElementById(id);return el?el.value:''
 function _orcxNum(id){return parseFloat(String(_orcxVal(id)||'').replace(',','.'))||0;}
 function _orcxMoney(id){const s=String(_orcxVal(id)||'').replace(/[^\d,.-]/g,'');if(!s)return 0;return s.indexOf(',')>=0?parseFloat(s.replace(/\./g,'').replace(',','.'))||0:parseFloat(s)||0;}
 function _orcxSim(id){return(_orcxVal(id)||'NÃO').toUpperCase()==='SIM';}
-const ORCX_CAMPOS=['orcx-empresa','orcx-solicitante','orcx-cidade','orcx-uf','orcx-job','orcx-pedido','orcx-distancia','orcx-valor-pedido','orcx-condicao','orcx-caminhao','orcx-fracionado','orcx-aereo','orcx-dias','orcx-carro','orcx-km-aero','orcx-m2-acm','orcx-rigging','orcx-art','orcx-remocao','orcx-seguro','orcx-el-tipo-1','orcx-el-qtd-1','orcx-el-pta-1','orcx-el-tipo-2','orcx-el-qtd-2','orcx-el-pta-2','orcx-el-tipo-3','orcx-el-qtd-3','orcx-el-pta-3'];
+const ORCX_CAMPOS=['orcx-empresa','orcx-solicitante','orcx-cidade','orcx-uf','orcx-job','orcx-pedido','orcx-distancia','orcx-valor-pedido','orcx-condicao','orcx-caminhao','orcx-fracionado','orcx-aereo','orcx-dias','orcx-carro','orcx-km-aero','orcx-m2-acm','orcx-rigging','orcx-art','orcx-remocao','orcx-seguro','orcx-el-tipo-1','orcx-el-qtd-1','orcx-el-dias-1','orcx-el-pta-1','orcx-el-tipo-2','orcx-el-qtd-2','orcx-el-dias-2','orcx-el-pta-2','orcx-el-tipo-3','orcx-el-qtd-3','orcx-el-dias-3','orcx-el-pta-3'];
 
 // ── Cálculo (cópia fiel do sistema antigo) ──
 function orcxCalcular(){
@@ -55861,7 +55861,13 @@ function orcxCalcular(){
     const tipo=_orcxVal('orcx-el-tipo-'+i),qtd=_orcxNum('orcx-el-qtd-'+i);
     if(!tipo||tipo==='NENHUM'||qtd<=0)continue;
     if(tipo==='PTA'){const v=_orcxMoney('orcx-el-pta-'+i);elev+=v;add('🏗️','Elevação — PTA','Valor a orçar, informado manualmente (qtd. '+qtd+')',v,'extras');}
-    else{const el=ORCX_ELEVACOES.find(e=>e.nome===tipo)||ORCX_ELEVACOES[0];const c=qtd*el.cobrar;elev+=c;add('🏗️','Elevação — '+tipo,qtd+'× '+_orcxBRL(el.cobrar)+' (custo '+_orcxBRL(el.custo)+' + índice '+(el.indice*100).toFixed(0)+'%)',c,'extras');}
+    else{
+      // (2026-10-02, a pedido do usuário) não basta a quantidade de equipamentos — cada um é cobrado
+      // por diária. Diárias vazias = 1 (orçamentos antigos continuam com o mesmo valor).
+      const dias=Math.max(1,_orcxNum('orcx-el-dias-'+i)||1);
+      const el=ORCX_ELEVACOES.find(e=>e.nome===tipo)||ORCX_ELEVACOES[0];const c=qtd*dias*el.cobrar;elev+=c;
+      add('🏗️','Elevação — '+tipo,qtd+' equip. × '+dias+' diária'+(dias===1?'':'s')+' × '+_orcxBRL(el.cobrar)+' (custo '+_orcxBRL(el.custo)+' + índice '+(el.indice*100).toFixed(0)+'%)',c,'extras');
+    }
   }
   const vRig=rigging?ORCX_PLANO_RIGGING:0;
   add('🪢','Plano de rigging','Serviço adicional de rigging',vRig,'extras');
@@ -56019,6 +56025,7 @@ function _orcxHtmlOperacionais(){
         ${[1,2,3].map(n=>`<div class="orcx-campos orcx-el-row" id="orcx-el-row-${n}" style="margin-bottom:8px">
           ${_orcxCampo(n===1?'Tipo':'Tipo ('+n+'ª)',_orcxSel('orcx-el-tipo-'+n,ORCX_ELEVACOES.map(e=>e.nome),'onchange="orcxAoMudar()"'))}
           ${_orcxCampo('Quantidade',_orcxInp('orcx-el-qtd-'+n,'0','number','min="0"'))}
+          ${_orcxCampo('Diárias',_orcxInp('orcx-el-dias-'+n,'1','number','min="1"'),'','orcx-w-dias-'+n)}
           ${_orcxCampo('Valor PTA — R$',_orcxInpMoeda('orcx-el-pta-'+n),'','orcx-w-pta-'+n)}
           ${n>1?`<button type="button" class="orcx-el-rm" title="Tirar esta elevação" onclick="orcxRemoverElevacao(${n})">✕</button>`:''}
         </div>`).join('')}
@@ -56046,6 +56053,7 @@ function orcxAtualizarVisibilidade(){
   vis('orcx-w-frac',_orcxVal('orcx-caminhao')==='FRACIONADO');
   const aer=_orcxSim('orcx-aereo');vis('orcx-w-carro',aer);vis('orcx-w-aero',aer);
   [1,2,3].forEach(n=>vis('orcx-w-pta-'+n,_orcxVal('orcx-el-tipo-'+n)==='PTA'));
+  [1,2,3].forEach(n=>{const t=_orcxVal('orcx-el-tipo-'+n);vis('orcx-w-dias-'+n,!!t&&t!=='NENHUM'&&t!=='PTA');});
   // chaves e botões de opção refletem o valor dos campos escondidos
   document.querySelectorAll('#sec-cat-ORCAMENTOS [data-tg]').forEach(b=>b.classList.toggle('on',_orcxSim(b.dataset.tg)));
   document.querySelectorAll('#sec-cat-ORCAMENTOS [data-chips]').forEach(box=>{const v=_orcxVal(box.dataset.chips);box.querySelectorAll('.orcx-chip').forEach(c=>c.classList.toggle('on',c.dataset.v===v));});
@@ -56062,7 +56070,7 @@ function orcxAtualizarVisibilidade(){
   if(vh)vh.innerHTML=_orcxMoney('orcx-valor-pedido')>0?'Base da instalação e da ART':'<b style="color:#b45309">⚠️ Sem o valor do pedido, instalação e ART ficam zeradas</b>';
 }
 function orcxAdicionarElevacao(){orcxEstado.elevExtra=Math.min(3,(orcxEstado.elevExtra||1)+1);orcxAtualizarVisibilidade();}
-function orcxRemoverElevacao(n){const t=document.getElementById('orcx-el-tipo-'+n),q=document.getElementById('orcx-el-qtd-'+n),p=document.getElementById('orcx-el-pta-'+n);if(t)t.value='NENHUM';if(q)q.value='';if(p)p.value='';orcxEstado.elevExtra=Math.max(1,n-1);orcxAoMudar();}
+function orcxRemoverElevacao(n){const t=document.getElementById('orcx-el-tipo-'+n),q=document.getElementById('orcx-el-qtd-'+n),p=document.getElementById('orcx-el-pta-'+n),dd=document.getElementById('orcx-el-dias-'+n);if(t)t.value='NENHUM';if(q)q.value='';if(p)p.value='';if(dd)dd.value='';orcxEstado.elevExtra=Math.max(1,n-1);orcxAoMudar();}
 // Rascunho: guarda o formulário no navegador enquanto você preenche (volta se sair do menu ou fechar a aba)
 const ORCX_LS_RASCUNHO='gcore_orcx_rascunho';
 let _orcxRascTimer=null;
@@ -56465,6 +56473,13 @@ function _orc2RenderEditor(c){
   const pj=d.projeto||{};Object.assign(campos,{'orcx-empresa':pj.empresa||'','orcx-solicitante':pj.solicitante||'','orcx-cidade':pj.cidade||'','orcx-uf':pj.uf||'','orcx-job':pj.job||'','orcx-pedido':pj.pedido||''});
   _orcxRestaurar(campos);
   _orc2SincronizarValorPedido();orcxCalcular();
+  // (2026-10-02, a pedido do usuário: "ao puxar um orçamento da fila já pegar os km sozinho pela
+  // cidade/UF, sem precisar clicar em Recalcular — senão esquece e dá problema"). Sempre que o
+  // orçamento abre com cidade+UF e a distância ainda vazia/zero, calcula na hora.
+  try{
+    const _dv=(document.getElementById('orcx-distancia')||{}).value;
+    if((!_dv||!(parseFloat(_dv)>0))&&String(campos['orcx-cidade']||'').trim()&&String(campos['orcx-uf']||'').trim())setTimeout(()=>{try{orcxCalcularDistancia(true);}catch(e){}},60);
+  }catch(e){}
   if(temProd)orc2AtualizarPreviewLetra();
   _orc2AtualizarTotais();
   if(aba==='resumo')_orc2RenderResumo();
