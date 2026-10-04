@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-04.1';</script>
+<script>const APP_BUILD_VERSION='2026-10-04.2';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -59103,6 +59103,7 @@ function _uxMdRender(){
     ${_getUserCat().isAdm?card('#5b21b6','#ede9fe','🙋 Aprovações pendentes',ap.n,ap.tarefas?"_uxAbrirAprovTarefas()":ap.orc?"setSection('cat:ORCAMENTOS')":''):''}
     ${fila?card('#0f766e','#ccfbf1','📥 Fila de orçamento',fila,"setSection('cat:ORCAMENTOS')"):''}
   </div>
+  ${(()=>{try{return _dirHtml();}catch(e){console.error('diretoria',e);return'';}})()}
   ${(()=>{try{return _uxSetHtml();}catch(e){console.error('meu dia setor',e);return'';}})()}
   <div style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:14px;align-items:start" class="md-grid">
     <div class="dash-card" style="margin:0"><div class="dash-sec-title">📋 Minhas tarefas — todas num lugar só</div>
@@ -59428,6 +59429,155 @@ function _uxSetHtml(){
     <div style="margin-top:8px;font-size:.7rem;color:#94a3b8">Mesmos números dos menus. Clique num pedido pra abrir no menu do setor já filtrado.</div>
   </div>`;
 }
+
+// ── Meu dia: PAINEL DA DIRETORIA (2026-10-04, a pedido do usuário: "Paulo e Guilherme Carbonare são
+// diretores... indicadores fáceis pra eles lerem a empresa, master de todos os setores, que eles
+// batam o olho e saibam como a empresa tá"). Uma frase de saúde geral (semáforo) + 8 cartões, um
+// por área. SÓ LEITURA, com as mesmas funções dos menus (metas/vendas da Visão Comercial, contas a
+// receber/pagar do Financeiro, pontualidade do Planejamento, fila da Produção, Qualidade). Quem vê:
+// admin + usuários marcados como diretor (sistema/diretoria; sem lista salva, reconhece pelo nome
+// "CARBONARE" ou "PAULO"). Limites das cores editáveis no ⚙️ do próprio painel (admin).
+let _dirCfg=null,_dirCfgOn=false,_dirCache={k:'',v:null},_dirCfgAberto=false;
+function _dirWatch(){if(_dirCfgOn||!window._fbOrcWatch)return;_dirCfgOn=true;window._fbOrcWatch('diretoria',it=>{_dirCfg=(it&&it.cfg)||null;_dirCache={k:'',v:null};try{_uxMdRefresh();}catch(e){}});}
+function _dirLim(){const l=(_dirCfg&&_dirCfg.limites)||{};const n=(k,d)=>{const v=parseFloat(l[k]);return v>=0?v:d;};
+  return{ritmoVerde:n('ritmoVerde',100),ritmoAmarelo:n('ritmoAmarelo',90),caixaVerde:n('caixaVerde',90),caixaAmarelo:n('caixaAmarelo',75),inadVerde:n('inadVerde',20),inadAmarelo:n('inadAmarelo',40),prazoVerde:n('prazoVerde',90),prazoAmarelo:n('prazoAmarelo',75),cargaMin:n('cargaMin',70),cargaMax:n('cargaMax',100)};}
+function _dirEhDiretor(){
+  _dirWatch();
+  const email=String((typeof usuarioLogado!=='undefined'&&usuarioLogado&&usuarioLogado.email)||'').toLowerCase(),nome=String(_uxMeuNome()||'').toUpperCase();
+  if(_dirCfg&&Array.isArray(_dirCfg.emails))return _dirCfg.emails.map(x=>String(x).toLowerCase()).indexOf(email)>=0;
+  return/CARBONARE/.test(nome)||/^PAULO\b/.test(nome);
+}
+function _dirVe(){try{return _getUserCat().isAdm||_dirEhDiretor();}catch(e){return false;}}
+function _dirMes(iso,y,m){return!!iso&&String(iso).slice(0,7)===y+'-'+String(m).padStart(2,'0');}
+function _dirCalc(){
+  const k=_uxHoje()+'|'+Math.floor(Date.now()/120000)+'|'+((typeof pedidos!=='undefined')?pedidos.length:0);
+  if(_dirCache.k===k&&_dirCache.v)return _dirCache.v;
+  const L=_dirLim(),hoje=_uxHoje(),d=new Date(),y=d.getFullYear(),m=d.getMonth()+1;
+  const ym=(yy,mm)=>({y:mm<1?yy-1:yy,m:mm<1?mm+12:mm}),ant=ym(y,m-1);
+  const C=[];const card=o=>C.push(o);
+  const pct=v=>Math.round(v*100)+'%';
+  // dias úteis do mês (pra saber o "ritmo")
+  let duTot=0,duPass=0;try{const ult=new Date(y,m,0).getDate();for(let i=1;i<=ult;i++){const iso=y+'-'+String(m).padStart(2,'0')+'-'+String(i).padStart(2,'0');if(_isDiaUtil(iso)){duTot++;if(iso<=hoje)duPass++;}}}catch(e){}
+  // 1) Vendas × meta (líquido, igual à Visão Comercial)
+  let vend=0,meta=0;
+  try{const todos=getVendedores(y,m);vend=getVendasMesTodos(y,m,null)||0;meta=todos.reduce((s,v)=>s+(getMetaMesTodos(y,m,v)||0),0);
+    const frac=duTot?Math.max(duPass,1)/duTot:1,proj=vend/frac,ritmo=meta?proj/meta*100:null;
+    const vAnt=getVendasMesTodos(ant.y,ant.m,null)||0;
+    card({id:'vendas',ic:'💼',area:'Vendas do mês',v:fmtR(vend),sub:meta?`${pct(vend/meta)} da meta de ${fmtR(meta)} · no ritmo de hoje fecha em ~${fmtR(proj)}`:'Sem meta cadastrada pro mês',cmp:`mês passado inteiro: ${fmtR(vAnt)}`,
+      st:ritmo==null?'n':ritmo>=L.ritmoVerde?'g':ritmo>=L.ritmoAmarelo?'y':'r',msg:ritmo!=null&&ritmo<L.ritmoVerde?`vendas no ritmo de ${Math.round(ritmo)}% da meta`:'',go:"setSection('geral')"});
+  }catch(e){card({id:'vendas',ic:'💼',area:'Vendas do mês',v:'—',sub:'Não consegui calcular agora',st:'n'});}
+  // 2) Funil (propostas abertas, líquido) × o que falta da meta
+  try{const aberto=_crmAbertoLiq(null)||0,falta=Math.max(0,meta-vend);
+    const lim90=Date.now()-90*86400000;let g=0,p=0;(crmEmpresas||[]).forEach(e=>{const f=e.fechamento;if(!f||!(Date.parse(f.em||'')>=lim90))return;if(f.status==='ganho')g++;else if(f.status==='perdido')p++;});
+    const cob=falta>0?aberto/falta:null;
+    card({id:'funil',ic:'🎯',area:'Funil de propostas',v:fmtR(aberto),sub:!meta?'sem meta cadastrada pro mês':falta>0?`cobre ${cob.toFixed(1).replace('.',',')}× o que falta da meta (${fmtR(falta)})`:'meta do mês já batida',cmp:`conversão 90 dias: ${g+p?Math.round(g/(g+p)*100)+'%':'—'} (${g} ganhos, ${p} perdidos)`,
+      st:!meta?'n':falta<=0?'g':cob>=2?'g':cob>=1?'y':'r',msg:meta&&falta>0&&cob<2?`funil cobre só ${cob.toFixed(1).replace('.',',')}× o que falta da meta`:'',go:"setSection('geral');setTimeout(()=>{try{geralTab('crm')}catch(e){}},80)"});
+  }catch(e){card({id:'funil',ic:'🎯',area:'Funil de propostas',v:'—',sub:'Não consegui calcular agora',st:'n'});}
+  // 3) Caixa: recebido no mês × o que estava previsto até hoje
+  let recMes=0;
+  try{
+    recMes=getFaturadoMesReal(y,m,null)||0;
+    const man=(typeof contasReceberManual!=='undefined'?contasReceberManual:[])||[];
+    recMes+=man.filter(c=>c.status==='recebido'&&!c.pedidoId&&_dirMes(c.dataRecebimento,y,m)).reduce((s,c)=>s+(Number(c.valor)||0),0);
+    const pend=_finReceberPendentes(),pendAteHoje=pend.filter(i=>_dirMes(i._venc,y,m)&&i._venc<=hoje).reduce((s,i)=>s+(i.valorBruto||i.valor||0),0)+man.filter(c=>c.status!=='recebido'&&_dirMes(c.dataPrevista,y,m)&&c.dataPrevista<=hoje).reduce((s,c)=>s+(Number(c.valor)||0),0);
+    const pendResto=pend.filter(i=>_dirMes(i._venc,y,m)&&i._venc>hoje).reduce((s,i)=>s+(i.valorBruto||i.valor||0),0);
+    const base=recMes+pendAteHoje,r=base>0?recMes/base*100:100;
+    card({id:'caixa',ic:'💰',area:'Recebimentos do mês',v:fmtR(recMes),sub:base>0?`${Math.round(r)}% do que vencia até hoje (${fmtR(pendAteHoje)} ainda não entrou)`:'nada vencia até hoje',cmp:`ainda vence no mês: ${fmtR(pendResto)}`,
+      st:r>=L.caixaVerde?'g':r>=L.caixaAmarelo?'y':'r',msg:r<L.caixaVerde?`${fmtR(pendAteHoje)} do mês venceu e não entrou`:'',go:"setSection('cat:FINANCEIRO')"});
+  }catch(e){card({id:'caixa',ic:'💰',area:'Recebimentos do mês',v:'—',sub:'Não consegui calcular agora',st:'n'});}
+  // 4) Inadimplência: vencido a receber, em "meses de venda"
+  try{const x=_finxHojeDados(),venc=x.recVenc.reduce((s,i)=>s+(i.valorBruto||i.valor||0),0)+x.rmVenc.reduce((s,c)=>s+(Number(c.valor)||0),0);
+    const cli=new Set(x.recVenc.map(i=>i.cliente||i.cl||i.os).concat(x.rmVenc.map(c=>c.cliente||c.descricao))).size;
+    const velho=[...x.recVenc.map(i=>i._venc),...x.rmVenc.map(c=>c.dataPrevista)].filter(Boolean).sort()[0];
+    let media=0;for(let i=1;i<=3;i++){const a=ym(y,m-i);media+=(getVendasMesTodos(a.y,a.m,null)||0)/3;}
+    const rel=media>0?venc/media*100:0;
+    card({id:'inad',ic:'⚠️',area:'Vencido a receber',v:fmtR(venc),sub:venc>0?`${cli} cliente(s) · o mais antigo venceu em ${velho?fmtD(velho):'—'}`:'nenhuma parcela vencida',cmp:media>0?`= ${Math.round(rel)}% de um mês de vendas (média dos últimos 3)`:'',
+      st:venc<=0?'g':media<=0?'y':rel<=L.inadVerde?'g':rel<=L.inadAmarelo?'y':'r',msg:venc>0&&rel>L.inadVerde?`${fmtR(venc)} vencidos a receber`:'',go:"setSection('cat:FINANCEIRO')"});
+  }catch(e){card({id:'inad',ic:'⚠️',area:'Vencido a receber',v:'—',sub:'Não consegui calcular agora',st:'n'});}
+  // 5) Resultado de caixa do mês: entrou − saiu
+  try{const cp=(typeof contasPagar!=='undefined'?contasPagar:[])||[];
+    const pago=(yy,mm)=>cp.filter(c=>c.status==='pago'&&_dirMes(c.dataPagamento,yy,mm)).reduce((s,c)=>s+(_cpValorAjustado(c)||0),0);
+    const saiu=pago(y,m),res=recMes-saiu;
+    let recAnt=getFaturadoMesReal(ant.y,ant.m,null)||0;const resAnt=recAnt-pago(ant.y,ant.m);
+    card({id:'res',ic:'📊',area:'Resultado de caixa do mês',v:fmtR(res),sub:`entrou ${fmtR(recMes)} · saiu ${fmtR(saiu)} (contas pagas)`,cmp:`mês passado inteiro: ${fmtR(resAnt)}`,
+      st:res>=0?'g':res>=-0.1*Math.max(recMes,1)?'y':'r',msg:res<0?`saiu ${fmtR(-res)} a mais do que entrou no mês`:'',go:"setSection('cat:FINANCEIRO')"});
+  }catch(e){card({id:'res',ic:'📊',area:'Resultado de caixa do mês',v:'—',sub:'Não consegui calcular agora',st:'n'});}
+  // 6) Entregas no prazo (obras finalizadas no mês × prazo original combinado)
+  try{const fin=(yy,mm)=>pedidos.filter(p=>!p.isChumbador&&!p.vendaCancelada&&p.finalizacao&&_dirMes(p.finalizacao.dataFinalizacao,yy,mm));
+    const taxa=l=>{const r=l.map(p=>{const po=_plPrazoOrigIso(p);return po?_plDiasAte(p.finalizacao.dataFinalizacao,po)<=0:true;});return r.length?r.filter(Boolean).length/r.length*100:null;};
+    const f=fin(y,m),t=taxa(f),tA=taxa(fin(ant.y,ant.m));
+    let atrAbertas=0;try{atrAbertas=_plObrasAbertas().filter(p=>{const c=_lpCalcEtapas(p);return c&&c.ok&&c.prazoIso&&c.prazoIso<hoje;}).length;}catch(e){}
+    card({id:'prazo',ic:'🚚',area:'Entregas no prazo',v:t==null?'—':Math.round(t)+'%',sub:t==null?'nenhuma obra finalizada no mês ainda':`${f.length} obra(s) finalizada(s) no mês`,cmp:`mês passado: ${tA==null?'—':Math.round(tA)+'%'} · ${atrAbertas} obra(s) aberta(s) com prazo vencido`,
+      st:t==null?(atrAbertas?'y':'n'):t>=L.prazoVerde&&!atrAbertas?'g':t>=L.prazoAmarelo?'y':'r',msg:t!=null&&t<L.prazoVerde?`só ${Math.round(t)}% das obras entregues no prazo`:atrAbertas?`${atrAbertas} obra(s) com prazo vencido`:'',go:"setSection('cat:PLANEJAMENTO')"});
+  }catch(e){card({id:'prazo',ic:'🚚',area:'Entregas no prazo',v:'—',sub:'Não consegui calcular agora',st:'n'});}
+  // 7) Produção: carga dos próximos 10 dias úteis × capacidade + pedidos atrasados
+  try{const cap=_lpCapProducaoDia(),mapa=_lpMapaProducaoPorDia()||{};let dia=hoje,soma=0;if(_isDiaUtil(hoje))soma+=(mapa[hoje]&&mapa[hoje].soma)||0;for(let i=0;i<(_isDiaUtil(hoje)?9:10);i++){dia=_agProxDiaUtil(dia);soma+=(mapa[dia]&&mapa[dia].soma)||0;}
+    const carga=cap>0?soma/(cap*10)*100:0;
+    const atr=_lpPedidosElegiveis().map(p=>_prodInfo(p,hoje)).filter(x=>x.ok&&x.statusPedido==='atrasado').length;
+    card({id:'prod',ic:'🏭',area:'Produção (próximos 10 dias)',v:Math.round(carga)+'%',sub:`da capacidade ocupada · ${fmtR(soma)} programados`,cmp:`${atr} pedido(s) com produção atrasada`,
+      st:atr>3||carga>L.cargaMax+10?'r':(atr===0&&carga>=L.cargaMin&&carga<=L.cargaMax)?'g':'y',msg:atr?`${atr} pedido(s) com produção atrasada`:carga>L.cargaMax?`produção acima da capacidade (${Math.round(carga)}%)`:carga<L.cargaMin?`produção ociosa (${Math.round(carga)}% da capacidade)`:'',go:"setSection('cat:PRODUÇÃO')"});
+  }catch(e){card({id:'prod',ic:'🏭',area:'Produção (próximos 10 dias)',v:'—',sub:'Não consegui calcular agora',st:'n'});}
+  // 8) Qualidade: garantias/retrabalhos abertos + pendências de obra
+  try{const ab=_lpPedidosElegiveis().filter(p=>!_lpObraFinalizada(p)&&_lpEhNaoVenda(p)&&/garantia|retrabalho/i.test(String(p.tipo||'')));
+    let pend=[];try{pend=_pfPedidosElegiveis().filter(p=>p.pendenciaFin&&!p.pendenciaFin.resolvido);}catch(e){}
+    const venc=pend.filter(p=>p.pendenciaFin.dataResolucaoPrevista&&p.pendenciaFin.dataResolucaoPrevista<hoje).length;
+    card({id:'qual',ic:'🛠️',area:'Qualidade',v:String(ab.length),sub:'garantia(s)/retrabalho(s) em andamento',cmp:`${pend.length} pendência(s) de obra aberta(s)${venc?' · '+venc+' vencida(s)':''}`,
+      st:venc>2?'r':venc>0||ab.length>5?'y':'g',msg:venc?`${venc} pendência(s) de obra vencida(s)`:'',go:"setSection('cat:QUALIDADE')"});
+  }catch(e){card({id:'qual',ic:'🛠️',area:'Qualidade',v:'—',sub:'Não consegui calcular agora',st:'n'});}
+  _dirCache={k,v:C};return C;
+}
+function _dirHtml(){
+  if(!_dirVe())return'';
+  const C=_dirCalc(),r=C.filter(c=>c.st==='r'),y=C.filter(c=>c.st==='y');
+  const geral=r.length?'r':y.length?'y':'g';
+  const cor={g:['#dcfce7','#166534','🟢'],y:['#fef3c7','#92400e','🟡'],r:['#fee2e2','#991b1b','🔴'],n:['#f1f5f9','#475569','⚪']};
+  const msgs=r.concat(y).map(c=>c.msg).filter(Boolean).slice(0,3);
+  const tit=geral==='g'?'Empresa saudável — todos os indicadores no verde':geral==='y'?`Atenção em ${y.length} ponto${y.length>1?'s':''}`:`${r.length} ponto${r.length>1?'s':''} crítico${r.length>1?'s':''}${y.length?' e '+y.length+' de atenção':''}`;
+  const adm=_getUserCat().isAdm;
+  return`<div class="dash-card" id="dir-painel" style="margin:0 0 14px;padding:16px 18px">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><div class="dash-sec-title" style="margin:0;flex:1">🏛️ Painel da diretoria — ${_uxEsc(new Date().toLocaleDateString('pt-BR',{month:'long',year:'numeric'}))}</div>
+      ${adm?`<button type="button" class="orcx-link" onclick="_dirCfgAberto=!_dirCfgAberto;_uxMdRefresh()">⚙️ Quem vê e limites</button>`:''}<button type="button" class="orcx-link" onclick="_dirCache={k:'',v:null};_uxMdRefresh()">↻ Atualizar</button></div>
+    <div class="dir-saude" style="background:${cor[geral][0]};color:${cor[geral][1]}"><span style="font-size:1.6rem">${cor[geral][2]}</span><div><b>${tit}</b>${msgs.length?`<div>${msgs.map(_uxEsc).join(' · ')}</div>`:''}</div></div>
+    ${_dirCfgAberto&&adm?_dirHtmlCfg():''}
+    <div class="dir-cards">${C.map(c=>{const k=cor[c.st]||cor.n;return`<div class="dir-card" style="border-top:4px solid ${k[1]}" ${c.go?`onclick="${c.go}"`:''} title="Clique pra abrir">
+      <div class="dir-h"><span>${c.ic} ${_uxEsc(c.area)}</span><i style="background:${k[0]};color:${k[1]}">${c.st==='g'?'bom':c.st==='y'?'atenção':c.st==='r'?'crítico':'—'}</i></div>
+      <b class="dir-v" style="color:${c.st==='r'?'#b91c1c':'#0f172a'}">${_uxEsc(c.v)}</b><div class="dir-s">${_uxEsc(c.sub||'')}</div>${c.cmp?`<div class="dir-c">${_uxEsc(c.cmp)}</div>`:''}</div>`;}).join('')}</div>
+    <div style="margin-top:8px;font-size:.7rem;color:#94a3b8">Mesmos números dos menus (Visão Comercial, Financeiro, Planejamento, Produção e Qualidade). Clique num cartão pra ver o detalhe.</div>
+  </div>`;
+}
+function _dirHtmlCfg(){
+  const L=_dirLim(),nomes=(cfg&&cfg.usuarioNomes)||{};
+  const marcados=(_dirCfg&&Array.isArray(_dirCfg.emails))?_dirCfg.emails.map(x=>String(x).toLowerCase()):Object.entries(nomes).filter(([e,n])=>/CARBONARE/i.test(n)||/^PAULO\b/i.test(n)).map(([e])=>e.toLowerCase());
+  const us=Object.entries(nomes).sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'pt-BR'));
+  const n=(k,l)=>`<label class="dir-lim">${l}<input class="fc no-upper" type="number" min="0" step="1" id="dir-l-${k}" value="${L[k]}"></label>`;
+  return`<div class="dir-cfg"><b>Quem vê o painel</b> <small>(administradores sempre veem)</small><div class="dir-us">${us.map(([e,nm])=>`<label><input type="checkbox" class="dir-us-ck" value="${_uxEsc(e)}" ${marcados.indexOf(String(e).toLowerCase())>=0?'checked':''}> ${_uxEsc(nm)}</label>`).join('')||'<small>Nenhum usuário cadastrado.</small>'}</div>
+    <b style="display:block;margin-top:10px">Limites das cores</b><div class="dir-lims">${n('ritmoVerde','Vendas: verde com ritmo ≥ (% da meta)')}${n('ritmoAmarelo','Vendas: amarelo com ritmo ≥')}${n('caixaVerde','Recebimentos: verde ≥ (% do previsto)')}${n('caixaAmarelo','Recebimentos: amarelo ≥')}${n('inadVerde','Vencido: verde até (% de 1 mês de vendas)')}${n('inadAmarelo','Vencido: amarelo até')}${n('prazoVerde','Entregas: verde ≥ (% no prazo)')}${n('prazoAmarelo','Entregas: amarelo ≥')}${n('cargaMin','Produção: carga mínima ideal (%)')}${n('cargaMax','Produção: carga máxima ideal (%)')}</div>
+    <button type="button" class="dash-btn-conf" style="margin-top:10px" onclick="_dirSalvarCfg()">💾 Salvar</button></div>`;
+}
+async function _dirSalvarCfg(){
+  if(!_getUserCat().isAdm){toast('Só administrador altera','terr');return;}
+  const emails=[...document.querySelectorAll('.dir-us-ck')].filter(x=>x.checked).map(x=>x.value);
+  const limites={};['ritmoVerde','ritmoAmarelo','caixaVerde','caixaAmarelo','inadVerde','inadAmarelo','prazoVerde','prazoAmarelo','cargaMin','cargaMax'].forEach(k=>{const v=parseFloat((document.getElementById('dir-l-'+k)||{}).value);if(v>=0)limites[k]=v;});
+  try{await window._fbOrcSalvar('diretoria','cfg',{emails,limites,em:new Date().toISOString(),por:_uxMeuNome()});_dirCfg={emails,limites};_dirCache={k:'',v:null};_dirCfgAberto=false;_uxMdRefresh();toast('Painel da diretoria salvo 💾','tok');}
+  catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+}
+(function(){
+  const st=document.createElement('style');st.textContent=`
+  #sec-cat-MEUDIA .dir-saude{display:flex;align-items:center;gap:12px;border-radius:12px;padding:12px 14px;margin-bottom:12px}
+  #sec-cat-MEUDIA .dir-saude b{font-size:.95rem}#sec-cat-MEUDIA .dir-saude div div{font-size:.78rem;margin-top:2px}
+  #sec-cat-MEUDIA .dir-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}
+  #sec-cat-MEUDIA .dir-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:12px 14px;cursor:pointer;transition:box-shadow .15s}
+  #sec-cat-MEUDIA .dir-card:hover{box-shadow:0 4px 14px rgba(15,23,42,.1)}
+  #sec-cat-MEUDIA .dir-h{display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:.7rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.3px}
+  #sec-cat-MEUDIA .dir-h i{font-style:normal;font-size:.6rem;border-radius:20px;padding:2px 8px}
+  #sec-cat-MEUDIA .dir-v{display:block;font-size:1.45rem;margin:6px 0 2px}
+  #sec-cat-MEUDIA .dir-s{font-size:.74rem;color:#334155}#sec-cat-MEUDIA .dir-c{font-size:.7rem;color:#94a3b8;margin-top:3px}
+  #sec-cat-MEUDIA .dir-cfg{border:1.5px dashed #cbd5e1;border-radius:12px;padding:12px;margin-bottom:12px;font-size:.8rem}
+  #sec-cat-MEUDIA .dir-us{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px}
+  #sec-cat-MEUDIA .dir-lims{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;margin-top:6px}
+  #sec-cat-MEUDIA .dir-lim{display:flex;flex-direction:column;gap:3px;font-size:.72rem;color:#475569}`;
+  document.head.appendChild(st);
+})();
 
 </script>
 </body>
