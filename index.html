@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-04.2';</script>
+<script>const APP_BUILD_VERSION='2026-10-05.6';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -25186,6 +25186,7 @@ function _lpTemElevacao(p){return (p.valores&&p.valores['Elevações'])==='Sim'|
 // (abrirFgLancar) — salvar um fornecedor lá marca a tarefa como concluída sozinho, ver
 // salvarFgLancamento(). Dados gravados em p.planTarefas={<key>:{concluido,data,por}}, mesmo
 // padrão de p.diarios/p.finalizacao/p.lpBaixas.
+const PLAN_REGRA_5DU_DESDE='2026-10-05';
 const PLAN_TAREFAS_REGRAS={
   instalador:{label:'Contratar Instalador',diasUteis:7,base:'chegada'}, // 7 dias úteis antes do Início da Instalação
   frete:{label:'Contratar Frete',diasUteis:6,base:'coleta'},            // 6 dias úteis antes do Início do Frete (coleta)
@@ -25218,7 +25219,12 @@ function _lpTarefaData(key,p,calc){
   const baseIso=regra.base==='coleta'?calc.coletaIso:calc.chegadaIso;
   const aplicavelMap={instalador:calc.temInst,frete:calc.temFrete,elevacao:_lpTemElevacao(p),rao:calc.temInst};
   const aplicavel=!!aplicavelMap[key];
-  return{aplicavel,iso:aplicavel?_lpSubtraiDiasUteis(baseIso,regra.diasUteis):null};
+  // (2026-10-05, a pedido do usuário) Pedidos emitidos a partir de 05/10/2026: Contratar Instalador,
+  // Frete e Elevação passam a ser 5 dias úteis antes (instalação/elevação: do Início da Instalação;
+  // frete: da coleta). Pedidos antigos continuam com a regra de antes (7/6/5) — nada muda neles.
+  let dias=regra.diasUteis;
+  if((key==='instalador'||key==='frete'||key==='elevacao')&&String(_normPrazoIso(p&&p.emissaoEm)||'')>=PLAN_REGRA_5DU_DESDE)dias=5;
+  return{aplicavel,iso:aplicavel?_lpSubtraiDiasUteis(baseIso,dias):null};
 }
 // Cor por proximidade do vencimento — verde em dia, amarelo ≤7 dias, vermelho ≤3 dias ou já
 // vencido (regra do usuário, 2026-08-03). Concluído sempre mostra verde, não importa a data.
@@ -28200,7 +28206,10 @@ function _prodInfo(p,hojeIso){
   // esse % em cima do líquido de verdade do pedido (pedidoToVendaRow(p).lq — mesmo campo usado
   // pra fatiar a capacidade diária de Produção, ver _lpAlocarProducaoPedido).
   const valorLiquidoTotal=(pedidoToVendaRow(p).lq)||0;
-  const pctValor=progItens.temItens?progItens.progresso:(subs.length?Math.min(100,feitos/subs.length*100):0);
+  // (2026-10-05, a pedido do usuário) Sem itens cadastrados, o valor só conta como produzido quando a
+  // etapa PRODUZIR é concluída — receber corte galvanizado/adesivo não é produção (antes contava 1/3 cada).
+  const _subProd=subs.find(s=>s.key==='producao');
+  const pctValor=progItens.temItens?progItens.progresso:(_subProd?(_subProd.feito?100:0):(subs.length?Math.min(100,feitos/subs.length*100):0));
   const valorLiquidoProduzido=valorLiquidoTotal*pctValor/100;
   return{p,ok:true,calc,subs,feitos,totalItens:subs.length,statusPedido,etapa:etapaAncora,inicioSugeridoIso,estourou:!!(aloc&&aloc.estourouJanela),progItens,valorLiquidoTotal,pctValor,valorLiquidoProduzido};
 }
@@ -29426,7 +29435,18 @@ function _prodVisaoGeralDados(){
   // pendente cujo prazo já passou — mesmo critério de statusPedido==='atrasado' do Kanban.
   const atrasados=infos.filter(x=>x.statusPedido==='atrasado');
   const atrasadosValor=atrasados.reduce((s,x)=>s+(x.valorLiquidoTotal-x.valorLiquidoProduzido),0);
-  return{hojeIso,cap,projetadoMes,realizadoMes,qtdMes:doMes.length,produtividadePct,projetadoAteHoje,realizadoAteHoje,
+  // (2026-10-05, a pedido do usuário: "revise se tá certo o valor do que tem de finalização de
+  // produção pra outubro e meses subsequentes") — o "Projetado" do mês só soma pedido com PRAZO DE
+  // PRODUÇÃO no mês. Pra conferência completa: (a) atrasados de meses anteriores que ainda não
+  // terminaram (também precisam sair este mês); (b) pedidos que não entram em conta nenhuma porque
+  // faltam dados pra calcular o prazo (emissão/prazo/estimativa de instalação); (c) depois dos 3 meses.
+  const anteriores=infos.filter(x=>x.statusPedido!=='concluido'&&x.etapa.iso&&x.etapa.iso<inicioMes);
+  const anterioresValor=anteriores.reduce((s,x)=>s+Math.max(0,x.valorLiquidoTotal-x.valorLiquidoProduzido),0);
+  const semCalc=_lpPedidosElegiveis().filter(p=>!_lpObraFinalizada(p)).map(p=>({p,x:_prodInfo(p,hojeIso)})).filter(o=>!o.x.ok&&!o.x.semEtapa).map(o=>{let v=0;try{v=pedidoToVendaRow(o.p).lq||0;}catch(e){}return{p:o.p,valor:v,problemas:(o.x.calc&&o.x.calc.problemas)||[]};});
+  const lim3=fmtISOLocal(new Date(y,m+3,0));
+  const depois=infos.filter(x=>x.statusPedido!=='concluido'&&x.etapa.iso&&x.etapa.iso>lim3);
+  return{anterioresInfos:anteriores,anterioresValor,semCalc,depoisInfos:depois,depoisValor:depois.reduce((s,x)=>s+x.valorLiquidoTotal,0),
+    hojeIso,cap,projetadoMes,realizadoMes,qtdMes:doMes.length,produtividadePct,projetadoAteHoje,realizadoAteHoje,
     proximosMeses,diasExcedidos,diasQuaseLotados,diasVazios,taxaOcupacaoPct,diasUteisMes,ocupadoMes,capacidadeTotalMes,
     atrasadosQtd:atrasados.length,atrasadosValor,doMesInfos:doMes,jaVenceramInfos:jaVenceram,atrasadosInfos:atrasados};
 }
@@ -29475,6 +29495,9 @@ function prodVGAbrirAtrasados(){
   const lista=d.atrasadosInfos.map(x=>({p:x.p,valor:x.valorLiquidoTotal-x.valorLiquidoProduzido,sub:'Prazo '+fmtD(x.etapa.iso),cor:'#dc2626'}));
   _prodVGAbrirListaPedidos('⏰ Pedidos atrasados na Produção',lista);
 }
+function prodVGAbrirAnteriores(){const d=_prodVisaoGeralDados();_prodVGAbrirListaPedidos('⏰ Prazo em meses anteriores — ainda a produzir',d.anterioresInfos.map(x=>({p:x.p,valor:x.valorLiquidoTotal-x.valorLiquidoProduzido,sub:'Prazo '+fmtD(x.etapa.iso),cor:'#dc2626'})));}
+function prodVGAbrirSemCalc(){const d=_prodVisaoGeralDados();_prodVGAbrirListaPedidos('⚠️ Sem prazo de produção calculado',d.semCalc.map(o=>({p:o.p,valor:o.valor,sub:'Falta: '+(o.problemas.map(x=>x.campo+(x.motivo==='invalido'?' (inválido)':'')).join(', ')||'prazo muito curto'),cor:'#92400e'})));}
+function prodVGAbrirDepois(){const d=_prodVisaoGeralDados();_prodVGAbrirListaPedidos('📅 Depois dos próximos 3 meses',d.depoisInfos.map(x=>({p:x.p,valor:x.valorLiquidoTotal,sub:'Prazo '+fmtD(x.etapa.iso),cor:'#1e40af'})));}
 function prodVGAbrirProximoMes(offset){
   const d=_prodVisaoGeralDados();
   const alvo=d.proximosMeses[offset-1];
@@ -29524,7 +29547,9 @@ function renderProdVisaoGeral(){
       <div><div style="font-size:.62rem;font-weight:700;color:#64748b;text-transform:uppercase">Pedidos</div><div style="font-size:1.15rem;font-weight:800;color:#475569">${d.qtdMes}</div></div>
     </div>
     <div style="height:10px;border-radius:20px;background:#e5e7eb;overflow:hidden"><div style="height:100%;width:${pctMes}%;background:#16a34a;border-radius:20px"></div></div>
-    <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">${pctMes.toFixed(0)}% do projetado do mês já produzido</div>
+    <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">${pctMes.toFixed(0)}% do projetado do mês já produzido · conta os pedidos com <b>prazo de produção</b> neste mês</div>
+    ${d.anterioresInfos.length?`<div onclick="event.stopPropagation();prodVGAbrirAnteriores()" style="margin-top:8px;padding:7px 10px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:.74rem;font-weight:700;cursor:pointer">＋ ${fmtR(d.anterioresValor)} ainda a produzir de ${d.anterioresInfos.length} pedido(s) com prazo em meses anteriores — também precisam sair agora</div>`:''}
+    ${d.semCalc.length?`<div onclick="event.stopPropagation();prodVGAbrirSemCalc()" style="margin-top:6px;padding:7px 10px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:.74rem;font-weight:700;cursor:pointer">⚠️ ${d.semCalc.length} pedido(s) (${fmtR(d.semCalc.reduce((s,o)=>s+o.valor,0))}) fora de todas as contas: falta dado pra calcular o prazo de produção</div>`:''}
   </div>`;
   const htmlProdutividade=`<div class="dash-card" onclick="prodVGAbrirProdutividade()" style="cursor:pointer" title="Clique para ver os pedidos com prazo até hoje">
     <div class="dash-sec-title">📈 Produtividade (projetado × realizado nas datas)</div>
@@ -29545,6 +29570,7 @@ function renderProdVisaoGeral(){
     <div class="dash-sec-title">📅 Próximos 3 meses</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
       ${d.proximosMeses.map((x,i)=>`<div onclick="prodVGAbrirProximoMes(${i+1})" style="cursor:pointer;background:#f8fafc;border-radius:10px;padding:10px"><div style="font-size:.68rem;font-weight:700;color:#475569">${x.label}</div><div style="font-size:1rem;font-weight:800;color:#1e40af;margin-top:2px">${fmtR(x.projetado)}</div><div style="font-size:.64rem;color:var(--ink4)">${x.qtd} pedido${x.qtd===1?'':'s'}</div></div>`).join('')}
+      ${d.depoisInfos.length?`<div onclick="prodVGAbrirDepois()" style="cursor:pointer;background:#f8fafc;border-radius:10px;padding:10px"><div style="font-size:.68rem;font-weight:700;color:#475569">Depois disso</div><div style="font-size:1rem;font-weight:800;color:#1e40af;margin-top:2px">${fmtR(d.depoisValor)}</div><div style="font-size:.64rem;color:var(--ink4)">${d.depoisInfos.length} pedido(s)</div></div>`:''}
     </div>
   </div>`;
   const htmlExcedidos=`<div class="dash-card">
@@ -45994,7 +46020,16 @@ function gcVendasPorSemana(y,m,todos){
     const emissao=p&&p.emissaoEm;
     const dia=emissao?parseInt(String(emissao).split('-')[2],10):0;
     if(!dia||dia<1||dia>31){semDataCount++;semDataTotal+=(r.lq||0);return;}
-    const semanaIdx=Math.min(GC_SEMANA_MAX,Math.ceil(dia/7))-1;
+    let semanaIdx=Math.min(GC_SEMANA_MAX,Math.ceil(dia/7))-1;
+    // Venda com o MÊS ALTERADO (2026-10-05, a pedido do usuário: "vendeu no fim do mês, só
+    // conseguiu emitir no começo do outro e eu mudo o mês da venda — considere como venda da
+    // última semana do mês pro qual eu alterei"). Se a emissão caiu DEPOIS do mês da venda, vai
+    // pra última semana do mês; se caiu ANTES (mês empurrado pra frente), vai pra Semana 1.
+    const _emAno=parseInt(String(emissao).slice(0,4),10),_emMes=parseInt(String(emissao).slice(5,7),10);
+    if(_emAno&&_emMes&&(_emAno!==y||_emMes!==m)){
+      const _ult=Math.min(GC_SEMANA_MAX,Math.ceil(new Date(y,m,0).getDate()/7));
+      semanaIdx=(_emAno*100+_emMes)>(y*100+m)?_ult-1:0;
+    }
     // Casamento tolerante de nome (mesmo padrão de getVendasMes()/getVendasBrutoMes()) — nomes
     // de vendedor podem variar entre planilha/cadastro (maiúsculas, sobrenome abreviado etc.);
     // sem isso, a mesma pessoa apareceria em 2 linhas diferentes na tabela/gráfico.
@@ -59145,6 +59180,8 @@ function _uxAbrirAprovTarefas(){setSection('cat:FERRAMENTAS');setTimeout(()=>{tr
 
 // ── Números de pendência no menu lateral ──
 function _uxBadges(){
+  // (2026-10-05, a pedido do usuário: "tire esses números dos menus, ficou muito poluído") — sem números no menu lateral.
+  document.querySelectorAll('.ux-badge').forEach(b=>b.remove());return;
   const set=(id,n,tit)=>{const b=document.getElementById(id);if(!b)return;let s=b.querySelector('.ux-badge');if(!(n>0)){if(s)s.remove();return;}if(!s){s=document.createElement('span');s.className='ux-badge';b.appendChild(s);}s.textContent=n>99?'99+':String(n);s.title=tit||'';};
   let tfs=[];try{tfs=_uxMinhasTarefas();}catch(e){}
   const hoje=_uxHoje(),urg=tfs.filter(t=>t.atrasada||t.data===hoje).length;
@@ -59191,7 +59228,7 @@ function _uxExportarVisivel(prefixo,k){
       const tabs=tabsId?id(tabsId):(document.querySelector('.compras-main-tab')||{}).parentNode;
       if(tabs&&!tabs.dataset.ux){tabs.dataset.ux='1';tabs.className='ux-seg';tabs.style.marginBottom='12px';[...tabs.children].forEach(b=>{b.classList.remove('dash-tab');b.classList.remove('dash-tab-sub');});}
       // botões de exportação de cada visão: escondidos e chamados pelo "⚙️ Mais"
-      document.querySelectorAll('[id^="'+p+'-sec-"] button').forEach(b=>{const oc=b.getAttribute('onclick')||'';if(/Exportar[A-Za-z]*Excel\(/.test(oc)||/Exportar[A-Za-z]*PDF\(/.test(oc)){b.dataset.uxExp=/PDF\(/.test(oc)?'pdf':'excel';b.style.display='none';const pai=b.parentNode;if(pai&&[...pai.children].every(x=>x.style.display==='none'))pai.style.display='none';}});
+      document.querySelectorAll('[id^="'+p+'-sec-"]:not([id$="-sec-indicadores"]) button').forEach(b=>{const oc=b.getAttribute('onclick')||'';if(/Exportar[A-Za-z]*Excel\(/.test(oc)||/Exportar[A-Za-z]*PDF\(/.test(oc)){b.dataset.uxExp=/PDF\(/.test(oc)?'pdf':'excel';b.style.display='none';const pai=b.parentNode;if(pai&&[...pai.children].every(x=>x.style.display==='none'))pai.style.display='none';}});
       const dataRow=id(p+'-fil-data-campo')&&id(p+'-fil-data-campo').parentNode;
       _uxMaisMontar({linha:()=>id(p+'-fil-busca')&&id(p+'-fil-busca').parentNode,mover:()=>dataRow?[...dataRow.children]:[],exportar:k=>_uxExportarVisivel(p,k),
         ativos:()=>((id(p+'-fil-data-campo')||{}).value?1:0)});
@@ -59578,6 +59615,107 @@ async function _dirSalvarCfg(){
   #sec-cat-MEUDIA .dir-lim{display:flex;flex-direction:column;gap:3px;font-size:.72rem;color:#475569}`;
   document.head.appendChild(st);
 })();
+
+// ── Exportar Excel/PDF em TODOS os indicadores (2026-10-05, a pedido do usuário: "inclua em todos
+// os indicadores do sistema a opção de exportar em pdf e excel"). Uma barra "Exportar esta tela"
+// aparece no topo de cada tela de indicadores e exporta o que está NA TELA naquele momento (com os
+// filtros/mês escolhidos): cartões de números, tabelas e os dados de cada gráfico (no PDF, o
+// gráfico vai como imagem). Genérico de propósito — vale pros indicadores que já existem e pros
+// que vierem depois, sem precisar de uma exportação escrita à mão pra cada um.
+const UX_EXP_ALVOS=[
+  ['dash-tab-graficos','Visão Comercial — Indicadores'],['crm-sec-indicadores','CRM — Indicadores'],['prosp-sec-indicadores','Prospecção — Indicadores'],
+  ['fin-sec-indicadores','Financeiro — Indicadores'],['dre-indicadores','DRE — Indicadores por centro de custo'],['pl-sec-indicadores','Planejamento — Indicadores'],
+  ['proj-sec-indicadores','Projetos — Indicadores'],['prod-sec-indicadores','Produção — Indicadores'],['rh-sec-pontualidade','RH — Pontualidade e assiduidade'],
+  ['hp-cards','Histórico de pedidos — Indicadores'],['dir-painel','Painel da diretoria'],['orc8-painel','Orçamentos — Painel']
+];
+function _uxExpEnsure(){
+  UX_EXP_ALVOS.forEach(([id,tit])=>{
+    let el=document.getElementById(id);
+    if(id==='orc8-painel'){const k=document.querySelector('#sec-cat-ORCAMENTOS .orc8-kpis');el=k?k.parentElement:null;if(el&&!el.id)el.id='orc8-painel';}
+    if(!el||el.offsetParent===null)return;
+    if(el.firstElementChild&&el.firstElementChild.classList&&el.firstElementChild.classList.contains('ux-exp-bar'))return;
+    const old=el.querySelector(':scope > .ux-exp-bar');if(old)old.remove();
+    const b=document.createElement('div');b.className='ux-exp-bar';
+    b.innerHTML=`<span>Exportar esta tela</span><button type="button" class="dash-btn-conf" style="background:#16a34a">📊 Excel</button><button type="button" class="dash-btn-conf" style="background:#dc2626">📄 PDF</button>`;
+    const [bx,bp]=b.querySelectorAll('button');bx.onclick=()=>_uxExpExcel(el,tit);bp.onclick=()=>_uxExpPdf(el,tit);
+    el.insertBefore(b,el.firstChild);
+  });
+}
+setInterval(()=>{try{_uxExpEnsure();}catch(e){}},1200);
+(function(){const st=document.createElement('style');st.textContent=`.ux-exp-bar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:0 0 10px;font-size:.72rem;color:#94a3b8;font-weight:700}.ux-exp-bar .dash-btn-conf{padding:6px 12px;font-size:.74rem}`;document.head.appendChild(st);})();
+function _uxExpVis(el){return el&&el.offsetParent!==null&&!el.closest('.ux-exp-bar');}
+function _uxExpTxt(s){return String(s==null?'':s).replace(/\s+/g,' ').trim();}
+function _uxExpTitulo(node,root){
+  let n=node;
+  while(n&&n!==root){
+    let p=n.previousElementSibling;
+    while(p){const t=p.matches&&p.matches('.gc-chart-title,.dash-sec-title,h3,h4,.plh-h')?p:(p.querySelector&&p.querySelector('.gc-chart-title,.dash-sec-title,h3,h4'));if(t&&_uxExpTxt(t.innerText))return _uxExpTxt(t.innerText).slice(0,80);p=p.previousElementSibling;}
+    n=n.parentElement;
+  }
+  return'';
+}
+function _uxExpColetar(root){
+  const out={kpis:[],tabelas:[],graficos:[]};
+  // Cartões de número (kpi/card/chip sem outro cartão dentro)
+  const sel='[class*="kpi"],[class*="card"],[class*="chip"]';
+  [...root.querySelectorAll(sel)].filter(e=>_uxExpVis(e)&&!e.querySelector('table,canvas')&&!e.querySelector(sel)&&!e.closest('table')).forEach(e=>{
+    const linhas=String(e.innerText||'').split('\n').map(_uxExpTxt).filter(Boolean);if(!linhas.length||linhas.join(' ').length>220)return;
+    out.kpis.push([linhas[0],linhas.slice(1).join(' · ')]);
+  });
+  [...root.querySelectorAll('table')].filter(_uxExpVis).forEach((t,i)=>out.tabelas.push({t,nome:_uxExpTitulo(t,root)||('Tabela '+(i+1))}));
+  [...root.querySelectorAll('canvas')].filter(_uxExpVis).forEach((c,i)=>{
+    let ch=null;try{ch=window.Chart&&Chart.getChart?Chart.getChart(c):null;}catch(e){}
+    const nome=_uxExpTitulo(c,root)||('Gráfico '+(i+1));let dados=null;
+    if(ch&&ch.data){const lb=ch.data.labels||[],ds=ch.data.datasets||[];dados=[[''].concat(ds.map(d=>d.label||''))].concat(lb.map((l,j)=>[String(l)].concat(ds.map(d=>{const v=d.data[j];return v&&typeof v==='object'?(v.y!=null?v.y:v.x):v;}))));}
+    out.graficos.push({c,nome,dados});
+  });
+  return out;
+}
+function _uxExpArq(tit,ext){const d=new Date(),p=n=>String(n).padStart(2,'0');return tit.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\w]+/g,'_').replace(/^_|_$/g,'')+'_'+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'.'+ext;}
+function _uxExpPeriodo(root){const l=root.querySelector('.dash-mes-label,[id$="-mes-lbl"],[id$="-lbl"]');const s=[...root.querySelectorAll('select')].filter(_uxExpVis).map(x=>x.options[x.selectedIndex]&&x.options[x.selectedIndex].text).filter(Boolean).slice(0,3);return _uxExpTxt([l&&_uxExpVis(l)?l.innerText:'',...s].filter(Boolean).join(' · '));}
+function _uxExpExcel(root,tit){
+  if(!window.XLSX){toast('Biblioteca do Excel não carregada — recarregue a página','terr');return;}
+  const D=_uxExpColetar(root),wb=XLSX.utils.book_new(),nomes=new Set();
+  const nm=s=>{let b=String(s||'Planilha').replace(/[\\\/\?\*\[\]:]/g,' ').slice(0,28).trim()||'Planilha',n=b,i=2;while(nomes.has(n.toLowerCase()))n=b.slice(0,25)+' '+(i++);nomes.add(n.toLowerCase());return n;};
+  const per=_uxExpPeriodo(root);
+  const res=[[tit],['Gerado em '+new Date().toLocaleString('pt-BR')+(per?' · '+per:'')],[]].concat(D.kpis.length?[['Indicador','Valor']].concat(D.kpis):[['(sem cartões de número nesta tela)']]);
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(res),nm('Resumo'));
+  D.tabelas.forEach(x=>{try{XLSX.utils.book_append_sheet(wb,XLSX.utils.table_to_sheet(x.t,{raw:true}),nm(x.nome));}catch(e){console.warn('exp tabela',e);}});
+  D.graficos.forEach(g=>{if(g.dados)XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(g.dados),nm(g.nome));});
+  XLSX.writeFile(wb,_uxExpArq(tit,'xlsx'));toast('Excel gerado 📊','tok');
+}
+async function _uxExpPdf(root,tit){
+  if(!window.jspdf){toast('Biblioteca de PDF não carregada — recarregue a página','terr');return;}
+  const D=_uxExpColetar(root);const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'mm',format:'a4',orientation:'landscape'});
+  if(typeof doc.autoTable!=='function'){toast('Biblioteca de tabelas do PDF não carregada','terr');return;}
+  const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),M=12;let y=12;
+  const NAVY=[26,43,94],PINK=[233,30,99];
+  let logo=null;try{logo=typeof _orc4Logo==='function'?await _orc4Logo():null;}catch(e){}
+  const tx=s=>_uxExpTxt(s).replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu,'').replace(/→/g,'->').replace(/[“”]/g,'"').trim();
+  const cab=()=>{if(logo){try{doc.addImage(logo,'PNG',M,7,34,12,'lg','FAST');}catch(e){}}doc.setFont('helvetica','bold');doc.setFontSize(14);doc.setTextColor(...NAVY);doc.text(tx(tit),W-M,13,{align:'right'});doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(100,116,139);const per=_uxExpPeriodo(root);doc.text(tx('Gerado em '+new Date().toLocaleString('pt-BR')+(per?' · '+per:'')),W-M,18,{align:'right'});doc.setDrawColor(...PINK);doc.setLineWidth(0.6);doc.line(M,22,W-M,22);};
+  cab();y=27;
+  const garantir=h=>{if(y+h>H-12){doc.addPage();cab();y=27;}};
+  const sub=t=>{garantir(10);doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(...NAVY);doc.text(tx(t),M,y+4);y+=7;};
+  if(D.kpis.length){sub('Resumo');const rows=[];for(let i=0;i<D.kpis.length;i+=2){const a=D.kpis[i],b=D.kpis[i+1]||['',''];rows.push([tx(a[0]),tx(a[1]),tx(b[0]),tx(b[1])]);}
+    doc.autoTable({startY:y,margin:{left:M,right:M},body:rows,theme:'grid',styles:{fontSize:8,cellPadding:2},columnStyles:{0:{fontStyle:'bold',textColor:[71,85,105],cellWidth:60},2:{fontStyle:'bold',textColor:[71,85,105],cellWidth:60}}});y=doc.lastAutoTable.finalY+6;}
+  for(const g of D.graficos){
+    let img=null;try{img=g.c.toDataURL('image/png');}catch(e){}
+    if(img&&g.c.width>0){const w=Math.min(W-2*M,180),h=Math.min(85,w*g.c.height/g.c.width);garantir(h+10);sub(g.nome);try{doc.addImage(img,'PNG',M,y,w,h);}catch(e){}y+=h+4;}
+    else sub(g.nome);
+    if(g.dados&&g.dados.length>1&&g.dados.length<=40){garantir(16);doc.autoTable({startY:y,margin:{left:M,right:M},head:[g.dados[0].map(tx)],body:g.dados.slice(1).map(r=>r.map(v=>typeof v==='number'?v.toLocaleString('pt-BR',{maximumFractionDigits:2}):tx(v))),theme:'grid',styles:{fontSize:7,cellPadding:1.5},headStyles:{fillColor:NAVY}});y=doc.lastAutoTable.finalY+6;}
+  }
+  for(const x of D.tabelas){
+    sub(x.nome);
+    const head=[...x.t.querySelectorAll('thead tr')].map(r=>[...r.cells].map(c=>tx(c.innerText)));
+    const body=[...x.t.querySelectorAll('tbody tr, tfoot tr')].filter(r=>r.offsetParent!==null).map(r=>[...r.cells].map(c=>tx(c.innerText)));
+    const semHead=!head.length&&x.t.rows.length?[...x.t.rows].filter(r=>!r.closest('thead')).map(r=>[...r.cells].map(c=>tx(c.innerText))):null;
+    doc.autoTable({startY:y,margin:{left:M,right:M},head:head.length?head:undefined,body:body.length?body:(semHead||[]),theme:'grid',styles:{fontSize:7.5,cellPadding:1.8,overflow:'linebreak'},headStyles:{fillColor:NAVY,textColor:255},alternateRowStyles:{fillColor:[248,250,252]},didDrawPage:()=>{}});
+    y=doc.lastAutoTable.finalY+6;
+  }
+  if(!D.kpis.length&&!D.tabelas.length&&!D.graficos.length){sub('Nada para exportar nesta tela no momento.');}
+  const n=doc.internal.getNumberOfPages();for(let i=1;i<=n;i++){doc.setPage(i);doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(100,116,139);doc.text('GRANDA Comunicação Visual · GCORE',M,H-6);doc.text(i+'/'+n,W-M,H-6,{align:'right'});}
+  doc.save(_uxExpArq(tit,'pdf'));toast('PDF gerado 📄','tok');
+}
 
 </script>
 </body>
