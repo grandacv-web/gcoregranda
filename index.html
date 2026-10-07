@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-07.1';</script>
+<script>const APP_BUILD_VERSION='2026-10-07.6';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -56366,16 +56366,54 @@ function _orc2PrecoFinal(custo,cmv){const c=(cmv>0&&cmv<=100)?cmv:_orc2Cmv();ret
 function _orc2Num(v){return parseFloat(String(v==null?'':v).replace(',','.'))||0;}
 function _orc2Id(){return 'orc_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
 
+// (2026-10-07, a pedido do usuário) Letra caixa é um CONJUNTO de letras: largura × altura é o tamanho
+// do conjunto todo (ex.: 0,77 × 12,50). A altura de CADA letra é a menor medida. É conjunto quando o
+// perímetro informado passa bem do contorno de uma letra só (2×(L+A)); sem perímetro, quando uma
+// medida é 4× a outra. Letra única continua usando a altura (e a maior medida no aviso de 4 mm).
+function _orcLetraConjunto(L){const l=_orc2Num(L&&L.largura),a=_orc2Num(L&&L.altura),p=_orc2Num(L&&L.perimetro);if(!(l>0&&a>0))return false;if(p>0)return p>2*(l+a)*1.3;return Math.max(l,a)>=4*Math.min(l,a);}
+function _orcAlturaLetra(L){const l=_orc2Num(L&&L.largura),a=_orc2Num(L&&L.altura);return _orcLetraConjunto(L)?Math.min(l,a):a;}
+function _orcMaiorLetra(L){const l=_orc2Num(L&&L.largura),a=_orc2Num(L&&L.altura);return _orcLetraConjunto(L)?Math.min(l,a):Math.max(l,a);}
 // ── LETRA CAIXA — cópia fiel do calcular() do sistema antigo (mesmas fórmulas e arredondamentos) ──
+// (2026-10-07, a pedido do usuário) Em cada linha da lista de materiais do orçamento, mostrar pequeno
+// embaixo QUAL matéria-prima da planilha está sendo usada no cálculo (código, nome, preço). Descobre pelo
+// preço unitário da linha (custo ÷ quantidade) cruzando com os preços do cálculo (_orc2Precos → código
+// da planilha) e com a planilha inteira; empate decide pelas palavras em comum com o nome da linha.
+function _orcMpFonte(i){
+  try{
+    if(!i||!(i.cost>0)||/insumos|ajuste pelo hist/i.test(i.name||''))return null;
+    if(i.cod){const m=_orc8Mat(i.cod);if(m)return{cod:String(i.cod),m};}
+    const qn=_orcTrNum(i.qty);if(!(qn>0))return null;const unit=i.cost/qn;
+    const perto=v=>v>0&&Math.abs(v-unit)<=Math.max(0.011,unit*0.003);
+    const toks=x=>_orc3Norm(x).split(/[^a-z0-9]+/).filter(t=>t.length>2);
+    const tn=toks(i.name),sc=n=>{const t=toks(n);return tn.filter(x=>t.indexOf(x)>=0).length;};
+    const cands=[],vistos={},P=_orc2Precos();
+    Object.keys(P).forEach(k=>{if(!perto(P[k]))return;const fo=_orc3Fonte(k);
+      if(fo.tipo==='base'){if(!vistos[fo.cod]){vistos[fo.cod]=1;cands.push({cod:String(fo.cod),m:fo.m,obs:fo.obs,pk:1});}}
+      else cands.push({tipo:fo.tipo,cod:fo.cod,pk:1});});
+    Object.entries((typeof orc3!=='undefined'&&orc3.base)||{}).forEach(([c,m])=>{if(m&&!vistos[c]&&perto(m.v)){vistos[c]=1;cands.push({cod:String(c),m});}});
+    cands.forEach(c=>c.s=(c.m?sc(c.m.n)*2:0)+(c.pk?1:0));
+    const ok=cands.filter(c=>c.pk||c.s>0).sort((a,b)=>b.s-a.s);
+    return ok[0]||null;
+  }catch(e){return null;}
+}
+function _orcMpHtml(i){
+  const f=_orcMpFonte(i);if(!f)return'';
+  let t;
+  if(f.m)t='cód. '+_orcxEsc(f.cod)+' · '+_orcxEsc(String(f.m.n||'').trim())+' · '+_orcxBRL(f.m.v)+(f.m.u?' / '+_orcxEsc(String(f.m.u).toLowerCase()):'')+(f.obs?' ('+_orcxEsc(f.obs)+')':'');
+  else if(f.tipo==='manual')t='preço digitado nas configurações do orçamento (não vem da planilha)';
+  else t='preço padrão do sistema'+(f.cod?' — código '+_orcxEsc(f.cod)+' não está na planilha':'');
+  return`<span style="display:block;font-size:.64rem;color:#0f766e;margin-top:1px">📦 Matéria-prima: ${t}</span>`;
+}
 function orc2CalcLetra(p,P,adesivoPrecos){
   const tipo=p.modelo,largura=_orc2Num(p.largura),alturaVal=_orc2Num(p.altura),perimetro=_orc2Num(p.perimetro),caixaM=_orc2Num(p.caixa);
   const isPVC=(tipo==='pvc10'||tipo==='pvc20');
   // galvanizada até 1,20 m (fórmula 2026-10-06): não usa perímetro — só largura, altura e profundidade
-  const _galvNova=tipo==='galv'&&alturaVal<=1.20;
-  const _haloNova=tipo==='halo'&&alturaVal<=1.20;
-  const _acrilNova=tipo==='acril'&&alturaVal<=1.20; // frente acrílico + iluminação interna (2026-10-06) // halo (LED atrás) até 1,20 m — mesma base da galvanizada + tinta interna + LED + reator
+  const hLetra=_orcAlturaLetra(p); // altura de cada letra (conjunto → menor medida)
+  const _galvNova=tipo==='galv'&&hLetra<=1.20;
+  const _haloNova=tipo==='halo'&&hLetra<=1.20;
+  const _acrilNova=tipo==='acril'&&hLetra<=1.20; // frente acrílico + iluminação interna (2026-10-06) // halo (LED atrás) até 1,20 m — mesma base da galvanizada + tinta interna + LED + reator
   if(largura<=0||alturaVal<=0||(!isPVC&&((!_galvNova&&perimetro<=0)||caixaM<=0)))return{ok:false,items:[],totalMat:0};
-  const area=largura*alturaVal,usaACM=alturaVal>1.20,usaEstr=alturaVal>2.00;
+  const area=largura*alturaVal,usaACM=hLetra>1.20,usaEstr=hLetra>2.00;
   const arred=(v,d)=>_orcxArred(v,d),ceilDec=_orc2CeilMeia,fmtQtd=_orc2Qtd,fmtBRL=_orcxBRL,Pm=_orcP(); // 2026-10-06: chapas sempre de 0,5 em 0,5 (0,33 → 0,50; 0,88 → 1)
   const items=[];let totalMat=0,areaChapasTotal=0;
   const push=(icon,name,detail,qty,cost)=>{items.push({icon,name,detail,qty,cost});totalMat+=cost;};
@@ -56487,7 +56525,7 @@ function orc2CalcLetra(p,P,adesivoPrecos){
     const reatores=[{label:'Reator 35W',watts:35,preco:P.r35},{label:'Reator 60W',watts:60,preco:P.r60},{label:'Reator 100W',watts:100,preco:P.r100},{label:'Reator 150W',watts:150,preco:P.r150},{label:'Reator 200W',watts:200,preco:P.r200}];
     const melhorReator=pot=>_orc2MelhorReator(pot,P); // regra única de reator (menor número de unidades) — ver _orc2MelhorReator
     if(tipo==='halo'){
-      const qLed=Math.ceil(perimetro/0.12);push('💡','Módulo LED 6.500K 3P 12V 0,72W (Argia)',fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.',qLed+' un.',qLed*P.led);
+      const qLed=Math.ceil(perimetro/0.12),_mL=p.ledCod?_orc8Mat(p.ledCod):null;push('💡',_mL?'Módulo LED — '+String(_mL.n).trim():'Módulo LED 6.500K 3P 12V 0,72W (Argia)',fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.',qLed+' un.',qLed*(_mL&&_mL.v>0?_mL.v:P.led));
       const pot=arred(qLed*0.72*1.20,1),mr=melhorReator(pot);push('⚡',mr.label+' IP67 12V',fmtQtd(pot,1)+'W (c/ 20% margem) ÷ '+mr.watts+'W → '+mr.qty+' un.',mr.qty+' un.',mr.custo);
     }
     if(tipo==='acril'){
@@ -56500,8 +56538,12 @@ function orc2CalcLetra(p,P,adesivoPrecos){
       const pedacos=op=>{const e=1e-9;return Math.min(Math.ceil(largura/op.cw-e)*Math.ceil(alturaVal/op.ch-e),Math.ceil(largura/op.ch-e)*Math.ceil(alturaVal/op.cw-e));};
       let mf=null;for(const op of ops){const qty=ceilDec(area/op.areaChapa),util=area/(qty*op.areaChapa),custo=qty*op.preco,pc=pedacos(op);
         if(!mf||pc<mf.pc||(pc===mf.pc&&(custo<mf.custo-0.005||(Math.abs(custo-mf.custo)<=0.005&&util>mf.util))))mf={nome:op.nome,areaChapa:op.areaChapa,qty,util,custo,pc};}
+      // (2026-10-07, a pedido do usuário) Se escolheu a chapa da frente (acrílico/policarbonato), usa A ESCOLHIDA —
+      // antes a letra acima de 1,20 m ignorava a escolha e escolhia sozinha (ex.: punha policarbonato no lugar do acrílico).
+      {const AC=p.acrilCod,mA=AC?_orc8Mat(AC):null,dA=AC&&typeof _orcEmDims==='function'?_orcEmDims(AC):null;
+        if(mA){const aA=dA?dA[0]*dA[1]:2,qA=ceilDec(area/aA),pcA=dA?pedacos({cw:dA[0],ch:dA[1]}):null;mf={nome:'Frente — '+String(mA.n).trim(),areaChapa:aA,qty:qA,util:area/(qA*aA),custo:mA.v>0?qA*mA.v:0,pc:pcA==null?1:pcA};}}
       push('🔵',mf.nome,fmtQtd(area,3)+' m² ÷ '+fmtQtd(mf.areaChapa,1)+' m² → '+fmtQtd(mf.qty,1)+' ch. (aprov. '+Math.round(mf.util*100)+'% · '+(mf.pc<=1?'sem emenda':(mf.pc-1)+(mf.pc-1===1?' emenda':' emendas'))+')',fmtQtd(mf.qty,1)+' ch.',mf.custo);
-      const qLed=Math.ceil(perimetro/0.12);push('💡','Módulo LED 6.500K 3P 12V 0,72W (Argia)',fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.',qLed+' un.',qLed*P.led);
+      const qLed=Math.ceil(perimetro/0.12),_mL=p.ledCod?_orc8Mat(p.ledCod):null;push('💡',_mL?'Módulo LED — '+String(_mL.n).trim():'Módulo LED 6.500K 3P 12V 0,72W (Argia)',fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.',qLed+' un.',qLed*(_mL&&_mL.v>0?_mL.v:P.led));
       const pot=arred(qLed*0.72*1.20,1),mr=melhorReator(pot);push('⚡',mr.label+' IP67 12V',fmtQtd(pot,1)+'W (c/ 20% margem) ÷ '+mr.watts+'W → '+mr.qty+' un.',mr.qty+' un.',mr.custo);
     }
     if(usaEstr){
@@ -56579,7 +56621,7 @@ function _orcAcrilCampoHtml(L){
   return`<div class="orc2-ades" style="background:${L.acrilCod?'#f0fdf4':'#fff7ed'};border-color:${L.acrilCod?'#86efac':'#fdba74'}"><b style="font-size:.76rem;color:#1a2b5e">🔷 Chapa da frente (acrílico ou policarbonato) <span style="color:#dc2626">*</span></b>
     <select class="fc" style="margin-top:6px" onchange="orc2Letra('acrilCod',this.value,true)"><option value="">Escolha a chapa…</option>${l.map(x=>`<option value="${x.cod}" ${String(L.acrilCod)===String(x.cod)?'selected':''}>${_orcxEsc(x.nome)} — ${_orcxBRL(x.v)}${x.area?' · '+_orc2Qtd(x.area,2)+' m²':''}</option>`).join('')}</select>
     ${l.length?'':'<div class="orcx-hint">Importe a planilha de matéria-prima pra listar os acrílicos.</div>'}
-    ${Math.max(_orc2Num(L.largura),_orc2Num(L.altura))>=_orcP().acrilGrossoM?`<div class="orcx-hint" style="color:#b45309;font-weight:700">⚠️ Letra com ${_orc2Qtd(_orcP().acrilGrossoM,2).replace(',00','')} m ou mais: use chapa de 4 mm ou mais.</div>`:''}</div>`;
+    <div id="orc2-acril-aviso4" class="orcx-hint" style="color:#b45309;font-weight:700;${_orcMaiorLetra(L)>=_orcP().acrilGrossoM?'':'display:none'}">⚠️ Letra com ${_orc2Qtd(_orcP().acrilGrossoM,2).replace(',00','')} m ou mais: use chapa de 4 mm ou mais.</div></div>`;
 }
 function _orcTintaCampoHtml(L){
   try{if(typeof _orc8Watch==='function')_orc8Watch();}catch(e){}
@@ -57040,11 +57082,15 @@ function _orc2AcmCores(){
   });
   return out;
 }
+// (2026-10-07, a pedido do usuário) A potência já tem 20% de folga, então pode faltar até 10W na
+// cobertura: 453,6W → 3× 150W (450W), não 3× 200W. Vale pra todo cálculo de reator/fonte.
+const ORC2_REATOR_TOL_W=10;
+function _orc2QtdReator(pot,w){return Math.max(1,Math.ceil((pot-ORC2_REATOR_TOL_W)/w-1e-9));}
 function _orc2MelhorReator(pot,P){
   const ops=[{label:'Reator 35W',watts:35,preco:P.r35},{label:'Reator 60W',watts:60,preco:P.r60},{label:'Reator 100W',watts:100,preco:P.r100},{label:'Reator 150W',watts:150,preco:P.r150},{label:'Reator 200W',watts:200,preco:P.r200}];
   // 2026-10-05 (a pedido do usuário): "nunca priorizar escolher vários reatores, sempre o menor número possível".
   // 1º critério = MENOS unidades; empate → mais barato; empate → menor potência. Ex.: 137W → 1× 150W (não 4× 35W).
-  let m=null;for(const op of ops){const qty=Math.max(1,Math.ceil(pot/op.watts-1e-9)),custo=qty*(op.preco||0);
+  let m=null;for(const op of ops){const qty=_orc2QtdReator(pot,op.watts),custo=qty*(op.preco||0);
     if(!m||qty<m.qty||(qty===m.qty&&op.watts<m.watts))m={label:op.label,watts:op.watts,qty,custo};}return m; // 2026-10-06: empate em unidades → a MENOR potência que cobre (138W → 150W; 300W → 2×150W; 560W → 3×200W)
 }
 function orc2CalcFachada(p,P,adesivoPrecos){
@@ -57617,7 +57663,7 @@ function _orc8Preview(){
   const box=document.getElementById('orc8-preview');if(!box||!orc8.form)return;const F=orc8.form,rc=_orc8Receita(F.receitaId);
   const r=_orc8AplicarFator(orc8CalcReceita(rc,F.largura,F.altura),'config:'+F.receitaId);
   box.innerHTML=r.ok?`<div style="border:1.5px solid #e5e7eb;border-radius:12px;padding:10px 12px;background:#fafbfd">
-    ${r.items.map(i=>`<div class="orc2-mat"><span>${i.icon}</span><div class="nm"><b>${_orcxEsc(i.name)}</b><span>${_orcxEsc(i.detail)}</span></div><div class="vl">${_orcxBRL(i.cost)}<span>${_orcxEsc(i.qty)}</span></div></div>`).join('')}
+    ${r.items.map(i=>`<div class="orc2-mat"><span>${i.icon}</span><div class="nm"><b>${_orcxEsc(i.name)}</b><span>${_orcxEsc(i.detail)}</span>${_orcMpHtml(i)}</div><div class="vl">${_orcxBRL(i.cost)}<span>${_orcxEsc(i.qty)}</span></div></div>`).join('')}
     <div style="display:flex;justify-content:space-between;margin-top:8px;padding-top:8px;border-top:1.5px solid #e5e7eb"><span style="font-size:.74rem;color:#64748b;font-weight:700">Custo dos materiais</span><b style="color:#1a2b5e">${_orcxBRL(r.totalMat)}</b></div>
     <div style="display:flex;justify-content:space-between;margin-top:4px"><span style="font-size:.74rem;color:#64748b;font-weight:700">Preço ao cliente (CMV ${_orc2Cmv()}%)</span><b style="color:#e91e63">${_orcxBRL(_orc2PrecoFinal(r.totalMat,_orc2Cmv()))}</b></div>${_orc8HtmlPreviewM2(F,r.totalMat)}</div>`
     :`<div class="orc2-vazio" style="padding:16px"><div class="ic">📐</div>Escolha o modelo e preencha largura e altura pra ver os materiais.</div>`;
@@ -57667,7 +57713,7 @@ function orc8BldMover(i,d){const it=orc8.bld.itens,j=i+d;if(j<0||j>=it.length)re
 function orc8BldCancelar(){orc8.bld=null;_orc8ReRenderCfg();}
 function _orc8NomeCod(c){if(!c)return'';const m=_orc8Mat(c);return m?m.n+' · '+_orcxBRL(m.v)+' '+(m.u||''):'⚠️ código não encontrado na planilha';}
 function _orc8HtmlTeste(){const b=orc8.bld;const r=orc8CalcReceita(b,b._tl,b._ta);if(!r.ok)return'<div class="orcx-hint">Preencha as linhas pra ver o teste.</div>';
-  return r.items.map(i=>`<div class="orc2-mat"><span>${i.icon}</span><div class="nm"><b>${_orcxEsc(i.name)}</b><span>${_orcxEsc(i.detail)}</span></div><div class="vl">${_orcxBRL(i.cost)}<span>${_orcxEsc(i.qty)}</span></div></div>`).join('')+`<div style="text-align:right;margin-top:6px;font-size:.8rem">Custo <b>${_orcxBRL(r.totalMat)}</b> · ao cliente (CMV ${_orc2Cmv()}%) <b style="color:#e91e63">${_orcxBRL(_orc2PrecoFinal(r.totalMat,_orc2Cmv()))}</b> · <b style="color:#0f766e">${_orcxBRL(_orc2PrecoFinal(r.totalMat,_orc2Cmv())/(_orc2Num(b._tl)*_orc2Num(b._ta)||1))}/m²</b></div>`;}
+  return r.items.map(i=>`<div class="orc2-mat"><span>${i.icon}</span><div class="nm"><b>${_orcxEsc(i.name)}</b><span>${_orcxEsc(i.detail)}</span>${_orcMpHtml(i)}</div><div class="vl">${_orcxBRL(i.cost)}<span>${_orcxEsc(i.qty)}</span></div></div>`).join('')+`<div style="text-align:right;margin-top:6px;font-size:.8rem">Custo <b>${_orcxBRL(r.totalMat)}</b> · ao cliente (CMV ${_orc2Cmv()}%) <b style="color:#e91e63">${_orcxBRL(_orc2PrecoFinal(r.totalMat,_orc2Cmv()))}</b> · <b style="color:#0f766e">${_orcxBRL(_orc2PrecoFinal(r.totalMat,_orc2Cmv())/(_orc2Num(b._tl)*_orc2Num(b._ta)||1))}/m²</b></div>`;}
 function _orc8HtmlBuilder(){
   const b=orc8.bld;const sel=(i,k,opts,v)=>`<select class="fc" onchange="orc8BldLinha(${i},'${k}',this.value,true)">${opts.map(([a,l])=>`<option value="${a}" ${String(v||'')===a?'selected':''}>${l}</option>`).join('')}</select>`;
   const inp=(i,k,v,ph,w)=>`<input class="fc no-upper" style="width:${w||80}px" placeholder="${ph}" value="${_orcxEsc(v==null?'':v)}" oninput="orc8BldLinha(${i},'${k}',this.value)">`;
@@ -57903,7 +57949,7 @@ function _orcTrAplicar(r,p){
     if(!t||t.calc){total+=it.cost;return it;}
     const m=_orc8Mat(t.cod),pr=m&&m.v>0?m.v:0,un=_orc8Un(m&&m.u)||'un.';
     let qty,det;
-    if(t.modo==='reator'){const pot=_orcTrPot(it),w=_orcTrWatts(m?m.n:t.nome)||1;qty=Math.max(1,Math.ceil(pot/w-1e-9));det=_orc2Qtd(pot,1)+'W ÷ '+_orc2Qtd(w,0)+'W → '+qty+' un.';}
+    if(t.modo==='reator'){const pot=_orcTrPot(it),w=_orcTrWatts(m?m.n:t.nome)||1;qty=_orc2QtdReator(pot,w);det=_orc2Qtd(pot,1)+'W ÷ '+_orc2Qtd(w,0)+'W → '+qty+' un.';}
     else{qty=_orc2Num(t.qtd)>0?_orc2Num(t.qtd):_orcTrNum(it.qty);det=(_orc2Num(t.qtd)>0?'quantidade digitada':'mesma quantidade calculada')+' · cód. '+t.cod+' · '+_orcxBRL(pr)+'/'+un;}
     const cost=_orcxArred(qty*pr,2);total+=cost;
     return Object.assign({},it,{name:(m?m.n:t.nome)+(m?'':' ⚠️ código '+t.cod+' não está na planilha'),detail:det+' · '+(t.trocaPadrao&&!(p&&p.trocas&&p.trocas[k])?'⭐ material padrão':'🔁')+' no lugar de "'+it.name+'"',qty:_orc2Qtd(qty,qty%1?2:0)+' '+(t.modo==='reator'?'un.':un),cost,trocado:true,chaveTroca:k});
@@ -57933,7 +57979,7 @@ function _orcTrRender(){
   if(atual&&atual.calc)h+=`<div style="margin:-4px 0 10px"><button type="button" class="orc2-btn sec" onclick="orcTrVoltarPadrao()">⭐ Neste item, voltar ao material padrão</button></div>`;
   if(atual&&!atual.calc)h+=`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:8px 10px;font-size:.76rem;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px"><span>Trocado por <b>${_orcxEsc(_orc8NomeCod(atual.cod))}</b></span><button type="button" class="orc2-btn sec" onclick="orcTrDesfazer()">↩ Voltar ao calculado</button></div>`;
   if(ehR&&pot>0){
-    const ops=_orcTrReatoresBase().map(o=>{const q=Math.max(1,Math.ceil(pot/o.w-1e-9));return Object.assign(o,{q,c:q*o.preco});}).sort((a,b)=>a.q-b.q||a.c-b.c);
+    const ops=_orcTrReatoresBase().map(o=>{const q=_orc2QtdReator(pot,o.w);return Object.assign(o,{q,c:q*o.preco});}).sort((a,b)=>a.q-b.q||a.c-b.c);
     h+=`<div style="font-size:.74rem;font-weight:800;color:#1a2b5e;margin:4px 0 6px">Reatores e fontes que cobrem ${_orc2Qtd(pot,1)}W (menos peças primeiro)</div>`;
     h+=ops.length?`<div style="max-height:260px;overflow:auto;border:1px solid #e5e7eb;border-radius:10px">${ops.map(o=>`<div onclick="orcTrEscolher('${_orcxEsc(o.cod)}','reator')" style="display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:.78rem;${atual&&String(atual.cod)===String(o.cod)?'background:#eef2ff':''}"><span><b>${o.q} ×</b> ${_orcxEsc(o.nome)} <span style="color:#94a3b8">· cód. ${_orcxEsc(o.cod)}</span></span><b>${_orcxBRL(o.c)}</b></div>`).join('')}</div>`:'<div style="font-size:.76rem;color:#b45309">Nenhum reator/fonte com potência (W) no nome está na planilha de matéria-prima. Use a busca abaixo.</div>';
     h+='<div style="font-size:.74rem;font-weight:800;color:#1a2b5e;margin:12px 0 6px">Ou qualquer outro material da planilha</div>';
@@ -58500,9 +58546,10 @@ function orc2AtualizarPreviewLetra(){
     const r=fach?orc2CalcFachada(L,_orc2Precos(),orc2.adesivoPrecos):orc2CalcLetra(L,_orc2Precos(),orc2.adesivoPrecos);
     const temMed=_orc2Num(L.largura)>0&&_orc2Num(L.altura)>0;
     const ar=document.getElementById(fach?'orc2-f-area':'orc2-l-area');
-    if(ar)ar.textContent=temMed?('Área: '+_orc2Qtd(_orc2Num(L.largura)*_orc2Num(L.altura),3)+' m²'+(!fach&&_orc2Num(L.altura)>1.2&&!(L.modelo==='pvc10'||L.modelo==='pvc20')?' · acima de 1,20m usa ACM':'')):'';
+    if(!fach){const av=document.getElementById('orc2-acril-aviso4');if(av)av.style.display=_orcMaiorLetra(L)>=_orcP().acrilGrossoM?'':'none';}
+    if(ar)ar.textContent=temMed?('Área: '+_orc2Qtd(_orc2Num(L.largura)*_orc2Num(L.altura),3)+' m²'+(!fach&&_orcLetraConjunto(L)?' · conjunto de letras com '+_orc2Qtd(_orcAlturaLetra(L),2)+' m de altura cada':'')+(!fach&&_orcAlturaLetra(L)>1.2&&!(L.modelo==='pvc10'||L.modelo==='pvc20')?' · acima de 1,20 m usa ACM':'')):'';
     box.innerHTML=r.ok?`<div style="border:1.5px solid #e5e7eb;border-radius:12px;padding:10px 12px;background:#fafbfd">
-      ${r.items.map(i=>{const k=i.chaveTroca||_orcTrChave(i.name);return`<div class="orc2-mat"${i.trocado?' style="background:#fff7ed"':''}><span>${i.icon}</span><div class="nm"><b>${_orcxEsc(i.name)}</b><span>${_orcxEsc(i.detail)}</span></div><div class="vl">${_orcxBRL(i.cost)}<span>${_orcxEsc(i.qty)}</span></div>${/ajuste pelo hist/i.test(i.name)?'':`<button type="button" title="Trocar por outra matéria-prima" onclick="orcTrAbrir(decodeURIComponent('${encodeURIComponent(k)}'))" style="border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:3px 7px;cursor:pointer;font-size:.8rem;flex:0 0 auto">🔁</button>`}</div>`;}).join('')}
+      ${r.items.map(i=>{const k=i.chaveTroca||_orcTrChave(i.name);return`<div class="orc2-mat"${i.trocado?' style="background:#fff7ed"':''}><span>${i.icon}</span><div class="nm"><b>${_orcxEsc(i.name)}</b><span>${_orcxEsc(i.detail)}</span>${_orcMpHtml(i)}</div><div class="vl">${_orcxBRL(i.cost)}<span>${_orcxEsc(i.qty)}</span></div>${/ajuste pelo hist/i.test(i.name)?'':`<button type="button" title="Trocar por outra matéria-prima" onclick="orcTrAbrir(decodeURIComponent('${encodeURIComponent(k)}'))" style="border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:3px 7px;cursor:pointer;font-size:.8rem;flex:0 0 auto">🔁</button>`}</div>`;}).join('')}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1.5px solid #e5e7eb"><span style="font-size:.74rem;color:#64748b;font-weight:700">Custo dos materiais</span><b style="color:#1a2b5e">${_orcxBRL(r.totalMat)}</b></div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><span style="font-size:.74rem;color:#64748b;font-weight:700">Preço ao cliente (CMV ${_orc2Cmv()}%)</span><b style="color:#e91e63">${_orcxBRL(_orc2PrecoFinal(r.totalMat,_orc2Cmv()))}</b></div>${_orc8HtmlPreviewM2(L,r.totalMat)}</div>`
       :`<div class="orc2-vazio" style="padding:16px"><div class="ic">📐</div>${fach?'Preencha largura e altura da testeira pra ver os materiais.':'Preencha largura, altura'+((L.modelo==='pvc10'||L.modelo==='pvc20')?'':', perímetro e profundidade')+' pra ver os materiais.'}</div>`;
@@ -58515,7 +58562,7 @@ function orc2AdicionarLetra(){
   if(r.semTinta){toast('Escolha a tinta da letra (obrigatório) — ou crie uma tinta nova','terr');return;}
   if(r.semLed){toast('Escolha a temperatura do LED (obrigatório)','terr');return;}
   if(r.semAcril){toast('Escolha a chapa da frente — acrílico ou policarbonato (obrigatório)','terr');return;}
-  if(L.modelo==='acril'&&L.acrilCod&&Math.max(_orc2Num(L.largura),_orc2Num(L.altura))>=_orcP().acrilGrossoM){const m=_orc8Mat(L.acrilCod),esp=_orcEspessuraMm(m&&m.n);if(esp&&esp<4){toast('Letra com '+_orc2Qtd(_orcP().acrilGrossoM,2).replace(',00','')+' m ou mais: use acrílico/policarbonato de 4 mm ou mais (escolhido: '+esp+' mm)','terr');return;}}
+  if(L.modelo==='acril'&&L.acrilCod&&_orcMaiorLetra(L)>=_orcP().acrilGrossoM){const m=_orc8Mat(L.acrilCod),esp=_orcEspessuraMm(m&&m.n);if(esp&&esp<4){toast('Letra com '+_orc2Qtd(_orcP().acrilGrossoM,2).replace(',00','')+' m ou mais: use acrílico/policarbonato de 4 mm ou mais (escolhido: '+esp+' mm)','terr');return;}}
   const desc=orc2DescLetra(L.modelo,r.usaACM,r.items);
   const antigo=orc2.letraEditId?orc2.doc.produtos.find(p=>p.id===orc2.letraEditId):null;
   const item={id:antigo?antigo.id:_orc2Id(),tipo:'letra',modelo:L.modelo,nomeCurto:L.nome||'',nome:(L.nome?L.nome+' — ':'')+desc,descricao:desc,largura:L.largura,altura:L.altura,perimetro:L.perimetro,caixa:L.caixa,adesivos:JSON.parse(JSON.stringify(L.adesivos||[])),trocas:JSON.parse(JSON.stringify(L.trocas||{})),tinta:L.tinta?JSON.parse(JSON.stringify(L.tinta)):null,ledCod:L.ledCod||'',acrilCod:L.acrilCod||'',usaACM:r.usaACM,materiais:r.items.map(i=>({icon:i.icon,nome:i.name,detalhe:i.detail,qtd:i.qty,custo:_orcxArred(i.cost,2)})),custo:_orcxArred(r.totalMat,2),cmv:antigo?antigo.cmv:_orc2Cmv(),qtd:antigo?_orc2Qtd1(antigo):1,precosEm:new Date().toISOString(),precosBase:(orc3.meta&&orc3.meta.em)||null};
@@ -59315,6 +59362,9 @@ function _orc10Lista(e){
   return l.map(x=>{let n='';try{n=_orc4Numero(x);}catch(err){}return{id:x.id,_num:n,_tot:_orc10Total(x),_em:x.atualizadoEm||x.dataSalvo,_por:x.atualizadoPor||x.por||'',_env:x.enviadoEm,_venc:(()=>{try{return _orc8Vencido(x);}catch(err){return false;}})(),_val:x.validadeAte};});
 }
 function _orc10BlocoCard(e){
+  // (2026-10-07, a pedido do usuário) Não mostrar mais o bloco de orçamento vinculado na aba
+  // Proposta do card do CRM — a proposta usada é o PDF do outro sistema, anexado na própria aba.
+  return'';
   if(!e)return'';
   let ac=false;try{ac=_orcxAcesso();}catch(err){}
   if(ac){try{_orc2WatchLista();}catch(err){}}
