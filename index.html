@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-06.14';</script>
+<script>const APP_BUILD_VERSION='2026-10-07.1';</script>
 <script>
 // Plural com a palavra INTEIRA (2026-09-30) — nunca colar sufixo ('útil'+'eis' virava 'útileis').
 // Uso: `${n} ${_plural(n,'dia útil','dias úteis')}`
@@ -10002,7 +10002,7 @@ function viewP(id){
       ${p.email_engenheiro?`<div class="vf" style="grid-column:span 2;display:flex;align-items:center;gap:8px"><div class="l" style="margin:0;white-space:nowrap">E-mail do Engenheiro da Obra</div><div class="v" style="margin:0">${p.email_engenheiro}</div></div>`:''}
       ${p.email_financeiro?`<div class="vf" style="grid-column:span 2;display:flex;align-items:center;gap:8px"><div class="l" style="margin:0;white-space:nowrap">E-mail Financeiro (NF's)</div><div class="v" style="margin:0">${p.email_financeiro}</div></div>`:''}
       ${p.obs?`<div class="vf" style="grid-column:span 2"><div class="l">Observações</div><div class="v">${p.obs}</div></div>`:''}
-      ${p.rncPedidoOrigem&&p.rncPedidoOrigem.os?`<div class="vf" style="grid-column:span 2"><div class="l">RNC — Pedido de origem (venda)</div><div class="v">OS ${p.rncPedidoOrigem.os} — ${p.rncPedidoOrigem.cliente||'—'}${p.rncPedidoOrigem.job?' — '+p.rncPedidoOrigem.job:''}</div></div>`:''}
+      ${p.rncPedidoOrigem&&p.rncPedidoOrigem.os?`<div class="vf" style="grid-column:span 2"><div class="l">RNC — Pedido de origem (venda)</div><div class="v">${_rncOrigemLabel(p.rncPedidoOrigem)}</div></div>`:''}
     </div></div>
     ${docsHtml}
     ${sec('Valores',v)}${sec('Pagamento',pg)}${sec('Instalação',inst)}${sec('Frete',fr)}
@@ -11172,20 +11172,24 @@ function _rncVendasOrigem(){
     .map(p=>({id:p.id,os:String(p.os),cliente:p.cliente||'',job:p.job||''}))
     .sort((a,b)=>(parseInt(b.os,10)||0)-(parseInt(a.os,10)||0));
 }
-function _rncOrigemLabel(o){return o?('OS '+o.os+' — '+(o.cliente||'—')+(o.job?' — '+o.job:'')):'';}
+// (2026-10-07, a pedido do usuário) A OS original continua obrigatória, mas não precisa mais
+// existir no GCore — pedidos antigos vieram de outro sistema. Se a OS digitada não estiver na
+// lista, fica registrada como {os, externo:true} (pedido do sistema antigo).
+function _rncOrigemLabel(o){if(!o)return'';if(o.externo&&!o.cliente)return'OS '+o.os+' (sistema antigo)';return'OS '+o.os+' — '+(o.cliente||'—')+(o.job?' — '+o.job:'');}
+function _rncOrigemOkHtml(o){return o.externo?`<div style="margin-top:6px;padding:8px 12px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:.8rem;font-weight:700">✅ OS ${String(o.os).replace(/</g,'&lt;')} registrada como pedido do sistema antigo (não está no GCore).</div>`:`<div style="margin-top:6px;padding:8px 12px;border-radius:8px;background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;font-size:.8rem;font-weight:700">✅ Vinculada a: ${_rncOrigemLabel(o).replace(/</g,'&lt;')}</div>`;}
 function _rncOrigemEscolher(inp){
   const v=(inp.value||'').trim();
   const lista=_rncVendasOrigem();
   let o=lista.find(x=>_rncOrigemLabel(x)===v);
-  if(!o){const m=v.match(/^(?:OS\s*)?(\d+)\b/i);if(m){const c=lista.filter(x=>x.os===m[1]);if(c.length===1)o=c[0];}}
+  if(!o){const m=v.match(/^(?:OS\s*)?(\d+)\b/i);if(m){const c=lista.filter(x=>x.os===m[1]);if(c.length===1)o=c[0];else if(!c.length)o={id:'',os:m[1],cliente:'',job:'',externo:true};}}
   ed.rncOrigem=o||null;
   const box=document.getElementById('em-rnc-origem-sel');
-  if(box)box.innerHTML=o?`<div style="margin-top:6px;padding:8px 12px;border-radius:8px;background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;font-size:.8rem;font-weight:700">✅ Vinculada a: ${_rncOrigemLabel(o).replace(/</g,'&lt;')}</div>`:(v?`<div style="margin-top:6px;padding:8px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:.78rem;font-weight:700">Pedido não encontrado — escolha um da lista (digite a OS, o cliente ou o JOB).</div>`:'');
+  if(box)box.innerHTML=o?_rncOrigemOkHtml(o):(v?`<div style="margin-top:6px;padding:8px 12px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:.78rem;font-weight:700">Informe o número da OS original — escolha um pedido da lista ou digite só o número da OS (pode ser do sistema antigo).</div>`:'');
   if(typeof _emAgendarRascunho==='function')_emAgendarRascunho();
 }
 function validarAba(id){
   // Retorna lista de erros da aba atual
-  if(id==='rnc'&&ed.tipo==='Garantia / Retrabalho'&&!(ed.rncOrigem&&ed.rncOrigem.os))return['Informe de qual pedido (venda anterior) é esta Garantia/Retrabalho'];
+  if(id==='rnc'&&ed.tipo==='Garantia / Retrabalho'&&!(ed.rncOrigem&&ed.rncOrigem.os))return['Informe o número da OS original desta Garantia/Retrabalho'];
   const erros=[];
   // Conselho de Pedidos (2026-08-07) — só exige RESPOSTA (Sim ou Não vale) pra avançar de
   // aba, mesmo padrão "obrigatório responder" do resto do formulário. A trava mais forte —
@@ -12257,10 +12261,10 @@ function _renderStepBase(id){
       <div class="fsec-t">&#128203; RNC — RELATÓRIO DE NÃO CONFORMIDADE</div>
       <div style="font-size:.76rem;color:var(--ink3);margin-bottom:14px">Pedido de Garantia/Retrabalho — informe de qual venda ele é e anexe o relatório de não conformidade da Qualidade.</div>
       <div class="fg"><label>De qual pedido é esta RNC? <span class="r">*</span></label>
-        <input class="fc" id="em-rnc-origem" list="em-rnc-origem-list" autocomplete="off" placeholder="Digite a OS, o cliente ou o JOB da venda original..." value="${_rncOrigemLabel(ed.rncOrigem).replace(/"/g,'&quot;')}" onchange="_rncOrigemEscolher(this)" oninput="if(this.value==='')_rncOrigemEscolher(this)">
+        <input class="fc" id="em-rnc-origem" list="em-rnc-origem-list" autocomplete="off" placeholder="Digite a OS, o cliente ou o JOB — ou só o número da OS do sistema antigo..." value="${_rncOrigemLabel(ed.rncOrigem).replace(/"/g,'&quot;')}" onchange="_rncOrigemEscolher(this)" oninput="if(this.value==='')_rncOrigemEscolher(this)">
         <datalist id="em-rnc-origem-list">${_rncVendasOrigem().map(o=>`<option value="${_rncOrigemLabel(o).replace(/"/g,'&quot;')}"></option>`).join('')}</datalist>
-        <div id="em-rnc-origem-sel">${ed.rncOrigem?`<div style="margin-top:6px;padding:8px 12px;border-radius:8px;background:#ecfdf5;border:1px solid #bbf7d0;color:#166534;font-size:.8rem;font-weight:700">✅ Vinculada a: ${_rncOrigemLabel(ed.rncOrigem).replace(/</g,'&lt;')}</div>`:''}</div>
-        <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Obrigatório — toda garantia/retrabalho precisa estar ligada a uma venda que já aconteceu.</div>
+        <div id="em-rnc-origem-sel">${ed.rncOrigem?_rncOrigemOkHtml(ed.rncOrigem):''}</div>
+        <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Obrigatório informar a OS original. Se o pedido for do sistema antigo e não aparecer na lista, digite só o número da OS.</div>
       </div>
       <div class="fg"><label>Inserir o Relatório de Não Conformidade</label>
         <div class="upload-zone${ed.arq_rnc?' has-file':''}" id="uz-rnc" onclick="document.getElementById('em-rnc-file').click()">
@@ -12805,7 +12809,7 @@ function buildEmissaoEmailContent(p){
                 <span style="display:inline-block;background:#dc2626;color:#ffffff;font-size:10px;font-weight:800;letter-spacing:1.5px;text-transform:uppercase;border-radius:20px;padding:3px 10px">Garantia / Retrabalho</span>
                 ${o&&o.os?`<div style="margin-top:10px;font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#9ca3af;font-weight:700">Pedido de origem</div>
                 <div style="margin-top:2px;font-size:20px;font-weight:800;color:#111827;line-height:1.2">OS ${esc(o.os)}</div>
-                ${cliJob?`<div style="margin-top:3px;font-size:13px;color:#4b5563">${cliJob}</div>`:''}
+                ${cliJob?`<div style="margin-top:3px;font-size:13px;color:#4b5563">${cliJob}</div>`:(o.externo||!orig?`<div style="margin-top:3px;font-size:13px;color:#4b5563">Pedido do sistema antigo</div>`:'')}
                 ${infoHtml}`:`<div style="margin-top:10px;font-size:13px;color:#b91c1c;font-weight:700">Pedido de origem não informado.</div>`}
               </td>
               <td align="right" style="vertical-align:middle;padding-left:16px;white-space:nowrap">
@@ -13914,7 +13918,7 @@ function _buildPedidoBaseDoEd(){
     // cidade/UF do assunto). Sempre com fallback pra string vazia — nunca undefined,
     // porque undefined no objeto quebra o savePedidoFS (ver [[project_firestore_undefined_fields]]).
     arq_os_url:ed.arq_os_url||'',arq_oc_url:ed.arq_oc_url||'',arq_chumb_url:ed.arq_chumb_url||'',arq_rnc_url:ed.arq_rnc_url||'',
-    rncPedidoOrigem:(ed.tipo==='Garantia / Retrabalho'&&ed.rncOrigem)?{id:ed.rncOrigem.id||'',os:ed.rncOrigem.os||'',cliente:ed.rncOrigem.cliente||'',job:ed.rncOrigem.job||''}:null,
+    rncPedidoOrigem:(ed.tipo==='Garantia / Retrabalho'&&ed.rncOrigem)?{id:ed.rncOrigem.id||'',os:ed.rncOrigem.os||'',cliente:ed.rncOrigem.cliente||'',job:ed.rncOrigem.job||'',externo:!!ed.rncOrigem.externo}:null,
     temProducao:(ed.tipo!=='Venda'&&ed.tipo!=='Permuta'&&ed.temProducao)?ed.temProducao:'',chumbador:ed.chumbador||'',os_chumb:ed.os_chumb||'',dt_chumb:(ed.chumbador==='Sim'&&ed.dt_chumb)?ed.dt_chumb:'',
     // Congela a config de Etapas de Pedidos (percentuais/removidas/extras) NO MOMENTO da
     // emissão — se for edição de um pedido que já tinha isso, mantém o snapshot antigo (nunca
@@ -14469,7 +14473,7 @@ async function submit(){
   // deixar emitir sem ele.
   // Pedido de origem obrigatório pra Garantia/Retrabalho (2026-09-25).
   if(ed.tipo==='Garantia / Retrabalho'&&!(ed.rncOrigem&&ed.rncOrigem.os)){
-    toast('Informe na aba RNC de qual pedido (venda anterior) é esta Garantia/Retrabalho','terr');
+    toast('Informe na aba RNC o número da OS original desta Garantia/Retrabalho','terr');
     const tRnc=getTabs().findIndex(t=>t.id==='rnc');if(tRnc>=0){step=tRnc;renderEM();}
     return;
   }
@@ -39769,7 +39773,7 @@ function _histPedidoEventos(p){
       add('⚠️','Garantia/Retrabalho aberta para este pedido',g.emissaoEmHora||g.emissaoEm||g.conselhoCriadoEm,`OS ${g.os||'—'} · ${g.job||g.cliente||'—'} · ${g.origemComercial?'emitida':'em rascunho no Conselho'}${g.responsavel?' · '+g.responsavel:''}`,'#dc2626');
     });
     if(p.rncPedidoOrigem&&p.rncPedidoOrigem.os){
-      add('🔗','Garantia/Retrabalho referente a uma venda anterior',p.emissaoEmHora||p.emissaoEm||p.conselhoCriadoEm,`Venda de origem: OS ${p.rncPedidoOrigem.os} — ${p.rncPedidoOrigem.cliente||'—'}${p.rncPedidoOrigem.job?' — '+p.rncPedidoOrigem.job:''}`,'#dc2626');
+      add('🔗','Garantia/Retrabalho referente a uma venda anterior',p.emissaoEmHora||p.emissaoEm||p.conselhoCriadoEm,`Venda de origem: ${_rncOrigemLabel(p.rncPedidoOrigem)}`,'#dc2626');
     }
   }catch(err){console.error('hist garantias',err);}
   // 25. (2026-09-25) Observações por aba preenchidas na emissão.
@@ -45324,7 +45328,7 @@ function verVendaDetalhe(os,pedidoId){
           <div class="vf" style="grid-column:span 2"><div class="l">E-mail de emissão</div><div class="v" style="font-weight:600">${_fmtEmailStatus(p)}</div></div>
           ${proj2.pasta_arquivos?`<div class="vf" style="grid-column:span 2"><div class="l">📁 Pasta de arquivos para projetos</div><div class="v">${proj2.pasta_arquivos}</div></div>`:''}
           ${p.obs?`<div class="vf" style="grid-column:span 2"><div class="l">Observações</div><div class="v">${p.obs}</div></div>`:''}
-      ${p.rncPedidoOrigem&&p.rncPedidoOrigem.os?`<div class="vf" style="grid-column:span 2"><div class="l">RNC — Pedido de origem (venda)</div><div class="v">OS ${p.rncPedidoOrigem.os} — ${p.rncPedidoOrigem.cliente||'—'}${p.rncPedidoOrigem.job?' — '+p.rncPedidoOrigem.job:''}</div></div>`:''}
+      ${p.rncPedidoOrigem&&p.rncPedidoOrigem.os?`<div class="vf" style="grid-column:span 2"><div class="l">RNC — Pedido de origem (venda)</div><div class="v">${_rncOrigemLabel(p.rncPedidoOrigem)}</div></div>`:''}
         </div></div>
         ${secHtml('Valores',vBase)}${secHtml('Elevações',vElev)}
         ${parcRows.length?`<div class="vm-sec"><h4>Datas de Pagamento</h4><div class="vm-gr">${parcRows.map(r=>`<div class="vf"><div class="l">${r.l}</div><div class="v">${r.v}</div></div>`).join('')}</div></div>`:secHtml('Pagamento',pg)}
