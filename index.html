@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-08.5';</script>
+<script>const APP_BUILD_VERSION='2026-10-13.1';</script>
 <script>
 // ── Copiar caminho da pasta a partir do e-mail (2026-10-08, a pedido do usuário) ──────────
 // E-mail não roda JavaScript (Gmail/Outlook bloqueiam), então um botão "copiar" de verdade
@@ -1315,6 +1315,14 @@ select.fc{cursor:pointer}
       </div>
       <div style="font-size:.78rem;color:var(--ink3);margin-bottom:14px">Registre aqui o que vai ser levado pra reunião de conselho — pré-preencha o que já souber, complete o que faltar depois, e só emita de verdade (vai pra Lista de Vendas e dispara o e-mail) quando tudo estiver pronto.</div>
       <div id="conselho-pedidos-list"></div>
+    </div>
+    <div class="dash-card" style="margin-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+        <div class="dash-sec-title" style="margin:0">📎 Pedidos sem Ordem de Compra do cliente</div>
+        <select id="semoc-mes" onchange="renderPedidosSemOC()" style="padding:6px 10px;border:1.5px solid var(--line,#e2e8f0);border-radius:8px;font-size:.78rem;font-weight:600"></select>
+      </div>
+      <div style="font-size:.78rem;color:var(--ink3);margin-bottom:12px">Todas as vendas de clientes que exigem OC (Configurações → Grupos de Cliente → "Exige OC") que ainda não têm a Ordem de Compra anexada — inclusive as que vieram da planilha de vendas.</div>
+      <div id="conselho-sem-oc-list"></div>
     </div>
   </div>
 
@@ -5174,7 +5182,10 @@ select.fc{cursor:pointer}
       <div class="cfg-sec" id="cfg-sec-usuarios" style="display:none">
         <div style="font-size:.7rem;font-weight:700;color:var(--brand);text-transform:uppercase;letter-spacing:1px;margin-bottom:16px">Gerenciar Usuários</div>
         <div id="cfg-nomes-preview" style="background:#e0f9fb;border:1.5px solid #00bac7;border-radius:10px;padding:14px 16px;margin-bottom:16px">
-          <div style="font-size:.72rem;font-weight:700;color:#0f766e;margin-bottom:8px">🏷️ Usuários cadastrados</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+            <div style="font-size:.72rem;font-weight:700;color:#0f766e">🏷️ Usuários cadastrados <span id="cfg-nomes-contagem" style="font-weight:600"></span></div>
+            <input type="search" id="cfg-nomes-busca" class="fc no-upper" placeholder="🔍 Pesquisar por nome, e-mail ou categoria..." oninput="_usrFiltrarLista()" style="flex:1;min-width:220px;max-width:360px;padding:6px 10px;font-size:.78rem">
+          </div>
           <div id="cfg-nomes-lista" style="font-size:.78rem;color:#0f766e;line-height:1.8"></div>
         </div>
         <div id="cfg-vend-saida-box" style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:14px 16px;margin-bottom:16px"></div>
@@ -5276,6 +5287,7 @@ select.fc{cursor:pointer}
             <input class="fc" id="cfg-novo-grupo-palavras" placeholder="Palavras-chave, separadas por vírgula" style="text-transform:uppercase">
           </div>
           <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--ink3);margin-bottom:10px"><input type="checkbox" id="cfg-novo-grupo-franq"> Separar franqueado (pedidos com "FRANQUEADO" na Categoria ficam de fora do grupo)</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--ink3);margin-bottom:10px"><input type="checkbox" id="cfg-novo-grupo-oc"> Exige Ordem de Compra (pedido sem OC anexada vira pendência do Conselho)</label>
           <button class="btn-next" style="width:100%;padding:9px" onclick="addGrupoCliente()">+ Adicionar Grupo</button>
         </div>
       </div>
@@ -5427,7 +5439,7 @@ select.fc{cursor:pointer}
 <script type="module" async>
 import{initializeApp,deleteApp}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js';
 import{getAuth,signInWithEmailAndPassword,signOut,onAuthStateChanged,createUserWithEmailAndPassword,sendPasswordResetEmail,EmailAuthProvider,reauthenticateWithCredential}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js';
-import{getFirestore,collection,doc,getDoc,setDoc,updateDoc,deleteDoc,deleteField,onSnapshot,getDocs,FieldPath,writeBatch,runTransaction}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
+import{getFirestore,collection,doc,getDoc,setDoc,updateDoc,deleteDoc,deleteField,onSnapshot,getDocs,FieldPath,writeBatch,runTransaction,waitForPendingWrites}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js';
 import{getFunctions,httpsCallable}from'https://www.gstatic.com/firebasejs/12.14.0/firebase-functions.js';
 
 const firebaseConfig={
@@ -5522,6 +5534,8 @@ function _fbSaveMerge(col,id,data){
   });
 }
 window._fbSavePedido=(p)=>_fbSaveMerge('pedidos',p.id,p);
+// Espera todas as gravações pendentes chegarem no servidor (usado antes de recarregar a página sozinho).
+window._fbAguardarGravacoes=()=>waitForPendingWrites(db);
 // Última versão do pedido recebida do servidor — só leitura (usada pelo registro exato de produção, 2026-09-30).
 window._fbBasePedido=(id)=>(_fbBases.pedidos&&_fbBases.pedidos[String(id)])||null;
 // Transação (lê o documento FRESCO do servidor, aplica um patch, grava) — usada pelas ações
@@ -9764,7 +9778,190 @@ function _pedPendResolvidaEfetiva(p,x){
   const t=(p&&p.tarefasComerciais||[]).find(y=>y.id===x.tarefaId);
   return !t||t.status==='concluida';
 }
-function _pedPendAbertas(p){return((p&&p.conselhoPendencias)||[]).filter(x=>!_pedPendResolvidaEfetiva(p,x));}
+// ── OC OBRIGATÓRIA POR CLIENTE (2026-10-08, a pedido do usuário: "quando um pedido de algum
+// cliente especifico como BK nao tenha ordem de compra eu preciso separar isso como pendencia").
+// O grupo de cliente (Configurações → Grupos de Cliente) ganhou a opção "Exige OC". Pedido de
+// um grupo marcado que não tem a Ordem de Compra do cliente anexada (p.ocUrl / p.arq_oc_url)
+// ganha uma pendência AUTOMÁTICA do Conselho. Ela não é gravada no pedido: é calculada na hora,
+// então some sozinha quando a OC é anexada (aqui no modal de Pendências, em Editar Valores ou
+// na emissão). Não bloqueia emissão, igual às outras pendências do Conselho.
+const _OC_GRUPOS_PADRAO=['BURGER KING'];
+function _grupoExigeOC(g){
+  if(!g)return false;
+  if(typeof g.exigeOC==='boolean')return g.exigeOC;
+  return _OC_GRUPOS_PADRAO.includes(String(g.nome||'').toUpperCase().trim());
+}
+function _pedTemOC(p){return !!(p&&(p.ocUrl||p.arq_oc_url));}
+function _pedGrupoExigeOC(p){
+  if(!p)return null;
+  const cli=String(p.cliente||p.conselhoClienteProvisorio||'').toUpperCase();
+  const job=String(p.job||'').toUpperCase();
+  let grupos=[];try{grupos=getGruposClienteFinanceiro()||[];}catch(e){}
+  // Mesma regra do Financeiro: vale o PRIMEIRO grupo que casar (BOB'S vem antes de BURGER KING).
+  for(const g of grupos){
+    const nome=String(g.nome||'').toUpperCase().trim();
+    const pal=(g.palavras||[]).map(x=>String(x||'').toUpperCase().trim()).filter(Boolean);
+    let bateu=pal.some(w=>cli.includes(w)||job.includes(w));
+    // "BK" sozinho no cliente/JOB (ex.: "ZAMP S.A." com JOB "BK SOROCABA") também é Burger King.
+    if(!bateu&&nome==='BURGER KING')bateu=/(^|[^A-Z0-9])BK([^A-Z0-9]|$)/.test(cli+' '+job);
+    if(bateu)return _grupoExigeOC(g)?(g.nome||nome):null;
+  }
+  // ZAMP já identificada manualmente pelo admin (Faturamento por Cliente).
+  try{
+    const man=p.os?_zampGrupoManual(p.os):null;
+    if(man){const g=grupos.find(x=>String(x.nome||'').toUpperCase()===String(man).toUpperCase());if(g&&_grupoExigeOC(g))return g.nome;}
+  }catch(e){}
+  return null;
+}
+// Devolve o nome do grupo quando o pedido está sem OC e o cliente exige; senão null.
+function _pedOcPendente(p){
+  if(!p||_pedTemOC(p))return null;
+  if(p.importadoPlanilha)return null;
+  if(!(p.origemComercial||p.conselhoStatus==='rascunho'))return null;
+  if(p.tipo&&p.tipo!=='Venda')return null; // Garantia, Interno, Amostra etc. não têm OC
+  try{if(p.os&&isVendaCancelada(p.os))return null;}catch(e){}
+  return _pedGrupoExigeOC(p);
+}
+function _pedPendOcVirtual(p){
+  let g=null;try{g=_pedOcPendente(p);}catch(e){}
+  return g?{id:'__oc__',auto:'oc',setor:'COMERCIAL',resolvida:false,texto:`📎 Falta a Ordem de Compra do cliente (${g} exige OC)`}:null;
+}
+function _pedPendAbertas(p){
+  const l=((p&&p.conselhoPendencias)||[]).filter(x=>!_pedPendResolvidaEfetiva(p,x));
+  const v=_pedPendOcVirtual(p);
+  return v?[v,...l]:l;
+}
+// Anexar a OC direto pelo modal de Pendências (o vendedor dono do conselho também consegue;
+// Editar Valores é só admin com senha).
+async function _consOcAnexar(input){
+  const f=input&&input.files&&input.files[0];if(!f)return;
+  const p=pedidos.find(x=>x.id===_consPendPedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  if(!_conselhoPodeMexer(p)){_conselhoBloqueioMsg(p);input.value='';return;}
+  if(!(cfg.cld_cloud&&cfg.cld_preset)){toast('Envio de arquivos (Cloudinary) não está configurado.','terr');input.value='';return;}
+  const btn=document.getElementById('cp-oc-btn');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Enviando...';}
+  let url='';
+  try{
+    const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_pedidos');
+    const isRaw=f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf');
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/${isRaw?'raw':'image'}/upload`,{method:'POST',body:fd});
+    const d=await r.json();
+    url=d.secure_url||'';
+    if(url)_cldRegistrarUpload(f.size);
+  }catch(e){console.error('Cloudinary upload error',e);}
+  input.value='';
+  if(!url){toast('Não foi possível enviar o arquivo. Tente de novo.','terr');if(btn){btn.disabled=false;btn.textContent='📎 Anexar OC';}return;}
+  const num=((document.getElementById('cp-oc-num')||{}).value||'').trim();
+  p.ocUrl=url;
+  if(num)p.numOC=num;
+  p.ocAnexadaEm=new Date().toISOString();
+  p.ocAnexadaPor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
+  if(p.pagamento&&Object.prototype.hasOwnProperty.call(p.pagamento,'Ordem de Compra do Cliente'))p.pagamento['Ordem de Compra do Cliente']='Sim';
+  try{
+    await savePedidoFS(p);
+    toast('Ordem de Compra anexada. A pendência saiu da lista.','tok');
+    _renderPendenciasConselho();
+    renderConselhoPedidos();
+    try{if(typeof renderDashVendas==='function')renderDashVendas();}catch(e){}
+  }catch(e){toast('Erro ao salvar a OC: '+e.message,'terr');if(btn){btn.disabled=false;btn.textContent='📎 Anexar OC';}}
+}
+// ── LISTA "PEDIDOS SEM OC DO CLIENTE" (2026-10-13, a pedido do usuário: "onde eu vejo os
+// pedidos que tão sem ordem de compra do cliente que eu pedi pra vc listar" — a faixa amarela
+// do Conselho só mostrava pedido EMITIDO pelo sistema, e boa parte das vendas de BK vem da
+// planilha/Editar Valores (importadoPlanilha), então não aparecia nada). Card próprio, fixo,
+// abaixo do Conselho: varre TODAS as vendas (getVendaRowsMerged — planilha + emitidos, sem
+// canceladas) e lista as de grupo com "Exige OC" sem OC anexada. Não mexe nas pendências do
+// Conselho (continuam só pra emitidos/rascunhos).
+function _semOcLinhas(){
+  let rows=[];try{rows=getVendaRowsMerged()||[];}catch(e){}
+  const out=[];
+  rows.forEach(r=>{
+    const ped=r._pid?pedidos.find(x=>x.id===r._pid):null;
+    if(ped){
+      if(_pedTemOC(ped))return;
+      if(ped.tipo&&ped.tipo!=='Venda')return;
+    }else if(r.ocUrl)return;
+    let g=null;
+    try{g=_pedGrupoExigeOC(ped||{cliente:r.cl||'',job:r.job||'',os:r.p});}catch(e){}
+    if(!g)return;
+    out.push({os:r.p,cliente:r.cl||(ped&&ped.cliente)||'',job:r.job||(ped&&ped.job)||'',m:r.m||0,mes:r.mes||'',vend:r.v||'',grupo:g,pid:ped?ped.id:'',numOC:(ped&&ped.numOC)||r.numOC||''});
+  });
+  out.sort((a,b)=>(b.m-a.m)||String(b.os).localeCompare(String(a.os),'pt-BR',{numeric:true}));
+  return out;
+}
+function renderPedidosSemOC(){
+  const wrap=document.getElementById('conselho-sem-oc-list');
+  if(!wrap)return;
+  const sel=document.getElementById('semoc-mes');
+  const todas=_semOcLinhas();
+  const esc=v=>String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  if(sel){
+    const atual=sel.value||'';
+    const meses=[...new Set(todas.map(x=>x.m).filter(Boolean))].sort((a,b)=>b-a);
+    sel.innerHTML=`<option value="">Todos os meses (${todas.length})</option>`+meses.map(m=>`<option value="${m}">${MESES_PT[m]||m} (${todas.filter(x=>x.m===m).length})</option>`).join('');
+    if(atual&&meses.includes(+atual))sel.value=atual;
+  }
+  const fm=sel&&sel.value?+sel.value:0;
+  const lista=fm?todas.filter(x=>x.m===fm):todas;
+  if(!lista.length){
+    wrap.innerHTML='<div style="text-align:center;padding:22px 16px;color:var(--ink4);font-size:.85rem">✅ Nenhuma venda sem Ordem de Compra'+(fm?' neste mês':'')+'.</div>';
+    return;
+  }
+  const{isAdm}=_getUserCat();
+  const linhas=lista.map(x=>{
+    const ped=x.pid?pedidos.find(p=>p.id===x.pid):null;
+    const pode=ped?_conselhoPodeMexer(ped):isAdm;
+    let acao='';
+    if(ped&&pode)acao=`<label style="display:inline-block;background:#fffbeb;color:#92400e;border:1.5px solid #fde68a;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">📎 Anexar OC<input type="file" accept=".pdf,image/*" style="display:none" onchange="_semOcAnexar(this,'${ped.id}')"></label>`;
+    else if(!ped&&isAdm)acao=`<button onclick="editarVendaLista('${esc(x.os)}')" title="Venda da planilha — anexe a OC em Editar Valores" style="background:#fff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">✏️ Editar Valores</button>`;
+    else acao='<span style="font-size:.7rem;color:var(--ink4)">só admin/dono</span>';
+    return`<tr>
+      <td style="font-weight:700;white-space:nowrap">${esc(x.os)||'—'}</td>
+      <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:120px">${esc(x.cliente)||'—'}</td>
+      <td style="font-size:.78rem">${esc(x.job)||'—'}</td>
+      <td style="font-size:.78rem;white-space:nowrap">${esc(x.mes)||'—'}</td>
+      <td style="font-size:.72rem;color:var(--ink4)">${esc(x.vend)||'—'}</td>
+      <td style="font-size:.72rem;font-weight:700;color:#92400e">${esc(x.grupo)}</td>
+      <td style="white-space:nowrap">${acao}</td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML=`<div style="font-size:.8rem;font-weight:700;color:#92400e;margin-bottom:8px">⚠️ ${lista.length} venda${lista.length>1?'s':''} sem OC</div><div style="overflow-x:auto"><table class="dash-table">
+    <thead><tr><th>OS</th><th>Cliente</th><th>JOB</th><th>Mês</th><th>Vendedor</th><th>Grupo</th><th></th></tr></thead>
+    <tbody>${linhas}</tbody></table></div>`;
+}
+async function _semOcAnexar(input,pid){
+  const f=input&&input.files&&input.files[0];if(!f)return;
+  const p=pedidos.find(x=>x.id===pid);
+  if(!p){toast('Pedido não encontrado','terr');input.value='';return;}
+  if(!_conselhoPodeMexer(p)){_conselhoBloqueioMsg(p);input.value='';return;}
+  if(!(cfg.cld_cloud&&cfg.cld_preset)){toast('Envio de arquivos (Cloudinary) não está configurado.','terr');input.value='';return;}
+  const num=(prompt('Nº da Ordem de Compra (opcional):',p.numOC||'')||'').trim();
+  toast('⏳ Enviando OC...','tinf');
+  let url='';
+  try{
+    const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_pedidos');
+    const isRaw=f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf');
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/${isRaw?'raw':'image'}/upload`,{method:'POST',body:fd});
+    const d=await r.json();
+    url=d.secure_url||'';
+    if(url)_cldRegistrarUpload(f.size);
+  }catch(e){console.error('Cloudinary upload error',e);}
+  input.value='';
+  if(!url){toast('Não foi possível enviar o arquivo. Tente de novo.','terr');return;}
+  p.ocUrl=url;
+  if(num)p.numOC=num;
+  p.ocAnexadaEm=new Date().toISOString();
+  p.ocAnexadaPor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
+  if(p.pagamento&&Object.prototype.hasOwnProperty.call(p.pagamento,'Ordem de Compra do Cliente'))p.pagamento['Ordem de Compra do Cliente']='Sim';
+  try{
+    await savePedidoFS(p);
+    try{_invalidateDashCache();}catch(e){}
+    toast('Ordem de Compra anexada.','tok');
+    renderConselhoPedidos();
+    try{if(typeof renderDashVendas==='function')renderDashVendas();}catch(e){}
+  }catch(e){toast('Erro ao salvar a OC: '+e.message,'terr');}
+}
 // ===================== CONSELHO DE PEDIDOS (2026-08-07) =====================
 // Lista os rascunhos que ainda NÃO foram emitidos de verdade (conselhoStatus==='rascunho' e
 // sem origemComercial) — assim que um rascunho é promovido a emissão de verdade (ver submit(),
@@ -9791,6 +9988,7 @@ function _conselhoPodeMexer(p){
 }
 function _conselhoBloqueioMsg(p){toast('🔒 Este conselho é de '+((p&&p.conselhoCriadoPor)||'outro usuário')+' — só quem criou ou um administrador pode abrir e mexer.','terr');}
 function renderConselhoPedidos(){
+  try{renderPedidosSemOC();}catch(e){console.error('renderPedidosSemOC',e);}
   const wrap=document.getElementById('conselho-pedidos-list');
   if(!wrap)return;
   const{isAdm,email}=_getUserCat();
@@ -9806,6 +10004,8 @@ function renderConselhoPedidos(){
     return;
   }
   const hojeIso=_hojeIso();
+  const _semOc=todos.filter(p=>p.origemComercial&&_pedPendOcVirtual(p));
+  const _semOcHtml=_semOc.length?`<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:.8rem;color:#92400e"><b>📎 ${_semOc.length} pedido${_semOc.length>1?'s emitidos':' emitido'} sem a Ordem de Compra do cliente:</b> ${_semOc.map(p=>`<a href="javascript:void(0)" onclick="abrirPendenciasConselho('${p.id}')" style="color:#92400e;font-weight:700;text-decoration:underline">OS ${p.os||'—'} · ${String(p.cliente||'').replace(/</g,'&lt;')}</a>`).join(' · ')}</div>`:'';
   const rows=todos.map(p=>{
     const jaEmitido=!!p.origemComercial;
     const pendList=_pedPendAbertas(p);
@@ -9846,7 +10046,7 @@ function renderConselhoPedidos(){
       </td>
     </tr>`;
   }).join('');
-  wrap.innerHTML=`<div style="overflow-x:auto"><table class="dash-table">
+  wrap.innerHTML=_semOcHtml+`<div style="overflow-x:auto"><table class="dash-table">
     <thead><tr><th>Data do Conselho</th><th>Cliente</th><th>JOB</th><th>Criado por</th><th>Status</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
@@ -9897,11 +10097,21 @@ function _renderPendenciasConselho(){
   const p=pedidos.find(x=>x.id===_consPendPedidoId);
   if(!p)return;
   const pend=p.conselhoPendencias||[];
+  const _oc=_pedPendOcVirtual(p);
+  const ocHtml=_oc?`<div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:10px 12px;margin-bottom:8px">
+      <div style="font-size:.85rem;font-weight:700;color:#92400e">${_oc.texto}</div>
+      <div style="font-size:.68rem;color:#92400e;margin-top:2px">Pendência automática do setor Comercial. Sai sozinha quando a OC for anexada.</div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <input type="text" id="cp-oc-num" class="fc no-upper" placeholder="Nº da OC (opcional)" value="${String(p.numOC||'').replace(/"/g,'&quot;')}" style="flex:1;min-width:140px">
+        <input type="file" id="cp-oc-file" accept=".pdf,image/*" style="display:none" onchange="_consOcAnexar(this)">
+        <button id="cp-oc-btn" onclick="document.getElementById('cp-oc-file').click()" style="background:#d97706;color:#fff;border:none;border-radius:9px;padding:7px 14px;font-size:.8rem;font-weight:700;cursor:pointer;white-space:nowrap">📎 Anexar OC</button>
+      </div>
+    </div>`:'';
   if(!pend.length){
-    wrap.innerHTML='<div style="text-align:center;padding:18px 8px;color:var(--ink4);font-size:.82rem">Nenhuma pendência registrada — se estiver tudo certo, é só fechar e emitir normalmente.</div>';
+    wrap.innerHTML=ocHtml||'<div style="text-align:center;padding:18px 8px;color:var(--ink4);font-size:.82rem">Nenhuma pendência registrada — se estiver tudo certo, é só fechar e emitir normalmente.</div>';
     return;
   }
-  wrap.innerHTML=pend.map(x=>{
+  wrap.innerHTML=ocHtml+pend.map(x=>{
     // Mesma rede de segurança de _pedPendResolvidaEfetiva() (2026-09-16): se a tarefa
     // vinculada já não existe mais (excluída) ou já foi concluída de verdade, mostra aqui
     // como resolvida mesmo que x.resolvida em si (campo gravado) ainda esteja com false por
@@ -14928,10 +15138,11 @@ async function renderUserList(){
   const lista=document.getElementById('cfg-nomes-lista');
   if(lista){
     const nomes=cfg.usuarioNomes||{};
-    const entries=Object.entries(nomes);
+    // (2026-10-08, a pedido do usuário) Ordem alfabética pelo nome + busca por nome/e-mail/categoria.
+    const entries=Object.entries(nomes).sort((a,b)=>String(a[1]||a[0]).localeCompare(String(b[1]||b[0]),'pt-BR',{sensitivity:'base'}));
     if(entries.length){
       lista.innerHTML=entries.map(([email,nome])=>
-        `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #b2ebf2;gap:4px">
+        `<div class="usr-linha" data-busca="${_usrTextoBusca(email,nome).replace(/"/g,'&quot;')}" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #b2ebf2;gap:4px">
           <span style="flex:1;min-width:0"><strong>${nome}</strong>${(cfg.vendDesligados||{})[email]?` <span style="font-size:.62rem;font-weight:700;color:#475569;background:#e2e8f0;border-radius:20px;padding:1px 7px">🚪 Desligado em ${fmtD(cfg.vendDesligados[email].data)}</span>`:''}<br><span style="color:#0891b2;font-size:.70rem">${email}</span></span>
           <div style="display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
             <button onclick="abrirMenusUsuario('${email}')" style="background:#f5f3ff;border:1px solid #c4b5fd;border-radius:6px;cursor:pointer;color:#6d28d9;font-size:.7rem;padding:3px 7px;font-weight:600" title="Escolher quais menus esse usuário pode ver">🧩 Menus</button>
@@ -14941,11 +15152,29 @@ async function renderUserList(){
             <button onclick="removerNomeUsuario('${email}')" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.8rem;padding:2px 6px" title="Remover">✕</button>
           </div>
         </div>`
-      ).join('');
+      ).join('')+'<div id="cfg-nomes-nada" style="display:none;color:#0891b2;font-size:.75rem;padding:8px 0">Nenhum usuário encontrado com essa pesquisa.</div>';
     } else {
       lista.innerHTML='<span style="color:#0891b2;font-size:.75rem">Nenhum usuário cadastrado ainda.</span>';
     }
+    _usrFiltrarLista();
   }
+}
+function _usrTextoBusca(email,nome){
+  const cat=(cfg.usuarioCats||{})[email]||'';
+  const tipo=(cfg.comercialTipo||{})[nome]||'';
+  const extra=Array.isArray(cfg.usuarioCatsExtras&&cfg.usuarioCatsExtras[email])?cfg.usuarioCatsExtras[email].join(' '):'';
+  return _normSemAcento([nome,email,cat,tipo,extra].join(' ')).toLowerCase();
+}
+function _usrFiltrarLista(){
+  const inp=document.getElementById('cfg-nomes-busca');
+  const q=inp?_normSemAcento(inp.value||'').toLowerCase().trim():'';
+  const termos=q.split(/\s+/).filter(Boolean);
+  const linhas=document.querySelectorAll('#cfg-nomes-lista .usr-linha');
+  let vis=0;
+  linhas.forEach(el=>{const t=el.getAttribute('data-busca')||'';const ok=termos.every(x=>t.includes(x));el.style.display=ok?'flex':'none';if(ok)vis++;});
+  const nada=document.getElementById('cfg-nomes-nada');if(nada)nada.style.display=(linhas.length&&!vis)?'block':'none';
+  const cont=document.getElementById('cfg-nomes-contagem');
+  if(cont)cont.textContent=linhas.length?(termos.length?`(${vis} de ${linhas.length})`:`(${linhas.length})`):'';
 }
 
 // 🧩 Menus por usuário (2026-08-08) — abre a checklist com os menus efetivos daquele e-mail
@@ -15938,6 +16167,61 @@ setInterval(()=>{try{_atualizarBadgeAvisos();}catch(e){}},60000);
 document.addEventListener('visibilitychange',()=>{
   if(document.visibilityState==='visible')try{_atualizarBadgeAvisos();}catch(e){}
 });
+// ── RECARREGAR AO VOLTAR DEPOIS DE MAIS DE 1 HORA PARADO (2026-10-08, a pedido do usuário:
+// "force a atualização ... se ele ficar logado ha mais de 1 hora sem atualizar a pagina ... pra
+// nao perder a informação que ele gravar"). Os dados já chegam ao vivo (onSnapshot) e o salvamento
+// já junta com o que está no servidor (_fbSaveMerge), mas depois de muito tempo parado (aba
+// escondida, computador em suspensão, rede caída) a conexão ao vivo pode ter ficado presa sem
+// ninguém perceber. Regra: se a página está aberta há 1h ou mais E a pessoa ficou 1h sem mexer
+// (ou a aba ficou 1h escondida, ou o computador dormiu 30 min ou mais), na hora em que ela
+// VOLTA a página recarrega sozinha — antes de ela começar a mexer em qualquer coisa.
+// Nunca recarrega com janela aberta ou campo em edição (_sistemaEstaSeguroPraRecarregar): espera
+// ficar seguro. E antes de recarregar espera todas as gravações pendentes chegarem no servidor.
+const _RECARGA_INATIVO_MS=60*60*1000;
+const _recargaPaginaAbertaEm=Date.now();
+let _recargaUltimaAtividade=Date.now();
+let _recargaEscondidaDesde=document.visibilityState==='hidden'?Date.now():null;
+let _recargaPendente=false,_recargaEmCurso=false,_recargaTick=Date.now();
+function _recargaMarcarPendente(){
+  if(Date.now()-_recargaPaginaAbertaEm<_RECARGA_INATIVO_MS)return;
+  _recargaPendente=true;
+}
+async function _recargaTentar(){
+  if(!_recargaPendente||_recargaEmCurso)return;
+  if(typeof _bloqueioAtualizacaoAtivo!=='undefined'&&_bloqueioAtualizacaoAtivo)return; // já tem a tela de versão nova
+  if(document.visibilityState!=='visible')return;
+  if(!_sistemaEstaSeguroPraRecarregar()){setTimeout(_recargaTentar,15000);return;}
+  if(typeof _submitPedidoEmAndamento!=='undefined'&&_submitPedidoEmAndamento){setTimeout(_recargaTentar,5000);return;}
+  _recargaEmCurso=true;
+  try{toast('🔄 Você ficou mais de 1 hora sem mexer — atualizando o sistema pra trazer os dados mais recentes...','tok');}catch(e){}
+  try{if(window._fbAguardarGravacoes)await Promise.race([window._fbAguardarGravacoes(),new Promise(r=>setTimeout(r,15000))]);}catch(e){}
+  setTimeout(()=>{
+    if(!_sistemaEstaSeguroPraRecarregar()){_recargaEmCurso=false;setTimeout(_recargaTentar,15000);return;}
+    location.replace(location.pathname+'?_v='+Date.now());
+  },1500);
+}
+function _recargaAtividade(){
+  const agora=Date.now();
+  if(agora-_recargaUltimaAtividade>=_RECARGA_INATIVO_MS)_recargaMarcarPendente();
+  _recargaUltimaAtividade=agora;
+  if(_recargaPendente)_recargaTentar();
+}
+['mousedown','keydown','touchstart','wheel'].forEach(ev=>document.addEventListener(ev,_recargaAtividade,{capture:true,passive:true}));
+document.addEventListener('mousemove',()=>{if(_recargaPendente||Date.now()-_recargaUltimaAtividade>=_RECARGA_INATIVO_MS)_recargaAtividade();},{passive:true});
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='hidden'){_recargaEscondidaDesde=Date.now();return;}
+  if(_recargaEscondidaDesde&&Date.now()-_recargaEscondidaDesde>=_RECARGA_INATIVO_MS)_recargaMarcarPendente();
+  if(Date.now()-_recargaUltimaAtividade>=_RECARGA_INATIVO_MS)_recargaMarcarPendente();
+  _recargaEscondidaDesde=null;
+  _recargaTentar();
+});
+// Computador em suspensão: o relógio "pula" entre um tique e outro.
+setInterval(()=>{
+  const agora=Date.now();
+  if(agora-_recargaTick>=30*60*1000)_recargaMarcarPendente();
+  _recargaTick=agora;
+  if(_recargaPendente&&document.visibilityState==='visible'&&agora-_recargaUltimaAtividade<5000)_recargaTentar();
+},60000);
 
 // ══════════════════════════════════════════════
 //  DASHBOARD COMERCIAL
@@ -17405,10 +17689,11 @@ function renderGruposCliente(){
   const grupos=cfg.gruposClienteFinanceiro;
   if(!grupos.length){el.innerHTML='<p style="font-size:.75rem;color:var(--ink4)">Nenhum grupo cadastrado.</p>';return;}
   el.innerHTML=grupos.map((g,i)=>`
-    <div style="display:grid;grid-template-columns:1fr 2fr auto auto;gap:8px;align-items:center;background:#f8fafc;border:1.5px solid var(--border-lt);border-radius:8px;padding:8px 10px;margin-bottom:6px">
+    <div style="display:grid;grid-template-columns:1fr 2fr auto auto auto;gap:8px;align-items:center;background:#f8fafc;border:1.5px solid var(--border-lt);border-radius:8px;padding:8px 10px;margin-bottom:6px">
       <input class="fc" value="${(g.nome||'').replace(/"/g,'&quot;')}" style="text-transform:uppercase" onchange="atualizaGrupoCliente(${i},'nome',this.value)">
       <input class="fc" value="${(g.palavras||[]).join(', ').replace(/"/g,'&quot;')}" placeholder="Palavras-chave, separadas por vírgula" style="text-transform:uppercase" onchange="atualizaGrupoCliente(${i},'palavras',this.value)">
       <label style="display:flex;align-items:center;gap:5px;font-size:.68rem;color:var(--ink3);white-space:nowrap"><input type="checkbox" ${g.separarFranqueado?'checked':''} onchange="atualizaGrupoCliente(${i},'separarFranqueado',this.checked)"> Separar franqueado</label>
+      <label style="display:flex;align-items:center;gap:5px;font-size:.68rem;color:var(--ink3);white-space:nowrap" title="Pedido deste cliente sem Ordem de Compra anexada vira pendência do Conselho"><input type="checkbox" ${_grupoExigeOC(g)?'checked':''} onchange="atualizaGrupoCliente(${i},'exigeOC',this.checked)"> Exige OC</label>
       <button onclick="removeGrupoCliente(${i})" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.9rem" title="Remover">🗑</button>
     </div>`).join('');
 }
@@ -17426,16 +17711,18 @@ function addGrupoCliente(){
   const inpNome=document.getElementById('cfg-novo-grupo-nome');
   const inpPalavras=document.getElementById('cfg-novo-grupo-palavras');
   const chkFranq=document.getElementById('cfg-novo-grupo-franq');
+  const chkOc=document.getElementById('cfg-novo-grupo-oc');
   const nome=(inpNome?.value||'').trim().toUpperCase();
   const palavras=(inpPalavras?.value||'').split(',').map(v=>v.trim().toUpperCase()).filter(Boolean);
   if(!nome||!palavras.length){toast('Preencha o nome do grupo e ao menos uma palavra-chave!','terr');return;}
   if(!cfg.gruposClienteFinanceiro||!cfg.gruposClienteFinanceiro.length)cfg.gruposClienteFinanceiro=_finGruposPadrao().map(g=>({...g}));
-  cfg.gruposClienteFinanceiro.push({nome,palavras,separarFranqueado:!!chkFranq?.checked});
+  cfg.gruposClienteFinanceiro.push({nome,palavras,separarFranqueado:!!chkFranq?.checked,exigeOC:!!chkOc?.checked});
   if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   if(inpNome)inpNome.value='';
   if(inpPalavras)inpPalavras.value='';
   if(chkFranq)chkFranq.checked=false;
+  if(chkOc)chkOc.checked=false;
   renderGruposCliente();
   toast('Grupo adicionado!','tok');
   if(typeof finView!=='undefined'&&finView==='fluxo'&&typeof renderFinFluxo==='function')renderFinFluxo();
@@ -40347,6 +40634,7 @@ function _histPedidoEventos(p){
   });
   // 13. Nome do cliente/venda alterado (Editar Valores).
   _hpTry('nomeCliente',()=>{
+    if(p.ocAnexadaEm)add('📎','Ordem de Compra do cliente anexada',p.ocAnexadaEm,`${p.numOC?'OC Nº '+p.numOC+' — ':''}por ${p.ocAnexadaPor||'—'}`,'#d97706');
     (p.historicoNomeCliente||[]).forEach(h=>add('✏️','Nome da venda/cliente alterado',h.em,`De "${h.de||'—'}" para "${h.para||'—'}" — por ${h.por||'—'}`,'#64748b'));
   });
   // 14. Edições do pedido (Editar Valores / edição pelo formulário completo) — p.historicoEdicoes.
@@ -42499,7 +42787,7 @@ function _finGruposPadrao(){
     // monteiro que é burger king e nao ta no burger king") — loja identificada só pelo nome
     // da rua no Cliente/JOB, sem a palavra "BURGER" nem "KING" no nome, então nenhuma das 2
     // palavras-chave já existentes conseguia casar com ela.
-    {nome:'BURGER KING',palavras:['BURGER KING','BURGER','ESTRADA DO MONTEIRO'],separarFranqueado:true},
+    {nome:'BURGER KING',palavras:['BURGER KING','BURGER','ESTRADA DO MONTEIRO'],separarFranqueado:true,exigeOC:true},
     {nome:'C&A',palavras:['C&A'],separarFranqueado:false},
     {nome:'ARCELOR MITTAL',palavras:['ARCELOR MITTAL','ARCELORMITTAL'],separarFranqueado:false},
     // MADERO entrou em 2026-08-28 (a pedido do usuário: revisão do Faturamento por Cliente
@@ -50608,6 +50896,9 @@ async function crmMoverEtapa(id,etapaKey){
   // pessoa precisar digitar nada, isso conta como "interação" pra saúde do funil (ver
   // _crmUltimaInteracao acima): avançar um card de etapa já prova que alguém está
   // cuidando dele.
+  // Checklist "O que orçar" (2026-10-08) — entrar na etapa ORÇAMENTO exige dizer quais produtos
+  // orçar. Abre a janela e só move depois de confirmar (ver _crmAbrirChecklistOrc/_crmCkConfirmar).
+  if(etapaKey==='orcamento'&&!window._crmChecklistOrcOk&&typeof _crmAbrirChecklistOrc==='function'){_crmAbrirChecklistOrc(e,etapaKey,'mover');return;}
   const labelAntiga=(etapas.find(x=>x.key===e.etapa)||{}).label||e.etapa||'—';
   const labelNova=(etapas.find(x=>x.key===etapaKey)||{}).label||etapaKey;
   const _etapaAnteriorKey=e.etapa,_entradaAnterior=e.etapaEntradaEm||null;
@@ -57534,9 +57825,9 @@ async function orc2IaRemoverChave(){
 // Botão na aba Produtos
 function _orc2IaHtmlBotao(){
   const st=orc2.ia&&orc2.ia.status;
-  return`<div class="orc2-ia-bar"><div style="flex:1;min-width:200px"><b>🤖 Ler projeto com IA</b><span>Suba o PDF do projeto: a IA lista os itens com as medidas e você confere antes de entrar no orçamento.</span></div>
-  <input type="file" id="orc2-ia-arquivo" accept="application/pdf,.pdf" style="display:none" onchange="orc2IaLerArquivo(this)">
-  <button type="button" class="orc2-btn pri" ${st==='lendo'?'disabled':''} onclick="orc2IaEscolher()">${st==='lendo'?'⏳ Lendo…':'📎 Escolher PDF do projeto'}</button></div>
+  return`<div class="orc2-ia-bar"><div style="flex:1;min-width:200px"><b>🤖 Ler projeto com IA</b><span>Suba o projeto (um ou vários PDFs, JPG ou PNG — pode selecionar todas as pranchas de uma vez): a IA lista os itens com as medidas e você confere antes de entrar no orçamento.</span></div>
+  <input type="file" id="orc2-ia-arquivo" multiple accept="application/pdf,.pdf,image/jpeg,image/png,.jpg,.jpeg,.png" style="display:none" onchange="orc2IaLerArquivo(this)">
+  <button type="button" class="orc2-btn pri" ${st==='lendo'?'disabled':''} onclick="orc2IaEscolher()">${st==='lendo'?'⏳ Lendo…':'📎 Escolher arquivos do projeto'}</button></div>
   <div id="orc2-ia-box">${_orc2IaHtmlBox()}</div>`;
 }
 function orc2IaEscolher(){
@@ -57547,13 +57838,14 @@ function _orc2IaProgresso(msg){if(!orc2.ia)return;orc2.ia.msg=msg;const el=docum
 function _orc2IaB64(buf){let s='';const b=new Uint8Array(buf);for(let i=0;i<b.length;i+=0x8000)s+=String.fromCharCode.apply(null,b.subarray(i,i+0x8000));return btoa(s);}
 // Desenha as páginas em imagens JPEG. Página até ~A3 = 1 imagem; maior (prancha) = página inteira +
 // partes em grade (com 6% de sobra entre partes), cada uma com até 1568px no lado maior.
-async function _orc2IaPaginas(buf){
+async function _orc2IaPaginas(buf,lim){
+  const maxImg=lim?lim.img:ORC2_IA_MAX_IMG,maxPag=lim?lim.pag:ORC2_IA_MAX_PAG,rotArq=lim&&lim.rot?lim.rot+' — ':'';
   if(!window.pdfjsLib)throw new Error('o leitor de PDF ainda está carregando — tente de novo em alguns segundos');
   if(!pdfjsLib.GlobalWorkerOptions.workerSrc)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-  const nPag=Math.min(pdf.numPages,ORC2_IA_MAX_PAG);const paginas=[];let nImg=0;
+  const nPag=Math.max(0,Math.min(pdf.numPages,maxPag));const paginas=[];let nImg=0;
   for(let n=1;n<=nPag;n++){
-    _orc2IaProgresso('Preparando página '+n+' de '+nPag+'…');
+    _orc2IaProgresso(rotArq+'Preparando página '+n+' de '+nPag+'…');
     const pg=await pdf.getPage(n);const vp1=pg.getViewport({scale:1});
     let texto='';try{const tc=await pg.getTextContent();texto=tc.items.map(i=>i.str).join(' ').replace(/\s+/g,' ').trim().slice(0,6000);}catch(e){}
     const W=vp1.width,H=vp1.height,grande=Math.max(W,H)>1300;
@@ -57566,9 +57858,9 @@ async function _orc2IaPaginas(buf){
       await pg.render({canvasContext:ctx,viewport:vp}).promise;
       imgs.push({rot,data:cv.toDataURL('image/jpeg',0.82).split(',')[1]});
     };
-    if(nImg<ORC2_IA_MAX_IMG){await desenhar(0,0,W,H,grande?'página inteira':'');nImg++;}
+    if(nImg<maxImg){await desenhar(0,0,W,H,grande?'página inteira':'');nImg++;}
     if(grande){const ox=W*0.06,oy=H*0.06,cw=W/cols,ch=H/lins;
-      for(let r=0;r<lins;r++)for(let c=0;c<cols;c++){if(nImg>=ORC2_IA_MAX_IMG)break;
+      for(let r=0;r<lins;r++)for(let c=0;c<cols;c++){if(nImg>=maxImg)break;
         const x0=Math.max(0,c*cw-ox),y0=Math.max(0,r*ch-oy),x1=Math.min(W,(c+1)*cw+ox),y1=Math.min(H,(r+1)*ch+oy);
         await desenhar(x0,y0,x1-x0,y1-y0,'parte '+(r*cols+c+1)+' de '+(cols*lins)+' (linha '+(r+1)+', coluna '+(c+1)+')');nImg++;}}
     paginas.push({n,texto,imgs});
@@ -57610,38 +57902,84 @@ TIPOS
 LISTA DO CATÁLOGO (id | nome | medida)
 ${cat||'(vazia)'}`;
 }
+// (2026-10-08, a pedido do usuário: "inserir mais de um pdf ou jpg... projetos do BK nem sempre vem uma
+// prancha só") — aceita vários arquivos de uma vez (PDF, JPG, PNG), todos enviados JUNTOS numa leitura só
+// (a IA trata como um projeto único e não repete o mesmo item que aparece em mais de uma prancha).
+// O limite de páginas/imagens (ORC2_IA_MAX_PAG/ORC2_IA_MAX_IMG) é dividido entre os arquivos.
+function _orc2IaEhImagem(f){return /^image\/(jpeg|png)$/i.test(f.type||'')||/\.(jpe?g|png)$/i.test(f.name||'');}
+function _orc2IaEhPdf(f){return /pdf/i.test(f.type||'')||/\.pdf$/i.test(f.name||'');}
+async function _orc2IaImagemArq(f,maxImg){
+  const url=URL.createObjectURL(f);
+  try{
+    const img=await new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>rej(new Error('não consegui abrir a imagem '+f.name));im.src=url;});
+    const W=img.naturalWidth,H=img.naturalHeight,grande=Math.max(W,H)>2600;
+    const cols=grande?Math.ceil(W/1800):1,lins=grande?Math.ceil(H/1800):1;const imgs=[];
+    const desenhar=(x0,y0,w,h,rot)=>{const esc=Math.min(1568/Math.max(w,h),1);const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(w*esc));cv.height=Math.max(1,Math.round(h*esc));
+      const ctx=cv.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);ctx.drawImage(img,x0,y0,w,h,0,0,cv.width,cv.height);
+      imgs.push({rot,data:cv.toDataURL('image/jpeg',0.85).split(',')[1]});};
+    if(maxImg>0)desenhar(0,0,W,H,grande?'imagem inteira':'');
+    if(grande){const ox=W*0.06,oy=H*0.06,cw=W/cols,ch=H/lins;
+      for(let r=0;r<lins;r++)for(let c=0;c<cols;c++){if(imgs.length>=maxImg)break;
+        const x0=Math.max(0,c*cw-ox),y0=Math.max(0,r*ch-oy),x1=Math.min(W,(c+1)*cw+ox),y1=Math.min(H,(r+1)*ch+oy);
+        desenhar(x0,y0,x1-x0,y1-y0,'parte '+(r*cols+c+1)+' de '+(cols*lins)+' (linha '+(r+1)+', coluna '+(c+1)+')');}}
+    return{paginas:[{n:1,texto:'',imgs}],total:1,lidas:1,nImg:imgs.length};
+  }finally{URL.revokeObjectURL(url);}
+}
 async function orc2IaLerArquivo(inp){
-  const f=inp&&inp.files&&inp.files[0];if(!f||!orc2.doc)return;
+  const files=[...((inp&&inp.files)||[])];if(!files.length||!orc2.doc)return;
   if(!_orc2IaTemChave()){toast('A leitura de projeto não está configurada','terr');return;}
-  if(f.size>60*1024*1024){toast('PDF grande demais (máx. 60 MB)','terr');return;}
-  orc2.ia={status:'lendo',arquivo:f.name,msg:'Abrindo o PDF…',itens:[],inicio:Date.now()};
+  const ruins=files.filter(f=>!_orc2IaEhPdf(f)&&!_orc2IaEhImagem(f));
+  if(ruins.length){toast('Só dá pra ler PDF, JPG ou PNG ('+ruins.map(f=>f.name).join(', ')+')','terr');return;}
+  const grandes=files.filter(f=>f.size>60*1024*1024);
+  if(grandes.length){toast('Arquivo grande demais (máx. 60 MB cada): '+grandes.map(f=>f.name).join(', '),'terr');return;}
+  const rotulo=files.length===1?files[0].name:files.length+' arquivos ('+files.map(f=>f.name).join(', ')+')';
+  orc2.ia={status:'lendo',arquivo:rotulo,msg:'Abrindo '+(files.length===1?'o arquivo':'os arquivos')+'…',itens:[],inicio:Date.now()};
   _orc2ReRenderProdutos();
   try{
-    const pg=await _orc2IaPaginas(await f.arrayBuffer());
-    try{orc2._iaCapa=(pg.paginas[0]&&pg.paginas[0].imgs[0]&&pg.paginas[0].imgs[0].data)||null;}catch(e){}
-    const content=[{type:'text',text:_orc2IaPrompt()}];
-    pg.paginas.forEach(p=>{
-      content.push({type:'text',text:`=== PÁGINA ${p.n} de ${pg.total} — texto extraído: ${p.texto||'(sem texto)'}`});
-      p.imgs.forEach(im=>{content.push({type:'text',text:`Página ${p.n}${im.rot?' — '+im.rot:''}:`});content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:im.data}});});
-    });
-    if(pg.total>pg.lidas)content.push({type:'text',text:`(O PDF tem ${pg.total} páginas; só as ${pg.lidas} primeiras foram enviadas.)`});
+    const content=[{type:'text',text:_orc2IaPrompt()+(files.length>1?`
+
+VÁRIOS ARQUIVOS
+- Este projeto veio em ${files.length} arquivos (pranchas separadas, fotos ou desenhos). Trate tudo como UM projeto só.
+- O mesmo item costuma aparecer em mais de uma prancha (planta, elevação, detalhe, quadro de quantidades): NÃO repita — junte as informações num item só.
+- Em "onde", diga o arquivo e a página (ex.: "arquivo 2 (FACHADAS.pdf), pág. 1, Fachada C").`:'')}];
+    let restImg=ORC2_IA_MAX_IMG,restPag=ORC2_IA_MAX_PAG,totPag=0,totImg=0,cortados=[];orc2._iaCapa=null;
+    for(let k=0;k<files.length;k++){
+      const f=files[k];const rot=files.length>1?'Arquivo '+(k+1)+' de '+files.length+' ('+f.name+')':'';
+      if(restImg<=0||restPag<=0){cortados.push(f.name);continue;}
+      // reserva um pouco pros próximos arquivos (cada um tem direito a pelo menos 1 imagem)
+      const reservar=Math.max(0,files.length-k-1);
+      const lim={img:Math.max(1,restImg-reservar),pag:restPag,rot};
+      let pg;
+      if(_orc2IaEhImagem(f)){_orc2IaProgresso((rot?rot+' — ':'')+'Preparando imagem…');pg=await _orc2IaImagemArq(f,lim.img);}
+      else pg=await _orc2IaPaginas(await f.arrayBuffer(),lim);
+      if(!orc2._iaCapa){try{orc2._iaCapa=(pg.paginas[0]&&pg.paginas[0].imgs[0]&&pg.paginas[0].imgs[0].data)||null;}catch(e){}}
+      if(files.length>1)content.push({type:'text',text:`##### ARQUIVO ${k+1} de ${files.length}: ${f.name}${_orc2IaEhImagem(f)?' (imagem)':' ('+pg.total+(pg.total===1?' página':' páginas')+')'}`});
+      pg.paginas.forEach(p=>{
+        const pre=files.length>1?'Arquivo '+(k+1)+', ':'';
+        if(!_orc2IaEhImagem(f))content.push({type:'text',text:`=== ${pre}PÁGINA ${p.n} de ${pg.total} — texto extraído: ${p.texto||'(sem texto)'}`});
+        p.imgs.forEach(im=>{content.push({type:'text',text:`${pre}${_orc2IaEhImagem(f)?'Imagem':'Página '+p.n}${im.rot?' — '+im.rot:''}:`});content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:im.data}});});
+      });
+      if(pg.total>pg.lidas)content.push({type:'text',text:`(O arquivo ${f.name} tem ${pg.total} páginas; só as ${pg.lidas} primeiras foram enviadas.)`});
+      restImg-=pg.nImg;restPag-=pg.lidas;totPag+=pg.lidas;totImg+=pg.nImg;
+    }
+    if(cortados.length)content.push({type:'text',text:`(Por limite de tamanho, estes arquivos não foram enviados: ${cortados.join(', ')}.)`});
     content.push({type:'text',text:'Liste agora todos os itens de comunicação visual do projeto, seguindo as regras.'});
     const modelo=(orc2.iaCfg&&orc2.iaCfg.modelo)||ORC2_IA_MODELOS[0][0];
-    _orc2IaProgresso('A IA está lendo '+pg.lidas+(pg.lidas===1?' página':' páginas')+' ('+pg.nImg+' imagens)… isso leva de 30 segundos a 2 minutos.');
+    _orc2IaProgresso('A IA está lendo '+(files.length>1?files.length+' arquivos, ':'')+totPag+(totPag===1?' página':' páginas')+' ('+totImg+' imagens)… isso leva de 30 segundos a 2 minutos.');
     const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':orc2.iaCfg.chave,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
       body:JSON.stringify({model:modelo,max_tokens:16000,messages:[{role:'user',content}],output_config:{format:{type:'json_schema',schema:ORC2_IA_SCHEMA}}})});
     const js=await r.json().catch(()=>null);
     if(!r.ok){const m=(js&&js.error&&js.error.message)||('HTTP '+r.status);
-      throw new Error(r.status===401?'chave da IA inválida — confira em ⚙️':r.status===413?'PDF grande demais pra ler de uma vez':(r.status===429||r.status===529)?'a IA está ocupada agora, tente de novo em 1 minuto':m);}
+      throw new Error(r.status===401?'chave da IA inválida — confira em ⚙️':r.status===413?'arquivos grandes demais pra ler de uma vez — tente mandar menos pranchas':(r.status===429||r.status===529)?'a IA está ocupada agora, tente de novo em 1 minuto':m);}
     const txt=((js&&js.content)||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
     let out;try{out=JSON.parse(txt);}catch(e){throw new Error('a resposta da IA veio num formato inesperado');}
     const itens=(out.itens||[]).map(it=>_orc2IaNormItem(it));
     itens.forEach(it=>{if(it.tipo==='manual'&&!it.preco){const sg=_orc2SugestaoAvulso(it.descricao);if(sg){it.preco=String(sg.preco);it.obs=(it.obs?it.obs+' · ':'')+'preço do último orçamento ("'+sg.nome+'")';}}});
-    orc2.ia={status:'ok',arquivo:f.name,modelo,cliente:out.cliente||'',cidade:out.cidade||'',uf:String(out.uf||'').toUpperCase().slice(0,2),resumo:out.resumo||'',itens,bruto:out,uso:js.usage||null,paginas:pg.lidas,imagens:pg.nImg,seg:Math.round((Date.now()-orc2.ia.inicio)/1000)};
+    orc2.ia={status:'ok',arquivo:rotulo,modelo,cliente:out.cliente||'',cidade:out.cidade||'',uf:String(out.uf||'').toUpperCase().slice(0,2),resumo:out.resumo||'',itens,bruto:out,uso:js.usage||null,paginas:totPag,imagens:totImg,seg:Math.round((Date.now()-orc2.ia.inicio)/1000)};
     _orc2IaPreencherProjeto();
     _orc2ReRenderProdutos();
-    toast('Projeto lido: '+itens.length+' itens pra conferir','tok');
-  }catch(e){console.error('orc2 IA',e);orc2.ia={status:'erro',arquivo:f.name,erro:e.message||String(e),itens:[]};_orc2ReRenderProdutos();toast('Não consegui ler o projeto: '+(e.message||e),'terr');}
+    toast('Projeto lido: '+itens.length+' itens pra conferir'+(cortados.length?' (alguns arquivos ficaram de fora pelo limite)':''),'tok');
+  }catch(e){console.error('orc2 IA',e);orc2.ia={status:'erro',arquivo:rotulo,erro:e.message||String(e),itens:[]};_orc2ReRenderProdutos();toast('Não consegui ler o projeto: '+(e.message||e),'terr');}
 }
 function _orc2IaCor(txt){const cn=_orc2BkNorm(txt);if(!cn)return ORC2_ACM_PADRAO;const cs=Object.keys(_orc2AcmCores());
   return cs.find(c=>_orc2BkNorm(c)===cn)||cs.find(c=>_orc2BkNorm(c).indexOf(cn)===0)||cs.find(c=>_orc2BkNorm(c).indexOf(cn.split(' ')[0])===0)||ORC2_ACM_PADRAO;}
@@ -59946,7 +60284,7 @@ function _orc5HtmlFila(){
   return`<div class="dash-card orc5-fila" style="padding:12px 14px;margin-bottom:12px">
     <div class="orc5-fila-h" onclick="orc5ToggleFila()"><b>📥 Na fila de orçamento</b><span class="orc5-n">${fila.length}</span><span style="flex:1"></span><span class="orc5-seta">${aberta?'▲':'▼'}</span></div>
     <div class="orc5-fila-l" style="${aberta?'':'display:none'}">${fila.map((e,i)=>{const o=_orc5OrcDoCard(e.id)[0];
-      return`<div class="orc5-fi"><span class="pos">${i+1}º</span><div class="i"><div class="n">${_orcxEsc(e.nome||'—')}</div><div class="m">${_orcxEsc([e.responsavel,[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'),e.job,_orc5Dias(e)].filter(Boolean).join(' · '))}</div></div>
+      return`<div class="orc5-fi"><span class="pos">${i+1}º</span><div class="i"><div class="n">${_orcxEsc(e.nome||'—')}</div><div class="m">${_orcxEsc([e.responsavel,[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'),e.job,_orc5Dias(e)].filter(Boolean).join(' · '))}</div>${typeof _crmCkResumoFila==='function'?_crmCkResumoFila(e):''}</div>
       ${o?`<button type="button" class="orc2-btn sec" onclick="orc2Abrir('novo','${o.id}')">Abrir orçamento</button>`:`<button type="button" class="orc2-btn pri" onclick="orc5Orcar('${e.id}')">Orçar</button>`}</div>`;}).join('')}</div></div>`;
 }
 function orc5ToggleFila(){let a=true;try{a=localStorage.getItem('gcore_orc5_fila')!=='0';localStorage.setItem('gcore_orc5_fila',a?'0':'1');}catch(e){}orc2Render();}
@@ -59964,6 +60302,225 @@ function orc5AbrirOrcDoCard(orcId){
   const abrir=()=>{if(orc2.salvos&&orc2.salvos[orcId]){orc2Abrir('novo',orcId);return true;}return false;};
   if(!abrir()){let n=0;const it=setInterval(()=>{if(abrir()||++n>20){clearInterval(it);if(n>20)toast('Orçamento não encontrado','terr');}},250);}
 }
+// ══════════════════════════════════════════════════════════════════════════════════════
+// CHECKLIST "O QUE ORÇAR" (2026-10-08, a pedido do usuário: "na hora que o usuário coloca um card
+// na etapa orçamentos... tem que ter um checklist pra ele dizer pro orçamentista o que deve ser
+// orçado... por enquanto um checklist de produtos"). A cidade não é perguntada — já vem do card.
+// Ao mover um card PARA a etapa ORÇAMENTO (arrastar, seletor, Mover, Avançar — tudo passa por
+// crmMoverEtapa), abre a janela; sem marcar pelo menos 1 produto o card não entra na fila.
+// Fica gravado em e.orcChecklist={itens:[{key,qtd,obs}],em,por} e aparece: no card (aba Geral,
+// com botão de editar), na fila "📥 Na fila de orçamento" e no orçamento vinculado (com ✅ quando
+// o orçamentista já adicionou um produto daquele tipo).
+// ══════════════════════════════════════════════════════════════════════════════════════
+const CRM_ORC_CHECKLIST=[
+  {key:'letra',ic:'🔠',l:'Letra caixa',match:(p,it)=>p.tipo==='letra'&&(!it||!it.modelo||p.modelo===it.modelo)},
+  {key:'fachada',ic:'🏢',l:'Fachada/Testeira',match:p=>p.tipo==='fachada'},
+  {key:'placa',ic:'🪧',l:'Placa',match:p=>p.tipo==='config'&&p.categoria==='placa'},
+  {key:'totem',ic:'🗼',l:'Totem / Painel'},
+  {key:'bk',ic:'🍔',l:'Itens da Tabela BK',match:p=>p.tipo==='bk'},
+  {key:'config',ic:'⚙️',l:'Produto configurado',match:p=>p.tipo==='config'&&p.categoria!=='placa'},
+  {key:'adesivo',ic:'🏷️',l:'Adesivo / Envelopamento'},
+  {key:'outro',ic:'✍️',l:'Outro',obsObrig:true}
+];
+let _crmCkPend=null; // {id,etapaKey,modo:'mover'|'editar'}
+function _crmCkEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function _crmCkDef(key){return CRM_ORC_CHECKLIST.find(x=>x.key===key);}
+function _crmCkItens(e){return(e&&e.orcChecklist&&Array.isArray(e.orcChecklist.itens))?e.orcChecklist.itens:[];}
+// "Produtos padrão caderno" (2026-10-08, a pedido do usuário): Burger King, Bob's etc. já têm
+// caderno + projeto — o orçamentista identifica no projeto o que orçar, o vendedor não lista item a item.
+function _crmCkCaderno(e){return!!(e&&e.orcChecklist&&e.orcChecklist.modo==='caderno');}
+function _crmCkTextoCaderno(c){return'📘 Produtos padrão caderno — orçamentista identifica pelo projeto'+(c&&c.obs?' — '+c.obs:'');}
+function _crmCkTem(e){return _crmCkCaderno(e)||_crmCkItens(e).length>0;}
+function _crmCkResumoTxt(c){if(!c)return'';if(c.modo==='caderno')return _crmCkTextoCaderno(c);return(Array.isArray(c.itens)?c.itens:[]).map(_crmCkTextoItem).join(' · ');}
+function _crmCkCadMudou(){
+  const on=!!document.getElementById('crm-ck-cad')?.checked;
+  const area=document.getElementById('crm-ck-itens-area');if(area)area.style.display=on?'none':'';
+  const det=document.getElementById('crm-ck-cad-det');if(det)det.style.display=on?'':'none';
+  const box=document.getElementById('crm-ck-cad-box');if(box){box.style.borderColor=on?'#2563eb':'#e2e8f0';box.style.background=on?'#eff6ff':'#fff';}
+  if(!on&&!document.querySelectorAll('#crm-ck-lista .crm-ck-row').length)_crmCkAddLinha();
+}
+function _crmCkModelosLetra(){try{return(typeof ORC2_MODELOS!=='undefined'&&Array.isArray(ORC2_MODELOS))?ORC2_MODELOS:[];}catch(err){return[];}}
+function _crmCkModeloLabel(k){const m=_crmCkModelosLetra().find(x=>x.k===k);return m?m.l:'';}
+function _crmCkProdMudou(sel){const row=sel.closest('.crm-ck-row');if(!row)return;const w=row.querySelector('.crm-ck-modelo-wrap');if(w)w.style.display=sel.value==='letra'?'':'none';}
+function _crmCkNum(v){const n=parseFloat(String(v==null?'':v).replace(',','.'));return isFinite(n)?n:null;}
+function _crmCkFmtN(n){return String(Math.round(n*100)/100).replace('.',',');}
+function _crmCkTextoItem(it){
+  const d=_crmCkDef(it.key)||{ic:'•',l:it.key};
+  const med=(it.larg!=null&&it.alt!=null)?`${_crmCkFmtN(it.larg)} × ${_crmCkFmtN(it.alt)}${it.prof!=null?' × '+_crmCkFmtN(it.prof):''} cm (L×A×P)`:'';
+  const mod=it.key==='letra'&&it.modelo?_crmCkModeloLabel(it.modelo):'';
+  return`${d.ic} ${d.l}${mod?' — '+mod:''}${it.qtd>1?' ×'+it.qtd:''}${med?' — '+med:''}${it.obs?' — '+it.obs:''}`;
+}
+// Janela "O que orçar" (v2, 2026-10-08 — a pedido do usuário: "o formato ideal é ADICIONAR
+// PRODUTO... pede obrigatoriamente as medidas separadas LARGURA, ALTURA E PROFUNDIDADE... pode
+// ter o mesmo produto porém com medidas diferentes"). Cada linha = 1 produto com suas medidas.
+function _crmCkLinhaHtml(it){
+  it=it||{};
+  const inp='border:1.5px solid #e5e7eb;border-radius:8px;padding:7px 9px;font-size:.82rem;font-family:inherit;color:#1e293b;background:#fff;box-sizing:border-box;width:100%';
+  const lbl='font-size:.62rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:3px';
+  const v=x=>x==null?'':String(x).replace('.',',');
+  return`<div class="crm-ck-row" style="border:1.5px solid #fbcfe8;background:#fdf2f8;border-radius:10px;padding:10px 12px">
+    <div style="display:grid;grid-template-columns:1fr 80px 34px;gap:8px;align-items:end">
+      <div><label style="${lbl}">Produto *</label><select class="crm-ck-prod" onchange="_crmCkProdMudou(this)" style="${inp}"><option value="">Escolha o produto…</option>${CRM_ORC_CHECKLIST.map(d=>`<option value="${d.key}" ${it.key===d.key?'selected':''}>${d.ic} ${d.l}</option>`).join('')}</select></div>
+      <div><label style="${lbl}">Qtd *</label><input type="number" min="1" step="1" class="crm-ck-qtd" value="${it.qtd||1}" style="${inp}"></div>
+      <button type="button" onclick="this.closest('.crm-ck-row').remove();_crmCkContar()" title="Remover este produto" style="background:#fff;border:1px solid #fecaca;color:#dc2626;border-radius:8px;height:34px;cursor:pointer;font-size:.85rem">🗑️</button>
+    </div>
+    <div class="crm-ck-modelo-wrap" style="display:${it.key==='letra'?'':'none'};margin-top:8px"><label style="${lbl}">Tipo de letra caixa *</label><select class="crm-ck-modelo" style="${inp}"><option value="">Escolha o tipo…</option>${_crmCkModelosLetra().map(m=>`<option value="${m.k}" ${it.modelo===m.k?'selected':''}>${_crmCkEsc(m.l)} — ${_crmCkEsc(m.sub)}</option>`).join('')}</select></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px">
+      <div><label style="${lbl}">Largura (cm) *</label><input type="text" inputmode="decimal" class="crm-ck-larg" value="${v(it.larg)}" placeholder="ex.: 120" style="${inp}"></div>
+      <div><label style="${lbl}">Altura (cm) *</label><input type="text" inputmode="decimal" class="crm-ck-alt" value="${v(it.alt)}" placeholder="ex.: 60" style="${inp}"></div>
+      <div><label style="${lbl}">Profundidade (cm) *</label><input type="text" inputmode="decimal" class="crm-ck-prof" value="${v(it.prof)}" placeholder="ex.: 8" style="${inp}"></div>
+    </div>
+    <input type="text" class="crm-ck-obs no-upper" value="${_crmCkEsc(it.obs||'')}" placeholder="Detalhe (opcional) — ex.: acrílico, iluminada, texto “BURGER KING”" style="${inp};margin-top:8px">
+  </div>`;
+}
+function _crmCkAddLinha(it){
+  const lista=document.getElementById('crm-ck-lista');if(!lista)return;
+  lista.insertAdjacentHTML('beforeend',_crmCkLinhaHtml(it));
+  _crmCkContar();
+  if(!it){const ult=lista.lastElementChild;const s=ult&&ult.querySelector('.crm-ck-prod');if(s)setTimeout(()=>s.focus(),0);}
+}
+function _crmCkContar(){
+  const n=document.querySelectorAll('#crm-ck-lista .crm-ck-row').length;
+  const el=document.getElementById('crm-ck-cont');if(el)el.textContent=n?n+' '+_plural(n,'produto','produtos'):'Nenhum produto ainda';
+}
+function _crmAbrirChecklistOrc(e,etapaKey,modo){
+  _crmCkPend={id:e.id,etapaKey,modo:modo||'mover'};
+  const old=document.getElementById('crm-ck-modal');if(old)old.remove();
+  const modal=document.createElement('div');modal.id='crm-ck-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10050;display:flex;align-items:center;justify-content:center;padding:20px';
+  _dynModalSemFechaClique(modal);
+  const cidade=[e.sedeCidade,e.sedeUf].filter(Boolean).join('/');
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:20px 22px;max-width:620px;width:100%;max-height:90vh;display:flex;flex-direction:column">
+    <div style="font-size:1rem;font-weight:800;color:#101B3D">📋 O que orçar — ${_crmCkEsc(e.nome||'')}</div>
+    <div style="font-size:.76rem;color:#64748b;margin:4px 0 12px">Adicione cada produto com as medidas. Pode repetir o mesmo produto com medidas diferentes.${cidade?' Cidade da obra: <b>'+_crmCkEsc(cidade)+'</b> (do card).':''}</div>
+    <label id="crm-ck-cad-box" style="display:flex;gap:10px;align-items:flex-start;border:1.5px solid ${_crmCkCaderno(e)?'#2563eb':'#e2e8f0'};background:${_crmCkCaderno(e)?'#eff6ff':'#fff'};border-radius:10px;padding:10px 12px;cursor:pointer;margin-bottom:10px">
+      <input type="checkbox" id="crm-ck-cad" ${_crmCkCaderno(e)?'checked':''} onchange="_crmCkCadMudou()" style="width:18px;height:18px;margin-top:2px;accent-color:#2563eb;cursor:pointer">
+      <span><b style="font-size:.86rem;color:#1e293b">📘 Produtos padrão caderno</b><br><span style="font-size:.74rem;color:#64748b">Burger King, Bob's e outros com caderno e projeto prontos — o orçamentista identifica no projeto o que orçar.</span></span>
+    </label>
+    <div id="crm-ck-cad-det" style="display:${_crmCkCaderno(e)?'':'none'}"><input type="text" id="crm-ck-cad-obs" class="no-upper" value="${_crmCkEsc((e.orcChecklist&&e.orcChecklist.obs)||'')}" placeholder="Qual caderno/pacote? (opcional) — ex.: Caderno BK 2026, pacote Sorocaba" style="width:100%;box-sizing:border-box;border:1.5px solid #e5e7eb;border-radius:8px;padding:8px 10px;font-size:.82rem;font-family:inherit"></div>
+    <div id="crm-ck-itens-area" style="display:${_crmCkCaderno(e)?'none':'flex'};flex-direction:column;min-height:0">
+    <div id="crm-ck-lista" style="display:flex;flex-direction:column;gap:8px;overflow:auto;padding-right:2px"></div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:10px">
+      <button type="button" onclick="_crmCkAddLinha()" style="background:#fff;border:1.5px dashed #e91e63;color:#e91e63;border-radius:10px;padding:9px 14px;font-weight:800;font-size:.84rem;cursor:pointer;font-family:inherit">➕ Adicionar produto</button>
+      <span id="crm-ck-cont" style="font-size:.74rem;color:#94a3b8"></span>
+    </div>
+    </div>
+    <div id="crm-ck-erro" style="font-size:.78rem;color:#dc2626;margin-top:10px;min-height:1em"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button type="button" onclick="_crmCkCancelar()" class="dash-btn-conf" style="background:#94a3b8;flex:1">Cancelar</button>
+      <button type="button" onclick="_crmCkConfirmar()" class="dash-btn-conf" style="background:#e91e63;flex:2">${_crmCkPend.modo==='editar'?'💾 Salvar checklist':'Salvar e mover para ORÇAMENTO'}</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  const itens=_crmCkItens(e);
+  if(itens.length)itens.forEach(it=>_crmCkAddLinha(it));else if(!_crmCkCaderno(e))_crmCkAddLinha();
+}
+function _crmCkCancelar(){
+  const m=document.getElementById('crm-ck-modal');if(m)m.remove();
+  const p=_crmCkPend;_crmCkPend=null;
+  if(p&&p.modo==='mover'){
+    toast('O card não foi para ORÇAMENTO — sem o checklist o orçamentista não sabe o que orçar','tinf');
+    try{renderCrmKanban();}catch(err){}
+    try{const e=crmEmpresas.find(x=>x.id===p.id);if(e&&_crmCardAtualId===e.id)_crmRenderCard(e);}catch(err){}
+  }
+}
+async function _crmCkConfirmar(){
+  const p=_crmCkPend;if(!p)return;
+  const e=crmEmpresas.find(x=>x.id===p.id);if(!e){_crmCkCancelar();return;}
+  const erro=document.getElementById('crm-ck-erro');
+  const caderno=!!document.getElementById('crm-ck-cad')?.checked;
+  const itens=[];let falta='';
+  if(!caderno)
+  document.querySelectorAll('#crm-ck-lista .crm-ck-row').forEach((row,i)=>{
+    row.style.borderColor='#fbcfe8';
+    const key=row.querySelector('.crm-ck-prod')?.value||'';
+    const qtd=parseInt(row.querySelector('.crm-ck-qtd')?.value,10);
+    const larg=_crmCkNum(row.querySelector('.crm-ck-larg')?.value),alt=_crmCkNum(row.querySelector('.crm-ck-alt')?.value),prof=_crmCkNum(row.querySelector('.crm-ck-prof')?.value);
+    const obs=(row.querySelector('.crm-ck-obs')?.value||'').trim();
+    const d=_crmCkDef(key);
+    const modelo=key==='letra'?(row.querySelector('.crm-ck-modelo')?.value||''):'';
+    let msg='';
+    if(!key)msg='escolha o produto';
+    else if(key==='letra'&&!modelo)msg='escolha o tipo de letra caixa';
+    else if(!(qtd>=1))msg='informe a quantidade';
+    else if(!(larg>0)||!(alt>0)||prof==null||prof<0)msg='preencha largura, altura e profundidade (em cm)';
+    else if(d&&d.obsObrig&&!obs)msg='descreva o que é no campo Detalhe';
+    if(msg){if(!falta){falta=`Produto ${i+1}: ${msg}.`;}row.style.borderColor='#dc2626';return;}
+    const item={key,qtd,larg,alt,prof,obs};if(modelo)item.modelo=modelo;
+    itens.push(item);
+  });
+  if(falta){if(erro)erro.textContent=falta;return;}
+  if(!caderno&&!itens.length){if(erro)erro.textContent='Adicione pelo menos 1 produto ou marque Produtos padrão caderno.';return;}
+  const quem=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',agora=new Date().toISOString();
+  const antes=_crmCkResumoTxt(e.orcChecklist);
+  e.orcChecklist=caderno?{modo:'caderno',obs:(document.getElementById('crm-ck-cad-obs')?.value||'').trim(),itens:[],em:agora,por:quem}:{itens,em:agora,por:quem};
+  const depois=_crmCkResumoTxt(e.orcChecklist);
+  const m=document.getElementById('crm-ck-modal');if(m)m.remove();
+  _crmCkPend=null;
+  if(p.modo==='mover'){
+    if(!e.timeline)e.timeline=[];
+    e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'📋 O que orçar: '+depois,autor:quem,em:agora,sistema:true});
+    window._crmChecklistOrcOk=true;
+    try{await crmMoverEtapa(e.id,p.etapaKey);}finally{window._crmChecklistOrcOk=false;}
+  }else{
+    if(antes===depois){toast('Nada mudou no checklist','tinf');return;}
+    if(!e.timeline)e.timeline=[];
+    e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'📋 Checklist do orçamento alterado: '+depois,autor:quem,em:agora,sistema:true});
+    e.atualizadoEm=agora;
+    try{await _crmSalvarEmpresaObj(e);toast('Checklist salvo ✅','tok');}catch(err){return;}
+    try{if(_crmCardAtualId===e.id)_crmRenderCard(e);renderCrmKanban();}catch(err){}
+  }
+}
+function crmEditarChecklistOrc(id){const e=crmEmpresas.find(x=>x.id===id);if(e)_crmAbrirChecklistOrc(e,e.etapa,'editar');}
+// Bloco no card (aba Geral) — aparece quando o card tem checklist ou está em ORÇAMENTO/REVISÃO.
+function _crmCkBlocoCard(e){
+  const itens=_crmCkItens(e),cad=_crmCkCaderno(e);
+  const naFila=e.etapa==='orcamento'||e.etapa==='revisao_orcamento';
+  if(!itens.length&&!cad&&!naFila)return'';
+  const c=e.orcChecklist||{};
+  return`<div id="crm-ck-bloco" style="background:#fdf2f8;border:1.5px solid #fbcfe8;border-radius:10px;padding:10px 12px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap">
+      <div style="font-size:.74rem;font-weight:800;color:#9d174d;text-transform:uppercase;letter-spacing:.04em">📋 O que orçar</div>
+      ${e.fechamento?'':`<button type="button" onclick="crmEditarChecklistOrc('${e.id}')" style="background:#fff;border:1px solid #f9a8d4;color:#9d174d;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;cursor:pointer">✏️ ${_crmCkTem(e)?'Editar':'Preencher'}</button>`}
+    </div>
+    ${cad?`<div style="margin-top:8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:6px 10px;font-size:.78rem;color:#1e40af;font-weight:700">${_crmCkEsc(_crmCkTextoCaderno(c))}</div>
+      <div style="font-size:.66rem;color:#94a3b8;margin-top:6px">Por ${_crmCkEsc(c.por||'—')} · ${c.em?_fmtDataHora(c.em):''}</div>`
+    :itens.length?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">${itens.map(it=>`<span style="background:#fff;border:1px solid #fbcfe8;border-radius:8px;padding:4px 10px;font-size:.76rem;color:#1e293b">${_crmCkEsc(_crmCkTextoItem(it))}</span>`).join('')}</div>
+      <div style="font-size:.66rem;color:#94a3b8;margin-top:6px">Por ${_crmCkEsc(c.por||'—')} · ${c.em?_fmtDataHora(c.em):''}</div>`
+    :`<div style="font-size:.76rem;color:#9d174d;margin-top:6px">Este card entrou na fila antes do checklist existir. Clique em Preencher pra dizer ao orçamentista o que orçar.</div>`}
+  </div>`;
+}
+// Texto curto pra fila de orçamento (menu Orçamentos)
+function _crmCkResumoFila(e){
+  const itens=_crmCkItens(e);
+  if(_crmCkCaderno(e))return`<div style="font-size:.72rem;color:#1e40af;margin-top:3px;font-weight:600">${_crmCkEsc(_crmCkTextoCaderno(e.orcChecklist))}</div>`;
+  if(!itens.length)return'<div style="font-size:.7rem;color:#b45309;margin-top:3px">⚠️ Sem checklist do que orçar</div>';
+  return`<div style="font-size:.72rem;color:#9d174d;margin-top:3px;font-weight:600">📋 ${itens.map(it=>_crmCkEsc(_crmCkTextoItem(it))).join(' · ')}</div>`;
+}
+// Bloco no editor do orçamento vinculado — ✅ quando já existe produto daquele tipo no orçamento.
+function _orcCkHtmlEditor(){
+  const d=typeof orc2!=='undefined'&&orc2.doc;if(!d||!d.crm||!d.crm.id)return'';
+  const e=_orc5Card(d.crm.id);const itens=_crmCkItens(e);
+  if(_crmCkCaderno(e))return`<div class="dash-card" id="orc-ck-editor" style="border:1.5px solid #bfdbfe;background:#eff6ff;margin-bottom:12px"><div class="dash-sec-title" style="color:#1e40af">📋 O que o vendedor pediu pra orçar</div><div style="font-size:.82rem;color:#1e40af;font-weight:700">${_crmCkEsc(_crmCkTextoCaderno(e.orcChecklist))}</div><div class="orcx-hint" style="margin-top:6px">Abra o projeto/caderno do cliente pra identificar os itens.</div></div>`;
+  if(!itens.length)return'';
+  const prods=Array.isArray(d.produtos)?d.produtos:[];
+  return`<div class="dash-card" id="orc-ck-editor" style="border:1.5px solid #fbcfe8;background:#fdf2f8;margin-bottom:12px">
+    <div class="dash-sec-title" style="color:#9d174d">📋 O que o vendedor pediu pra orçar</div>
+    <div style="display:flex;flex-direction:column;gap:5px">${itens.map(it=>{const def=_crmCkDef(it.key)||{};
+      const feito=def.match?prods.some(p=>{try{return def.match(p,it);}catch(err){return false;}}):null;
+      const ic=feito===true?'✅':feito===false?'⬜':'•';
+      return`<div style="font-size:.8rem;color:#1e293b"><span style="display:inline-block;width:22px">${ic}</span>${_crmCkEsc(_crmCkTextoItem(it))}</div>`;}).join('')}</div>
+    <div class="orcx-hint" style="margin-top:6px">✅ já tem produto desse tipo no orçamento · ⬜ ainda não · • conferir manualmente</div>
+  </div>`;
+}
+(function(){
+  // Card do CRM: bloco no topo da aba Geral
+  const _ckPre=()=>{try{return _orcCkHtmlEditor();}catch(err){console.error('orc checklist',err);return'';}};
+  if(typeof _orc2HtmlProjeto==='function'){const _op=_orc2HtmlProjeto;_orc2HtmlProjeto=function(){return _ckPre()+_op.apply(this,arguments);};}
+  if(typeof _orc2HtmlProdutos==='function'){const _opr=_orc2HtmlProdutos;_orc2HtmlProdutos=function(){return _ckPre()+_opr.apply(this,arguments);};}
+  if(typeof _crmRenderCard==='function'){const _o=_crmRenderCard;_crmRenderCard=function(e){const r=_o.apply(this,arguments);try{const tab=document.getElementById('crm-tab-geral');const old=document.getElementById('crm-ck-bloco');if(old)old.remove();const h=_crmCkBlocoCard(e);if(tab&&h)tab.insertAdjacentHTML('afterbegin',h);}catch(err){console.error('checklist card',err);}return r;};}
+})();
+
 function _orc5FaixaCard(e){
   const g=e&&e.orcGcore;if(!g)return'';
   const existe=!orc2.salvos||!Object.keys(orc2.salvos).length||orc2.salvos[g.id];
