@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-13.1';</script>
+<script>const APP_BUILD_VERSION='2026-10-13.4';</script>
 <script>
 // ── Copiar caminho da pasta a partir do e-mail (2026-10-08, a pedido do usuário) ──────────
 // E-mail não roda JavaScript (Gmail/Outlook bloqueiam), então um botão "copiar" de verdade
@@ -1271,6 +1271,7 @@ select.fc{cursor:pointer}
       </div>
       <!-- Filtros -->
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;padding-top:10px;border-top:1px solid var(--border-lt)">
+        <select id="vnd-fil-ano" onchange="_anoRef=+this.value||_anoRef;renderDashVendas()" style="display:none;border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:.8rem;background:var(--surface);color:var(--ink2)"></select>
         <select id="vnd-fil-mes" onchange="renderDashVendas()" style="border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:.8rem;background:var(--surface);color:var(--ink2)">
           <option value="">📅 Todos os meses</option>
           <option>JANEIRO</option><option>FEVEREIRO</option><option>MARÇO</option><option>ABRIL</option>
@@ -3360,6 +3361,7 @@ select.fc{cursor:pointer}
         <option value="5">MAIO</option><option value="6">JUNHO</option><option value="7">JULHO</option><option value="8">AGOSTO</option>
         <option value="9">SETEMBRO</option><option value="10">OUTUBRO</option><option value="11">NOVEMBRO</option><option value="12">DEZEMBRO</option>
       </select>
+      <select id="ev-ano-venda" class="evx-in" style="background:#fff;margin-top:6px"></select>
       <div style="font-size:.64rem;color:#94a3b8;margin-top:4px">Conta pra Metas, Comissões e Lista de Vendas.</div>
     </div>
     <div class="evx-side-box">
@@ -10689,6 +10691,18 @@ async function editarValoresPedido(pedidoId){
   // setado antes, senão cai pro mês real de emissão (comportamento de sempre).
   const _mesNatural=p.emissaoEm?(parseInt(p.emissaoEm.split('-')[1],10)||0):0;
   setIn2('ev-mes-venda',String(p.mesVendaOverride||_mesNatural||(new Date().getMonth()+1)));
+  // Ano da venda (2026-10-13, virada de ano) — padrão = ano natural da emissão (2026 pra tudo
+  // que existe hoje), então abrir e salvar sem mexer grava exatamente o mesmo de antes.
+  try{
+    const _anoNat=p.emissaoEm?_anoDeIso(p.emissaoEm):_anoEf(new Date().getFullYear());
+    const _anoAtualEv=p.mesVendaOverrideAno?_anoEf(p.mesVendaOverrideAno):_anoNat;
+    const selAno=document.getElementById('ev-ano-venda');
+    if(selAno){
+      const anos=[...new Set([_anoNat-1,_anoNat,_anoNat+1,_anoAtualEv].map(_anoEf))].sort((a,b)=>a-b);
+      selAno.innerHTML=anos.map(a=>`<option value="${a}">${a}</option>`).join('');
+      selAno.value=String(_anoAtualEv);
+    }
+  }catch(e){console.error('ev-ano-venda',e);}
   setIn2('ev-email-comprador',p.email_comprador||'');
   setIn2('ev-email-engenheiro',p.email_engenheiro||'');
   setIn2('ev-email-financeiro',p.email_financeiro||'');
@@ -10956,8 +10970,12 @@ async function salvarValoresPedido(){
   // pra não deixar lixo salvo à toa.
   const mesEscolhido=parseInt(gi('ev-mes-venda'),10)||0;
   const mesNaturalSalvo=p.emissaoEm?(parseInt(p.emissaoEm.split('-')[1],10)||0):0;
-  if(mesEscolhido&&mesEscolhido!==mesNaturalSalvo)p.mesVendaOverride=mesEscolhido;
-  else delete p.mesVendaOverride;
+  const anoNaturalSalvo=p.emissaoEm?_anoDeIso(p.emissaoEm):_ANO_BASE;
+  const anoEscolhido=_anoEf(parseInt(gi('ev-ano-venda'),10)||anoNaturalSalvo);
+  if(mesEscolhido&&(mesEscolhido!==mesNaturalSalvo||anoEscolhido!==anoNaturalSalvo)){
+    p.mesVendaOverride=mesEscolhido;
+    if(anoEscolhido!==anoNaturalSalvo)p.mesVendaOverrideAno=anoEscolhido;else delete p.mesVendaOverrideAno;
+  }else{delete p.mesVendaOverride;delete p.mesVendaOverrideAno;}
   // E-mails de contato do pedido — antes só existiam no formulário original de Emissão,
   // sem jeito nenhum de completar/corrigir depois (ex.: pedido antigo ou importado que
   // nunca teve Comprador/Engenheiro cadastrado). Editável aqui agora; entram juntos no
@@ -14451,7 +14469,7 @@ function _celebrarPedidoGanho(d){
   let metaTxt='';
   try{
     const hoje=new Date(),y=hoje.getFullYear(),m=hoje.getMonth()+1;
-    const rows=getVendaRowsMerged().filter(r=>r.m===m&&vendedorMatch(r.v,nomeCompleto));
+    const rows=getVendaRowsMerged().filter(r=>_vrNoMes(r,y,m)&&vendedorMatch(r.v,nomeCompleto));
     const jaIncluso=d.os&&rows.some(r=>String(r.p)===String(d.os));
     const vendido=rows.reduce((s,r)=>s+(r.lq||0),0)+(jaIncluso?0:(d.liq||0));
     const qtd=rows.length+(jaIncluso?0:1);
@@ -18119,7 +18137,8 @@ function auditarLiquidosMes(){
     const anoNatural=p.emissaoEm?(parseInt(p.emissaoEm.split('-')[0],10)||0):0;
     const mesNatural=p.emissaoEm?(parseInt(p.emissaoEm.split('-')[1],10)||0):0;
     const mesConta=p.mesVendaOverride||mesNatural;
-    if(mesConta!==m||anoNatural!==y)return;
+    const anoConta=(p.mesVendaOverride&&p.mesVendaOverrideAno)?parseInt(p.mesVendaOverrideAno,10):anoNatural;
+    if(mesConta!==m||anoConta!==y)return;
     const vals=p.valores||{};
     const brutoPedido=mNum(vals['Valor Bruto']);
     const liqPedido=mNum(vals['Valor Líquido do Pedido']);
@@ -18204,7 +18223,8 @@ async function corrigirLiquidosMes(){
     const anoNatural=p.emissaoEm?(parseInt(p.emissaoEm.split('-')[0],10)||0):0;
     const mesNatural=p.emissaoEm?(parseInt(p.emissaoEm.split('-')[1],10)||0):0;
     const mesConta=p.mesVendaOverride||mesNatural;
-    if(mesConta!==m||anoNatural!==y)return;
+    const anoConta=(p.mesVendaOverride&&p.mesVendaOverrideAno)?parseInt(p.mesVendaOverrideAno,10):anoNatural;
+    if(mesConta!==m||anoConta!==y)return;
     const vals=p.valores||{};
     const brutoPedido=mNum(vals['Valor Bruto']);
     const liqPedido=mNum(vals['Valor Líquido do Pedido']);
@@ -19212,6 +19232,42 @@ const _EXCLUIR_COMISSAO_0804_CONFKEY_218='p_1783367270573_mzldf::entrada';
 // história não confirmada pelo usuário (ver comentário em getComissaoItemsAll). Os 17 pedidos
 // agora são tratados por _migrarBaixaHistoricaPDF0408() (setupRealtimeSync), na fonte, sem
 // exclusão manual.
+// ══ VIRADA DE ANO (2026-10-13) ════════════════════════════════════════════════════════════
+// A pedido do usuário ("olhando o sistema como um todo... que correções importantes temos"):
+// as vendas guardavam só o MÊS (r.m), sem ano — em jan/2027 as vendas de janeiro/2026 e
+// janeiro/2027 se misturariam em Metas, Comissões, Gráficos, Lista de Vendas e DRE.
+// REGRA DE OURO ("eu nao posso perder absolutamente nada... nao pode mudar vendas e comissao"):
+// todo dado que existe hoje (ano <= 2026) continua contando como 2026, EXATAMENTE como antes
+// (_anoEf). Só o que for de 2027 em diante ganha ano próprio. Nenhum dado é regravado.
+const _ANO_BASE=2026;
+function _anoEf(y){y=parseInt(y,10)||0;return y>_ANO_BASE?y:_ANO_BASE;}
+function _anoDeIso(iso){return _anoEf(String(iso||'').slice(0,4));}
+let _anoRef=_anoEf(new Date().getFullYear()); // ano escolhido nas telas que só têm filtro de mês
+function _vrAno(r){return(r&&r.y)||_ANO_BASE;}
+function _vrNoMes(r,y,m){return r.m===m&&_vrAno(r)===_anoEf(y);}
+function _vrNoPeriodo(r,y,m){return m?_vrNoMes(r,y,m):_vrAno(r)===_anoEf(y);}
+// Ano da venda de um pedido — mesma prioridade do mês em pedidoToVendaRow(): override manual
+// (com ano explícito, se foi escolhido), planilha (sempre 2026), emissão.
+function _pedVendaAno(p){
+  if(!p)return _ANO_BASE;
+  if(p.mesVendaOverride)return p.mesVendaOverrideAno?_anoEf(p.mesVendaOverrideAno):(p.emissaoEm?_anoDeIso(p.emissaoEm):_ANO_BASE);
+  const xr=(typeof XLSX_VENDAS_BY_OS!=='undefined')?XLSX_VENDAS_BY_OS[String(p.os)]:null;
+  if(xr&&xr.m)return _ANO_BASE;
+  return p.emissaoEm?_anoDeIso(p.emissaoEm):_ANO_BASE;
+}
+function _anosVendas(){
+  const s=new Set([_anoRef]);
+  try{getVendaRowsMerged().forEach(r=>s.add(_vrAno(r)));}catch(e){}
+  return[...s].sort((a,b)=>b-a);
+}
+function _anosOperacionais(){
+  const s=new Set([_anoRef]);
+  try{pedidos.forEach(p=>{
+    if(p.prazo){const i=_normPrazoIso(p.prazo);if(/^\d{4}-/.test(i))s.add(_anoDeIso(i));}
+    const f=p.finalizacao&&p.finalizacao.dataFinalizacao;if(f){const i=_normPrazoIso(String(f));if(/^\d{4}-/.test(i))s.add(_anoDeIso(i));}
+  });}catch(e){}
+  return[...s].sort((a,b)=>b-a);
+}
 function getVendaRowsMerged(){
   if(_vrmCache)return _vrmCache;
   const importadosFS=pedidos.filter(p=>p.importadoPlanilha);
@@ -19254,7 +19310,7 @@ function getVendaRowsMerged(){
 }
 function getVendasMes(y,m,vendedor){
   return getVendaRowsMerged()
-    .filter(r=>r.m===m&&vendedorMatch(r.v,vendedor))
+    .filter(r=>_vrNoMes(r,y,m)&&vendedorMatch(r.v,vendedor))
     .reduce((s,r)=>s+(r.lq||0),0);
 }
 
@@ -20405,7 +20461,7 @@ function getComissaoItemsAll(){
       // a comissão continuava calculando bateu/não-bateu meta do mês ERRADO, pagando metade
       // da comissão (15% em vez de 30%) mesmo o vendedor tendo batido a meta do mês certo.
       let emY,emM;
-      if(p.mesVendaOverride){emY=2026;emM=parseInt(p.mesVendaOverride,10)||0;}
+      if(p.mesVendaOverride){emY=_pedVendaAno(p);emM=parseInt(p.mesVendaOverride,10)||0;} // (2026-10-13) era emY=2026 fixo; _pedVendaAno dá 2026 pra todo pedido existente
       else if(xlsxRef){emY=2026;emM=xlsxRef.m;}
       else if(p.emissaoEm){emY=parseInt(p.emissaoEm.slice(0,4))||qi.y;emM=parseInt(p.emissaoEm.slice(5,7))||qi.m;}
       else{emY=qi.y;emM=qi.m;}
@@ -23304,7 +23360,7 @@ function calcularDRE(y,m,empresaFiltro,regime){
       });
     }
   }else{
-    const vendasMes=incluirReceita?getVendaRowsMerged().filter(r=>r.m===m):[];
+    const vendasMes=incluirReceita?getVendaRowsMerged().filter(r=>_vrNoMes(r,y,m)):[];
     receitaBruta=vendasMes.reduce((s,r)=>s+(r.br||0),0);
     custoProducaoInterno=vendasMes.reduce((s,r)=>s+(r.op||0),0);
     const comItens=incluirReceita?getComissaoItemsAll().filter(i=>i.emY===y&&i.emM===m):[];
@@ -23452,7 +23508,7 @@ function _dreIndReceitaBruta(y,m,empresaFiltro,regime){
     });
     return receita;
   }
-  return getVendaRowsMerged().filter(r=>r.m===m).reduce((s,r)=>s+(r.br||0),0);
+  return getVendaRowsMerged().filter(r=>_vrNoMes(r,y,m)).reduce((s,r)=>s+(r.br||0),0);
 }
 // Classificação por regras (2026-08-24, a pedido do usuário — mapeamento explícito: "pegar
 // custos administrativos tudo que tiver lançado no contas a pagar como administrativo. tudo que
@@ -24772,7 +24828,7 @@ function _opPedidosElegiveis(){
   // — ver project memory) — sem isso, um pedido cancelado continuava gerando previsão de
   // Mão de Obra/Frete a pagar em Operacionais Pedidos/Fluxo de Caixa, inflando a projeção
   // com uma venda que não vai mais acontecer.
-  return pedidos.filter(p=>!(p.os&&isVendaCancelada(p.os))&&isComercialPedido(p)&&!p.importadoPlanilha&&p.prazo&&_opMesVenda(p)>=7);
+  return pedidos.filter(p=>!(p.os&&isVendaCancelada(p.os))&&isComercialPedido(p)&&!p.importadoPlanilha&&p.prazo&&(_pedVendaAno(p)>_ANO_BASE||_opMesVenda(p)>=7));
 }
 // Calcula TODOS os lançamentos previstos (qualquer mês) de uma vez só — as datas de Mão
 // de Obra/Frete podem cair num mês diferente do Prazo de Finalização do pedido (ex.:
@@ -30558,7 +30614,7 @@ function _lpListaFiltrada(){
   infos=infos.filter(x=>!x.curto);
   if(busca)infos=infos.filter(({p})=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
   if(filEtapa)infos=infos.filter(x=>x.ok&&x.etapaAtual&&x.etapaAtual.key===filEtapa);
-  if(_lpMes)infos=infos.filter(x=>x.ok&&x.calc.prazoIso&&parseInt(x.calc.prazoIso.slice(5,7),10)===_lpMes);
+  if(_lpMes)infos=infos.filter(x=>x.ok&&x.calc.prazoIso&&parseInt(x.calc.prazoIso.slice(5,7),10)===_lpMes&&_anoDeIso(x.calc.prazoIso)===_anoRef);
   if(temFiltroData){
     if(filDataCampo==='emissao')infos=infos.filter(x=>x.ok&&_lpDataNoIntervalo(x.calc.emissaoIso,filDataDe,filDataAte));
     else if(filDataCampo==='final')infos=infos.filter(x=>x.ok&&_lpDataNoIntervalo(x.calc.prazoIso,filDataDe,filDataAte));
@@ -35331,7 +35387,7 @@ function renderComissaoPlanejamento(){
   if(lblEl)lblEl.textContent=_cplMes?MESES_PT[_cplMes]:'Todos os meses';
   const todasFinalizadas=_plPedidosElegiveis().filter(p=>!p.isChumbador&&p.finalizacao&&p.finalizacao.dataFinalizacao);
   let base=todasFinalizadas;
-  if(_cplMes)base=base.filter(p=>_cplMesDaData(p.finalizacao.dataFinalizacao)===_cplMes);
+  if(_cplMes)base=base.filter(p=>_cplMesDaData(p.finalizacao.dataFinalizacao)===_cplMes&&_anoDeIso(_normPrazoIso(String(p.finalizacao.dataFinalizacao)))===_anoRef);
   const c=_cplCalcComissao(base);
   const cardsEl=document.getElementById('cpl-cards');
   if(cardsEl){
@@ -38593,7 +38649,7 @@ function _plObrasLinhasFiltradas(ignorarStatus){
   let lista=_plPedidosElegiveis();
   // Mês aqui é o de ENTREGA (prazo de finalização), não o da venda (2026-07-29, a pedido do
   // usuário — reaproveita _fgMesPrazo, mesma conta já usada em Indicadores de Planejamento).
-  if(_plMes)lista=lista.filter(p=>_fgMesPrazo(p)===_plMes);
+  if(_plMes)lista=lista.filter(p=>_fgMesPrazo(p)===_plMes&&_anoDeIso(_normPrazoIso(p.prazo))===_anoRef);
   if(busca){
     lista=lista.filter(p=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
   }
@@ -40785,7 +40841,7 @@ function renderHistoricoPedidos(){
   const cardsEl=document.getElementById('hp-cards');
   let idsPagamento=[],idsFinalizacao=[],idsSem=[];
   if(cardsEl){
-    const rowsMes=(_hpMes?getVendaRowsMerged().filter(r=>r.m===_hpMes):getVendaRowsMerged()).filter(r=>r._pid);
+    const rowsMes=(_hpMes?getVendaRowsMerged().filter(r=>_vrNoMes(r,_anoRef,_hpMes)):getVendaRowsMerged()).filter(r=>r._pid);
     rowsMes.forEach(r=>{
       const p=pedidos.find(x=>x.id===r._pid);
       if(!p)return;
@@ -40806,7 +40862,7 @@ function renderHistoricoPedidos(){
   }
   const busca=(document.getElementById('hp-fil-busca')?.value||'').toUpperCase().trim();
   let rows=getVendaRowsMerged().slice().sort((a,b)=>(b.m-a.m)||String(b.p).localeCompare(String(a.p)));
-  if(_hpMes)rows=rows.filter(r=>r.m===_hpMes);
+  if(_hpMes)rows=rows.filter(r=>_vrNoMes(r,_anoRef,_hpMes));
   if(_hpCardFiltro==='pagamento')rows=rows.filter(r=>idsPagamento.includes(r._pid));
   else if(_hpCardFiltro==='finalizacao')rows=rows.filter(r=>idsFinalizacao.includes(r._pid));
   else if(_hpCardFiltro==='sem')rows=rows.filter(r=>idsSem.includes(r._pid));
@@ -42956,6 +43012,7 @@ function _fatClienteAgrupar(){
   const grupos={};
   getVendaRowsMerged().forEach(r=>{
     if(!r.m||r.m<1||r.m>12)return;
+    if(_vrAno(r)!==_anoRef)return; // (2026-10-13) virada de ano — hoje tudo é 2026, nada muda
     const nomeGrupo=_fatClienteGrupoNome(r);
     if(!grupos[nomeGrupo]){
       grupos[nomeGrupo]={nome:nomeGrupo,totalBr:0,totalLq:0,vendas:[]};
@@ -46197,6 +46254,7 @@ function pedidoToVendaRow(p){
     // — usado na Lista de Vendas pra mostrar "(adiado)" quando entrega!==prazoOriginal
     // (2026-07-23, a pedido do usuário: quer ver aqui também quando o prazo mudou lá).
     prazoOriginal:p.prazoOriginal||'',
+    y:_pedVendaAno(p),
     mesAjustado:!!p.mesVendaOverride};
 }
 
@@ -46348,7 +46406,7 @@ function _vndFilteredRows(){
   // Busca livre: OS, cliente, JOB, cidade, vendedor, categoria e Nº de OC — tudo num campo só,
   // sem acento/maiúsculas (norm()) pra não depender de digitar exatamente igual.
   const _buscaMatch=r=>!filBusca||[r.p,r.cl,r.job,r.cidade,r.v,r.cat,r.numOC].some(v=>v&&norm(String(v)).includes(filBusca));
-  let rows2=allRowsForFil.filter(r=>(!filMes||r.mes===filMes)&&(!filVend||r.v===filVend)&&(!filCat||r.cat===filCat)&&_buscaMatch(r));
+  let rows2=allRowsForFil.filter(r=>_vrAno(r)===_anoRef&&(!filMes||r.mes===filMes)&&(!filVend||r.v===filVend)&&(!filCat||r.cat===filCat)&&_buscaMatch(r));
   rows2=rows2.map(r=>({...r,rem:r.rem||0,med:r.med||0,opAdj:(r.op||0),lqAdj:(r.lq||0)}));
   rows2.sort((a,b)=>a.m-b.m||a.cl.localeCompare(b.cl));
   return rows2;
@@ -46814,7 +46872,7 @@ function gcSetVend(v){
 
 function getVendasBrutoMes(y,m,vendedor){
   return getVendaRowsMerged()
-    .filter(r=>r.m===m&&vendedorMatch(r.v,vendedor))
+    .filter(r=>_vrNoMes(r,y,m)&&vendedorMatch(r.v,vendedor))
     .reduce((s,r)=>s+(r.br||0),0);
 }
 
@@ -46889,14 +46947,14 @@ function _gcAbrirModalKpi(titulo,subtitulo,headers,linhas,totalTxt){
   openM('mo-kpi-detalhe');
 }
 function gcAbrirDetalheVendasBrutas(y,m,vendedor){
-  const rows=getVendaRowsMerged().filter(r=>(m?r.m===m:true)&&vendedorMatch(r.v,vendedor)).sort((a,b)=>(b.br||0)-(a.br||0));
+  const rows=getVendaRowsMerged().filter(r=>_vrNoPeriodo(r,y,m)&&vendedorMatch(r.v,vendedor)).sort((a,b)=>(b.br||0)-(a.br||0));
   const total=rows.reduce((s,r)=>s+(r.br||0),0);
   const headers=vendedor?[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'valor',l:'Valor Bruto',num:true}]:[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'vendedor',l:'Vendedor'},{k:'valor',l:'Valor Bruto',num:true}];
   const linhas=rows.map(r=>({os:r.p||'—',cliente:r.cl||'—',job:r.job||'—',vendedor:r.v||'—',valor:fmtR(r.br||0)}));
   _gcAbrirModalKpi('💰 Vendas Brutas do Mês',_gcPeriodoLabel(y,m,vendedor),headers,linhas,fmtR(total));
 }
 function gcAbrirDetalheVendasLiquidas(y,m,vendedor){
-  const rows=getVendaRowsMerged().filter(r=>(m?r.m===m:true)&&vendedorMatch(r.v,vendedor)).sort((a,b)=>(b.lq||0)-(a.lq||0));
+  const rows=getVendaRowsMerged().filter(r=>_vrNoPeriodo(r,y,m)&&vendedorMatch(r.v,vendedor)).sort((a,b)=>(b.lq||0)-(a.lq||0));
   const total=rows.reduce((s,r)=>s+(r.lq||0),0);
   const headers=vendedor?[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'valor',l:'Valor Líquido',num:true}]:[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'vendedor',l:'Vendedor'},{k:'valor',l:'Valor Líquido',num:true}];
   const linhas=rows.map(r=>({os:r.p||'—',cliente:r.cl||'—',job:r.job||'—',vendedor:r.v||'—',valor:fmtR(r.lq||0)}));
@@ -47122,7 +47180,7 @@ function gcVendasPorSemana(y,m,todos){
   const porVendSemana={};
   (todos||[]).forEach(v=>{porVendSemana[v]=Array(GC_SEMANA_MAX).fill(0);});
   let semDataCount=0,semDataTotal=0;
-  getVendaRowsMerged().filter(r=>r.m===m).forEach(r=>{
+  getVendaRowsMerged().filter(r=>_vrNoMes(r,y,m)).forEach(r=>{
     const p=r._pid?pedidos.find(pp=>pp.id===r._pid):null;
     const emissao=p&&p.emissaoEm;
     const dia=emissao?parseInt(String(emissao).split('-')[2],10):0;
@@ -47209,7 +47267,7 @@ function gcRenderVendasPorSemana(y,m,todos){
 // _crmGanhoInfo, _crmCiclosOrcamento, _fatClienteGrupoNome) — nenhuma regra nova de venda,
 // meta ou comissão. Nada do que já existia foi removido (o ranking de Faturamento por Cliente
 // continua igual; a concentração é só uma faixa em cima dele).
-function _gxRows(m){return getVendaRowsMerged().filter(r=>m?r.m===m:true);}
+function _gxRows(m,y){const yy=y||(typeof gcMes!=='undefined'&&gcMes&&gcMes.y)||_anoRef;return getVendaRowsMerged().filter(r=>_vrNoPeriodo(r,yy,m));}
 function _gxPct(v,d){return v==null||isNaN(v)?'—':v.toFixed(d==null?1:d).replace('.',',')+'%';}
 function _gxDelta(atual,ant,tipo){
   if(ant==null||!isFinite(ant)||(tipo!=='pp'&&!(ant>0)))return'';
@@ -47282,7 +47340,7 @@ function _gxCard(titulo,sub,corpo,extraStyle){
 function gcRenderGeralExtras(y,m,todos){
   const hojeD=new Date();
   const mesAtual=y===hojeD.getFullYear()&&m===hojeD.getMonth()+1;
-  const rows=_gxRows(m);
+  const rows=_gxRows(m,y);
   const lq=rows.reduce((s,r)=>s+(r.lq||0),0),br=rows.reduce((s,r)=>s+(r.br||0),0),nPed=rows.length;
   const meta=todos.reduce((s,v)=>s+getMetaMesTodos(y,m,v),0);
   const mg=br>0?lq/br*100:null,tk=nPed?lq/nPed:0;
@@ -47716,7 +47774,7 @@ function gcRenderVendPaineis(){
   // Conta pedidos da mesma fonte mesclada (Firestore + planilha) usada em vendas/metas —
   // antes só olhava `pedidos` do Firestore com match exato de nome, subcontando pedidos
   // que só existem em XLSX_VENDAS ou com nome curto na planilha (ex: "JULIO").
-  const nPeds=getVendaRowsMerged().filter(r=>(m?r.m===m:true)&&vendedorMatch(r.v,v)).length;
+  const nPeds=getVendaRowsMerged().filter(r=>_vrNoPeriodo(r,y,m)&&vendedorMatch(r.v,v)).length;
   // Quanto esse vendedor precisa vender por dia útil pra bater a meta dele — só calcula de
   // verdade se o mês navegado for o mês corrente real (ver gcFaltaPorDiaUtil).
   const fpdVend=gcFaltaPorDiaUtil(y,m,faltaMes);
@@ -54891,7 +54949,7 @@ function _crmSemanasDoMes(y,m){
 function _crmVendasDatadasMes(y,m,v){
   const itens=[];let semData=0;
   const chave=dasKey(y,m);
-  getVendaRowsMerged().filter(r=>r.m===m&&vendedorMatch(r.v,v)).forEach(r=>{
+  getVendaRowsMerged().filter(r=>_vrNoMes(r,y,m)&&vendedorMatch(r.v,v)).forEach(r=>{
     const p=r._pid?pedidos.find(pp=>pp.id===r._pid):null;
     const em=p&&p.emissaoEm?String(p.emissaoEm).slice(0,10):'';
     if(em&&em.slice(0,7)===chave)itens.push({iso:em,lq:r.lq||0});
@@ -55053,7 +55111,7 @@ function _crmVendPainelTopoHtml(v){
   let br=0,lq=vendido,ft=0,nPeds=0;
   try{br=getVendasBrutoMes(y,m,v)||0;}catch(err){}
   try{ft=getFaturadoMesReal(y,m,v)||0;}catch(err){}
-  try{nPeds=getVendaRowsMerged().filter(r=>r.m===m&&vendedorMatch(r.v,v)).length;}catch(err){}
+  try{nPeds=getVendaRowsMerged().filter(r=>_vrNoMes(r,y,m)&&vendedorMatch(r.v,v)).length;}catch(err){}
   const falta=Math.max(0,meta-lq);
   let fpd={isMesAtual:false};try{fpd=gcFaltaPorDiaUtil(y,m,falta);}catch(err){}
   const kpis=[
@@ -56257,6 +56315,26 @@ function _lptSyncFaixaTarefas(sec){
 const _lptSetSectionOrig=setSection;
 setSection=function(sec){const r=_lptSetSectionOrig.apply(this,arguments);try{_lptSyncFaixaTarefas(sec);}catch(e){}return r;};
 
+// ══ REDE DE SEGURANÇA PRA GRAVAÇÃO QUE FALHA CALADA (2026-10-13) ════════════════════════
+// Revisão geral pedida pelo usuário: quase toda gravação já avisa quando falha (savePedidoFS,
+// _fbSaveCfg...), mas algumas chamadas ficam sem await/sem .catch — se o servidor recusar, o erro
+// some e ninguém fica sabendo. Isto só ESCUTA: qualquer erro do Firebase que escapar sem
+// tratamento vira um aviso na tela (no máximo 1 a cada 15s). Não muda nenhum fluxo nem dado.
+(function(){
+  let _ult=0;
+  window.addEventListener('unhandledrejection',ev=>{
+    try{
+      const e=ev&&ev.reason;if(!e)return;
+      const nome=String(e.name||''),cod=String(e.code||''),msg=String(e.message||e);
+      const ehFirebase=nome==='FirebaseError'||/^(permission-denied|unavailable|aborted|deadline-exceeded|resource-exhausted|failed-precondition|invalid-argument|not-found|unauthenticated|internal)$/.test(cod)||/firestore|firebase/i.test(msg);
+      if(!ehFirebase)return;
+      console.error('Gravação no servidor falhou sem tratamento:',e);
+      const agora=Date.now();if(agora-_ult<15000)return;_ult=agora;
+      if(typeof toast==='function')toast('⚠️ Uma alteração pode não ter sido salva no servidor ('+(cod||'erro')+'). Confira e, se faltar algo, faça de novo.','terr');
+    }catch(x){}
+  });
+})();
+
 // ══ FILTRO DE MÊS PADRÃO DO SISTEMA (2026-09-30) ══════════════════════════════════════════
 // A pedido do usuário: "quando tem filtro de mes, eu gosto muito desse modelo de abrir a
 // janelinha e selecionar o mes que quer e do lado dele ter um botao TODOS OS MESES, que abre o
@@ -56273,7 +56351,7 @@ setSection=function(sec){const r=_lptSetSectionOrig.apply(this,arguments);try{_l
 // histórico de ponto dentro do modal do RH e o ano das Férias.
 const _MESX_MESES=['','JANEIRO','FEVEREIRO','MARÇO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO','SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'];
 // <select>s que já tinham "Todos os meses" (ou "Ano todo") como opção — viram mês + botão
-const _MESX_SELECTS=['vnd-fil-mes','f-mes','rh-bh-mes','fech-mes','fnr-fil-mes','com-per-mes'];
+const _MESX_SELECTS=['vnd-fil-mes','f-mes','rh-bh-mes','fech-mes','fnr-fil-mes','com-per-mes','semoc-mes'];
 const _mesxPad=n=>String(n).padStart(2,'0');
 // Navegadores ◀ ▶ — fn: nome da função da seta (acha o container), hide: botões a esconder,
 // lbl: id do rótulo (ou 'entre' = o elemento entre as setas), tipo: 'ym' {y,m} | 'm' (1..12 ou
@@ -56292,10 +56370,10 @@ const _MESX_NAV=[
       _fcMesVigenteAplicado=true;fcAplicarFiltros();}},
   {fn:'_fgMesMov',hide:['_fgMesMov'],lbl:'fg-mes-lbl',tipo:'m',todos:true,get:()=>_fgMes,set:m=>{_fgMes=m;renderFgAll();}},
   {fn:'_fgMesMov',hide:['_fgMesMov'],lbl:'fgif-mes-lbl',tipo:'m',todos:true,get:()=>_fgMes,set:m=>{_fgMes=m;renderFgAll();}},
-  {fn:'_plMesMov',hide:['_plMesMov'],lbl:'pl-mes-lbl',tipo:'m',todos:true,get:()=>_plMes,set:m=>{_plMes=m;renderPlanejamentoObras();}},
-  {fn:'_cplMesMov',hide:['_cplMesMov'],lbl:'cpl-mes-lbl',tipo:'m',todos:true,get:()=>_cplMes,set:m=>{_cplMes=m;renderComissaoPlanejamento();}},
-  {fn:'_lpMesMov',hide:['_lpMesMov'],lbl:'lp-mes-lbl',tipo:'m',todos:true,get:()=>_lpMes,set:m=>{_lpMes=m;lpRenderAtivo();}},
-  {fn:'_hpMesMov',hide:['_hpMesMov'],lbl:'hp-mes-lbl',tipo:'m',todos:true,get:()=>_hpMes,set:m=>{_hpMes=m;_hpCardFiltro='';renderHistoricoPedidos();}},
+  {fn:'_plMesMov',hide:['_plMesMov'],lbl:'pl-mes-lbl',tipo:'m',todos:true,anoGlobal:'op',get:()=>_plMes,set:m=>{_plMes=m;renderPlanejamentoObras();}},
+  {fn:'_cplMesMov',hide:['_cplMesMov'],lbl:'cpl-mes-lbl',tipo:'m',todos:true,anoGlobal:'op',get:()=>_cplMes,set:m=>{_cplMes=m;renderComissaoPlanejamento();}},
+  {fn:'_lpMesMov',hide:['_lpMesMov'],lbl:'lp-mes-lbl',tipo:'m',todos:true,anoGlobal:'op',get:()=>_lpMes,set:m=>{_lpMes=m;lpRenderAtivo();}},
+  {fn:'_hpMesMov',hide:['_hpMesMov'],lbl:'hp-mes-lbl',tipo:'m',todos:true,anoGlobal:'vendas',get:()=>_hpMes,set:m=>{_hpMes=m;_hpCardFiltro='';renderHistoricoPedidos();}},
   {fn:'_rhMesMov',hide:['_rhMesMov',"_rhDataDe=''"],lbl:'rh-mes-lbl',tipo:'lista',todos:true,
     opcoes:()=>[...new Set((typeof rhPontoMeses!=='undefined'?rhPontoMeses:[]).map(x=>x.anoMes).filter(Boolean))].sort().reverse().map(am=>[am,_MESX_MESES[+am.slice(5,7)]+' '+am.slice(0,4)]),
     get:()=>_rhMes,set:v=>{_rhDataDe='';_rhDataAte='';_rhMes=v;renderRhPontualidade();}},
@@ -56358,6 +56436,7 @@ function _mesxTodosOpt(sel){
 }
 function _mesxSelect(id){
   const S=document.getElementById(id);if(!S)return;
+  if(id==='vnd-fil-mes'){try{const sa=document.getElementById('vnd-fil-ano');if(sa){const anos=_anosVendas();_mesxOpcoesAno(sa,anos);sa.value=String(_anoRef);sa.style.display=anos.length>1?'':'none';}}catch(e){}}
   let W=S._mesx;
   if(!W||!W.w.isConnected){
     const tOpt=_mesxTodosOpt(S);
@@ -56390,7 +56469,7 @@ function _mesxNav(cfg){
   const lbl=cfg.lbl==='entre'?prev.nextElementSibling:document.getElementById(cfg.lbl);
   let W=cont._mesx;
   if(!W||!W.w.isConnected){
-    W=_mesxCriarWidget({anos:cfg.tipo==='ym'?[]:null,todos:cfg.todos});
+    W=_mesxCriarWidget({anos:(cfg.tipo==='ym'||cfg.anoGlobal)?[]:null,todos:cfg.todos});
     cont._mesx=W;
     cont.classList.add('mesx-nav-on');
     [...cont.children].forEach(el=>{
@@ -56408,7 +56487,8 @@ function _mesxNav(cfg){
       setTimeout(_mesxSync,0);
     };
     W.sm.addEventListener('change',()=>aplicar(false));
-    if(W.sa)W.sa.addEventListener('change',()=>{const st=cfg.get()||{};aplicar(!st.m);});
+    if(W.sa&&cfg.anoGlobal)W.sa.addEventListener('change',()=>{_anoRef=+W.sa.value||_anoRef;const v0=cfg.get();cfg.set(v0);setTimeout(_mesxSync,0);});
+    else if(W.sa)W.sa.addEventListener('change',()=>{const st=cfg.get()||{};aplicar(!st.m);});
     if(W.bt)W.bt.addEventListener('click',()=>aplicar(true));
   }
   // sincroniza com o estado real
@@ -56416,6 +56496,12 @@ function _mesxNav(cfg){
   try{
     if(cfg.tipo==='ym'){const st=cfg.get()||{};todos=!st.m;v=st.m||'';_mesxOpcoesAno(W.sa,_mesxAnos(st.y));W.sa.value=String(st.y||new Date().getFullYear());}
     else{v=cfg.get();todos=v===''||v==null;}
+    if(cfg.anoGlobal&&W.sa){
+      // (2026-10-13) Ano só aparece quando existe mais de um ano com dados — em 2026 a tela fica igual.
+      const anos=cfg.anoGlobal==='vendas'?_anosVendas():_anosOperacionais();
+      _mesxOpcoesAno(W.sa,anos);W.sa.value=String(_anoRef);
+      W.sa.style.display=anos.length>1?'':'none';
+    }
   }catch(e){return;}
   const lista=cfg.tipo==='lista'?cfg.opcoes():_MESX_MESES.slice(1).map((t,i)=>[i+1,t]);
   _mesxOpcoesMes(W.sm,lista,cfg.todos);
