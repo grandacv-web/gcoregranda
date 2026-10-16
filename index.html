@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-16.4';</script>
+<script>const APP_BUILD_VERSION='2026-10-16.6';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -5614,6 +5614,12 @@ function _fbSaveMerge(col,id,data){
 window._fbSavePedido=(p)=>_fbSaveMerge('pedidos',p.id,p);
 // Portal do cliente (2026-10-15): grava a cópia limpa do pedido em portalObras/{token}.
 window._fbSetDocCol=(col,id,data)=>setDoc(doc(db,col,String(id)),data);
+// Ficha técnica do produto (2026-10-16): especificação, projeto de instalação, versões de arquivos
+// e histórico de alterações ficam em produtosFicha/{produtoId}, fora do cfg (limite de 1 MB).
+window._fbPesosMpGet=()=>getDoc(doc(db,'sistema','pesosMp')).then(s=>s.exists()?s.data():{});
+window._fbPesosMpSet=(k,v)=>v?setDoc(doc(db,'sistema','pesosMp'),{itens:{[k]:v}},{merge:true}):updateDoc(doc(db,'sistema','pesosMp'),new FieldPath('itens',k),deleteField());
+window._fbProdFichaGet=(id)=>getDoc(doc(db,'produtosFicha',String(id))).then(s=>s.exists()?s.data():{});
+window._fbProdFichaTx=(id,fn)=>runTransaction(db,async(tx)=>{const ref=doc(db,'produtosFicha',String(id));const snap=await tx.get(ref);const d=snap.exists()?JSON.parse(JSON.stringify(snap.data())):{};const n=fn(d)||d;tx.set(ref,n);return n;});
 // Espera todas as gravações pendentes chegarem no servidor (usado antes de recarregar a página sozinho).
 window._fbAguardarGravacoes=()=>waitForPendingWrites(db);
 // Última versão do pedido recebida do servidor — só leitura (usada pelo registro exato de produção, 2026-09-30).
@@ -17200,8 +17206,10 @@ function renderProdutos(){
     </div>`;
   }).join('');
 }
+const _PF_CAMPO_LBL={nome:'Nome',categoria:'Cliente',tipoProduto:'Tipo de produto',medida:'Medida',precoFinal:'Preço final',um:'Unidade de medida',custo:'CMV'};
 function atualizaProduto(i,campo,valor){
   const p=getProdutos()[i];if(!p)return;
+  const _antes=p[campo];
   if(campo==='custo')p.custo=moneyToNum(valor)||0;
   else if(campo==='precoFinal')p.precoFinal=moneyToNum(valor)||0;
   else if(campo==='nome'){
@@ -17223,6 +17231,10 @@ function atualizaProduto(i,campo,valor){
   else if(campo==='um')p.um=String(valor||'').trim();
   if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
+  try{
+    const fmtV=v=>(campo==='custo'||campo==='precoFinal')?(v==null||v===''?'—':fmtR(Number(v)||0)):(v==null||v===''?'—':String(v));
+    if(String(_antes==null?'':_antes)!==String(p[campo]==null?'':p[campo]))_prodHist(p.id,'Alterou '+(_PF_CAMPO_LBL[campo]||campo),fmtV(_antes)+' → '+fmtV(p[campo]));
+  }catch(e){}
   toast('Produto atualizado!','tok');
 }
 function addProduto(){
@@ -17243,7 +17255,9 @@ function addProduto(){
   if(!nome){toast('Informe o nome do produto!','terr');return;}
   cfg.produtos=cfg.produtos||[];
   if(cfg.produtos.some(x=>_normNomeProduto(x.nome)===_normNomeProduto(nome))){toast('Já existe um produto com esse nome (ou bem parecido) cadastrado!','terr');return;}
-  cfg.produtos.push({id:uid(),nome:nome.replace(/\s+/g,' '),categoria,tipoProduto,medida,precoFinal,um,custo});
+  const _novoP={id:uid(),nome:nome.replace(/\s+/g,' '),categoria,tipoProduto,medida,precoFinal,um,custo};
+  cfg.produtos.push(_novoP);
+  _prodHist(_novoP.id,'Produto cadastrado',_novoP.nome);
   if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   if(inpNome)inpNome.value='';
@@ -17257,7 +17271,9 @@ function addProduto(){
   toast('Produto adicionado!','tok');
 }
 function removeProduto(i){
-  if(!confirm('Remover este produto?'))return;
+  const _pr=getProdutos()[i];
+  if(!confirm(`Remover o produto ${(_pr&&_pr.nome)||''}?\n\nEle sai do catálogo e esta ação não pode ser desfeita (não vai pra Lixeira). Orçamentos e pedidos que já usaram este produto não mudam.`))return;
+  if(_pr)_prodHist(_pr.id,'Produto removido do catálogo',_pr.nome||'');
   getProdutos().splice(i,1);
   if(window._fbSaveCfg)window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
@@ -17498,10 +17514,13 @@ async function confirmarMateriaisProduto(){
   const p=getProdutos()[_mpProdutoIdx];
   if(!p){toast('Produto não encontrado','terr');return;}
   const total=_mpImportRows.reduce((s,r)=>s+(r.custoLinha||0),0);
+  const _cmvAntes=p.custo;
   p.materiasPrimas=_mpImportRows;
   p.custo=total;
   p.custoMateriaisEm=new Date().toISOString();
   p.custoMateriaisArquivo=_mpImportFileName||'';
+  p.custoMateriaisPor=_pfQuem();
+  _prodHist(p.id,'Atualizou as matérias-primas',`${_mpImportRows.length} itens · CMV ${_cmvAntes!=null?fmtR(_cmvAntes):'—'} → ${fmtR(total)}${_mpImportFileName?' · '+_mpImportFileName:''}`);
   if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   toast(`CMV calculado a partir de ${_mpImportRows.length} matéria(s)-prima(s): ${fmtR(total)}`,'tok');
@@ -17514,7 +17533,8 @@ async function removerMateriaisProduto(i){
   const p=getProdutos()[i];
   if(!p){toast('Produto não encontrado','terr');return;}
   if(!confirm('Remover a lista de matérias-primas deste produto? O CMV calculado continua como está, só passa a ser editável manualmente de novo.'))return;
-  delete p.materiasPrimas;delete p.custoMateriaisEm;delete p.custoMateriaisArquivo;
+  delete p.materiasPrimas;delete p.custoMateriaisEm;delete p.custoMateriaisArquivo;delete p.custoMateriaisPor;
+  _prodHist(p.id,'Removeu a lista de matérias-primas','');
   if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   toast('Lista de matérias-primas removida','twar');
@@ -17620,10 +17640,13 @@ async function confirmarImportacaoMateriaisMassa(){
       if(!p){ignorados++;continue;}
       atualizados++;
     }
+    const _cmvAnt=p.custo;
     p.materiasPrimas=s.linhas;
     p.custo=total;
     p.custoMateriaisEm=agora;
     p.custoMateriaisArquivo=_mpmFileName||'';
+    p.custoMateriaisPor=_pfQuem();
+    _prodHist(p.id,'Atualizou as matérias-primas (importação em massa)',`${s.linhas.length} itens · CMV ${_cmvAnt!=null&&map.produtoIdx!==-1?fmtR(_cmvAnt):'—'} → ${fmtR(total)}${_mpmFileName?' · '+_mpmFileName:''}`);
     p.custoMateriaisTituloOrigem=s.titulo||'';
   }
   if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
@@ -17709,12 +17732,20 @@ function abrirFichaProduto(i){
         </div>
       </div>
     </div>
-    <div class="dash-sec-title" style="font-size:.8rem;margin-bottom:6px">📎 Projeto Executivo</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:-4px 0 16px">${_pfMpChipHtml(p)}<button onclick="_pfGerarPDF(${i})" style="margin-left:auto;background:#fff;color:#e91e63;border:1.5px solid #fbcfe8;border-radius:8px;padding:6px 12px;font-size:.76rem;font-weight:700;cursor:pointer">📄 PDF da ficha técnica</button></div>
+    <div class="dash-sec-title" style="font-size:.8rem;margin-bottom:6px">🧩 Especificação técnica</div>
+    <div id="pf-spec" style="margin-bottom:16px"><div style="font-size:.76rem;color:var(--ink4)">Carregando…</div></div>
+    <div class="dash-sec-title" style="font-size:.8rem;margin-bottom:6px">📎 Projeto Executivo${p.projetoExecutivoEm?` <span style="font-weight:400;font-size:.66rem;color:var(--ink4)">(${_pfDH(p.projetoExecutivoEm)}${p.projetoExecutivoPor?' por '+_ptE(p.projetoExecutivoPor):''})</span>`:''}</div>
     ${projetoHtml}
+    <div id="pf-exec-versoes"></div>
+    <div class="dash-sec-title" style="font-size:.8rem;margin:16px 0 6px">🛠️ Projeto de Instalação</div>
+    <div id="pf-inst"><div style="font-size:.76rem;color:var(--ink4)">Carregando…</div></div>
     <div class="dash-sec-title" style="font-size:.8rem;margin:16px 0 6px">🧾 Matérias-Primas${p.custoMateriaisEm?` <span style="font-weight:400;font-size:.66rem;color:var(--ink4)">(atualizado em ${new Date(p.custoMateriaisEm).toLocaleDateString('pt-BR')})</span>`:''}</div>
     ${materiaisHtml}
     ${isAdm?`<div style="text-align:right;margin-top:10px"><button onclick="closeM('mo-produto-ficha');abrirMateriaisProduto(${i})" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:8px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer">🧾 Gerenciar Matérias-Primas</button></div>`:''}
   `;
+  corpoEl.insertAdjacentHTML('beforeend',`<div class="dash-sec-title" style="font-size:.8rem;margin:18px 0 6px">⚖️ Peso calculado pelas matérias-primas</div><div id="pf-peso"><div style="font-size:.76rem;color:var(--ink4)">Carregando…</div></div><div class="dash-sec-title" style="font-size:.8rem;margin:18px 0 6px">🕘 Histórico de alterações</div><div id="pf-hist"><div style="font-size:.76rem;color:var(--ink4)">Carregando…</div></div>`);
+  _pfCarregar(i);
   openM('mo-produto-ficha');
 }
 async function uploadFotoProduto(i,input){
@@ -17732,6 +17763,7 @@ async function uploadFotoProduto(i,input){
     if(!url)throw new Error('Falha no upload.');
     if(typeof _cldRegistrarUpload==='function')_cldRegistrarUpload(f.size);
     p.fotoUrl=url;
+    _prodHist(p.id,'Trocou a foto do produto',f.name||'');
     if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
     localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
     toast('Imagem salva.','tok');
@@ -17748,6 +17780,7 @@ async function removerFotoProduto(i){
   const p=getProdutos()[i];if(!p){toast('Produto não encontrado','terr');return;}
   if(!confirm('Remover a imagem deste produto?'))return;
   delete p.fotoUrl;
+  _prodHist(p.id,'Removeu a foto do produto','');
   if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   abrirFichaProduto(i);
@@ -17768,8 +17801,12 @@ async function uploadProjetoProduto(i,input){
     const url=d.secure_url||'';
     if(!url)throw new Error('Falha no upload.');
     if(typeof _cldRegistrarUpload==='function')_cldRegistrarUpload(f.size);
+    if(p.projetoExecutivoUrl)await _pfGuardarVersao(p.id,'exec',{url:p.projetoExecutivoUrl,nome:p.projetoExecutivoNome||'',em:p.projetoExecutivoEm||'',por:p.projetoExecutivoPor||''});
     p.projetoExecutivoUrl=url;
     p.projetoExecutivoNome=f.name;
+    p.projetoExecutivoEm=new Date().toISOString();
+    p.projetoExecutivoPor=_pfQuem();
+    _prodHist(p.id,'Anexou nova versão do projeto executivo',f.name);
     if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
     localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
     toast('Projeto executivo salvo.','tok');
@@ -17783,14 +17820,298 @@ async function uploadProjetoProduto(i,input){
 async function removerProjetoProduto(i){
   if(!_getUserCat().isAdm){toast('Apenas administradores podem editar produtos.','terr');return;}
   const p=getProdutos()[i];if(!p){toast('Produto não encontrado','terr');return;}
-  if(!confirm('Remover o projeto executivo deste produto?'))return;
-  delete p.projetoExecutivoUrl;delete p.projetoExecutivoNome;
+  if(!confirm('Remover o projeto executivo atual deste produto? Ele continua guardado em "Versões anteriores".'))return;
+  await _pfGuardarVersao(p.id,'exec',{url:p.projetoExecutivoUrl,nome:p.projetoExecutivoNome||'',em:p.projetoExecutivoEm||'',por:p.projetoExecutivoPor||''});
+  _prodHist(p.id,'Removeu o projeto executivo atual',p.projetoExecutivoNome||'');
+  delete p.projetoExecutivoUrl;delete p.projetoExecutivoNome;delete p.projetoExecutivoEm;delete p.projetoExecutivoPor;
   if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
   localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
   abrirFichaProduto(i);
 }
+// ── FICHA TÉCNICA COMPLETA (2026-10-16, a pedido do usuário: "ficha técnica de cada produto bem
+// top, campo pro projeto executivo que já tem, mas também projeto de instalação, que registre a
+// data da última atualização de matéria-prima, histórico de alterações dizendo quem alterou com
+// hora e data etc"). O que já existia continua no cfg.produtos (preço, CMV, foto, projeto
+// executivo atual, matérias-primas). O resto fica em produtosFicha/{id}: spec{}, inst{} (projeto de
+// instalação atual), versoes{exec:[],inst:[]} e historico[] (máx. 300, mais novo no fim).
+const PF_SPEC=[['descricao','Descrição técnica',1],['dimensoes','Dimensões (L × A × P)'],['peso','Peso aproximado'],['materiais','Materiais principais'],['acabamento','Acabamento e cores'],['iluminacao','Iluminação'],['consumo','Consumo / potência'],['tensao','Tensão de alimentação'],['fixacao','Fixação'],['garantia','Garantia'],['prazoProducao','Prazo médio de produção'],['manutencao','Manutenção recomendada',1],['obs','Observações',1]];
+let _pfFicha={},_pfIdx=null,_pfEditSpec=false;
+function _pfQuem(){try{return(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'';}catch(e){return'';}}
+function _pfDH(iso){if(!iso)return'';const d=new Date(iso);if(isNaN(d))return'';return d.toLocaleDateString('pt-BR')+' às '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}
+function _pfDias(iso){if(!iso)return null;const d=new Date(iso);if(isNaN(d))return null;return Math.floor((Date.now()-d.getTime())/86400000);}
+function _pfMpCor(dias){return dias==null?{c:'#64748b',b:'#f1f5f9'}:dias>180?{c:'#dc2626',b:'#fee2e2'}:dias>90?{c:'#b45309',b:'#fef3c7'}:{c:'#059669',b:'#d1fae5'};}
+function _pfMpChipHtml(p){
+  const dias=_pfDias(p.custoMateriaisEm),k=_pfMpCor(dias);
+  const txt=p.custoMateriaisEm?`🧾 Matéria-prima atualizada em ${_pfDH(p.custoMateriaisEm)}${p.custoMateriaisPor?' por '+_ptE(p.custoMateriaisPor):''} · ${dias===0?'hoje':dias+' '+_plural(dias,'dia','dias')+' atrás'}${dias>90?' — revisar':''}`:'🧾 Matéria-prima nunca atualizada';
+  return`<span style="display:inline-block;padding:5px 10px;border-radius:999px;font-size:.72rem;font-weight:700;background:${k.b};color:${k.c}">${txt}</span>`;
+}
+function _pfMpMiniHtml(p){
+  const dias=_pfDias(p.custoMateriaisEm),k=_pfMpCor(dias);
+  return`<div style="font-size:.66rem;font-weight:600;color:${k.c};margin-top:2px">${p.custoMateriaisEm?'🧾 MP '+new Date(p.custoMateriaisEm).toLocaleDateString('pt-BR')+(dias>90?' · revisar':''):'🧾 MP nunca atualizada'}${_pfPesoMiniHtml(p)}</div>`;
+}
+function _prodHist(pid,acao,det){
+  if(!pid||!window._fbProdFichaTx)return Promise.resolve();
+  const reg={em:new Date().toISOString(),por:_pfQuem(),acao:String(acao||''),det:String(det||'')};
+  return window._fbProdFichaTx(pid,d=>{d.historico=Array.isArray(d.historico)?d.historico:[];d.historico.push(reg);if(d.historico.length>300)d.historico=d.historico.slice(-300);return d;})
+    .then(n=>{_pfFicha[pid]=n;const p=getProdutos()[_pfIdx];if(p&&p.id===pid)_pfRenderHist(p);})
+    .catch(e=>console.warn('Histórico do produto não gravado',e));
+}
+async function _pfGuardarVersao(pid,tipo,v){
+  if(!v||!v.url||!window._fbProdFichaTx)return;
+  try{const n=await window._fbProdFichaTx(pid,d=>{d.versoes=d.versoes||{};const l=Array.isArray(d.versoes[tipo])?d.versoes[tipo]:[];if(!l.some(x=>x.url===v.url))l.push(Object.assign({},v,{substituidoEm:new Date().toISOString(),substituidoPor:_pfQuem()}));d.versoes[tipo]=l.slice(-30);return d;});_pfFicha[pid]=n;}catch(e){console.warn('versão',e);}
+}
+async function _pfCarregar(i){
+  _pfIdx=i;_pfEditSpec=false;
+  const p=getProdutos()[i];if(!p)return;
+  try{_pfFicha[p.id]=window._fbProdFichaGet?await window._fbProdFichaGet(p.id):{};}catch(e){console.warn(e);_pfFicha[p.id]=_pfFicha[p.id]||{};}
+  try{await _pesosMpCarregar();}catch(e){}
+  if(getProdutos()[_pfIdx]!==p)return;
+  _pfRenderPeso(p);
+  _pfRenderSpec(p);_pfRenderInst(p);_pfRenderVersoes(p,'exec','pf-exec-versoes');_pfRenderHist(p);
+}
+function _pfRenderSpec(p){
+  const el=document.getElementById('pf-spec');if(!el)return;
+  const f=_pfFicha[p.id]||{},sp=f.spec||{},isAdm=_getUserCat().isAdm;
+  if(_pfEditSpec&&isAdm){
+    el.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px">${PF_SPEC.map(([k,l,big])=>`<label style="font-size:.7rem;font-weight:700;color:var(--ink3);${big?'grid-column:1/-1':''}">${l}${big?`<textarea id="pfs-${k}" class="fc no-upper" rows="2" style="margin-top:3px;text-transform:none">${_ptE(sp[k]||'')}</textarea>`:`<input id="pfs-${k}" class="fc no-upper" style="margin-top:3px;text-transform:none" value="${_ptE(sp[k]||'')}">`}</label>`).join('')}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button onclick="_pfEditSpec=false;_pfRenderSpec(getProdutos()[_pfIdx])" style="background:#fff;border:1.5px solid var(--border);border-radius:8px;padding:6px 14px;font-size:.78rem;font-weight:700;cursor:pointer">Cancelar</button><button id="pfs-salvar" onclick="_pfSalvarSpec()" style="background:#1a2b5e;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:.78rem;font-weight:700;cursor:pointer">Salvar especificação</button></div>`;
+    return;
+  }
+  const preenchidos=PF_SPEC.filter(([k])=>String(sp[k]||'').trim());
+  el.innerHTML=(preenchidos.length?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:.8rem">${PF_SPEC.map(([k,l,big])=>`<div style="${big?'grid-column:1/-1':''}"><div style="color:var(--ink4);font-size:.64rem;text-transform:uppercase;font-weight:700">${l}</div><div style="white-space:pre-wrap;${String(sp[k]||'').trim()?'':'color:var(--ink4)'}">${_ptE(String(sp[k]||'').trim()||'—')}</div></div>`).join('')}</div>`
+    :`<div style="padding:12px;text-align:center;color:var(--ink4);font-size:.78rem;border:1px dashed var(--border);border-radius:8px">Nenhuma especificação técnica preenchida ainda.</div>`)
+    +(f.specEm?`<div style="font-size:.66rem;color:var(--ink4);margin-top:6px">Última alteração em ${_pfDH(f.specEm)}${f.specPor?' por '+_ptE(f.specPor):''}</div>`:'')
+    +(isAdm?`<div style="text-align:right;margin-top:8px"><button onclick="_pfEditSpec=true;_pfRenderSpec(getProdutos()[_pfIdx])" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:8px;padding:6px 12px;font-size:.76rem;font-weight:700;cursor:pointer">✏️ Editar especificação</button></div>`:'');
+}
+async function _pfSalvarSpec(){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem editar produtos.','terr');return;}
+  const p=getProdutos()[_pfIdx];if(!p)return;
+  const novo={};PF_SPEC.forEach(([k])=>{const e=document.getElementById('pfs-'+k);novo[k]=e?String(e.value||'').trim():'';});
+  const ant=(_pfFicha[p.id]||{}).spec||{};
+  const mud=PF_SPEC.filter(([k])=>String(ant[k]||'')!==novo[k]);
+  if(!mud.length){_pfEditSpec=false;_pfRenderSpec(p);return;}
+  const btn=document.getElementById('pfs-salvar');if(btn){btn.disabled=true;btn.textContent='⏳ Salvando…';}
+  const agora=new Date().toISOString(),quem=_pfQuem();
+  const curto=v=>{v=String(v||'').replace(/\s+/g,' ').trim();return v?(v.length>60?v.slice(0,60)+'…':v):'—';};
+  try{
+    const n=await window._fbProdFichaTx(p.id,d=>{
+      d.spec=novo;d.specEm=agora;d.specPor=quem;
+      d.historico=Array.isArray(d.historico)?d.historico:[];
+      mud.forEach(([k,l])=>d.historico.push({em:agora,por:quem,acao:'Alterou '+l,det:curto(ant[k])+' → '+curto(novo[k])}));
+      if(d.historico.length>300)d.historico=d.historico.slice(-300);
+      return d;
+    });
+    _pfFicha[p.id]=n;_pfEditSpec=false;
+    toast('Especificação salva','tok');
+    _pfRenderSpec(p);_pfRenderHist(p);
+  }catch(e){console.error(e);toast('Erro ao salvar: '+e.message,'terr');if(btn){btn.disabled=false;btn.textContent='Salvar especificação';}}
+}
+function _pfRenderInst(p){
+  const el=document.getElementById('pf-inst');if(!el)return;
+  const f=_pfFicha[p.id]||{},inst=f.inst,isAdm=_getUserCat().isAdm;
+  let h;
+  if(inst&&inst.url){
+    h=`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;flex-wrap:wrap">
+      <span style="font-size:.8rem">📄 ${_ptE(inst.nome||'projeto-instalacao.pdf')} <span style="font-size:.68rem;color:var(--ink4)">(${_pfDH(inst.em)}${inst.por?' por '+_ptE(inst.por):''})</span></span>
+      <div style="display:flex;gap:12px"><a href="${cldDownload(inst.url)}" target="_blank" style="font-size:.76rem;color:var(--brand);font-weight:700;text-decoration:none">⬇️ Baixar</a>
+      ${isAdm?`<label style="font-size:.76rem;color:#1d4ed8;font-weight:700;cursor:pointer">🔄 Nova versão<input type="file" accept=".pdf,application/pdf,image/*" style="display:none" onchange="uploadProjetoInstalacao(this)"></label><button onclick="removerProjetoInstalacao()" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:.76rem;font-weight:700">🗑️ Remover</button>`:''}</div></div>`;
+  }else h=isAdm?`<div class="upload-zone" onclick="document.getElementById('pf-inst-file').click()" style="padding:12px;min-height:auto"><span class="uz-icon" style="font-size:1.3rem;margin-bottom:2px">📎</span><div class="uz-title" style="font-size:.78rem">Anexar projeto de instalação (PDF ou imagem)</div><input type="file" id="pf-inst-file" accept=".pdf,application/pdf,image/*" onchange="uploadProjetoInstalacao(this)"></div>`
+    :`<div style="padding:10px;text-align:center;color:var(--ink4);font-size:.76rem">Nenhum projeto de instalação anexado</div>`;
+  el.innerHTML=h+'<div id="pf-inst-status" style="font-size:.68rem;color:var(--ink4);margin-top:4px"></div><div id="pf-inst-versoes"></div>';
+  _pfRenderVersoes(p,'inst','pf-inst-versoes');
+}
+function _pfRenderVersoes(p,tipo,elId){
+  const el=document.getElementById(elId);if(!el)return;
+  const l=(((_pfFicha[p.id]||{}).versoes||{})[tipo]||[]).slice().reverse();
+  el.innerHTML=l.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:.72rem;color:var(--ink3);font-weight:700">Versões anteriores (${l.length})</summary><div style="margin-top:6px">${l.map(v=>`<div style="display:flex;justify-content:space-between;gap:8px;font-size:.74rem;padding:5px 8px;border-bottom:1px solid var(--border-lt,#eef2f7)"><span>📄 ${_ptE(v.nome||'arquivo')} <span style="color:var(--ink4)">· anexado ${v.em?_pfDH(v.em):'—'}${v.por?' por '+_ptE(v.por):''} · substituído ${_pfDH(v.substituidoEm)}${v.substituidoPor?' por '+_ptE(v.substituidoPor):''}</span></span><a href="${cldDownload(v.url)}" target="_blank" style="color:var(--brand);font-weight:700;text-decoration:none;white-space:nowrap">⬇️ Baixar</a></div>`).join('')}</div></details>`:'';
+}
+async function uploadProjetoInstalacao(input){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem editar produtos.','terr');return;}
+  const f=input&&input.files&&input.files[0];if(!f)return;
+  const p=getProdutos()[_pfIdx];if(!p){toast('Produto não encontrado','terr');return;}
+  const st=document.getElementById('pf-inst-status');if(st)st.textContent='⏳ Enviando arquivo...';
+  try{
+    if(!cfg.cld_cloud||!cfg.cld_preset)throw new Error('Cloudinary não configurado (Configurações → Integrações).');
+    const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_produtos');
+    const isRaw=f.type==='application/pdf'||f.name.toLowerCase().endsWith('.pdf');
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/${isRaw?'raw':'image'}/upload`,{method:'POST',body:fd});
+    const d=await r.json();const url=d.secure_url||'';
+    if(!url)throw new Error('Falha no upload.');
+    if(typeof _cldRegistrarUpload==='function')_cldRegistrarUpload(f.size);
+    const agora=new Date().toISOString(),quem=_pfQuem();
+    const n=await window._fbProdFichaTx(p.id,x=>{
+      x.versoes=x.versoes||{};
+      if(x.inst&&x.inst.url){const l=Array.isArray(x.versoes.inst)?x.versoes.inst:[];l.push(Object.assign({},x.inst,{substituidoEm:agora,substituidoPor:quem}));x.versoes.inst=l.slice(-30);}
+      x.inst={url,nome:f.name,em:agora,por:quem};
+      x.historico=Array.isArray(x.historico)?x.historico:[];
+      x.historico.push({em:agora,por:quem,acao:'Anexou nova versão do projeto de instalação',det:f.name});
+      return x;
+    });
+    _pfFicha[p.id]=n;toast('Projeto de instalação salvo.','tok');
+    _pfRenderInst(p);_pfRenderHist(p);
+  }catch(e){console.error(e);if(st)st.textContent='';toast('Erro ao enviar arquivo: '+e.message,'terr');}
+}
+async function removerProjetoInstalacao(){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem editar produtos.','terr');return;}
+  const p=getProdutos()[_pfIdx];if(!p)return;
+  if(!confirm('Remover o projeto de instalação atual? Ele continua guardado em "Versões anteriores".'))return;
+  const agora=new Date().toISOString(),quem=_pfQuem();
+  try{
+    const n=await window._fbProdFichaTx(p.id,x=>{
+      if(x.inst&&x.inst.url){x.versoes=x.versoes||{};const l=Array.isArray(x.versoes.inst)?x.versoes.inst:[];l.push(Object.assign({},x.inst,{substituidoEm:agora,substituidoPor:quem}));x.versoes.inst=l.slice(-30);x.historico=Array.isArray(x.historico)?x.historico:[];x.historico.push({em:agora,por:quem,acao:'Removeu o projeto de instalação atual',det:x.inst.nome||''});}
+      x.inst=null;return x;
+    });
+    _pfFicha[p.id]=n;_pfRenderInst(p);_pfRenderHist(p);
+  }catch(e){toast('Erro ao remover: '+e.message,'terr');}
+}
+function _pfRenderHist(p){
+  const el=document.getElementById('pf-hist');if(!el)return;
+  const l=((_pfFicha[p.id]||{}).historico||[]).slice().reverse();
+  if(!l.length){el.innerHTML='<div style="padding:12px;text-align:center;color:var(--ink4);font-size:.78rem;border:1px dashed var(--border);border-radius:8px">Nenhuma alteração registrada ainda. A partir de agora, toda mudança neste produto fica registrada aqui com quem fez, dia e hora.</div>';return;}
+  const linha=h=>`<div style="display:grid;grid-template-columns:130px 1fr;gap:10px;padding:7px 4px;border-bottom:1px solid var(--border-lt,#eef2f7);font-size:.76rem"><div style="color:var(--ink4)">${_pfDH(h.em)}<div style="font-weight:700;color:var(--ink3)">${_ptE(h.por||'—')}</div></div><div><b>${_ptE(h.acao)}</b>${h.det?`<div style="color:var(--ink3);word-break:break-word">${_ptE(h.det)}</div>`:''}</div></div>`;
+  el.innerHTML=`<div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0 8px">${l.map(linha).join('')}</div><div style="font-size:.66rem;color:var(--ink4);margin-top:4px">${l.length} ${_plural(l.length,'registro','registros')}</div>`;
+}
+async function _pfImgDataUrl(url){
+  try{const r=await fetch(url.replace('/image/upload/','/image/upload/w_600,c_limit,f_jpg,q_80/'));const b=await r.blob();return await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>res(null);fr.readAsDataURL(b);});}catch(e){return null;}
+}
+// ── PESO DO PRODUTO CALCULADO PELAS MATÉRIAS-PRIMAS (2026-10-16, a pedido do usuário: "quero que
+// tenha o peso de cada produto calculado automaticamente com base nas matérias-primas e suas
+// quantidades"). A planilha de matérias-primas não tem peso, então existe uma tabela única de
+// "kg por unidade" de cada matéria-prima (sistema/pesosMp, fora do cfg): preenchida UMA vez por
+// material, vale pra todos os produtos que usam ele. Linha em kg/g/t conta sozinha. Peso do
+// produto = soma de quantidade × kg por unidade; se faltar peso de algum material, mostra
+// "parcial" e quais faltam, com o campo pra preencher ali mesmo na ficha.
+let _pesosMp=null,_pesosMpCarregando=null;
+function _pesoMpChave(nome,unidade){
+  const n=s=>String(s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9]+/g,'_').replace(/^_|_$/g,'');
+  return(n(nome)+'__'+n(unidade)).slice(0,200)||'x';
+}
+function _pesoUnidadeKg(unidade){
+  const u=String(unidade||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z]/g,'');
+  if(['KG','KGS','KILO','KILOS','QUILO','QUILOS','QUILOGRAMA','QUILOGRAMAS','KILOGRAMA','KILOGRAMAS'].includes(u))return 1;
+  if(['G','GR','GRS','GRAMA','GRAMAS'].includes(u))return 0.001;
+  if(['T','TON','TONELADA','TONELADAS'].includes(u))return 1000;
+  return null;
+}
+function _pesosMpCarregar(forcar){
+  if(_pesosMp&&!forcar)return Promise.resolve(_pesosMp);
+  if(_pesosMpCarregando&&!forcar)return _pesosMpCarregando;
+  _pesosMpCarregando=(window._fbPesosMpGet?window._fbPesosMpGet():Promise.resolve({}))
+    .then(d=>{_pesosMp=(d&&d.itens)||{};_pesosMpCarregando=null;return _pesosMp;})
+    .catch(e=>{console.warn('Pesos de matéria-prima',e);_pesosMp=_pesosMp||{};_pesosMpCarregando=null;return _pesosMp;});
+  return _pesosMpCarregando;
+}
+// {kg, linhas:[{nome,qtd,unidade,kgUn,kg,auto,falta}], faltam, total} — null se não tem lista de MP.
+function _prodPeso(p){
+  const rows=(p&&p.materiasPrimas)||[];
+  if(!rows.length)return null;
+  const tab=_pesosMp||{};
+  let kg=0,faltam=0;
+  const linhas=rows.map(r=>{
+    const qtd=Number(r.qtd);const q=isFinite(qtd)?qtd:0;
+    const auto=_pesoUnidadeKg(r.unidade);
+    let kgUn=null;
+    if(auto!=null)kgUn=auto;
+    else{const t=tab[_pesoMpChave(r.nome,r.unidade)];if(t&&t.kg!=null&&isFinite(Number(t.kg)))kgUn=Number(t.kg);}
+    const falta=kgUn==null;
+    const k=falta?0:q*kgUn;
+    if(falta)faltam++;else kg+=k;
+    return{nome:r.nome,qtd:q,unidade:r.unidade||'',kgUn,kg:k,auto:auto!=null,falta};
+  });
+  return{kg,linhas,faltam,total:rows.length};
+}
+function _pesoFmt(kg){return kg.toLocaleString('pt-BR',{minimumFractionDigits:kg<10?2:1,maximumFractionDigits:kg<10?2:1})+' kg';}
+function _pesoResumoTxt(p){
+  const r=_prodPeso(p);
+  if(!r)return'';
+  if(r.faltam===r.total)return'';
+  return(r.faltam?'≈ ':'')+_pesoFmt(r.kg)+(r.faltam?` (parcial — falta o peso de ${r.faltam} ${_plural(r.faltam,'material','materiais')})`:'');
+}
+function _pfPesoMiniHtml(p){
+  const r=_prodPeso(p);
+  if(!r||r.faltam===r.total)return'';
+  return` · <span style="color:${r.faltam?'#b45309':'#334155'}" title="${r.faltam?'Parcial: falta o peso de '+r.faltam+' '+_plural(r.faltam,'material','materiais'):'Peso calculado pelas matérias-primas'}">⚖️ ${r.faltam?'≈ ':''}${_pesoFmt(r.kg)}</span>`;
+}
+function _pfRenderPeso(p){
+  const el=document.getElementById('pf-peso');if(!el)return;
+  const r=_prodPeso(p),isAdm=_getUserCat().isAdm,tab=_pesosMp||{};
+  if(!r){el.innerHTML='<div style="padding:12px;text-align:center;color:var(--ink4);font-size:.78rem;border:1px dashed var(--border);border-radius:8px">O peso é calculado pelas matérias-primas. Cadastre a lista de matérias-primas deste produto pra ver o peso.</div>';return;}
+  const cab=r.faltam===r.total
+    ?`<div style="font-size:.84rem;font-weight:700;color:#b45309">Falta informar o peso das matérias-primas abaixo pra calcular.</div>`
+    :`<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span style="font-size:1.35rem;font-weight:800;color:#1a2b5e">${r.faltam?'≈ ':''}${_pesoFmt(r.kg)}</span><span style="font-size:.74rem;color:${r.faltam?'#b45309':'#059669'};font-weight:700">${r.faltam?`parcial — falta o peso de ${r.faltam} de ${r.total} ${_plural(r.total,'material','materiais')}`:`completo — ${r.total} ${_plural(r.total,'material','materiais')}`}</span></div>`;
+  const linhas=r.linhas.map((l,ix)=>{
+    const t=tab[_pesoMpChave(l.nome,l.unidade)];
+    const quem=t&&t.em?`informado por ${t.por||'—'} em ${_pfDH(t.em)}`:'';
+    let kgCel;
+    if(l.auto)kgCel=`<span style="color:var(--ink4)" title="A unidade já é peso">automático</span>`;
+    else if(isAdm)kgCel=`<input type="number" min="0" step="0.001" class="fc" style="width:96px;padding:4px 6px;${l.falta?'border-color:#f59e0b;background:#fffbeb':''}" value="${l.kgUn!=null?l.kgUn:''}" placeholder="kg" title="${_ptE(quem||'Peso em kg de 1 unidade deste material. Vale pra todos os produtos que usam ele.')}" onchange="_pfPesoSalvar(${ix},this.value)">`;
+    else kgCel=l.falta?'<span style="color:#b45309">falta</span>':l.kgUn.toLocaleString('pt-BR',{maximumFractionDigits:3});
+    return`<tr${l.falta?' style="background:#fffbeb"':''}><td>${_ptE(l.nome)}</td><td style="text-align:right">${l.qtd.toLocaleString('pt-BR',{maximumFractionDigits:3})}</td><td>${_ptE(l.unidade||'—')}</td><td style="text-align:right">${kgCel}</td><td style="text-align:right;font-weight:700">${l.falta?'—':_pesoFmt(l.kg)}</td></tr>`;
+  }).join('');
+  el.innerHTML=cab+`<details style="margin-top:8px"${r.faltam?' open':''}><summary style="cursor:pointer;font-size:.74rem;color:var(--ink3);font-weight:700">Ver cálculo por matéria-prima${isAdm&&r.faltam?' e preencher o que falta':''}</summary>
+    <div style="overflow-x:auto;margin-top:6px"><table class="dash-table"><thead><tr><th>Material</th><th style="text-align:right">Quantidade</th><th>Unidade</th><th style="text-align:right">kg por unidade</th><th style="text-align:right">Peso</th></tr></thead><tbody>${linhas}</tbody></table></div>
+    <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">O peso por unidade de cada matéria-prima é informado uma vez e vale pra todos os produtos que usam ela. Linhas em kg, g ou toneladas entram sozinhas.</div></details>`;
+}
+async function _pfPesoSalvar(ix,valor){
+  if(!_getUserCat().isAdm){toast('Apenas administradores podem informar o peso.','terr');return;}
+  const p=getProdutos()[_pfIdx];if(!p)return;
+  const r=_prodPeso(p);const l=r&&r.linhas[ix];if(!l)return;
+  const v=String(valor||'').trim().replace(',','.');
+  const k=_pesoMpChave(l.nome,l.unidade);
+  const antes=(_pesosMp&&_pesosMp[k]&&_pesosMp[k].kg!=null)?_pesosMp[k].kg:null;
+  const num=v===''?null:Number(v);
+  if(num!=null&&(!isFinite(num)||num<0)){toast('Peso inválido','terr');return;}
+  const reg=num==null?null:{kg:num,nome:l.nome,unidade:l.unidade,em:new Date().toISOString(),por:_pfQuem()};
+  try{
+    await window._fbPesosMpSet(k,reg);
+    _pesosMp=_pesosMp||{};if(reg)_pesosMp[k]=reg;else delete _pesosMp[k];
+    _prodHist(p.id,'Informou o peso de matéria-prima',`${l.nome} (${l.unidade||'sem unidade'}): ${antes==null?'—':antes+' kg'} → ${num==null?'—':num+' kg'} por unidade · vale pra todos os produtos que usam este material`);
+    toast('Peso salvo — vale pra todos os produtos com este material','tok');
+    _pfRenderPeso(p);
+    try{renderComercialProdutos();}catch(e){}
+  }catch(e){console.error(e);toast('Erro ao salvar o peso: '+e.message,'terr');}
+}
+// PDF da ficha técnica — sem custo, CMV nem margem (pode ser enviado pra cliente).
+async function _pfGerarPDF(i){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const p=getProdutos()[i];if(!p)return;
+  toast('⏳ Gerando PDF...','tinf');
+  let f=_pfFicha[p.id];if(!f){try{f=await window._fbProdFichaGet(p.id);}catch(e){f={};}}
+  const sp=(f&&f.spec)||{};
+  const{jsPDF}=window.jspdf;const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],GRAY=[100,116,139];
+  const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+  doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(15);doc.text('FICHA TÉCNICA',W-14,15,{align:'right'});
+  doc.setTextColor(...PINK);doc.setFontSize(10);doc.text('GCORE - Sistema Granda',W-14,21,{align:'right'});
+  doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,26,W-14,26);
+  let y=34;
+  doc.setTextColor(...NAVY);doc.setFontSize(13);
+  const tl=doc.splitTextToSize(p.nome||'Produto',W-28);doc.text(tl,14,y);y+=tl.length*6;
+  doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(...GRAY);
+  doc.text([p.categoria,p.tipoProduto,p.medida,p.um].filter(Boolean).join('  ·  ')||' ',14,y);y+=6;
+  if(p.fotoUrl){const img=await _pfImgDataUrl(p.fotoUrl);if(img){try{const pr=doc.getImageProperties(img);let w=70,h=w*pr.height/pr.width;if(h>60){h=60;w=h*pr.width/pr.height;}doc.addImage(img,'JPEG',14,y,w,h);y+=h+6;}catch(e){}}}
+  const linhas=PF_SPEC.filter(([k])=>String(sp[k]||'').trim()).map(([k,l])=>[l,String(sp[k]).trim()]);
+  const docs=[];
+  if(p.projetoExecutivoUrl)docs.push(['Projeto executivo',(p.projetoExecutivoNome||'arquivo')+(p.projetoExecutivoEm?' — '+_pfDH(p.projetoExecutivoEm):'')]);
+  if(f&&f.inst&&f.inst.url)docs.push(['Projeto de instalação',(f.inst.nome||'arquivo')+(f.inst.em?' — '+_pfDH(f.inst.em):'')]);
+  docs.push(['Matéria-prima atualizada em',p.custoMateriaisEm?_pfDH(p.custoMateriaisEm):'—']);
+  try{await _pesosMpCarregar();const pt=_pesoResumoTxt(p);if(pt)linhas.unshift(['Peso calculado (matérias-primas)',pt]);}catch(e){}
+  doc.autoTable({startY:y,head:[['Especificação técnica','']],body:linhas.length?linhas:[['—','Nenhuma especificação preenchida']],theme:'grid',
+    styles:{fontSize:8.5,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:2.2,valign:'top'},headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold'},
+    columnStyles:{0:{fontStyle:'bold',cellWidth:52}},margin:{left:14,right:14,bottom:20}});
+  doc.autoTable({startY:doc.lastAutoTable.finalY+6,head:[['Documentos','']],body:docs,theme:'grid',
+    styles:{fontSize:8.5,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:2.2},headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold'},
+    columnStyles:{0:{fontStyle:'bold',cellWidth:52}},margin:{left:14,right:14,bottom:20}});
+  const n=doc.internal.getNumberOfPages();
+  for(let pg=1;pg<=n;pg++){doc.setPage(pg);doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,H-14,W-14,H-14);doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,H-9);doc.text('Gerado em '+_pfDH(new Date().toISOString()),W/2,H-9,{align:'center'});doc.text('Página '+pg+' de '+n,W-14,H-9,{align:'right'});}
+  doc.save('ficha_tecnica_'+String(p.nome||'produto').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'_').slice(0,50)+'.pdf');
+}
 function renderComercialProdutos(){
   const el=document.getElementById('comprod-body');if(!el)return;
+  if(!_pesosMp&&!_pesosMpCarregando)_pesosMpCarregar().then(()=>{try{renderComercialProdutos();}catch(e){}});
   const elCards=document.getElementById('comprod-cards');
   const produtos=getProdutos();
   const hoje=new Date();
@@ -17909,7 +18230,7 @@ function renderComercialProdutos(){
     }
     return `<tr onclick="abrirFichaProduto(${i})" style="cursor:pointer" title="Clique para abrir a ficha técnica">
       <td>${fotoMiniHtml(p)}</td>
-      <td style="max-width:320px;word-break:break-word;font-weight:600">${(p.nome||'—').replace(/</g,'&lt;')}</td>
+      <td style="max-width:320px;word-break:break-word;font-weight:600">${(p.nome||'—').replace(/</g,'&lt;')}${_pfMpMiniHtml(p)}</td>
       <td style="max-width:110px;word-break:break-word;color:var(--ink3)">${(p.medida||'—').replace(/</g,'&lt;')}</td>
       <td style="font-weight:600">${preco>0.005?fmtR(preco):'—'}</td>
       <td style="font-size:.76rem;color:var(--ink3)">${p.um||'—'}</td>
@@ -18004,7 +18325,9 @@ function importarProdutosColados(){
     // anteriores do forEach) — cobre tanto "produto do pedido já estava cadastrado" quanto
     // "colei o mesmo produto 2x sem querer no mesmo lote".
     if(cfg.produtos.some(x=>_normNomeProduto(x.nome)===_normNomeProduto(nome))){dup++;dupNomes.push(nome);return;}
-    cfg.produtos.push({id:uid(),nome,categoria:'',medida,precoFinal,custo:cmv});
+    const _np={id:uid(),nome,categoria:'',medida,precoFinal,custo:cmv};
+    cfg.produtos.push(_np);
+    _prodHist(_np.id,'Produto cadastrado (importação em lote)',nome);
     add++;
   });
   if(add>0){
