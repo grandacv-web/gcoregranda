@@ -18,12 +18,13 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-15.4';</script>
+<script>const APP_BUILD_VERSION='2026-10-16.4';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
 (function(){try{var q=new URLSearchParams(location.search);
   if(q.get('obra')){window.__GCORE_PORTAL={modo:'obra',token:q.get('obra')};window.__GCORE_PORTAL_QS='obra='+encodeURIComponent(q.get('obra'))+'&';}
+  else if(q.get('lista')){window.__GCORE_PORTAL={modo:'lista',token:q.get('lista')};window.__GCORE_PORTAL_QS='lista='+encodeURIComponent(q.get('lista'))+'&';}
   else if(q.has('portal')){window.__GCORE_PORTAL={modo:'portal'};window.__GCORE_PORTAL_QS='portal=1&';}
   if(window.__GCORE_PORTAL)document.documentElement.classList.add('portal-mode');
 }catch(e){}})();
@@ -1372,10 +1373,21 @@ select.fc{cursor:pointer}
     <div class="dash-card" style="margin-top:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px">
         <div class="dash-sec-title" style="margin:0">📎 Pedidos sem Ordem de Compra do cliente</div>
-        <select id="semoc-mes" onchange="renderPedidosSemOC()" style="padding:6px 10px;border:1.5px solid var(--line,#e2e8f0);border-radius:8px;font-size:.78rem;font-weight:600"></select>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <select id="semoc-mes" onchange="renderPedidosSemOC()" style="padding:6px 10px;border:1.5px solid var(--line,#e2e8f0);border-radius:8px;font-size:.78rem;font-weight:600"></select>
+          <select id="semoc-cli" onchange="renderPedidosSemOC()" style="padding:6px 10px;border:1.5px solid var(--line,#e2e8f0);border-radius:8px;font-size:.78rem;font-weight:600;max-width:240px"></select>
+          <label style="display:inline-flex;align-items:center;gap:5px;font-size:.76rem;font-weight:600;color:var(--ink3);cursor:pointer;white-space:nowrap"><input type="checkbox" id="semoc-na" onchange="renderPedidosSemOC()"> Ver os marcados N.A.</label>
+          <button onclick="exportarExcelSemOc()" style="border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:.8rem;background:#fff;color:#166534;font-weight:700;cursor:pointer;white-space:nowrap">📊 Excel</button>
+          <button onclick="gerarPDFSemOc()" style="border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:.8rem;background:#fff;color:#e91e63;font-weight:700;cursor:pointer;white-space:nowrap">📄 PDF</button>
+        </div>
       </div>
-      <div style="font-size:.78rem;color:var(--ink3);margin-bottom:12px">Todas as vendas de clientes que exigem OC (Configurações → Grupos de Cliente → "Exige OC") que ainda não têm a Ordem de Compra anexada — inclusive as que vieram da planilha de vendas.</div>
+      <div style="font-size:.78rem;color:var(--ink3);margin-bottom:12px">Todo pedido emitido que ainda não tem a Ordem de Compra do cliente anexada, além das vendas da planilha de clientes que exigem OC. O pedido fica aqui até a OC ser anexada ou até o administrador marcar <b>N.A.</b> (não se aplica).</div>
       <div id="conselho-sem-oc-list"></div>
+    </div>
+    <div class="dash-card" style="margin-top:14px">
+      <div class="dash-sec-title" style="margin:0 0 6px">📋 Pedidos com Pendências</div>
+      <div style="font-size:.78rem;color:var(--ink3);margin-bottom:12px">Pedidos já emitidos com pendências do Conselho ainda em aberto. Cada pendência continua também em Ferramentas → Tarefas, e o pedido sai daqui quando todas forem resolvidas.</div>
+      <div id="conselho-com-pend-list"></div>
     </div>
   </div>
 
@@ -9883,18 +9895,30 @@ function _pedGrupoExigeOC(p){
   }catch(e){}
   return null;
 }
-// Devolve o nome do grupo quando o pedido está sem OC e o cliente exige; senão null.
+// N.A. da Ordem de Compra (2026-10-16, a pedido do usuário): o admin marca "não se aplica" na
+// lista de Pedidos sem OC e o pedido sai da lista (e a pendência automática de OC some). Pedido
+// do Firestore guarda em p.ocNA; venda que só existe na planilha guarda em cfg.ocNA[OS].
+function _ocNAInfo(ped,os){
+  if(ped&&ped.ocNA)return ped.ocNA;
+  const k=String(os!=null&&os!==''?os:((ped&&ped.os)||''));
+  return (k&&cfg.ocNA&&cfg.ocNA[k])||null;
+}
+// Pendência de OC: (2026-10-16) TODO pedido emitido sem OC (qualquer cliente), até anexar a OC
+// ou ser marcado N.A. Rascunho do Conselho só quando o grupo do cliente exige OC.
+// Devolve {grupo} (grupo que exige OC, ou '') quando há pendência; senão null.
 function _pedOcPendente(p){
   if(!p||_pedTemOC(p))return null;
+  if(_ocNAInfo(p))return null;
   if(p.importadoPlanilha)return null;
-  if(!(p.origemComercial||p.conselhoStatus==='rascunho'))return null;
   if(p.tipo&&p.tipo!=='Venda')return null; // Garantia, Interno, Amostra etc. não têm OC
   try{if(p.os&&isVendaCancelada(p.os))return null;}catch(e){}
-  return _pedGrupoExigeOC(p);
+  if(p.origemComercial){let g='';try{g=_pedGrupoExigeOC(p)||'';}catch(e){}return{grupo:g};}
+  if(p.conselhoStatus==='rascunho'){const g=_pedGrupoExigeOC(p);return g?{grupo:g}:null;}
+  return null;
 }
 function _pedPendOcVirtual(p){
-  let g=null;try{g=_pedOcPendente(p);}catch(e){}
-  return g?{id:'__oc__',auto:'oc',setor:'COMERCIAL',resolvida:false,texto:`📎 Falta a Ordem de Compra do cliente (${g} exige OC)`}:null;
+  let r=null;try{r=_pedOcPendente(p);}catch(e){}
+  return r?{id:'__oc__',auto:'oc',setor:'COMERCIAL',resolvida:false,texto:'📎 Falta a Ordem de Compra do cliente'+(r.grupo?` (${r.grupo} exige OC)`:'')}:null;
 }
 function _pedPendAbertas(p){
   const l=((p&&p.conselhoPendencias)||[]).filter(x=>!_pedPendResolvidaEfetiva(p,x));
@@ -9943,19 +9967,42 @@ async function _consOcAnexar(input){
 // abaixo do Conselho: varre TODAS as vendas (getVendaRowsMerged — planilha + emitidos, sem
 // canceladas) e lista as de grupo com "Exige OC" sem OC anexada. Não mexe nas pendências do
 // Conselho (continuam só pra emitidos/rascunhos).
+// (2026-10-16) Grupo de cliente pra separar a lista (BURGER KING, MADERO...): primeiro grupo de
+// Configurações → Grupos de Cliente que casar, exija OC ou não; sem grupo, o próprio cliente.
+function _grupoCliNome(cli,job){
+  const c=String(cli||'').toUpperCase(),j=String(job||'').toUpperCase();
+  let grupos=[];try{grupos=getGruposClienteFinanceiro()||[];}catch(e){}
+  for(const g of grupos){
+    const nome=String(g.nome||'').toUpperCase().trim();
+    const pal=(g.palavras||[]).map(x=>String(x||'').toUpperCase().trim()).filter(Boolean);
+    let bateu=pal.some(w=>c.includes(w)||j.includes(w));
+    if(!bateu&&nome==='BURGER KING')bateu=/(^|[^A-Z0-9])BK([^A-Z0-9]|$)/.test(c+' '+j);
+    if(bateu)return g.nome||nome;
+  }
+  return '';
+}
+// (2026-10-16) Entra: todo pedido EMITIDO pelo sistema sem OC (qualquer cliente) + venda da
+// planilha/Editar Valores de cliente que exige OC (regra antiga). x.na = marcado N.A.
 function _semOcLinhas(){
   let rows=[];try{rows=getVendaRowsMerged()||[];}catch(e){}
   const out=[];
   rows.forEach(r=>{
     const ped=r._pid?pedidos.find(x=>x.id===r._pid):null;
+    let exige='';
     if(ped){
       if(_pedTemOC(ped))return;
       if(ped.tipo&&ped.tipo!=='Venda')return;
-    }else if(r.ocUrl)return;
-    let g=null;
-    try{g=_pedGrupoExigeOC(ped||{cliente:r.cl||'',job:r.job||'',os:r.p});}catch(e){}
-    if(!g)return;
-    out.push({os:r.p,cliente:r.cl||(ped&&ped.cliente)||'',job:r.job||(ped&&ped.job)||'',m:r.m||0,mes:r.mes||'',vend:r.v||'',grupo:g,pid:ped?ped.id:'',numOC:(ped&&ped.numOC)||r.numOC||''});
+      try{exige=_pedGrupoExigeOC(ped)||'';}catch(e){}
+      if((!ped.origemComercial||ped.importadoPlanilha)&&!exige)return;
+    }else{
+      if(r.ocUrl)return;
+      try{exige=_pedGrupoExigeOC({cliente:r.cl||'',job:r.job||'',os:r.p})||'';}catch(e){}
+      if(!exige)return;
+    }
+    const cliente=r.cl||(ped&&ped.cliente)||'';
+    const job=r.job||(ped&&ped.job)||'';
+    let gc='';try{gc=_grupoCliNome(cliente,job);}catch(e){}
+    out.push({os:r.p,cliente,job,m:r.m||0,mes:r.mes||'',vend:r.v||'',grupo:exige,cliGrupo:gc||String(cliente).trim().toUpperCase()||'—',pid:ped?ped.id:'',numOC:(ped&&ped.numOC)||r.numOC||'',na:_ocNAInfo(ped,r.p)});
   });
   out.sort((a,b)=>(b.m-a.m)||String(b.os).localeCompare(String(a.os),'pt-BR',{numeric:true}));
   return out;
@@ -9974,45 +10021,237 @@ function _semOcEhMeu(x){
   const vend=String(x.vend||(ped&&(ped.vendedor||ped.responsavel))||'').trim();
   return !!vend&&vendedorMatch(vend,meuNome);
 }
+function _semOcEsc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+// Linhas já filtradas (mês, cliente, N.A.) — a mesma fonte da tela, do Excel e do PDF.
+function _semOcFiltradas(){
+  const todas=_semOcLinhas().filter(x=>{try{return _semOcEhMeu(x);}catch(e){return false;}});
+  const verNA=!!(document.getElementById('semoc-na')||{}).checked;
+  const base=todas.filter(x=>verNA?!!x.na:!x.na);
+  const fm=+((document.getElementById('semoc-mes')||{}).value||0);
+  const fc=(document.getElementById('semoc-cli')||{}).value||'';
+  const lista=base.filter(x=>(!fm||x.m===fm)&&(!fc||x.cliGrupo===fc));
+  return{base,lista,fm,fc,verNA};
+}
+// Ordem "separada por cliente": cliente/grupo A→Z, depois mês mais recente e OS.
+function _semOcOrdenarPorCliente(l){
+  return l.slice().sort((a,b)=>String(a.cliGrupo).localeCompare(String(b.cliGrupo),'pt-BR')||(b.m-a.m)||String(b.os).localeCompare(String(a.os),'pt-BR',{numeric:true}));
+}
 function renderPedidosSemOC(){
   const wrap=document.getElementById('conselho-sem-oc-list');
   if(!wrap)return;
-  const sel=document.getElementById('semoc-mes');
-  const todas=_semOcLinhas().filter(x=>{try{return _semOcEhMeu(x);}catch(e){return false;}});
-  const esc=v=>String(v==null?'':v).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-  if(sel){
-    const atual=sel.value||'';
-    const meses=[...new Set(todas.map(x=>x.m).filter(Boolean))].sort((a,b)=>b-a);
-    sel.innerHTML=`<option value="">Todos os meses (${todas.length})</option>`+meses.map(m=>`<option value="${m}">${MESES_PT[m]||m} (${todas.filter(x=>x.m===m).length})</option>`).join('');
-    if(atual&&meses.includes(+atual))sel.value=atual;
+  const esc=_semOcEsc;
+  const selM=document.getElementById('semoc-mes');
+  const selC=document.getElementById('semoc-cli');
+  let f=_semOcFiltradas();
+  if(selM){
+    const atual=selM.value||'';
+    const meses=[...new Set(f.base.map(x=>x.m).filter(Boolean))].sort((a,b)=>b-a);
+    selM.innerHTML=`<option value="">Todos os meses (${f.base.length})</option>`+meses.map(m=>`<option value="${m}">${MESES_PT[m]||m} (${f.base.filter(x=>x.m===m).length})</option>`).join('');
+    if(atual&&meses.includes(+atual))selM.value=atual;
   }
-  const fm=sel&&sel.value?+sel.value:0;
-  const lista=fm?todas.filter(x=>x.m===fm):todas;
+  if(selC){
+    const atual=selC.value||'';
+    const fm=+((selM&&selM.value)||0);
+    const doMes=f.base.filter(x=>!fm||x.m===fm);
+    const clis=[...new Set(doMes.map(x=>x.cliGrupo))].sort((a,b)=>String(a).localeCompare(String(b),'pt-BR'));
+    selC.innerHTML=`<option value="">Todos os clientes (${doMes.length})</option>`+clis.map(c=>`<option value="${esc(c)}">${esc(c)} (${doMes.filter(x=>x.cliGrupo===c).length})</option>`).join('');
+    if(atual&&clis.includes(atual))selC.value=atual;
+  }
+  f=_semOcFiltradas();
+  const lista=f.lista;
   if(!lista.length){
-    wrap.innerHTML='<div style="text-align:center;padding:22px 16px;color:var(--ink4);font-size:.85rem">✅ Nenhuma venda sem Ordem de Compra'+(fm?' neste mês':'')+'.</div>';
+    wrap.innerHTML='<div style="text-align:center;padding:22px 16px;color:var(--ink4);font-size:.85rem">'+(f.verNA?'Nenhum pedido marcado N.A.':'✅ Nenhum pedido sem Ordem de Compra')+(f.fm||f.fc?' com esses filtros':'')+'.</div>';
     return;
   }
   const{isAdm}=_getUserCat();
-  const linhas=lista.map(x=>{
+  const linha=x=>{
     const ped=x.pid?pedidos.find(p=>p.id===x.pid):null;
     const pode=ped?_conselhoPodeMexer(ped):isAdm;
+    const data=`data-pid="${esc(x.pid)}" data-os="${esc(x.os)}"`;
     let acao='';
-    if(ped&&pode)acao=`<label style="display:inline-block;background:#fffbeb;color:#92400e;border:1.5px solid #fde68a;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">📎 Anexar OC<input type="file" accept=".pdf,image/*" style="display:none" onchange="_semOcAnexar(this,'${ped.id}')"></label>`;
-    else if(!ped&&isAdm)acao=`<button onclick="editarVendaLista('${esc(x.os)}')" title="Venda da planilha — anexe a OC em Editar Valores" style="background:#fff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">✏️ Editar Valores</button>`;
-    else acao='<span style="font-size:.7rem;color:var(--ink4)">só admin/dono</span>';
+    if(f.verNA){
+      const na=x.na||{};
+      acao=`<span style="font-size:.7rem;color:#475569" title="${esc(na.motivo||'')}">✔️ N.A. por ${esc(na.por||'—')}${na.em?' em '+esc(fmtD(String(na.em).slice(0,10))):''}${na.motivo?' · '+esc(na.motivo):''}</span>`;
+      if(isAdm)acao+=` <button ${data} onclick="_semOcDesfazerNA(this)" style="background:#fff;color:#475569;border:1.5px solid #cbd5e1;border-radius:6px;padding:4px 8px;font-size:.7rem;font-weight:700;cursor:pointer;margin-left:4px;white-space:nowrap">↩️ Desfazer</button>`;
+    }else{
+      if(ped&&pode)acao=`<label style="display:inline-block;background:#fffbeb;color:#92400e;border:1.5px solid #fde68a;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">📎 Anexar OC<input type="file" accept=".pdf,image/*" style="display:none" onchange="_semOcAnexar(this,'${ped.id}')"></label>`;
+      else if(!ped&&isAdm)acao=`<button onclick="editarVendaLista('${esc(x.os)}')" title="Venda da planilha — anexe a OC em Editar Valores" style="background:#fff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">✏️ Editar Valores</button>`;
+      else acao='<span style="font-size:.7rem;color:var(--ink4)">só admin/dono</span>';
+      if(isAdm)acao+=` <button ${data} onclick="_semOcMarcarNA(this)" title="Não se aplica Ordem de Compra — o pedido sai da lista" style="background:#fff;color:#475569;border:1.5px solid #cbd5e1;border-radius:6px;padding:5px 9px;font-size:.72rem;font-weight:800;cursor:pointer;margin-left:4px;white-space:nowrap">N.A.</button>`;
+    }
     return`<tr>
       <td style="font-weight:700;white-space:nowrap">${esc(x.os)||'—'}</td>
       <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:120px">${esc(x.cliente)||'—'}</td>
       <td style="font-size:.78rem">${esc(x.job)||'—'}</td>
       <td style="font-size:.78rem;white-space:nowrap">${esc(x.mes)||'—'}</td>
       <td style="font-size:.72rem;color:var(--ink4)">${esc(x.vend)||'—'}</td>
-      <td style="font-size:.72rem;font-weight:700;color:#92400e">${esc(x.grupo)}</td>
+      <td style="font-size:.72rem;font-weight:700;color:#92400e">${x.grupo?esc(x.grupo)+' exige OC':'—'}</td>
       <td style="white-space:nowrap">${acao}</td>
     </tr>`;
+  };
+  let corpo='';
+  if(f.fc)corpo=lista.map(linha).join('');
+  else{
+    let atual=null;
+    _semOcOrdenarPorCliente(lista).forEach(x=>{
+      if(x.cliGrupo!==atual){
+        atual=x.cliGrupo;
+        const n=lista.filter(y=>y.cliGrupo===atual).length;
+        corpo+=`<tr><td colspan="7" style="background:#f1f5f9;font-weight:800;font-size:.78rem;color:#1a2b5e;padding:7px 10px">${esc(atual)} <span style="font-weight:600;color:var(--ink4)">(${n})</span></td></tr>`;
+      }
+      corpo+=linha(x);
+    });
+  }
+  const tit=f.verNA?`✔️ ${lista.length} pedido${lista.length>1?'s marcados':' marcado'} N.A.`:`⚠️ ${lista.length} pedido${lista.length>1?'s':''} sem OC`;
+  wrap.innerHTML=`<div style="font-size:.8rem;font-weight:700;color:${f.verNA?'#475569':'#92400e'};margin-bottom:8px">${tit}</div><div style="overflow-x:auto"><table class="dash-table">
+    <thead><tr><th>OS</th><th>Cliente</th><th>JOB</th><th>Mês</th><th>Vendedor</th><th>Exige OC</th><th></th></tr></thead>
+    <tbody>${corpo}</tbody></table></div>`;
+}
+async function _semOcMarcarNA(btn){
+  const{isAdm}=_getUserCat();
+  if(!isAdm){toast('Só o administrador pode marcar N.A.','terr');return;}
+  const pid=(btn&&btn.dataset.pid)||'',os=(btn&&btn.dataset.os)||'';
+  const ped=pid?pedidos.find(x=>x.id===pid):null;
+  const nome=ped?_pedNome(ped):os;
+  const motivo=prompt(`Marcar a OS ${os} (${nome}) como N.A. — não se aplica Ordem de Compra.\nO pedido sai desta lista e a pendência de OC some (dá pra desfazer em "Ver os marcados N.A.").\n\nMotivo (opcional):`,'');
+  if(motivo===null)return;
+  const info={por:(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'',em:new Date().toISOString(),motivo:String(motivo||'').trim()};
+  try{
+    if(ped){
+      ped.ocNA=info;
+      await savePedidoFS(ped);
+    }else{
+      if(!os){toast('Pedido não encontrado','terr');return;}
+      if(!cfg.ocNA)cfg.ocNA={};
+      cfg.ocNA[String(os)]=info;
+      await window._fbUpdateCfgField(['ocNA',String(os)],info);
+      try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
+    }
+    try{_invalidateDashCache();}catch(e){}
+    toast(`OS ${os} marcada como N.A. e retirada da lista.`,'tok');
+    renderConselhoPedidos();
+    try{if(typeof renderDashVendas==='function')renderDashVendas();}catch(e){}
+  }catch(e){toast('Erro ao marcar N.A.: '+e.message,'terr');}
+}
+async function _semOcDesfazerNA(btn){
+  const{isAdm}=_getUserCat();
+  if(!isAdm){toast('Só o administrador pode desfazer o N.A.','terr');return;}
+  const pid=(btn&&btn.dataset.pid)||'',os=(btn&&btn.dataset.os)||'';
+  if(!confirm(`Desfazer o N.A. da OS ${os}? Ela volta pra lista de pedidos sem Ordem de Compra.`))return;
+  const ped=pid?pedidos.find(x=>x.id===pid):null;
+  try{
+    if(ped&&ped.ocNA){ped.ocNA=null;await savePedidoFS(ped);}
+    if(os&&cfg.ocNA&&cfg.ocNA[String(os)]){
+      delete cfg.ocNA[String(os)];
+      await window._fbDeleteCfgField(['ocNA',String(os)]);
+      try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
+    }
+    try{_invalidateDashCache();}catch(e){}
+    toast(`N.A. desfeito — a OS ${os} voltou pra lista.`,'tok');
+    renderConselhoPedidos();
+    try{if(typeof renderDashVendas==='function')renderDashVendas();}catch(e){}
+  }catch(e){toast('Erro ao desfazer: '+e.message,'terr');}
+}
+function _semOcFiltrosLbl(f){
+  const p=[];
+  if(f.fm)p.push('Mês: '+(MESES_PT[f.fm]||f.fm));
+  if(f.fc)p.push('Cliente: '+f.fc);
+  p.push(f.verNA?'Marcados N.A.':'Sem OC');
+  return p.join('  ·  ');
+}
+function exportarExcelSemOc(){
+  const f=_semOcFiltradas();
+  if(!f.lista.length){toast('Nenhum pedido com esses filtros para exportar','terr');return;}
+  const headers=['Cliente / Grupo','OS','Cliente','JOB','Mês','Vendedor','Exige OC','Situação'];
+  const body=_semOcOrdenarPorCliente(f.lista).map(x=>[x.cliGrupo,String(x.os||''),x.cliente||'',x.job||'',x.mes||'',x.vend||'',x.grupo?'Sim':'Não',
+    x.na?`N.A. (${x.na.por||''}${x.na.motivo?' — '+x.na.motivo:''})`:'Sem OC']);
+  _csvDownload(`pedidos_sem_oc_${_hojeIso()}.csv`,headers,body);
+  toast('Exportado! Abra o arquivo baixado no Excel.','tok');
+}
+async function gerarPDFSemOc(){
+  if(!window.jspdf){toast('Biblioteca PDF não carregada. Verifique sua conexão.','terr');return;}
+  const f=_semOcFiltradas();
+  if(!f.lista.length){toast('Nenhum pedido com esses filtros para gerar o PDF.','terr');return;}
+  const{jsPDF}=window.jspdf;
+  const doc=new jsPDF();
+  const NAVY=[26,43,94],PINK=[233,30,99],GRAY=[100,116,139];
+  const pageW=doc.internal.pageSize.getWidth(),pageH=doc.internal.pageSize.getHeight();
+  const logo=await _getLogoGrandaPDF();
+  const titulo=f.verNA?'PEDIDOS MARCADOS N.A. (ORDEM DE COMPRA)':'PEDIDOS SEM ORDEM DE COMPRA';
+  const filtros='Filtros: '+_semOcFiltrosLbl(f)+'  ·  '+f.lista.length+' pedido'+(f.lista.length>1?'s':'');
+  function drawHeader(){
+    if(logo){try{doc.addImage(logo,'PNG',14,9,36,12.9);}catch(e){}}
+    doc.setTextColor(...NAVY);doc.setFont('helvetica','bold');doc.setFontSize(13);
+    doc.text(titulo,pageW-14,15,{align:'right'});
+    doc.setTextColor(...PINK);doc.setFontSize(10);
+    doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
+    doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+    doc.text(filtros,pageW-14,26.5,{align:'right'});
+    doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,28,pageW-14,28);
+  }
+  function drawFooter(){
+    doc.setDrawColor(220,224,230);doc.setLineWidth(0.3);doc.line(14,pageH-14,pageW-14,pageH-14);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(...GRAY);
+    doc.text('GRANDA Comunicação Visual · GCORE - Sistema Granda',14,pageH-9);
+    doc.text('Gerado em '+new Date().toLocaleDateString('pt-BR')+' às '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),pageW/2,pageH-9,{align:'center'});
+    doc.text('Página '+doc.internal.getCurrentPageInfo().pageNumber,pageW-14,pageH-9,{align:'right'});
+  }
+  const body=[];let atual=null;
+  const ord=_semOcOrdenarPorCliente(f.lista);
+  ord.forEach(x=>{
+    if(x.cliGrupo!==atual){
+      atual=x.cliGrupo;
+      const n=ord.filter(y=>y.cliGrupo===atual).length;
+      body.push([{content:`${atual} (${n})`,colSpan:6,styles:{fillColor:[241,245,249],textColor:NAVY,fontStyle:'bold',fontSize:7.5}}]);
+    }
+    body.push([String(x.os||'—'),x.cliente||'—',x.job||'—',x.mes||'—',x.vend||'—',
+      f.verNA?('N.A.'+(x.na&&x.na.motivo?' — '+x.na.motivo:'')):(x.grupo?x.grupo+' exige OC':'—')]);
+  });
+  doc.autoTable({
+    startY:33,head:[['OS','Cliente','JOB','Mês','Vendedor',f.verNA?'Situação':'Exige OC']],body,theme:'grid',
+    styles:{fontSize:7,textColor:[51,65,85],lineColor:[226,232,240],lineWidth:.1,cellPadding:1.8},
+    headStyles:{fillColor:NAVY,textColor:255,fontStyle:'bold',fontSize:7.5},
+    columnStyles:{0:{fontStyle:'bold',cellWidth:18}},
+    margin:{top:33,left:14,right:14,bottom:20},
+    didDrawPage:()=>{drawHeader();drawFooter();}
+  });
+  doc.save(`pedidos_sem_oc_${_hojeIso()}.pdf`);
+  toast('PDF gerado!','tok');
+}
+// ── PEDIDOS COM PENDÊNCIAS (2026-10-16, a pedido do usuário) — card próprio abaixo da lista sem
+// OC: pedidos já emitidos com pendência do Conselho em aberto (fora a de OC, que fica no card de
+// cima). Antes ficavam misturados com os rascunhos na lista principal do Conselho. As pendências
+// continuam sendo tarefas em Ferramentas → Tarefas (nada mudou nelas).
+function renderPedidosComPendencias(){
+  const wrap=document.getElementById('conselho-com-pend-list');
+  if(!wrap)return;
+  const esc=_semOcEsc;
+  const lista=pedidos.filter(p=>p.origemComercial&&_conselhoPodeMexer(p)&&_pedPendAbertas(p).some(x=>x&&x.id!=='__oc__'));
+  if(!lista.length){
+    wrap.innerHTML='<div style="text-align:center;padding:22px 16px;color:var(--ink4);font-size:.85rem">✅ Nenhum pedido emitido com pendência em aberto.</div>';
+    return;
+  }
+  lista.sort((a,b)=>String(b.os||'').localeCompare(String(a.os||''),'pt-BR',{numeric:true}));
+  const rows=lista.map(p=>{
+    const abertas=_pedPendAbertas(p);
+    const outras=abertas.filter(x=>x&&x.id!=='__oc__');
+    const semOc=abertas.some(x=>x&&x.id==='__oc__');
+    const itens=outras.map(x=>`<div style="font-size:.76rem;line-height:1.35;margin:2px 0">• ${esc(x.texto)}${x.setor?` <span style="font-size:.64rem;font-weight:700;color:#7c3aed">${esc(x.setor)}</span>`:''}${x.responsavel?` <span style="font-size:.66rem;color:var(--ink4)">(${esc(x.responsavel)})</span>`:''}</div>`).join('');
+    return`<tr>
+      <td style="font-weight:700;white-space:nowrap">${esc(p.os)||'—'}</td>
+      <td style="font-weight:600;white-space:normal;word-break:break-word;min-width:120px">${esc(p.cliente)||'—'}${semOc?' <span style="font-size:.62rem;font-weight:700;color:#92400e;white-space:nowrap">📎 sem OC</span>':''}</td>
+      <td style="font-size:.78rem">${esc(p.job)||'—'}</td>
+      <td style="font-size:.72rem;color:var(--ink4)">${esc(p.conselhoCriadoPor||p.responsavel||'—')}</td>
+      <td style="white-space:normal;min-width:200px">${itens}</td>
+      <td style="white-space:nowrap">
+        <button onclick="abrirPendenciasConselho('${p.id}')" style="background:#fff;color:#7c3aed;border:1.5px solid #ddd6fe;border-radius:6px;padding:5px 8px;font-size:.72rem;font-weight:700;cursor:pointer;margin-right:4px">📋 Pendências (${abertas.length})</button>
+        <button onclick="openEmissao('${p.id}')" style="background:#fff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer">✏️ Ver/Editar</button>
+      </td>
+    </tr>`;
   }).join('');
-  wrap.innerHTML=`<div style="font-size:.8rem;font-weight:700;color:#92400e;margin-bottom:8px">⚠️ ${lista.length} venda${lista.length>1?'s':''} sem OC</div><div style="overflow-x:auto"><table class="dash-table">
-    <thead><tr><th>OS</th><th>Cliente</th><th>JOB</th><th>Mês</th><th>Vendedor</th><th>Grupo</th><th></th></tr></thead>
-    <tbody>${linhas}</tbody></table></div>`;
+  wrap.innerHTML=`<div style="font-size:.8rem;font-weight:700;color:#7c3aed;margin-bottom:8px">🟣 ${lista.length} pedido${lista.length>1?'s':''} com pendência em aberto</div><div style="overflow-x:auto"><table class="dash-table">
+    <thead><tr><th>OS</th><th>Cliente</th><th>JOB</th><th>Criado por</th><th>Pendências em aberto</th><th></th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
 }
 async function _semOcAnexar(input,pid){
   const f=input&&input.files&&input.files[0];if(!f)return;
@@ -10073,6 +10312,7 @@ function _conselhoPodeMexer(p){
 function _conselhoBloqueioMsg(p){toast('🔒 Este conselho é de '+((p&&p.conselhoCriadoPor)||'outro usuário')+' — só quem criou ou um administrador pode abrir e mexer.','terr');}
 function renderConselhoPedidos(){
   try{renderPedidosSemOC();}catch(e){console.error('renderPedidosSemOC',e);}
+  try{renderPedidosComPendencias();}catch(e){console.error('renderPedidosComPendencias',e);}
   const wrap=document.getElementById('conselho-pedidos-list');
   if(!wrap)return;
   const{isAdm,email}=_getUserCat();
@@ -10083,11 +10323,12 @@ function renderConselhoPedidos(){
   // (2026-10-14) Pedido emitido cuja ÚNICA pendência é a OC do cliente não entra mais aqui — ele
   // fica só no card "Pedidos sem Ordem de Compra" logo abaixo (a pedido do usuário: "pq tem duas
   // listas?"). Pedido com outra pendência continua aqui normalmente.
-  const emitidosComPend=pedidos.filter(p=>p.origemComercial&&meus(p)&&_pedPendAbertas(p).some(x=>x&&x.id!=='__oc__'));
-  const todos=[...rascunhos,...emitidosComPend];
+  // (2026-10-16) Pedido já emitido com pendência saiu daqui: fica no card "Pedidos com
+  // Pendências" (renderPedidosComPendencias), abaixo da lista sem OC.
+  const todos=[...rascunhos];
   todos.sort((a,b)=>(a.conselhoData||'9999').localeCompare(b.conselhoData||'9999'));
   if(!todos.length){
-    wrap.innerHTML='<div style="text-align:center;padding:32px 16px;color:var(--ink4);font-size:.85rem">Nenhum rascunho aguardando conselho nem pendência aberta — clique em "Fazer Novo Conselho" pra começar um.</div>';
+    wrap.innerHTML='<div style="text-align:center;padding:32px 16px;color:var(--ink4);font-size:.85rem">Nenhum rascunho aguardando conselho. Clique em "Fazer Novo Conselho" pra começar um.</div>';
     return;
   }
   const hojeIso=_hojeIso();
@@ -31140,7 +31381,7 @@ function _lpTopoCompactoHtml(infos,hoje,ex){
     +bt('semana','📆 Entregas desta semana')
     +bt('assert',`🎯 Assertividade${a.pct!=null?' '+a.pct+'%':''}`)
     +(ex.diasCap?bt('cap',`🏭 ${ex.diasCap} ${ex.diasCap===1?'dia':'dias'} acima da capacidade`):'')
-    +`<button type="button" class="plx-tg" onclick="portalCopiarLinkEngenheiro()" title="Link do portal onde cada engenheiro(a) do cliente entra com o próprio e-mail e vê todas as obras dele com a Granda">🔗 Portal do engenheiro</button>`
+    +`<button type="button" class="plx-tg" onclick="portalAbrirCompartilhar()" title="Mande pro cliente ou pro engenheiro um link com todas as obras dele">🔗 Compartilhar obras</button>`
     +(ex.qtdAtencao?`<button type="button" class="plx-tg" onclick="_lpAbrirModalAtencao()" title="Limite de Produção ou Instalação estourado — clique pra ver quais pedidos">⚠️ ${ex.qtdAtencao} ${ex.qtdAtencao===1?'pedido requer':'pedidos requerem'} atenção</button>`:'')
     +`</div>`;
   if(_lpPainelTopo==='onde')h+=_lpFilaHtml(infos,hoje);
@@ -62118,6 +62359,7 @@ async function _portalBackfill(){
     if(ok===false&&!p.portalToken)continue;
     await new Promise(r=>setTimeout(r,60));
   }
+  try{await _portalCarteirasBackfill();}catch(e){console.warn('Portal: listas',e);}
 }
 (function _portalAgendarBackfill(){
   if(window.__GCORE_PORTAL)return;
@@ -62136,11 +62378,161 @@ function _portalCopiar(txt,msg){
 async function portalCopiarLinkObra(pedidoId){
   const p=pedidos.find(x=>x.id===pedidoId);if(!p)return;
   if(!_portalElegivel(p)){toast('Este pedido não entra no acompanhamento do cliente','terr');return;}
-  await _portalSync(p,true);
-  if(!p.portalToken){toast('Não foi possível gerar o link agora — tente de novo','terr');return;}
+  // (2026-10-16) Força regravar a cópia do cliente e só copia o link se ela foi gravada de
+  // verdade — antes copiava mesmo quando a gravação falhava, e o cliente abria um link vazio.
+  try{localStorage.removeItem('gcPortal_'+p.id);}catch(e){}
+  const ok=await _portalSync(p,true);
+  if(!p.portalToken){toast('Não foi possível gerar o link agora. Tente de novo.','terr');return;}
+  if(!ok){toast('O link não foi copiado: o servidor recusou gravar o acompanhamento. As regras do Firestore do portal precisam estar publicadas no Firebase Console.','terr');return;}
   _portalCopiar(_portalLinkObra(p),'🔗 Link de acompanhamento da obra copiado — é só colar pro cliente');
 }
 function portalCopiarLinkEngenheiro(){_portalCopiar(_portalLinkEngenheiro(),'🔗 Link do portal do engenheiro copiado');}
+// ── COMPARTILHAR OBRAS (2026-10-16, a pedido do usuário: "organizar por engenheiro responsável e
+// poder enviar todas as obras do engenheiro ou todas as obras do cliente para apreciação do
+// cliente, sem interferir na visualização interna do Pipeline"). Uma janela só, com busca: cada
+// linha é um engenheiro (e-mail do campo "E-mail do Engenheiro da Obra") ou um cliente (Grupo de
+// Cliente, ou o nome do cliente sem grupo). Entram obras em andamento + concluídas nos últimos 60
+// dias. O link (?lista=TOKEN) é estável: o token fica em cfg.portalCarteiras[k] e a lista é
+// regravada ao copiar/enviar e na passada automática do admin.
+function _portalCarteiraK(chave){return 'k'+_portalHash(String(chave));}
+function _portalLinkLista(token){return PORTAL_BASE_URL+'?lista='+encodeURIComponent(token||'');}
+function _portalEngNome(email){const n=cfg.portalEngNomes&&cfg.portalEngNomes[_portalCarteiraK('e:'+email)];return(n&&n.nome)||'';}
+function _portalCarteirasMontar(){
+  const lim=_isoLocal(new Date(Date.now()-60*86400000));
+  let lista=[];try{lista=_lpPedidosElegiveis().filter(_portalElegivel);}catch(e){}
+  const m={};
+  const add=(chave,base,p)=>{if(!m[chave])m[chave]=Object.assign({chave,pedidos:[]},base);m[chave].pedidos.push(p);};
+  lista.forEach(p=>{
+    const f=p.finalizacao&&p.finalizacao.dataFinalizacao;
+    if(f&&f<lim)return;
+    _portalEmails(p.email_engenheiro).forEach(em=>add('e:'+em,{tipo:'eng',email:em},p));
+    let g='';try{g=_grupoCliNome(p.cliente,p.job);}catch(e){}
+    const nome=g||String(p.cliente||'').trim().toUpperCase();
+    if(nome)add('c:'+nome,{tipo:'cli',nome},p);
+  });
+  Object.values(m).forEach(c=>{
+    if(c.tipo==='eng'){c.nome=_portalEngNome(c.email);c.titulo=c.nome?'de '+c.nome:'de '+c.email;c.sub=c.nome?'Engenheiro(a): '+c.nome:'Engenheiro(a): '+c.email;}
+    else{c.titulo='de '+c.nome;c.sub='Cliente: '+c.nome;}
+    c.andamento=c.pedidos.filter(p=>!(p.finalizacao&&p.finalizacao.dataFinalizacao)).length;
+  });
+  return m;
+}
+// Token da lista: cria na hora (síncrono) e grava no cfg em segundo plano.
+function _portalCarteiraTokenSync(chave){
+  const k=_portalCarteiraK(chave);
+  if(!cfg.portalCarteiras)cfg.portalCarteiras={};
+  let reg=cfg.portalCarteiras[k];
+  if(!reg||!reg.token){
+    reg={token:_portalNovoToken(),chave:String(chave),em:new Date().toISOString()};
+    cfg.portalCarteiras[k]=reg;
+    try{window._fbUpdateCfgField(['portalCarteiras',k],reg).catch(e=>console.warn('portalCarteiras',e));}catch(e){}
+  }
+  return reg.token;
+}
+function _portalCarteiraLinkSync(chave){
+  if(window.__GCORE_PORTAL)return'';
+  const t=_portalCarteiraTokenSync(chave);
+  setTimeout(()=>{_portalPublicarCarteira(chave).catch(()=>{});},3000);
+  return _portalLinkLista(t);
+}
+async function _portalPublicarCarteira(chave,cart){
+  if(window.__GCORE_PORTAL||!window._fbSetDocCol)return null;
+  const c=cart||_portalCarteirasMontar()[chave];
+  const token=_portalCarteiraTokenSync(chave);
+  const tokens=[];
+  if(c){for(const p of c.pedidos){const ok=await _portalSync(p,true);if(p.portalToken&&ok!==false)tokens.push(p.portalToken);}}
+  const doc={v:1,tipo:'lista',titulo:c?c.titulo:'',sub:c?c.sub:'',tokens,atualizadoEm:new Date().toISOString()};
+  const h=_portalHash(JSON.stringify([doc.titulo,doc.sub,tokens]));
+  let ant=null;try{ant=localStorage.getItem('gcPortalLista_'+token);}catch(e){}
+  if(ant!==h){await window._fbSetDocCol('portalObras',token,doc);try{localStorage.setItem('gcPortalLista_'+token,h);}catch(e){}}
+  return _portalLinkLista(token);
+}
+// Passada automática (admin): regrava as listas que já têm link, pra entrar obra nova e sair obra antiga.
+async function _portalCarteirasBackfill(){
+  const regs=Object.values(cfg.portalCarteiras||{}).filter(r=>r&&r.chave&&r.token);
+  if(!regs.length)return;
+  const m=_portalCarteirasMontar();
+  for(const r of regs){try{await _portalPublicarCarteira(r.chave,m[r.chave]||null);}catch(e){}await new Promise(x=>setTimeout(x,60));}
+}
+let _portalCompartBusca='';
+function portalAbrirCompartilhar(){
+  let mo=document.getElementById('mo-portal-compart');
+  if(!mo){
+    mo=document.createElement('div');mo.className='mov';mo.id='mo-portal-compart';
+    mo.setAttribute('onclick',"cio(event,'mo-portal-compart')");
+    mo.innerHTML=`<div class="mvmod" style="width:620px;max-width:96vw;max-height:86vh;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <h3 style="margin-bottom:0">🔗 Compartilhar obras</h3>
+        <button onclick="fecharJanela('mo-portal-compart')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
+      </div>
+      <p style="font-size:.78rem;color:var(--ink3);margin:0 0 10px">Digite pra quem você vai mandar (engenheiro, cliente, loja ou cidade). O link mostra as obras em andamento e as concluídas nos últimos 60 dias, sem valores e sem atrasos.</p>
+      <input type="text" id="pcmp-busca" class="fc no-upper" placeholder="Buscar engenheiro, cliente, loja ou cidade…" oninput="_portalCompartBusca=this.value;_portalCompartRender()" style="margin-bottom:10px">
+      <div id="pcmp-lista" style="overflow-y:auto;flex:1"></div>
+    </div>`;
+    document.body.appendChild(mo);
+  }
+  _portalCompartBusca='';
+  const b=document.getElementById('pcmp-busca');if(b)b.value='';
+  _portalCompartRender();
+  openM('mo-portal-compart');
+  setTimeout(()=>{try{document.getElementById('pcmp-busca').focus();}catch(e){}},50);
+}
+function _portalCompartRender(){
+  const wrap=document.getElementById('pcmp-lista');if(!wrap)return;
+  const esc=_ptE;
+  const q=norm(_portalCompartBusca||'');
+  const m=_portalCarteirasMontar();
+  let itens=Object.values(m);
+  if(q)itens=itens.filter(c=>[c.nome,c.email].some(v=>v&&norm(String(v)).includes(q))||c.pedidos.some(p=>norm([p.cliente,p.job,p.locCidade,p.os].join(' ')).includes(q)));
+  itens.sort((a,b)=>(b.pedidos.length-a.pedidos.length)||String(a.nome||a.email).localeCompare(String(b.nome||b.email),'pt-BR'));
+  if(!itens.length){wrap.innerHTML='<div style="text-align:center;padding:22px 10px;color:var(--ink4);font-size:.85rem">Nada encontrado. Engenheiros só aparecem quando o e-mail deles está no pedido (campo "E-mail do Engenheiro da Obra").</div>';return;}
+  wrap.innerHTML=itens.slice(0,80).map(c=>{
+    const k=esc(c.chave);
+    const n=c.pedidos.length,and=c.andamento;
+    const quem=c.tipo==='eng'
+      ?`<div style="font-weight:700;font-size:.86rem">👷 ${esc(c.nome||c.email)} <button onclick="_portalEngDarNome('${esc(c.email)}')" title="${c.nome?'Trocar o nome':'Dar nome ao engenheiro'}" style="background:none;border:none;cursor:pointer;font-size:.72rem;color:#1d4ed8;font-weight:700;padding:0 4px">✏️ ${c.nome?'':'dar nome'}</button></div><div style="font-size:.7rem;color:var(--ink4)">Engenheiro${c.nome?' · '+esc(c.email):''}</div>`
+      :`<div style="font-weight:700;font-size:.86rem">🏢 ${esc(c.nome)}</div><div style="font-size:.7rem;color:var(--ink4)">Cliente</div>`;
+    return`<div style="display:flex;align-items:center;gap:10px;padding:9px 6px;border-bottom:1px solid var(--line,#e2e8f0)">
+      <div style="flex:1;min-width:0">${quem}</div>
+      <div style="font-size:.74rem;color:var(--ink3);white-space:nowrap;text-align:right">${n} ${n===1?'obra':'obras'}<br><span style="color:var(--ink4)">${and} em andamento</span></div>
+      <button data-k="${k}" onclick="_portalCompartCopiar(this)" style="background:#fff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:6px;padding:5px 9px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">📋 Copiar link</button>
+      <button data-k="${k}" onclick="_portalCompartEnviar(this)" style="background:#fff;color:#e91e63;border:1.5px solid #fbcfe8;border-radius:6px;padding:5px 9px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">✉️ Enviar</button>
+    </div>`;
+  }).join('');
+}
+async function _portalEngDarNome(email){
+  const atual=_portalEngNome(email);
+  const nome=prompt(`Nome do engenheiro(a) ${email} (aparece na lista e no link enviado):`,atual);
+  if(nome===null)return;
+  const k=_portalCarteiraK('e:'+email);
+  const reg={nome:String(nome).trim(),email};
+  if(!cfg.portalEngNomes)cfg.portalEngNomes={};
+  cfg.portalEngNomes[k]=reg;
+  try{await window._fbUpdateCfgField(['portalEngNomes',k],reg);}catch(e){toast('Erro ao salvar o nome: '+e.message,'terr');return;}
+  toast('Nome salvo','tok');
+  _portalCompartRender();
+}
+async function _portalCompartGerar(btn){
+  const chave=btn&&btn.dataset.k;if(!chave)return null;
+  const c=_portalCarteirasMontar()[chave];
+  if(!c){toast('Nenhuma obra encontrada','terr');return null;}
+  const txt=btn.textContent;btn.disabled=true;btn.textContent='⏳ Preparando…';
+  try{return{c,link:await _portalPublicarCarteira(chave,c)};}
+  catch(e){console.error(e);toast('Não foi possível gerar o link agora. Tente de novo.','terr');return null;}
+  finally{btn.disabled=false;btn.textContent=txt;}
+}
+async function _portalCompartCopiar(btn){
+  const r=await _portalCompartGerar(btn);if(!r||!r.link)return;
+  _portalCopiar(r.link,`🔗 Link copiado — ${r.c.pedidos.length} ${r.c.pedidos.length===1?'obra':'obras'}`);
+}
+async function _portalCompartEnviar(btn){
+  const r=await _portalCompartGerar(btn);if(!r||!r.link)return;
+  const c=r.c;
+  const assunto=`Acompanhamento das obras ${c.tipo==='eng'?'com a Granda':c.nome+' · Granda'}`;
+  const corpo=`Olá${c.tipo==='eng'&&c.nome?', '+c.nome.split(' ')[0]:''}!\n\nNeste link você acompanha todas as obras ${c.tipo==='eng'?'sob sua responsabilidade':'da '+c.nome} com a Granda: etapa atual, previsões e o diário de obra com fotos. Ele é atualizado automaticamente.\n\n${r.link}\n\nQualquer dúvida, estamos à disposição.\nGranda Comunicação Visual`;
+  const para=c.tipo==='eng'?c.email:'';
+  window.location.href='mailto:'+encodeURIComponent(para).replace(/%40/g,'@')+'?subject='+encodeURIComponent(assunto)+'&body='+encodeURIComponent(corpo);
+}
 // Bloco do link nos e-mails de Emissão e Finalização (antes do rodapé escuro).
 function _portalEmailBlocoHtml(p,finalizacao){
   try{
@@ -62148,7 +62540,8 @@ function _portalEmailBlocoHtml(p,finalizacao){
     _portalGarantirToken(p); // o salvamento do status do e-mail, logo depois do envio, grava o link e a cópia
     const link=_portalLinkObra(p);
     const txt=finalizacao?'Todo o histórico desta obra — diário com fotos, etapas e os documentos da entrega — fica guardado neste link.':'Acompanhe em tempo real em que etapa está o seu pedido, com as datas previstas e as fotos do diário de obra. Ao final, os documentos da entrega também ficam disponíveis aqui.';
-    const eng=_portalEmails(p.email_engenheiro).length?`<p style="margin:12px 0 0;font-size:12px;color:#6b7280;line-height:1.5">Engenheiro(a) da obra? Veja todas as suas obras com a Granda em um só lugar: <a href="${_portalLinkEngenheiro()}" target="_blank" style="color:#e91e63;font-weight:700">portal do engenheiro</a>.</p>`:'';
+    let eng='';
+    try{const em=_portalEmails(p.email_engenheiro)[0];if(em){const lk=_portalCarteiraLinkSync('e:'+em);if(lk)eng=`<p style="margin:12px 0 0;font-size:12px;color:#6b7280;line-height:1.5">Engenheiro(a) da obra? Veja todas as suas obras com a Granda em um só lugar: <a href="${lk}" target="_blank" style="color:#e91e63;font-weight:700">minhas obras com a Granda</a>.</p>`;}}catch(e){}
     return`
   <tr><td style="padding:8px 40px 28px;background:#ffffff">
     <table width="100%" cellpadding="0" cellspacing="0"><tr><td style="border:2px solid #fce7f3;background:#fff7fb;border-radius:12px;padding:18px 20px">
@@ -62203,7 +62596,14 @@ function _ptObraHtml(o,voltar){
   const n=st.gs.length,feitas=st.gs.filter(g=>g.done).length,pct=n?Math.round(feitas/n*100):0;
   const etapas=st.gs.map((g,i)=>{
     const estado=g.done?'feita':(i===st.atual?'atual':'futura');
-    const quando=g.done?(o.concluido&&i===n-1?'Concluída em '+_ptD(o.dataFinalizacao):'Concluída'):(i===st.atual?(g.iso>=_ptHoje()?'Em andamento · previsão '+_ptD(g.iso):'Em andamento'):'Previsão: '+_ptD(g.iso));
+    // (2026-10-16) Nunca mostrar ao cliente uma previsão que já passou — pareceria atraso.
+    // Cada etapa mostra a JANELA dela (do fim da etapa anterior até o fim desta). Se a etapa
+    // anterior terminou adiantada, a atual fica "Agendada" até a janela começar — senão parecia
+    // que a obra ficaria parada, ex.: "Embalagem em andamento" por 10 dias.
+    const hj=_ptHoje(),futuro=g.iso&&g.iso>=hj;
+    const ini=i>0?(st.gs[i-1].iso||''):'';
+    const per=(ini&&ini>=hj&&ini<g.iso)?_ptD(ini)+' a '+_ptD(g.iso):_ptD(g.iso);
+    const quando=g.done?(o.concluido&&i===n-1?'Concluída em '+_ptD(o.dataFinalizacao):'Concluída'):(i===st.atual?(ini&&ini>hj?'Agendada · '+per:(futuro?'Em andamento · previsão '+_ptD(g.iso):'Em andamento')):(futuro?'Previsão: '+_ptD(g.iso):'Próxima etapa'));
     return`<div class="pt-et ${estado}"><div class="pt-et-dot">${g.done?'✓':''}</div><div class="pt-et-b"><div class="pt-et-l">${_ptE(g.l)}</div><div class="pt-et-q">${_ptE(quando)}</div></div></div>`;
   }).join('');
   const diario=(o.diario||[]).length?(o.diario||[]).map(d=>`<div class="pt-dia"><div class="pt-dia-d"><b>${_ptD(d.data)}</b> <span>${_ptE(_ptDS(d.data))}</span></div>${d.texto?`<div class="pt-dia-t">${_ptE(d.texto)}</div>`:''}${_ptFotosHtml(d.fotos)}</div>`).join(''):'<div class="pt-vazio">Ainda não há registros no diário desta obra.</div>';
@@ -62221,7 +62621,7 @@ function _ptObraHtml(o,voltar){
     <div class="pt-head-os">OS ${_ptE(o.os)}${o.local?' · '+_ptE(o.local):''}</div>
     <h1>${_ptE(o.cliente)}</h1>
     <div class="pt-head-row"><span class="pt-pill ${st.cls}">${st.cls==='ok'?'✓ ':''}${_ptE(st.txt)}</span><span class="pt-head-sub">${_ptE(st.sub)}</span></div>
-    ${o.concluido?'':`<div class="pt-entrega"><span>Entrega combinada</span><b>${_ptD(o.prazo)}</b><small>${_ptE(_ptDS(o.prazo))}</small></div>`}
+    ${o.concluido||!o.prazo||o.prazo<_ptHoje()?'':`<div class="pt-entrega"><span>Entrega combinada</span><b>${_ptD(o.prazo)}</b><small>${_ptE(_ptDS(o.prazo))}</small></div>`}
     <div class="pt-prog"><div style="width:${pct}%"></div></div><div class="pt-prog-l">${feitas} de ${n} etapas concluídas</div>
   </div>
   <div class="pt-card"><h3>Etapas da obra</h3><div class="pt-ets">${etapas}</div></div>
@@ -62246,7 +62646,11 @@ async function _ptAbrirObra(token){
     if(!s.exists()){_ptMsg('Link não encontrado','Este link de acompanhamento não existe ou ainda está sendo preparado. Se você recebeu agora, tente de novo em alguns minutos ou fale com a Granda.');return;}
     const o=s.data();document.title='OS '+o.os+' · Acompanhamento Granda';
     _ptRoot().innerHTML=_ptShell(_ptObraHtml(o,''));
-  }catch(e){console.error(e);_ptMsg('Não foi possível carregar','Verifique sua conexão e tente de novo.');}
+  }catch(e){
+    console.error(e);
+    if(e&&/permission/i.test(String(e.code||e.message||'')))_ptMsg('Acompanhamento em preparação','Este link ainda está sendo liberado. Tente de novo em alguns minutos ou fale com a Granda.');
+    else _ptMsg('Não foi possível carregar','Verifique sua conexão e tente de novo.');
+  }
 }
 function _ptLoginHtml(msg){
   return _ptShell(`<div class="pt-card pt-center pt-login"><h2>Portal do engenheiro</h2><p>Veja todas as suas obras com a Granda, com etapas, datas e o diário de obra.</p>
@@ -62275,18 +62679,42 @@ function _ptListaHtml(obras){
   const card=o=>{const st=_ptStatusObra(o);return`<button class="pt-ob" onclick="_ptVerObra('${_ptE(o.token)}')"><div class="pt-ob-t"><b>${_ptE(o.cliente)}</b><span class="pt-pill ${st.cls}">${_ptE(st.txt)}</span></div>
     <div class="pt-ob-s">OS ${_ptE(o.os)}${o.local?' · '+_ptE(o.local):''}</div>
     <div class="pt-ob-r"><span>${o.concluido?'Concluída em':'Etapa atual'}</span><b>${_ptE(o.concluido?_ptD(o.dataFinalizacao):st.sub)}</b></div>
-    ${o.concluido?'':`<div class="pt-ob-r"><span>Entrega combinada</span><b>${_ptD(o.prazo)}</b></div>`}</button>`;};
-  return _ptShell(`<div class="pt-ola">Olá! Estas são as suas obras com a Granda.<small>${_ptE(_pt.user.email)}</small></div>
+    ${o.concluido||!o.prazo||o.prazo<_ptHoje()?'':`<div class="pt-ob-r"><span>Entrega combinada</span><b>${_ptD(o.prazo)}</b></div>`}</button>`;};
+  const cab=_pt.lista?`<div class="pt-ola">Obras ${_ptE(_pt.lista.titulo||'')} com a Granda<small>${_ptE(_pt.lista.sub||'')}</small></div>`:`<div class="pt-ola">Olá! Estas são as suas obras com a Granda.<small>${_ptE(_pt.user.email)}</small></div>`;
+  return _ptShell(`${cab}
     <div class="pt-kpis"><div><b>${obras.filter(o=>!o.concluido).length}</b><span>em andamento</span></div><div><b>${obras.filter(o=>o.concluido).length}</b><span>concluídas</span></div></div>
     ${obras.length>4?`<input class="pt-busca" placeholder="Buscar loja, OS ou cidade…" value="${_ptE(_pt.busca||'')}" oninput="_pt.busca=this.value;_ptRenderLista(true)">`:''}
     <div class="pt-sec">Em andamento (${and.length})</div>${and.length?`<div class="pt-obs">${and.map(card).join('')}</div>`:'<div class="pt-vazio">Nenhuma obra em andamento.</div>'}
-    ${con.length?`<div class="pt-sec">Concluídas (${con.length})</div><div class="pt-obs">${con.map(card).join('')}</div>`:''}`,'Portal do engenheiro');
+    ${con.length?`<div class="pt-sec">Concluídas (${con.length})</div><div class="pt-obs">${con.map(card).join('')}</div>`:''}`,_pt.lista?'Acompanhamento de obras':'Portal do engenheiro');
 }
 function _ptRenderLista(manterFoco){
   _ptRoot().innerHTML=_ptListaHtml(_pt.obras||[]);
   if(manterFoco){const b=document.querySelector('.pt-busca');if(b){b.focus();b.setSelectionRange(b.value.length,b.value.length);}}
 }
-function _ptVerObra(token){const o=(_pt.obras||[]).find(x=>x.token===token);if(!o)return;_ptRoot().innerHTML=_ptShell(_ptObraHtml(o,'_ptRenderLista()'),'Portal do engenheiro');window.scrollTo(0,0);}
+function _ptVerObra(token){const o=(_pt.obras||[]).find(x=>x.token===token);if(!o)return;_ptRoot().innerHTML=_ptShell(_ptObraHtml(o,'_ptRenderLista()'),_pt.lista?'Acompanhamento de obras':'Portal do engenheiro');window.scrollTo(0,0);}
+// (2026-10-16) Link com várias obras (de um engenheiro ou de um cliente): ?lista=TOKEN. O documento
+// portalObras/{TOKEN} (tipo 'lista') guarda só os tokens das obras; cada obra é lida do próprio
+// documento dela, então a lista sempre mostra os dados mais recentes. Não precisa de login.
+async function _ptAbrirLista(token){
+  _ptRoot().innerHTML=_ptShell('<div class="pt-load">Carregando…</div>');
+  try{
+    const{F,db}=await _ptFb();
+    const s=await F.getDoc(F.doc(db,'portalObras',token));
+    if(!s.exists()||s.data().tipo!=='lista'){_ptMsg('Link não encontrado','Este link de acompanhamento não existe ou ainda está sendo preparado. Fale com a Granda.');return;}
+    const l=s.data();
+    const docs=await Promise.all((l.tokens||[]).map(t=>F.getDoc(F.doc(db,'portalObras',String(t))).catch(()=>null)));
+    const lim=(()=>{const d=new Date(Date.now()-60*86400000);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+    _pt.lista={titulo:l.titulo||'',sub:l.sub||''};
+    _pt.obras=docs.filter(d=>d&&d.exists()).map(d=>d.data()).filter(o=>o&&o.tipo!=='lista'&&(!o.concluido||String(o.dataFinalizacao||'')>=lim));
+    document.title='Obras '+(l.titulo||'')+' · Acompanhamento Granda';
+    if(!_pt.obras.length){_ptMsg('Nenhuma obra no momento','Não há obras em andamento ou concluídas recentemente neste acompanhamento.');return;}
+    _ptRenderLista();
+  }catch(e){
+    console.error(e);
+    if(e&&/permission/i.test(String(e.code||e.message||'')))_ptMsg('Acompanhamento em preparação','Este link ainda está sendo liberado. Tente de novo em alguns minutos ou fale com a Granda.');
+    else _ptMsg('Não foi possível carregar','Verifique sua conexão e tente de novo.');
+  }
+}
 async function _ptCarregarObras(){
   _ptRoot().innerHTML=_ptShell('<div class="pt-load">Carregando suas obras…</div>','Portal do engenheiro');
   try{
@@ -62382,6 +62810,7 @@ function _portalBoot(){
 `;document.head.appendChild(st);
   _ptRoot();
   if(m.modo==='obra'&&m.token)_ptAbrirObra(m.token);
+  else if(m.modo==='lista'&&m.token)_ptAbrirLista(m.token);
   else _ptPortalEngenheiro();
 }
 if(window.__GCORE_PORTAL){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_portalBoot);else _portalBoot();}
