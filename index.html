@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-17.18';</script>
+<script>const APP_BUILD_VERSION='2026-10-18.04';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -5331,6 +5331,9 @@ select.fc{cursor:pointer}
           <div class="fg" style="margin:0 0 10px"><label style="font-size:.7rem;font-weight:600;color:var(--ink2)">Categoria <span class="r">*</span></label>
             <select class="fc" id="nu-cat" onchange="nuCatChanged()"><option value="">Selecione...</option><option>ADMINISTRADOR</option><option>COMERCIAL</option><option>RH</option><option>FINANCEIRO</option><option>COMPRAS</option><option>PCP</option><option>PRODUÇÃO</option><option>QUALIDADE</option><option>PLANEJAMENTO</option><option>PROJETOS</option><option>PROSPECÇÃO</option></select>
           </div>
+          <div class="fg" id="nu-nivel-wrap" style="margin:0 0 10px"><label style="font-size:.7rem;font-weight:600;color:var(--ink2)">Nível hierárquico <span class="r">*</span></label>
+            <select class="fc" id="nu-nivel"><option value="OPERADOR">Operador — executa, vê o que é dele</option><option value="SUPERVISOR">Supervisor — vê o setor e aprova a equipe</option><option value="GESTOR">Gestor — configura e decide no setor</option><option value="DIRETORIA">Diretoria — vê e aprova em todos os setores</option></select>
+          </div>
           <div id="nu-comercial-extra" style="display:none">
             <div class="fg" style="margin:0 0 10px"><label style="font-size:.7rem;font-weight:600;color:var(--ink2)">Tipo no Comercial <span class="r">*</span></label>
               <select class="fc" id="nu-tipo-com" onchange="nuTipoComChanged()">
@@ -5870,6 +5873,8 @@ window._fbSaveCfg=(data)=>{
     safeData.usuarioNomes=atual.usuarioNomes||{};
     safeData.usuarioCats=atual.usuarioCats||{};
     safeData.usuarioMenus=atual.usuarioMenus||{};
+    // 2026-10-17: níveis e permissões têm escrita própria (só admin) — aqui vai sempre o valor do servidor
+    ['usuarioNiveis','permissoesNivel','permissoesLog','usuarioTitulares','usuarioTrocaEm'].forEach(k=>{if(k in atual)safeData[k]=atual[k];else delete safeData[k];});
     // Ampliado 2026-09-21 (a pedido do usuário: "nao pode sumir absolutamente mais
     // nada do sistema nunca mais") — mesmos 3 campos que passaram a ter escrita
     // atômica dedicada agora (ver window._fbTxArrayField): pagamentosExtras,
@@ -5879,7 +5884,9 @@ window._fbSaveCfg=(data)=>{
     safeData.logAdiamentos=atual.logAdiamentos||[];
     // 2026-10-17 (segurança dos produtos): só admin/Projetos alteram produtos e modelos de instalação. Para os
     // demais, esses campos vão SEMPRE com o valor atual do servidor — a regra do banco recusa qualquer mudança.
-    try{if(typeof _prodPodeEditar==='function'&&!_prodPodeEditar()){['produtos','modelosInstalacao'].forEach(k=>{if(k in atual)safeData[k]=atual[k];else delete safeData[k];});}}catch(e){}
+    try{if(typeof _prodPodeEditar==='function'&&!_prodPodeEditar()){['produtos','modelosInstalacao','produtosCodigos'].forEach(k=>{if(k in atual)safeData[k]=atual[k];else delete safeData[k];});}}catch(e){}
+    // 2026-10-18: código de produto é definitivo — o registro do servidor sempre vence (nunca muda um código já dado)
+    try{const rc=atual.produtosCodigos||{};if(Object.keys(rc).length){const novo=Object.assign({},safeData.produtosCodigos||{},rc);safeData.produtosCodigos=novo;if(Array.isArray(safeData.produtos))safeData.produtos.forEach(p=>{if(p&&p.id&&novo[p.id]&&p.codigo!==novo[p.id])p.codigo=novo[p.id];});}}catch(e){}
     tx.set(ref,safeData);
   }).catch(e=>{
     console.error('_fbSaveCfg: falhou (dado inválido pro Firestore, ou erro de transação) — nada foi salvo no servidor',e);
@@ -6495,7 +6502,7 @@ async function solicitarAdiamentoTarefaGeral(tarefaId,novoPrazo,justificativa,no
 // o usuário: pediu adiamento e foi negado, conta contra ele.
 function _podeDecidirAdiamento(){return _getUserCat().isAdm;}
 function _aplicarDecisaoAdiamento(t,aprovado){
-  if(!_podeDecidirAdiamento()){toast('Só um administrador pode aprovar ou reprovar um adiamento','terr');return false;}
+  if(!(_podeDecidirAdiamento()||_podeAprovarTarefaDe(t))){toast('Só o administrador ou o supervisor do setor pode decidir este adiamento','terr');return false;}
   if(!t.adiamentoPendente){toast('Não há pedido de adiamento pendente nesta tarefa','terr');return false;}
   const meuNome=usuarioLogado?.nomeExibicao||'';
   const agora=new Date().toISOString();
@@ -6554,19 +6561,19 @@ function _refreshTarefasBadge(){
     // trabalho pendente dele igual uma tarefa pendente normal (ver aba nova em
     // renderTarefasComerciais()). Adiamentos NÃO entram de novo aqui (já estão dentro de
     // pend, ver getTarefasComerciaisAdiamentoPendente()) — senão contava a mesma tarefa 2x.
-    const n=isAdm?(pend.length+aguardando.length):pend.filter(t=>t.responsavel===meuNome).length;
+    const n=isAdm?(pend.length+aguardando.length):pend.filter(t=>t.responsavel===meuNome).length+aguardando.filter(_tarefaDaMinhaEquipe).length;
     badge.textContent=n?` (${n})`:'';
   }
   const tabAprov=document.getElementById('tf-tab-aprov-count');
   if(tabAprov){
-    const n=isAdm?aguardando.length:aguardando.filter(t=>t.responsavel===meuNome).length;
+    const n=isAdm?aguardando.length:aguardando.filter(t=>t.responsavel===meuNome||_tarefaDaMinhaEquipe(t)).length;
     tabAprov.textContent=n?` (${n})`:'';
   }
   // Contador de adiamentos aguardando decisão (2026-09-18, ver
   // getTarefasComerciaisAdiamentoPendente()) — só admin decide, então só ele vê.
   const tabAdiamento=document.getElementById('tf-tab-pend-adiamento-count');
   if(tabAdiamento){
-    const nAdiamento=isAdm?getTarefasComerciaisAdiamentoPendente().length:0;
+    const nAdiamento=isAdm?getTarefasComerciaisAdiamentoPendente().length:getTarefasComerciaisAdiamentoPendente().filter(_tarefaDaMinhaEquipe).length;
     tabAdiamento.innerHTML=nAdiamento?` <span style="background:#fef3c7;color:#92400e;border-radius:20px;padding:1px 7px;font-size:.62rem;font-weight:800;margin-left:2px">🕓 ${nAdiamento}</span>`:'';
   }
   _renderPainelUsuario();
@@ -6839,9 +6846,9 @@ async function marcarTarefaGeral(tarefaId,concluida){
 // não muda); devolver volta a tarefa pra "pendente" com um prazo novo, porque na prática não
 // foi concluída (ou foi feita errado) — mesmo padrão de _aplicarSolicitacaoAdiamento()/
 // _aplicarDecisaoAdiamento(), reaproveitado tanto pra tarefa de pedido quanto avulsa geral.
-function _podeAprovarTarefa(){return _getUserCat().isAdm;}
+function _podeAprovarTarefa(t){return _getUserCat().isAdm||(typeof _podeAprovarTarefaDe==='function'&&_podeAprovarTarefaDe(t));}
 function _aplicarAprovacaoTarefa(t,aprovado,novoPrazo,motivo,novaHora){
-  if(!_podeAprovarTarefa()){toast('Só um administrador pode aprovar ou devolver uma tarefa','terr');return false;}
+  if(!_podeAprovarTarefa(t)){toast('Só o administrador ou o supervisor do setor de quem fez pode aprovar ou devolver esta tarefa','terr');return false;}
   if(t.status!=='aguardando_aprovacao'){toast('Essa tarefa não está aguardando aprovação','terr');return false;}
   const meuNome=usuarioLogado?.nomeExibicao||'';
   const agora=new Date().toISOString();
@@ -9609,7 +9616,7 @@ function _fechChaveMes(){const{y,m}=_fechView;return m?`${y}-${String(m).padStar
 function _fechMesFechado(){const k=_fechChaveMes();const f=k&&cfg.fechMesesFechados&&cfg.fechMesesFechados[k];return f&&f.em?f:null;}
 function _fechSnapshotLinha(x){return{os:x.os,cliente:x.cliente,liqReal:Math.round(x.liqReal*100)/100,contrib:x.contrib==null?null:Math.round(x.contrib*100)/100,rm:x.rm==null?null:Math.round(x.rm*100)/100};}
 async function fechFecharMes(){
-  if(!_getUserCat().isAdm){toast('Apenas administradores','terr');return;}
+  if(!_pode('fin_fechar_mes')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const k=_fechChaveMes();if(!k){toast('Escolha um mês (não "Ano todo") pra fechar','terr');return;}
   const L=_fechLinhas().map(_fechEnriquecer);
   const pend=_fechPendencias(L).length;
@@ -9626,7 +9633,7 @@ async function fechFecharMes(){
   }catch(e){console.error(e);toast('Erro ao fechar o mês: '+(e&&e.message||e),'terr');}
 }
 async function fechReabrirMes(){
-  if(!_getUserCat().isAdm){toast('Apenas administradores','terr');return;}
+  if(!_pode('fin_fechar_mes')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const k=_fechChaveMes();if(!k)return;
   if(!confirm('Reabrir o mês? O fechamento oficial é descartado.'))return;
   try{await window._fbUpdateCfgField(['fechMesesFechados',k],null);if(cfg.fechMesesFechados)cfg.fechMesesFechados[k]=null;toast('Mês reaberto','tok');renderFechamentoPedidos();}
@@ -9639,7 +9646,7 @@ function _fechMesBarHtml(L){
   const{isAdm}=_getUserCat();
   if(!f)return`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#f8fafc;border:1px dashed var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:.78rem">
     <span>🔓 <b>Mês aberto</b> — os números ainda podem mudar conforme Planejamento/Projetos lançam.</span>
-    ${isAdm?`<button type="button" onclick="fechFecharMes()" style="margin-left:auto;background:#0f172a;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-weight:700;font-size:.74rem;cursor:pointer">🔒 Fechar mês</button>`:''}</div>`;
+    ${_pode('fin_fechar_mes')?`<button type="button" onclick="fechFecharMes()" style="margin-left:auto;background:#0f172a;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-weight:700;font-size:.74rem;cursor:pointer">🔒 Fechar mês</button>`:''}</div>`;
   const ajustes=[];
   const atual={};L.forEach(x=>{atual[x.p.id]=x;});
   Object.keys(f.linhas||{}).forEach(id=>{
@@ -9655,7 +9662,7 @@ function _fechMesBarHtml(L){
   return`<div style="background:#ecfdf5;border:1.5px solid #86efac;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:.78rem">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <span>🔒 <b>Mês fechado</b> em ${quando} por ${_fechEsc(f.por)} · oficial: ${tot.n||0} obras · líquido realizado ${fmtR(tot.liqReal||0)}${tot.brutoRm?` · margem real ${_fechPct(tot.contrib/tot.brutoRm)}`:''}${f.pendencias?` · fechado com ${f.pendencias} pendência(s)`:''}</span>
-      ${isAdm?`<button type="button" onclick="fechReabrirMes()" style="margin-left:auto;background:#fff;border:1px solid #86efac;border-radius:8px;padding:4px 10px;font-weight:700;font-size:.72rem;cursor:pointer">🔓 Reabrir</button>`:''}
+      ${_pode('fin_fechar_mes')?`<button type="button" onclick="fechReabrirMes()" style="margin-left:auto;background:#fff;border:1px solid #86efac;border-radius:8px;padding:4px 10px;font-weight:700;font-size:.72rem;cursor:pointer">🔓 Reabrir</button>`:''}
     </div>
     ${ajustes.length?`<div style="margin-top:8px;padding-top:8px;border-top:1px dashed #86efac"><b style="color:#b45309">⚠️ ${ajustes.length} ajuste(s) depois do fechamento</b> (a tela mostra o número atual):
       ${ajustes.map(a=>`<div style="display:flex;gap:10px;font-size:.74rem;padding:2px 0"><b>OS ${_fechEsc(a.os)}</b><span style="flex:1">${_fechEsc(a.cliente)} — ${a.txt}</span><b style="color:${a.d>=0?'#16a34a':'#dc2626'}">${sinal(a.d)}</b></div>`).join('')}</div>`:''}
@@ -15426,7 +15433,7 @@ async function addUser(){
   // cadastrado AQUI no sistema (cfg.usuarioCats), antes de mexer no Firebase Auth. Evita
   // duplicar/sobrescrever sem querer e deixa claro pra quem está cadastrando o que já existe.
   if(cfg.usuarioCats&&Object.prototype.hasOwnProperty.call(cfg.usuarioCats,em)){
-    toast('Esse e-mail já está cadastrado no sistema (categoria atual: '+cfg.usuarioCats[em]+'). Pra mudar algo dele, edite o usuário existente em vez de criar um novo.','terr');
+    toast('Esse e-mail já está no sistema com '+((cfg.usuarioNomes||{})[em]||em)+'. Se outra pessoa assumiu esse e-mail, é só trocar a pessoa — abrindo agora.','tinf');try{_ttAbrir(em,{nome,cat});}catch(e){}
     return;
   }
   let tipoCom='';
@@ -15465,6 +15472,7 @@ async function addUser(){
     // Campos a gravar de forma atômica (FieldPath) — ver comentário em _fbUpdateUsuario logo
     // acima da definição, no bloco do Firebase. Nunca mais um setDoc(cfg inteiro) aqui.
     const _campos=[[['usuarioNomes',em],nome],[['usuarioCats',em],cat]];
+    try{if(cat!=='ADMINISTRADOR'){const _nv=(document.getElementById('nu-nivel')||{}).value||'OPERADOR';cfg.usuarioNiveis=cfg.usuarioNiveis||{};cfg.usuarioNiveis[em]=_nv;_campos.push([['usuarioNiveis',em],_nv]);const _ns=document.getElementById('nu-nivel');if(_ns)_ns.value='OPERADOR';}}catch(e){}
     if(cat==='COMERCIAL'){
       if(!cfg.comercialTipo)cfg.comercialTipo={};
       cfg.comercialTipo[nome]=tipoCom;
@@ -16344,6 +16352,16 @@ function initAuth(tries){
               return;
             }
           }catch(e){}
+          // Troca de pessoa no mesmo e-mail (2026-10-18): quem entrou ANTES da troca é desconectado.
+          try{
+            const _tt=(cfg.usuarioTrocaEm||{})[user.email.toLowerCase()];
+            const _ls=user.metadata&&Date.parse(user.metadata.lastSignInTime||'');
+            if(_tt&&_ls&&_ls<Date.parse(_tt)-60000){
+              alert('Este login ('+user.email+') passou para outra pessoa. Entre de novo com a senha nova.');
+              if(window._fbSignOut)window._fbSignOut();
+              return;
+            }
+          }catch(e){}
           _migrarPinAdmin(); // (2026-09-30) PIN antigo em texto puro → hash, só quando admin entra
           atualizarBotaoNovoPedido();
           buildSidebarCats();
@@ -17186,7 +17204,7 @@ function _normNomeProduto(s){
   return String(s||'').trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
 }
 // Quem cadastra e edita produtos (2026-10-16): time de Projetos + administradores.
-function _prodPodeEditar(){try{return _getUserCat().isAdm||_isSetorUser('PROJETOS');}catch(e){return false;}}
+function _prodPodeEditar(){try{return _getUserCat().isAdm||(_isSetorUser('PROJETOS')&&(typeof _pode!=='function'||_pode('proj_editar_produtos')));}catch(e){return false;}}
 function getProdutos(){return cfg.produtos||[];}
 // Pencil-to-edit (2026-08-25, a pedido do usuário: "pra editar eu clique num lapis e nao
 // editar assim facil de cara, e so adm muda") — antes TODO campo era um <input> sempre aberto.
@@ -17802,7 +17820,7 @@ function abrirFichaProduto(i){
       </div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:-4px 0 6px">${_pfSeloHtml(p)}${_pfMpChipHtml(p)}</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 16px">${isAdm?`<button onclick="_pfInativar()" style="background:#fff;color:#475569;border:1.5px solid var(--border);border-radius:8px;padding:6px 12px;font-size:.76rem;font-weight:700;cursor:pointer">${p.inativo?'▶ Reativar':'⏸ Inativar'}</button>`:''}${p.inativo&&_getUserCat().isAdm?`<button onclick="_pfExcluirDeVez()" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:8px;padding:6px 12px;font-size:.76rem;font-weight:700;cursor:pointer">🗑 Excluir de vez</button>`:''}<button onclick="_pfGerarPDF(${i})" style="margin-left:auto;background:#fff;color:#e91e63;border:1.5px solid #fbcfe8;border-radius:8px;padding:6px 12px;font-size:.76rem;font-weight:700;cursor:pointer">📄 PDF da ficha técnica</button></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 16px">${isAdm?`<button onclick="_pfInativar()" style="background:#fff;color:#475569;border:1.5px solid var(--border);border-radius:8px;padding:6px 12px;font-size:.76rem;font-weight:700;cursor:pointer">${p.inativo?'▶ Reativar':'⏸ Inativar'}</button>`:''}${p.inativo&&_pode('proj_excluir_produto')?`<button onclick="_pfExcluirDeVez()" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:8px;padding:6px 12px;font-size:.76rem;font-weight:700;cursor:pointer">🗑 Excluir de vez</button>`:''}<button onclick="_pfGerarPDF(${i})" style="margin-left:auto;background:#fff;color:#e91e63;border:1.5px solid #fbcfe8;border-radius:8px;padding:6px 12px;font-size:.76rem;font-weight:700;cursor:pointer">📄 PDF da ficha técnica</button></div>
     <div class="dash-sec-title" style="font-size:.8rem;margin-bottom:6px">🏷️ Dados da variação</div>
     <div id="pf-dados" style="margin-bottom:16px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#fafbfd"></div>
     <div class="dash-sec-title" style="font-size:.8rem;margin-bottom:6px">🏭 Etapas de produção</div>
@@ -19452,7 +19470,7 @@ function _pfInativar(){
   try{abrirFichaProduto(_pfIdx);}catch(e){}try{renderComercialProdutos();}catch(e){}
 }
 function _pfExcluirDeVez(){
-  if(!_getUserCat().isAdm){toast('Só administrador exclui produto.','terr');return;}
+  if(!_pode('proj_excluir_produto')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const i=_pfIdx;const p=getProdutos()[i];if(!p)return;
   if(!p.inativo){toast('Inative o produto antes de excluir.','terr');return;}
   closeM('mo-produto-ficha');removeProduto(i);try{renderComercialProdutos();}catch(e){}
@@ -19919,7 +19937,7 @@ function abrirFichaProduto(i){
   const menuMais=isAdm||p.inativo?`<details style="position:relative"><summary title="Mais ações" style="list-style:none;${_PF_BTN};padding:6px 8px">${_PFI.mais}</summary>
       <div style="position:absolute;right:0;top:36px;z-index:20;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 24px -8px rgba(15,23,42,.25);padding:6px;min-width:190px">
         ${isAdm?`<button type="button" onclick="_pfInativar()" style="display:block;width:100%;text-align:left;background:none;border:none;padding:8px 10px;border-radius:7px;font-family:inherit;font-size:.78rem;color:#334155;cursor:pointer">${p.inativo?'▶ Reativar variação':'⏸ Inativar variação'}</button>`:''}
-        ${p.inativo&&_getUserCat().isAdm?`<button type="button" onclick="_pfExcluirDeVez()" style="display:block;width:100%;text-align:left;background:none;border:none;padding:8px 10px;border-radius:7px;font-family:inherit;font-size:.78rem;color:#dc2626;cursor:pointer">🗑 Excluir de vez</button>`:''}
+        ${p.inativo&&_pode('proj_excluir_produto')?`<button type="button" onclick="_pfExcluirDeVez()" style="display:block;width:100%;text-align:left;background:none;border:none;padding:8px 10px;border-radius:7px;font-family:inherit;font-size:.78rem;color:#dc2626;cursor:pointer">🗑 Excluir de vez</button>`:''}
       </div></details>`:'';
   const corpoEl=document.getElementById('pf-corpo');if(!corpoEl)return;
   corpoEl.innerHTML=`
@@ -22912,6 +22930,396 @@ function _miPassosParaSalvar(){const l=(_mi&&Array.isArray(_mi.passosEd)?_mi.pas
   };
   const _f=_miFaltas;
   _miFaltas=function(){const l=_f.apply(this,arguments);if(_mi&&_mi.enviandoFoto)l.unshift('esperar o envio da imagem terminar');if(!_miPassosParaSalvar().lista.length)l.push('pelo menos 1 passo do método de instalação');return l;};
+})();
+
+// ── NÍVEIS HIERÁRQUICOS E PERMISSÕES (2026-10-17) ──
+// Pedido do usuário: "definir níveis hierárquicos dentro de cada setor — ao cadastrar um usuário, além do setor,
+// dizer o nível, para o sistema dar as permissões de ver e mexer; se dou admin para todos os supervisores eles
+// mexem em configurações que não são deles". Setor = de onde a pessoa é (categoria). Nível = o que ela pode fazer.
+// Administrador continua sendo a categoria ADMINISTRADOR (Configurações gerais só ele). Os demais têm nível:
+// Operador → Supervisor → Gestor → Diretoria. Cada ação sensível tem um nível mínimo (tabela editável pelo admin).
+// Sem nível definido = Operador (ninguém perde nem ganha nada até o admin promover alguém).
+const NIVEIS=[
+  {k:'OPERADOR',l:'Operador',r:1,d:'Executa: vê e trabalha no que é dele.'},
+  {k:'SUPERVISOR',l:'Supervisor',r:2,d:'Chefe de equipe: vê o setor todo e aprova o que a equipe fez.'},
+  {k:'GESTOR',l:'Gestor',r:3,d:'Responsável pela área: configura e decide no setor.'},
+  {k:'DIRETORIA',l:'Diretoria',r:4,d:'Vê e aprova em todos os setores; não mexe nas configurações gerais.'}
+];
+const NIVEL_SO_ADMIN='ADMIN';
+function _nivelInfo(k){return NIVEIS.find(n=>n.k===k)||null;}
+function _nivelRank(k){if(k===NIVEL_SO_ADMIN)return 99;const n=_nivelInfo(k);return n?n.r:1;}
+function _nivelDe(email){const v=(cfg.usuarioNiveis||{})[String(email||'').toLowerCase()];return _nivelInfo(v)?v:'OPERADOR';}
+function _meuNivel(){const u=_getUserCat();return u.isAdm?NIVEL_SO_ADMIN:_nivelDe(u.email);}
+function _minhasCats(){const u=_getUserCat();const ex=(cfg.usuarioCatsExtras||{})[u.email];return[u.cat].concat(Array.isArray(ex)?ex:[]).filter(Boolean);}
+const PERM_SETORES={
+  FINANCEIRO:{l:'Financeiro',t:()=>_minhasCats().includes('FINANCEIRO')||_temMenu('FINANCEIRO')},
+  COMERCIAL:{l:'Comercial',t:()=>{const c=_minhasCats();return c.includes('COMERCIAL')||c.includes('PROSPECÇÃO');}},
+  PROJETOS:{l:'Projetos',t:()=>_minhasCats().includes('PROJETOS')||_temMenu('PROJETOS')},
+  EQUIPE:{l:'Do próprio setor',t:()=>true}
+};
+// Ações sensíveis com nível mínimo padrão. Nada aqui tira acesso de quem já tinha: o padrão de cada ação é o
+// comportamento de hoje para admin, e só abre para quem for promovido.
+const PERM_ACOES=[
+  {k:'tarefa_aprovar',g:'Tarefas',s:'EQUIPE',l:'Ver as tarefas da equipe do setor, aprovar ou devolver as concluídas e decidir pedidos de adiamento',p:'SUPERVISOR'},
+  {k:'proj_editar_produtos',g:'Projetos',s:'PROJETOS',l:'Cadastrar e editar produtos, fichas técnicas e modelos de instalação',p:'OPERADOR'},
+  {k:'proj_excluir_produto',g:'Projetos',s:'PROJETOS',l:'Excluir produto definitivamente',p:'GESTOR'},
+  {k:'com_etapas_funil',g:'Comercial',s:'COMERCIAL',l:'Personalizar as etapas do funil (CRM e Prospecção)',p:'GESTOR'},
+  {k:'com_aprovar_orc',g:'Comercial',s:'COMERCIAL',l:'Aprovar ou reprovar orçamentos enviados para aprovação',p:'DIRETORIA'},
+  {k:'com_catalogo_avulso',g:'Comercial',s:'COMERCIAL',l:'Salvar item avulso do orçamento no catálogo de produtos',p:'GESTOR'},
+  {k:'com_excluir_hist_prop',g:'Comercial',s:'COMERCIAL',l:'Excluir itens do histórico de propostas',p:'GESTOR'},
+  {k:'com_msg_aniversario',g:'Comercial',s:'COMERCIAL',l:'Editar a mensagem padrão de aniversário',p:'GESTOR'},
+  {k:'fin_fechar_mes',g:'Financeiro',s:'FINANCEIRO',l:'Fechar e reabrir o mês',p:'GESTOR'},
+  {k:'fin_autorizar_pag',g:'Financeiro',s:'FINANCEIRO',l:'Autorizar pagamentos acima do limite',p:'DIRETORIA'}
+];
+function _permAcao(k){return PERM_ACOES.find(a=>a.k===k)||null;}
+function _permNivelReq(k){const a=_permAcao(k);const v=(cfg.permissoesNivel||{})[k];return v===NIVEL_SO_ADMIN||_nivelInfo(v)?v:(a?a.p:NIVEL_SO_ADMIN);}
+// Pode fazer a ação? Admin sempre. Os demais: nível ≥ mínimo da ação E ser do setor da ação (Diretoria vale em todos).
+function _pode(k){
+  try{
+    const u=_getUserCat();if(u.isAdm)return true;
+    const a=_permAcao(k);if(!a)return false;
+    const req=_permNivelReq(k);if(req===NIVEL_SO_ADMIN)return false;
+    const nv=_nivelDe(u.email);if(_nivelRank(nv)<_nivelRank(req))return false;
+    if(nv==='DIRETORIA')return true;
+    const st=PERM_SETORES[a.s];return st?!!st.t():false;
+  }catch(e){return false;}
+}
+// tarefa da equipe: quem aprova é admin, ou quem tem a permissão e é do mesmo setor de quem fez (nunca a própria)
+function _podeAprovarTarefaDe(t){
+  try{
+    if(!t)return false;if(_getUserCat().isAdm)return true;
+    const meu=(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
+    if(!t.responsavel||t.responsavel===meu)return false;
+    if(!_pode('tarefa_aprovar'))return false;
+    if(_meuNivel()==='DIRETORIA')return true;
+    const cs=_nomeParaCategorias(t.responsavel),m=_minhasCats();return cs.some(c=>m.includes(c));
+  }catch(e){return false;}
+}
+function _tarefaDaMinhaEquipe(t){return _podeAprovarTarefaDe(t);}
+
+// ── gravação (só admin; a regra do banco também só aceita admin nesses campos) ──
+async function _permLog(acao,det){
+  try{const l=(cfg.permissoesLog||[]).slice(-199);l.push({em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',acao,det});cfg.permissoesLog=l;
+    if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['permissoesLog'],l);}catch(e){console.warn('log de permissões',e);}
+}
+async function _nivelSalvar(email,nv){
+  if(!_getUserCat().isAdm){toast('Só o administrador muda o nível dos usuários','terr');return;}
+  if(!_nivelInfo(nv))return;email=String(email).toLowerCase();
+  const ant=_nivelDe(email),nome=(cfg.usuarioNomes||{})[email]||email;if(ant===nv)return;
+  try{cfg.usuarioNiveis=cfg.usuarioNiveis||{};cfg.usuarioNiveis[email]=nv;await window._fbUpdateCfgField(['usuarioNiveis',email],nv);
+    try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
+    _permLog('nível',`${nome}: ${_nivelInfo(ant).l} → ${_nivelInfo(nv).l}`);toast(`${nome} agora é ${_nivelInfo(nv).l}`,'tok');}
+  catch(e){toast('Não consegui salvar o nível: '+(e.message||e),'terr');}
+}
+async function _permSalvar(k,v){
+  if(!_getUserCat().isAdm){toast('Só o administrador muda as permissões','terr');return;}
+  const a=_permAcao(k);if(!a)return;const ant=_permNivelReq(k);if(ant===v)return;
+  try{cfg.permissoesNivel=cfg.permissoesNivel||{};cfg.permissoesNivel[k]=v;await window._fbUpdateCfgField(['permissoesNivel',k],v);
+    try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
+    const nm=x=>x===NIVEL_SO_ADMIN?'Só administrador':_nivelInfo(x).l+' ou acima';
+    _permLog('permissão',`${a.l}: ${nm(ant)} → ${nm(v)}`);toast('Permissão atualizada','tok');_permRender();}
+  catch(e){toast('Não consegui salvar: '+(e.message||e),'terr');}
+}
+
+// ── tela "Níveis e permissões" (Configurações → Usuários) ──
+function _permAbrir(){
+  if(!_getUserCat().isAdm){toast('Só o administrador acessa as permissões','terr');return;}
+  let d=document.getElementById('mo-permissoes');
+  if(!d){d=document.createElement('div');d.className='mov';d.id='mo-permissoes';
+    d.innerHTML=`<div class="mvmod" style="width:900px;max-width:98vw;max-height:92vh;overflow-y:auto">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px"><div><div style="font-size:.66rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Configurações</div><h3 style="margin:0;font-size:1rem">Níveis e permissões</h3></div>
+      <button onclick="closeM('mo-permissoes')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem" title="Fechar">✕</button></div><div id="perm-corpo"></div></div>`;
+    document.body.appendChild(d);}
+  _permRender();openM('mo-permissoes');
+}
+function _permRender(){
+  const el=document.getElementById('perm-corpo');if(!el)return;
+  const nomes=cfg.usuarioNomes||{},cats=cfg.usuarioCats||{};
+  const porNivel={};Object.keys(nomes).forEach(e=>{if(cats[e]==='ADMINISTRADOR'||(cfg.vendDesligados||{})[e])return;const n=_nivelDe(e);(porNivel[n]=porNivel[n]||[]).push(nomes[e]);});
+  const adms=Object.keys(nomes).filter(e=>cats[e]==='ADMINISTRADOR').map(e=>nomes[e]);
+  const opts=k=>NIVEIS.map(n=>`<option value="${n.k}" ${_permNivelReq(k)===n.k?'selected':''}>${n.l} ou acima</option>`).join('')+`<option value="${NIVEL_SO_ADMIN}" ${_permNivelReq(k)===NIVEL_SO_ADMIN?'selected':''}>Só administrador</option>`;
+  const grupos=[...new Set(PERM_ACOES.map(a=>a.g))];
+  const log=(cfg.permissoesLog||[]).slice(-8).reverse();
+  el.innerHTML=`
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;margin-bottom:14px">
+      ${NIVEIS.map(n=>`<div style="border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;background:#fff"><div style="font-size:.82rem;font-weight:800;color:#0f172a">${n.l} <span style="font-weight:600;color:#94a3b8;font-size:.72rem">· ${(porNivel[n.k]||[]).length}</span></div><div style="font-size:.7rem;color:#64748b;margin-top:2px">${n.d}</div>${(porNivel[n.k]||[]).length&&n.k!=='OPERADOR'?`<div style="font-size:.68rem;color:#334155;margin-top:4px">${(porNivel[n.k]||[]).map(_ptE).join(', ')}</div>`:''}</div>`).join('')}
+      <div style="border:1px solid #0f172a;border-radius:10px;padding:10px 12px;background:#0f172a;color:#fff"><div style="font-size:.82rem;font-weight:800">Administrador <span style="font-weight:600;color:#94a3b8;font-size:.72rem">· ${adms.length}</span></div><div style="font-size:.7rem;color:#cbd5e1;margin-top:2px">Tudo, inclusive usuários, permissões, integrações, backups e comissões.</div><div style="font-size:.68rem;color:#e2e8f0;margin-top:4px">${adms.map(_ptE).join(', ')}</div></div>
+    </div>
+    <div style="font-size:.74rem;color:#475569;background:#f8fafc;border-radius:10px;padding:9px 12px;margin-bottom:12px">O nível de cada pessoa é escolhido em <b>Configurações → Usuários</b>, ao lado do nome. Abaixo, o nível mínimo para cada ação — sempre dentro do setor da pessoa (Diretoria vale para todos os setores). Configurações gerais, usuários, permissões, integrações, backups e comissões são sempre só do administrador.</div>
+    ${grupos.map(g=>`<div style="font-size:.66rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px">${_ptE(g)}</div>
+      <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">${PERM_ACOES.filter(a=>a.g===g).map((a,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 12px;${i?'border-top:1px solid #f1f5f9':''};background:#fff">
+        <div style="min-width:0"><div style="font-size:.8rem;color:#0f172a">${_ptE(a.l)}</div><div style="font-size:.66rem;color:#94a3b8">setor: ${_ptE(PERM_SETORES[a.s].l)}${_permNivelReq(a.k)!==a.p?' · padrão: '+(a.p===NIVEL_SO_ADMIN?'só administrador':_nivelInfo(a.p).l):''}</div></div>
+        <select class="fc no-upper" style="width:200px;flex-shrink:0" onchange="_permSalvar('${a.k}',this.value)">${opts(a.k)}</select></div>`).join('')}</div>`).join('')}
+    ${log.length?`<div style="font-size:.66rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin:16px 0 6px">Últimas mudanças</div>${log.map(x=>`<div style="font-size:.72rem;color:#475569;padding:3px 0"><span style="color:#94a3b8">${_ptE(_pfDH(x.em))} · ${_ptE(x.por)}</span> — ${_ptE(x.det)}</div>`).join('')}`:''}`;
+}
+// lista de usuários: nível ao lado do nome + botão da tela de permissões
+(function(){
+  const _ru=renderUserList;
+  renderUserList=async function(){
+    const r=await _ru.apply(this,arguments);
+    try{
+      const lista=document.getElementById('cfg-nomes-lista');if(!lista)return r;
+      if(_getUserCat().isAdm&&!document.getElementById('perm-btn-abrir'))lista.insertAdjacentHTML('beforebegin',`<button type="button" id="perm-btn-abrir" onclick="_permAbrir()" style="margin:4px 0 8px;background:#0f172a;color:#fff;border:none;border-radius:8px;padding:7px 12px;font-size:.74rem;font-weight:700;cursor:pointer">🔐 Níveis e permissões</button>`);
+      lista.querySelectorAll('.usr-linha').forEach(row=>{
+        if(row.querySelector('[data-nivel]'))return;const b=row.querySelector('button[onclick^="abrirMenusUsuario("]');if(!b)return;
+        const email=(b.getAttribute('onclick').match(/abrirMenusUsuario\('([^']+)'\)/)||[])[1];if(!email)return;
+        const cat=(cfg.usuarioCats||{})[email];
+        const html=cat==='ADMINISTRADOR'?`<span data-nivel="1" style="font-size:.66rem;font-weight:700;color:#fff;background:#0f172a;border-radius:6px;padding:4px 8px;white-space:nowrap">Administrador</span>`
+          :`<select data-nivel="1" title="Nível hierárquico" onchange="_nivelSalvar('${email}',this.value)" style="font-size:.7rem;border:1px solid #cbd5e1;border-radius:6px;padding:3px 4px;background:#fff;color:#0f172a;font-weight:600">${NIVEIS.map(n=>`<option value="${n.k}" ${_nivelDe(email)===n.k?'selected':''}>${n.l}</option>`).join('')}</select>`;
+        b.insertAdjacentHTML('beforebegin',html);
+      });
+    }catch(e){console.warn('níveis na lista de usuários',e);}
+    return r;
+  };
+})();
+// cadastro: nível escondido para Administrador
+function _nuNivelSync(){const c=(document.getElementById('nu-cat')||{}).value;const w=document.getElementById('nu-nivel-wrap');if(w)w.style.display=c==='ADMINISTRADOR'?'none':'';}
+(function(){const _nc=nuCatChanged;nuCatChanged=function(){const r=_nc.apply(this,arguments);try{_nuNivelSync();}catch(e){}return r;};})();
+
+// ── CÓDIGOS DE PRODUTO DEFINITIVOS + CATÁLOGO DO ORÇAMENTO POR CADERNO (2026-10-18) ──
+// Pedido do usuário: (1) "os códigos dos produtos que já estão lá não podem mudar, mesmo que cadastre outros
+// produtos — ficam intactos"; (2) no orçamento, inserir os produtos pelos cadernos cadastrados (começando pelo BK),
+// levando só código, nome, descrição, valor e medidas — sem a ficha técnica completa.
+
+// (1) Registro de códigos: cfg.produtosCodigos = {idDoProduto: código}. Uma vez registrado, o código daquele
+// produto nunca muda, e nenhum código já usado (nem de produto excluído) é dado de novo para outro produto.
+function _codRegistro(){return(cfg&&cfg.produtosCodigos)||{};}
+function _codGerarNovo(p){
+  const reg=_codRegistro();
+  const usados=new Set(Object.values(reg).concat(getProdutos().filter(x=>x&&x!==p&&x.codigo).map(x=>x.codigo)).filter(Boolean));
+  const irmas=getProdutos().filter(x=>x&&x!==p&&x.codigo&&_prodFamKey(x)===_prodFamKey(p));
+  let fam=irmas.length?_prodFamCod(irmas[0]):'';
+  if(!fam){const sig=_cadSiglaFixar(p.categoria);let max=0;const re=new RegExp('^'+sig.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'-(\\d{4})');usados.forEach(c=>{const m=String(c).match(re);if(m)max=Math.max(max,+m[1]);});fam=sig+'-'+String(max+1).padStart(4,'0');}
+  const esc=fam.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');let seq=0;usados.forEach(c=>{const m=String(c).match(new RegExp('^'+esc+'-(\\d{2})$'));if(m)seq=Math.max(seq,+m[1]);});
+  let c=fam+'-'+String(seq+1).padStart(2,'0');while(usados.has(c)){seq++;c=fam+'-'+String(seq+1).padStart(2,'0');}
+  return c;
+}
+_prodGerarCodigo=function(p){
+  if(!p)return'';const reg=_codRegistro();
+  if(p.id&&reg[p.id]){p.codigo=reg[p.id];return p.codigo;}           // já tem código definitivo: mantém
+  p.codigo=_codGerarNovo(p);
+  if(p.id){cfg.produtosCodigos=Object.assign({},reg,{[p.id]:p.codigo});}
+  return p.codigo;
+};
+// trava: registra quem ainda não está no registro e devolve o código certo a quem estiver diferente
+function _codTravar(){
+  if(!cfg||!Array.isArray(cfg.produtos))return false;
+  const reg=Object.assign({},_codRegistro());let mud=false;
+  cfg.produtos.forEach(p=>{if(!p||!p.id)return;
+    if(reg[p.id]){if(p.codigo!==reg[p.id]){p.codigo=reg[p.id];mud=true;}}
+    else if(p.codigo){reg[p.id]=p.codigo;mud=true;}});
+  if(mud)cfg.produtosCodigos=reg;
+  return mud;
+}
+(function(){let n=0;const t=setInterval(()=>{n++;if(n>720){clearInterval(t);return;}
+  try{if(!usuarioLogado||typeof getProdutos!=='function'||!getProdutos().length)return;
+    // todos corrigem na tela; só Projetos/admin gravam o registro no banco
+    const mud=_codTravar();
+    if(mud&&_prodPodeEditar()&&window._fbSaveCfg){window._fbSaveCfg(cfg);try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}}
+  }catch(e){console.warn('códigos dos produtos',e);}},5000);})();
+
+// (2) Catálogo do orçamento por caderno
+function _orcCadernosDisponiveis(){
+  const m=new Map();_orc2CatalogoLista().forEach(p=>{const c=String(p.categoria||'').trim()||'SEM CADERNO';m.set(c,(m.get(c)||0)+1);});
+  return[...m.entries()].sort((a,b)=>a[0].localeCompare(b[0],'pt-BR'));
+}
+(function(){
+  const _gr=_orc2CatGrupos;
+  _orc2CatGrupos=function(q){const g=_gr.apply(this,arguments);const c=orc2.catCad||'';return c?g.filter(x=>(String(x.cad||'').trim()||'SEM CADERNO')===c):g;};
+  const _form=_orc2HtmlFormCatalogo;
+  _orc2HtmlFormCatalogo=function(){
+    const cads=_orcCadernosDisponiveis();
+    if(orc2.catCad&&!cads.some(([c])=>c===orc2.catCad))orc2.catCad='';
+    if(orc2.catCad===undefined&&cads.length===1)orc2.catCad=cads[0][0];
+    const chip=(c,l,n,logo)=>`<button type="button" onclick="orc2.catCad='${_orcxEsc(c).replace(/'/g,"\\'")}';orc2.catAberto='';_orc2ReRenderProdutos()" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;border:1.5px solid ${(orc2.catCad||'')===c?'#0f172a':'#e2e8f0'};background:${(orc2.catCad||'')===c?'#0f172a':'#fff'};color:${(orc2.catCad||'')===c?'#fff':'#334155'};font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap">${logo||''}${_orcxEsc(l)} <span style="opacity:.6;font-weight:600">${n}</span></button>`;
+    const chips=`<div style="font-size:.66rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin:0 0 6px">Cadernos</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${chip('','Todos',_orc2CatalogoLista().length,'')}${cads.map(([c,n])=>chip(c,c,n,(()=>{try{return _cadernoLogoHtml(c,16);}catch(e){return'';}})())).join('')}</div>`;
+    const gs=_orc2CatGrupos(''),nP=gs.length,nV=gs.reduce((s,g)=>s+g.vs.length,0);
+    const hint=`${nP} ${_plural(nP,'produto','produtos')} · ${nV} ${_plural(nV,'variação','variações')}${orc2.catCad?' em '+_orcxEsc(orc2.catCad):''}. Abra o produto e escolha a variação — entram no orçamento o código, o nome, a descrição técnica, as medidas e o preço.`;
+    return _form.apply(this,arguments).replace(/(<div class="orcx-hint"[^>]*>)[^<]*(<\/div>)/,'$1'+hint+'$2').replace('<input class="fc no-upper" placeholder="🔍 Buscar',chips+'<input class="fc no-upper" placeholder="🔍 Buscar');
+  };
+  // item que entra no orçamento: código + nome + variação, descrição técnica, medidas e o preço do produto
+  const _ic=_orc2ItemCatalogo;
+  _orc2ItemCatalogo=function(p,qtd,l,a){
+    const it=_ic.apply(this,arguments);if(!p)return it;
+    try{
+      const nm=(_prodCatTxt(p.tipoProduto)||p.nome||'').trim(),va=String(p.variacao||'').trim();
+      it.codigo=p.codigo||'';it.caderno=p.categoria||'';
+      it.nomeCurto=[p.codigo,[nm,va].filter(Boolean).join(' — ')].filter(Boolean).join(' · ');it.nome=it.nomeCurto;
+      let d='';try{d=(_pfDescricaoAuto(p)||'').split('\n').slice(1).map(s=>s.trim()).filter(Boolean).map(s=>/[.!?]$/.test(s)?s:s+'.').join(' ');}catch(e){}
+      it.descricao=d||String(p.categoria||'');
+      if(!(_orc2Num(l)>0)&&!(_orc2Num(a)>0)&&_prodTemDims(p)){it.largura=_prodNum(p.largura)/100;it.altura=_prodNum(p.altura)/100;it.profundidade=_prodNum(p.profundidade)/100;}
+      it.medida=_prodTemDims(p)?_prodDimsTxt(p):(p.medida||'');
+    }catch(e){console.warn('item do catálogo',e);}
+    return it;
+  };
+})();
+
+// ── TROCA DE PESSOA NO MESMO E-MAIL (2026-10-18) ──
+// Pedido do usuário: e-mails de função (rh@, projetos1@…) passam de uma pessoa para outra quando alguém sai.
+// Antes era preciso apagar o login no Firebase e cadastrar tudo de novo. Agora: Configurações → Usuários →
+// "🔄 Trocar pessoa". O login (e-mail) continua o mesmo; muda quem está por trás dele:
+//  · nome, setor e nível passam a ser da pessoa nova (o histórico antigo continua no nome da pessoa antiga);
+//  · se estava desligado, volta a ter acesso;
+//  · tarefas pendentes da pessoa antiga podem ir para a nova;
+//  · a senha é trocada (digitada aqui ou por e-mail de redefinição) e quem ainda estiver logado com a pessoa
+//    antiga é desconectado na próxima vez que o sistema carregar.
+// Fica registrado em cfg.usuarioTitulares[email] = [{nome, categoria, ate, por}].
+const TT_CATS=['COMERCIAL','RH','FINANCEIRO','COMPRAS','PCP','PRODUÇÃO','QUALIDADE','PLANEJAMENTO','PROJETOS','PROSPECÇÃO','ADMINISTRADOR'];
+function _ttAbrir(email,pre){
+  if(!_getUserCat().isAdm){toast('Só o administrador troca a pessoa de um login','terr');return;}
+  email=String(email||'').toLowerCase();pre=pre||{};
+  const nomeAnt=(cfg.usuarioNomes||{})[email]||'',catAnt=(cfg.usuarioCats||{})[email]||'',desl=(cfg.vendDesligados||{})[email];
+  const hist=((cfg.usuarioTitulares||{})[email]||[]).slice().reverse();
+  let d=document.getElementById('mo-troca-titular');
+  if(!d){d=document.createElement('div');d.className='mov';d.id='mo-troca-titular';d.innerHTML='<div class="mvmod" style="width:560px;max-width:96vw;max-height:92vh;overflow-y:auto"><div id="tt-corpo"></div></div>';document.body.appendChild(d);}
+  const lb='font-size:.7rem;font-weight:600;color:#475569;display:block;margin-top:10px';
+  const cat=pre.cat||catAnt;
+  document.getElementById('tt-corpo').innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+      <div><div style="font-size:.66rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em">Usuários</div><h3 style="margin:0;font-size:1rem">Trocar a pessoa deste login</h3></div>
+      <button type="button" onclick="closeM('mo-troca-titular')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem">✕</button></div>
+    <div style="margin-top:10px;padding:10px 12px;border-radius:10px;background:#f8fafc;font-size:.78rem;color:#334155;line-height:1.5">
+      Login: <b>${_ptE(email)}</b><br>Hoje está com: <b>${_ptE(nomeAnt||'—')}</b>${catAnt?' · '+_ptE(catAnt):''}${desl?` · <span style="color:#b45309">desligado em ${fmtD(desl.data)}</span>`:''}
+      ${hist.length?`<div style="font-size:.7rem;color:#64748b;margin-top:4px">Antes: ${hist.map(h=>_ptE(h.nome)+' (até '+new Date(h.ate).toLocaleDateString('pt-BR')+')').join(', ')}</div>`:''}</div>
+    <input type="hidden" id="tt-email" value="${_ptE(email)}">
+    <label style="${lb}">Nome da nova pessoa *<input id="tt-nome" class="fc" style="margin-top:3px;text-transform:uppercase" value="${_ptE(pre.nome&&pre.nome!==nomeAnt?pre.nome:'')}" placeholder="ex.: RAFAELA SOUZA"></label>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <label style="${lb}">Setor<select id="tt-cat" class="fc" style="margin-top:3px">${TT_CATS.map(c=>`<option ${c===cat?'selected':''}>${c}</option>`).join('')}</select></label>
+      <label style="${lb}">Nível<select id="tt-nivel" class="fc" style="margin-top:3px">${NIVEIS.map(n=>`<option value="${n.k}" ${_nivelDe(email)===n.k?'selected':''}>${n.l}</option>`).join('')}</select></label>
+    </div>
+    <label style="${lb}">Senha da nova pessoa<input id="tt-senha" type="text" class="fc no-upper" style="margin-top:3px" placeholder="mínimo 6 caracteres — em branco: enviamos o e-mail de redefinição"></label>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-size:.78rem;color:#334155;cursor:pointer"><input type="checkbox" id="tt-tarefas" checked style="margin-top:2px"> Passar as tarefas pendentes de ${_ptE(nomeAnt||'quem saiu')} para a nova pessoa</label>
+    <div style="font-size:.7rem;color:#64748b;margin-top:10px;line-height:1.5">O que já foi feito continua no nome de ${_ptE(nomeAnt||'quem saiu')} (histórico, pedidos, aprovações). Quem ainda estiver logado com a pessoa antiga é desconectado.${cat==='COMERCIAL'?' Para vendedor, a carteira de clientes é passada pelo botão de transferir carteira.':''}</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button type="button" onclick="closeM('mo-troca-titular')" style="${_PF_BTN}">Cancelar</button>
+      <button type="button" id="tt-btn" onclick="_ttConfirmar()" style="${_PF_BTN};background:#0f172a;color:#fff;border-color:#0f172a">Trocar pessoa</button></div>`;
+  openM('mo-troca-titular');setTimeout(()=>{const i=document.getElementById('tt-nome');if(i)i.focus();},60);
+}
+async function _ttConfirmar(){
+  if(!_getUserCat().isAdm)return;
+  const g=id=>(document.getElementById(id)||{}).value||'';
+  const email=g('tt-email'),novo=g('tt-nome').trim().toUpperCase().replace(/\s+/g,' '),cat=g('tt-cat'),nv=g('tt-nivel'),senha=g('tt-senha');
+  const ant=(cfg.usuarioNomes||{})[email]||'',catAnt=(cfg.usuarioCats||{})[email]||'';
+  if(!novo){toast('Digite o nome da nova pessoa','terr');return;}
+  if(novo===ant){toast('Esse já é o nome de quem está no login','terr');return;}
+  if(Object.entries(cfg.usuarioNomes||{}).some(([e,n])=>e!==email&&String(n).toUpperCase()===novo)){toast('Já existe outro usuário com esse nome — use o nome completo para diferenciar','terr');return;}
+  if(senha&&senha.length<6){toast('A senha precisa ter pelo menos 6 caracteres','terr');return;}
+  const btn=document.getElementById('tt-btn');if(btn){btn.disabled=true;btn.textContent='Trocando…';}
+  const agora=new Date().toISOString(),quem=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  try{
+    const hist=((cfg.usuarioTitulares||{})[email]||[]).concat(ant?[{nome:ant,categoria:catAnt,ate:agora,por:quem}]:[]);
+    const campos=[[['usuarioNomes',email],novo],[['usuarioCats',email],cat],[['usuarioTitulares',email],hist],[['usuarioTrocaEm',email],agora]];
+    if(cat!=='ADMINISTRADOR')campos.push([['usuarioNiveis',email],nv]);
+    await window._fbUpdateUsuario(campos);
+    cfg.usuarioNomes[email]=novo;cfg.usuarioCats[email]=cat;(cfg.usuarioTitulares=cfg.usuarioTitulares||{})[email]=hist;(cfg.usuarioTrocaEm=cfg.usuarioTrocaEm||{})[email]=agora;
+    if(cat!=='ADMINISTRADOR')(cfg.usuarioNiveis=cfg.usuarioNiveis||{})[email]=nv;
+    // volta a ter acesso e começa com os menus padrão do setor
+    if((cfg.vendDesligados||{})[email]){try{await window._fbDeleteCfgField(['vendDesligados',email]);}catch(e){}delete cfg.vendDesligados[email];}
+    if((cfg.usuarioMenus||{})[email]){try{await window._fbDeleteCfgField(['usuarioMenus',email]);}catch(e){}delete cfg.usuarioMenus[email];}
+    // tarefas pendentes
+    let nT=0;
+    if((document.getElementById('tt-tarefas')||{}).checked&&ant){
+      const passa=t=>t&&t.responsavel===ant&&(t.status||'pendente')==='pendente';
+      const mudar=t=>Object.assign(t,{responsavel:novo,transferidaDe:ant,transferidaEm:agora,transferidaPor:quem});
+      if((cfg.tarefasGerais||[]).some(passa)&&window._fbTxTarefasGerais){
+        await window._fbTxTarefasGerais(ts=>ts.map(t=>{if(passa(t)){nT++;return mudar(t);}return t;}));
+        (cfg.tarefasGerais||[]).forEach(t=>{if(passa(t))mudar(t);});
+      }
+      for(const p of (typeof pedidos!=='undefined'?pedidos:[])){
+        const l=(p.tarefasComerciais||[]).filter(passa);if(!l.length)continue;
+        l.forEach(t=>{mudar(t);nT++;});try{await savePedidoFS(p);}catch(e){console.warn('tarefa do pedido',e);}
+      }
+    }
+    try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
+    try{_permLog('titular',`${email}: ${ant||'—'} → ${novo}`);}catch(e){}
+    // senha
+    let msgSenha='';
+    if(senha){try{await window._fbAdminSetPassword(email,senha);msgSenha='senha nova já vale';}catch(e){try{await window._fbSendReset(email);msgSenha='não deu para definir a senha direto — enviamos o e-mail de redefinição para '+email;}catch(e2){msgSenha='não consegui trocar a senha ('+(e2.message||e2)+')';}}}
+    else{try{await window._fbSendReset(email);msgSenha='e-mail de redefinição de senha enviado para '+email;}catch(e){msgSenha='não consegui enviar o e-mail de redefinição ('+(e.message||e)+')';}}
+    closeM('mo-troca-titular');
+    toast(`✅ ${email} agora é de ${novo}${nT?` · ${nT} ${_plural(nT,'tarefa passada','tarefas passadas')}`:''} · ${msgSenha}`,'tok');
+    try{renderUserList();}catch(e){}try{_refreshTarefasBadge();}catch(e){}
+  }catch(e){toast('Não consegui trocar: '+(e.message||e),'terr');}
+  finally{if(btn){btn.disabled=false;btn.textContent='Trocar pessoa';}}
+}
+// botão na lista de usuários
+(function(){
+  const _ru=renderUserList;
+  renderUserList=async function(){
+    const r=await _ru.apply(this,arguments);
+    try{if(!_getUserCat().isAdm)return r;
+      document.querySelectorAll('#cfg-nomes-lista .usr-linha').forEach(row=>{
+        if(row.querySelector('[data-tt]'))return;const b=row.querySelector('button[onclick^="recriarUsuario("]');if(!b)return;
+        const email=(b.getAttribute('onclick').match(/recriarUsuario\('([^']+)'\)/)||[])[1];if(!email)return;
+        b.insertAdjacentHTML('beforebegin',`<button data-tt="1" onclick="_ttAbrir('${email}')" style="background:#fff7ed;border:1px solid #fdba74;border-radius:6px;cursor:pointer;color:#c2410c;font-size:.7rem;padding:3px 7px;font-weight:600" title="Outra pessoa assumiu este e-mail">🔄 Trocar pessoa</button>`);
+      });}catch(e){console.warn('trocar pessoa',e);}
+    return r;
+  };
+})();
+
+// ── OC CHEGOU DEPOIS DA EMISSÃO → AVISO AO FINANCEIRO (2026-10-18) ──
+// Pedido do usuário: pedido emitido sem Ordem de Compra fica com a pendência de OC; quando a OC é anexada
+// depois, o sistema avisa o Financeiro da Granda por e-mail (financeiro@ + paulo@), usando o mesmo serviço e o
+// mesmo modelo do EmailJS da emissão. A pendência de OC some sozinha (é calculada: com OC, não existe mais);
+// as outras pendências registradas continuam.
+const OC_AVISO_PARA=['financeiro@granda.ind.br','paulo@granda.ind.br'];
+function _ocAvisoHtml(p){
+  const E=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  let liq='',bruto='';try{const r=pedidoToVendaRow(p);bruto=r&&r.vl?fmtR(Number(r.vl)):'';liq=r&&r.lq?fmtR(Number(r.lq)):'';}catch(e){}
+  const linha=(l,v)=>v?`<tr><td style="padding:6px 10px;color:#64748b;font-size:13px;white-space:nowrap">${l}</td><td style="padding:6px 10px;color:#0f172a;font-size:13px;font-weight:600">${v}</td></tr>`:'';
+  const quando=p.ocAnexadaEm?new Date(p.ocAnexadaEm).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'';
+  return`<div style="font-family:Arial,Helvetica,sans-serif;max-width:620px;margin:0 auto;background:#ffffff">
+    <div style="background:#1a2b5e;padding:18px 22px;border-radius:10px 10px 0 0"><img src="https://grandacv-web.github.io/gcoregranda/logo_granda_branca.png" height="34" alt="Granda" style="height:34px"></div>
+    <div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 10px 10px;padding:20px 22px">
+      <div style="font-size:12px;font-weight:700;color:#e91e63;letter-spacing:.06em;text-transform:uppercase">Ordem de Compra recebida</div>
+      <div style="font-size:20px;font-weight:800;color:#1a2b5e;margin:4px 0 12px">OS ${E(p.os||'—')} · ${E(typeof _pedNome==='function'?_pedNome(p):p.cliente)}</div>
+      <div style="font-size:14px;color:#334155;line-height:1.5;margin-bottom:12px">Este pedido foi emitido sem a Ordem de Compra do cliente. A OC chegou e foi anexada no GCore — a pendência de OC foi baixada.</div>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;background:#f8fafc;border-radius:8px">
+        ${linha('Nº da OC',E(p.numOC||'não informado'))}${linha('Cliente',E(p.cliente||''))}${linha('JOB',E(p.job||''))}${linha('Vendedor',E(p.responsavel||''))}
+        ${linha('Valor bruto',bruto)}${linha('Valor líquido',liq)}${linha('Anexada por',E(p.ocAnexadaPor||''))}${linha('Anexada em',quando)}
+      </table>
+      ${p.ocUrl?`<div style="margin-top:16px"><a href="${E(p.ocUrl)}" target="_blank" style="display:inline-block;background:#e91e63;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:10px 18px;border-radius:8px">📎 Abrir a Ordem de Compra</a></div>`:''}
+      <div style="font-size:11px;color:#94a3b8;margin-top:18px">Aviso automático do GCORE - Sistema Granda.</div>
+    </div></div>`;
+}
+async function _ocNotificarFinanceiro(p){
+  if(!p||!p.ocUrl)return{ok:false};
+  if(!window.emailjs){toast('Não consegui avisar o Financeiro: serviço de e-mail não carregou. Use "Reenviar aviso" no pedido.','terr');return{ok:false};}
+  const subject=`OC recebida — OS ${p.os||'—'} · ${(typeof _pedNome==='function'?_pedNome(p):p.cliente)||''}`;
+  const reg={em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',para:OC_AVISO_PARA.slice(),numOC:p.numOC||'',ocUrl:p.ocUrl};
+  try{
+    emailjs.init(cfg.k||'wtJbXi3uGODPaFIqc');
+    await emailjs.send(cfg.s||'service_t99xeta',cfg.t||'template_lzow9ef',{html_content:_ocAvisoHtml(p),to_email:OC_AVISO_PARA.join(','),cc:'',to_name:'Financeiro Granda',os_numero:String(p.os||''),subject,name:'GCORE - Sistema Granda',reply_to:'pedidos@granda.ind.br'});
+    reg.status='enviado';toast('📧 Financeiro avisado da OC (financeiro@ e paulo@)','tok');
+  }catch(e){reg.status='erro';reg.erro=String((e&&(e.text||e.message))||e);toast('Não consegui avisar o Financeiro por e-mail ('+reg.erro+'). Use "Reenviar aviso" no pedido.','terr');}
+  p.ocAvisos=(p.ocAvisos||[]).concat([reg]).slice(-10);
+  try{await savePedidoFS(p);}catch(e){console.warn('registro do aviso de OC',e);}
+  return{ok:reg.status==='enviado'};
+}
+function _ocReenviarAviso(pid){const p=(pedidos||[]).find(x=>x.id===pid);if(p)_ocNotificarFinanceiro(p);}
+// dispara quando a OC passa de "não tem" para "tem" num pedido já emitido (os 3 caminhos de anexar)
+function _ocPedidoEmitido(p){return!!p&&p.conselhoStatus!=='rascunho'&&!!p.os;}
+(function(){
+  const embrulhar=(nome,achar)=>{
+    const orig=window[nome];if(typeof orig!=='function')return;
+    window[nome]=async function(){
+      let p=null,antes=true;try{p=achar.apply(this,arguments);antes=p?_pedTemOC(p):true;}catch(e){}
+      const r=await orig.apply(this,arguments);
+      try{if(p&&!antes&&_pedTemOC(p)&&_ocPedidoEmitido(p))await _ocNotificarFinanceiro(p);}catch(e){console.warn('aviso de OC',e);}
+      return r;
+    };
+  };
+  embrulhar('_consOcAnexar',()=>(pedidos||[]).find(x=>x.id===_consPendPedidoId));
+  embrulhar('_semOcAnexar',(input,pid)=>(pedidos||[]).find(x=>x.id===pid));
+  embrulhar('salvarValoresPedido',()=>(pedidos||[]).find(x=>x.id===_editValId));
+  // Histórico do pedido: aviso ao Financeiro
+  const _he=_histPedidoEventos;
+  _histPedidoEventos=function(p){
+    const ev=_he.apply(this,arguments);
+    try{(p&&p.ocAvisos||[]).forEach(a=>{ev.push({icone:a.status==='enviado'?'📧':'⚠️',titulo:a.status==='enviado'?'Financeiro avisado: OC recebida':'Falha ao avisar o Financeiro da OC',quandoTxt:_histFmtQuando(a.em),detalhe:(a.status==='enviado'?'Para '+a.para.join(', '):'Erro: '+(a.erro||''))+(a.numOC?' · OC nº '+a.numOC:'')+' · por '+a.por+(a.status!=='enviado'?` · <a href="javascript:void(0)" onclick="_ocReenviarAviso('${p.id}')">Reenviar aviso</a>`:''),cor:a.status==='enviado'?'#0f766e':'#b91c1c',ts:_histParseTs(a.em)});});ev.sort((a,b)=>a.ts-b.ts);}catch(e){}
+    return ev;
+  };
 })();
 
 function renderComercialProdutos(){
@@ -29566,7 +29974,7 @@ function _cpAutorizacaoBadge(c){
   return h;
 }
 async function cpAutorizarPagamento(id){
-  if(!_getUserCat().isAdm){toast('Só o administrador pode autorizar pagamentos','terr');return;}
+  if(!_pode('fin_autorizar_pag')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const c=(contasPagar||[]).find(x=>String(x.id)===String(id));if(!c)return;
   c.autorizadoPor=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';c.autorizadoEm=new Date().toISOString();
   await saveContaPagarFS(c);
@@ -29608,7 +30016,7 @@ function _cpProtecoesHtml(){
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
       <div><div style="font-size:.7rem;font-weight:700;color:#7c3aed;text-transform:uppercase;margin-bottom:6px">🔒 Aguardando autorização (${pend.length})</div>
-        ${pend.length?pend.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid #ddd6fe;border-radius:8px;padding:7px 9px;margin-bottom:6px;font-size:.74rem"><span>${linhaC(c)}</span>${isAdm?`<button onclick="cpAutorizarPagamento('${c.id}')" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:4px 9px;font-weight:700;cursor:pointer;white-space:nowrap">Autorizar</button>`:''}</div>`).join(''):`<div style="font-size:.78rem;color:var(--ink4)">${lim?'Nada aguardando.':'Limite não definido.'}</div>`}
+        ${pend.length?pend.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid #ddd6fe;border-radius:8px;padding:7px 9px;margin-bottom:6px;font-size:.74rem"><span>${linhaC(c)}</span>${_pode('fin_autorizar_pag')?`<button onclick="cpAutorizarPagamento('${c.id}')" style="background:#7c3aed;color:#fff;border:none;border-radius:6px;padding:4px 9px;font-weight:700;cursor:pointer;white-space:nowrap">Autorizar</button>`:''}</div>`).join(''):`<div style="font-size:.78rem;color:var(--ink4)">${lim?'Nada aguardando.':'Limite não definido.'}</div>`}
       </div>
       <div><div style="font-size:.7rem;font-weight:700;color:#b45309;text-transform:uppercase;margin-bottom:6px">⚠️ Possíveis duplicidades (${dup.length})</div>
         ${dup.length?dup.slice(0,30).map(([x,y])=>`<div style="border:1px solid #fde68a;border-radius:8px;padding:7px 9px;margin-bottom:6px;font-size:.72rem;line-height:1.5">
@@ -50507,7 +50915,7 @@ function renderTarefasComerciais(){
     // Todo mundo mais vê só as próprias tarefas atribuídas — é a "caixinha pendente pra
     // mim" que fica assim até eu mesmo marcar como concluída (e, na aba Aguardando
     // Aprovação, só pra acompanhar o status, sem botão de aprovar/devolver).
-    lista=lista.filter(t=>t.responsavel===meuNome);
+    lista=lista.filter(t=>t.responsavel===meuNome||_tarefaDaMinhaEquipe(t));
   }
   // Busca por nome (título da tarefa/cliente) ou OS (2026-08-24, a pedido do usuário) — roda
   // pra todo mundo (admin ou não), depois de já aplicado o filtro "só minhas tarefas" pra
@@ -50673,7 +51081,7 @@ let _tarefasListaAtual=[];
 function abrirDetalheTarefa(tarefaId){
   const t=_tarefasListaAtual.find(x=>x.id===tarefaId);
   if(!t){toast('Tarefa não encontrada (a lista pode ter mudado) — atualize e tente de novo','terr');return;}
-  const {isAdm}=_getUserCat();
+  const isAdm=_getUserCat().isAdm||_podeAprovarTarefaDe(t);
   const pendente=(t.status||'pendente')==='pendente';
   const aguardando=t.status==='aguardando_aprovacao';
   const atrasada=_tarefaAtrasada(t);
@@ -50812,7 +51220,7 @@ function _confirmarAdiamentoTarefa(){
 function abrirDevolverTarefa(pedidoId,tarefaId){
   const t=_tarefasListaAtual.find(x=>x.id===tarefaId);
   if(!t){toast('Tarefa não encontrada (a lista pode ter mudado) — atualize e tente de novo','terr');return;}
-  if(!_podeAprovarTarefa()){toast('Só um administrador pode devolver uma tarefa','terr');return;}
+  if(!_podeAprovarTarefa(t)){toast('Só o administrador ou o supervisor do setor de quem fez pode devolver esta tarefa','terr');return;}
   const elP=document.getElementById('tf-devolver-pedido-id');if(elP)elP.value=pedidoId||'';
   const elT=document.getElementById('tf-devolver-tarefa-id');if(elT)elT.value=tarefaId;
   const elN=document.getElementById('tf-devolver-novo-prazo');if(elN)elN.value=t.prazoTarefa||'';
@@ -51123,7 +51531,7 @@ async function exportarTarefasPDF(){
   const filResp=isAdm?((document.getElementById('tf-fil-responsavel')||{}).value||''):'';
 
   let lista=[...getTarefasComerciaisPendentes(),...getTarefasComerciaisAguardandoAprovacao(),...getTarefasComerciaisConcluidas()];
-  if(!isAdm)lista=lista.filter(t=>t.responsavel===meuNome);
+  if(!isAdm)lista=lista.filter(t=>t.responsavel===meuNome||_tarefaDaMinhaEquipe(t));
   else if(filResp)lista=lista.filter(t=>t.responsavel===filResp);
 
   if(escopo==='pendentes')lista=lista.filter(t=>t.status!=='concluida');
@@ -53865,7 +54273,7 @@ function renderProspKanban(){
   const wrap=document.getElementById('prosp-kanban-body');
   if(!wrap)return;
   const btnEtapasProsp=document.getElementById('prosp-btn-etapas');
-  if(btnEtapasProsp)btnEtapasProsp.style.display=_getUserCat().isAdm?'':'none';
+  if(btnEtapasProsp)btnEtapasProsp.style.display=_pode('com_etapas_funil')?'':'none';
   if(!_temAcessoProspeccao()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
   const base=_prospBaseFiltrada();
   try{_prospRenderToolbar(base);}catch(err){console.error('_prospRenderToolbar',err);}
@@ -55638,7 +56046,7 @@ function renderProspIndicadores(){
 
 // ── GERENCIAR ETAPAS DO FUNIL ───────────────────────────────────────────────────────
 function prospAbrirGerenciarEtapas(){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem personalizar as etapas do funil','terr');return;}
+  if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   _prospRenderEtapasModal();
   openM('mo-prosp-etapas');
 }
@@ -55660,7 +56068,7 @@ function _prospRenderEtapasModal(){
   }).join('');
 }
 async function prospMoverEtapaOrdem(i,dir){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem personalizar as etapas do funil','terr');return;}
+  if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const etapas=[..._prospEtapas()];
   const j=i+dir;
   if(j<0||j>=etapas.length)return;
@@ -55670,7 +56078,7 @@ async function prospMoverEtapaOrdem(i,dir){
   if(_prospTabAtiva==='kanban')renderProspKanban();
 }
 async function prospAdicionarEtapa(){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem personalizar as etapas do funil','terr');return;}
+  if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const input=document.getElementById('prosp-etapas-novo');
   const label=((input&&input.value)||'').trim().toUpperCase();
   if(!label){toast('Digite o nome da etapa','terr');return;}
@@ -55687,7 +56095,7 @@ async function prospAdicionarEtapa(){
   toast('Etapa adicionada!','tok');
 }
 async function prospRemoverEtapa(key){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem personalizar as etapas do funil','terr');return;}
+  if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const etapas=_prospEtapas();
   if(etapas.length<=1){toast('Precisa deixar pelo menos uma etapa no funil','terr');return;}
   const qtd=prospEmpresas.filter(e=>e.etapa===key).length;
@@ -56351,7 +56759,7 @@ function renderCrmKanban(){
   const wrap=document.getElementById('crm-kanban-body');
   if(!wrap)return;
   const btnEtapasCrm=document.getElementById('crm-btn-etapas');
-  if(btnEtapasCrm)btnEtapasCrm.style.display=_getUserCat().isAdm?'':'none';
+  if(btnEtapasCrm)btnEtapasCrm.style.display=_pode('com_etapas_funil')?'':'none';
   if(!_podeVerVisaoComercial()){wrap.innerHTML='<div style="padding:24px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO.</div>';return;}
   const busca=document.getElementById('crm-kanban-busca')?.value||'';
   const empresas=_crmEmpresasFiltradas(busca);
@@ -56808,7 +57216,7 @@ function _anivxContato(origem,empresaId,idx){
   return Object.assign({},d,{empresaId,_idx:idx,_origem:origem,empresaNome:d.empresa||e.nome||'—'});
 }
 async function anivxEditarMsg(){
-  if(!_getUserCat().isAdm){toast('Só administrador edita a mensagem padrão','terr');return;}
+  if(!_pode('com_msg_aniversario')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const atual=(cfg.anivMsgPadrao)||ANIVX_MSG_PADRAO;
   const v=prompt('Mensagem padrão de aniversário.\nUse {nome} (primeiro nome), {nomeCompleto} e {empresa}.',atual);
   if(v===null)return;
@@ -56870,7 +57278,7 @@ function _anivxRender(pref,mesAtual){
       <label style="display:flex;gap:4px;align-items:center;cursor:pointer"><input type="checkbox" ${est.ocultarOk?'checked':''} onchange="anivxSet('${pref}','ocultarOk',this.checked)"> Esconder já parabenizados</label>
       <span style="margin-left:auto;display:flex;gap:6px">
         <button type="button" onclick="anivxExportar('${pref}',${mesAtual})" class="dash-btn-conf" style="background:#64748b;padding:5px 10px">📊 Exportar mês</button>
-        ${_getUserCat().isAdm?`<button type="button" onclick="anivxEditarMsg()" class="dash-btn-conf" style="background:#7c3aed;padding:5px 10px" title="${_anivxEsc((cfg.anivMsgPadrao)||ANIVX_MSG_PADRAO)}">✏️ Mensagem padrão</button>`:''}
+        ${_pode('com_msg_aniversario')?`<button type="button" onclick="anivxEditarMsg()" class="dash-btn-conf" style="background:#7c3aed;padding:5px 10px" title="${_anivxEsc((cfg.anivMsgPadrao)||ANIVX_MSG_PADRAO)}">✏️ Mensagem padrão</button>`:''}
       </span>
     </div>
     ${est.semData?`<div class="dash-card" style="margin-bottom:10px"><div class="dash-sec-title">📇 Contatos sem aniversário cadastrado (${semData.length})</div><div style="font-size:.7rem;color:var(--ink4);margin:2px 0 6px">Primeiro os de negócios em aberto no CRM. Clique pra abrir o card e completar.</div>
@@ -57718,7 +58126,7 @@ function _crmRenderJanelaProposta(alvo){
 // (ver _crmRenderCard), sem duplicar a lógica de montagem da lista.
 function _crmPropostaHistoricoHtml(alvo){
   const hist=(alvo.propostaHistorico||[]).slice().reverse();
-  const isAdmHist=_getUserCat().isAdm;
+  const isAdmHist=_pode('com_excluir_hist_prop');
   return hist.length?hist.map(item=>`
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border-lt);border-radius:8px;margin-bottom:6px;font-size:.76rem">
         <div style="min-width:0">
@@ -57743,7 +58151,7 @@ function _crmPropostaHistoricoHtml(alvo){
 // anexar (ver comentário de crmPropostaModalPdfSelecionado) — ou zeram se o histórico ficar
 // vazio.
 async function crmExcluirItemHistoricoProposta(empresaId,itemId){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem excluir itens do histórico de propostas','terr');return;}
+  if(!_pode('com_excluir_hist_prop')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const alvo=empresaId?crmEmpresas.find(x=>x.id===empresaId):_crmEmpPropostaPendente;
   if(!alvo||!alvo.propostaHistorico)return;
   const item=alvo.propostaHistorico.find(it=>it.id===itemId);
@@ -61169,7 +61577,7 @@ function _crmIndAbrirDetalheContatos100(){
 
 // ── GERENCIAR ETAPAS DO FUNIL ───────────────────────────────────────────────────────
 function crmAbrirGerenciarEtapas(){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem personalizar as etapas do funil','terr');return;}
+  if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   _crmRenderEtapasModal();
   openM('mo-crm-etapas');
 }
@@ -61193,7 +61601,7 @@ function _crmRenderEtapasModal(){
   }).join('');
 }
 async function crmDefinirPrazoEtapa(key,valor){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem personalizar as etapas do funil','terr');return;}
+  if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const horas=Math.max(0,Math.round(Number(String(valor).replace(',','.'))||0));
   const etapas=_crmEtapas().map(et=>et.key===key?Object.assign({},et,{prazoHoras:horas}):et);
   await _crmSalvarEtapas(etapas);
@@ -61203,7 +61611,7 @@ async function crmDefinirPrazoEtapa(key,valor){
   try{_atualizarBadgeAvisos();}catch(err){}
 }
 async function crmMoverEtapaOrdem(i,dir){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem personalizar as etapas do funil','terr');return;}
+  if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const etapas=[..._crmEtapas()];
   const j=i+dir;
   if(j<0||j>=etapas.length)return;
@@ -61213,7 +61621,7 @@ async function crmMoverEtapaOrdem(i,dir){
   if(_crmTabAtiva==='kanban')_crmRenderFunilAtivo();
 }
 async function crmAdicionarEtapa(){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem personalizar as etapas do funil','terr');return;}
+  if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const input=document.getElementById('crm-etapas-novo');
   const label=((input&&input.value)||'').trim().toUpperCase();
   if(!label){toast('Digite o nome da etapa','terr');return;}
@@ -61248,7 +61656,7 @@ async function crmRenomearEtapa(key){
   toast('Etapa renomeada!','tok');
 }
 async function crmRemoverEtapa(key){
-  if(!_getUserCat().isAdm){toast('Apenas administradores podem personalizar as etapas do funil','terr');return;}
+  if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const etapas=_crmEtapas();
   if(etapas.length<=1){toast('Precisa deixar pelo menos uma etapa no funil','terr');return;}
   const qtd=crmEmpresas.filter(e=>e.etapa===key).length;
@@ -63553,7 +63961,7 @@ function _orc2DepoisDeMudarProdutos(){_orc2ReRenderProdutos();_orc2SincronizarVa
 function _orc2HtmlItemFixo(p){
   return`<div class="orc2-item">
     <div class="h"><span style="font-size:1.1rem">${_orc2ProdIcone(p)}</span><div class="nm">${_orcxEsc(p.nomeCurto||_orc2ProdTitulo(p))}<span>${_orcxEsc([p.descricao,p.medida||((_orc2Num(p.largura)||_orc2Num(p.altura))?_orc2Qtd(_orc2Num(p.largura),2)+' × '+_orc2Qtd(_orc2Num(p.altura),2)+' m':'')].filter(Boolean).join(' · '))}</span></div>
-    ${p.tipo==='manual'&&_getUserCat().isAdm?`<button type="button" class="orc2-ic" title="Salvar no catálogo de produtos" onclick="orc2ManParaCatalogo('${p.id}')">📚</button>`:''}<button type="button" class="orc2-ic" title="Tirar" onclick="orc2RemoverProduto('${p.id}')">🗑️</button></div>
+    ${p.tipo==='manual'&&_pode('com_catalogo_avulso')?`<button type="button" class="orc2-ic" title="Salvar no catálogo de produtos" onclick="orc2ManParaCatalogo('${p.id}')">📚</button>`:''}<button type="button" class="orc2-ic" title="Tirar" onclick="orc2RemoverProduto('${p.id}')">🗑️</button></div>
     <div class="b"><span>${p.tipo==='catalogo'?'Catálogo':'Avulso'} · ${_orcxBRL(p.precoUnit)} un.</span><span>Qtd <input type="number" min="1" step="1" value="${_orc2Qtd1(p)}" onchange="orc2QtdItem('${p.id}',this.value)"></span>${_orc8HtmlItemExtras(p)}<span class="pf" id="orc2-pf-${p.id}">${_orcxBRL(_orc2PrecoItem(p))}</span></div>
   </div>`;
 }
@@ -63999,7 +64407,7 @@ function _orc2HtmlSugAvulso(){
 }
 function orc2UsarSugestao(v){orc2.man=orc2.man||_orc2ManVazio();orc2.man.preco=String(v);const el=document.getElementById('orc2-m-preco');if(el)el.value=String(v);orc2Man('preco',String(v));}
 async function orc2ManParaCatalogo(id){
-  if(!_getUserCat().isAdm){toast('Só administrador cadastra produto no catálogo','terr');return;}
+  if(!_pode('com_catalogo_avulso')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const p=orc2.doc&&orc2.doc.produtos.find(x=>x.id===id);if(!p)return;
   const nome=String(p.nomeCurto||'').trim();if(!nome){toast('O item precisa de nome','terr');return;}
   cfg.produtos=cfg.produtos||[];
@@ -64099,7 +64507,7 @@ function _orc2HtmlDesconto(){
   <div id="orc2-aprov-box">${_orc2HtmlAprov()}</div>`;
 }
 function _orc2HtmlAprov(){
-  const d=orc2.doc;if(!d)return'';const est=_orc2AprovEstado(d),a=d.aprovacao||{},adm=_getUserCat().isAdm;
+  const d=orc2.doc;if(!d)return'';const est=_orc2AprovEstado(d),a=d.aprovacao||{},adm=_pode('com_aprovar_orc');
   if(est==='livre')return'';
   const mot=_orc2AprovMotivos(d).map(x=>'<li>'+_orcxEsc(x)+'</li>').join('');
   const quando=x=>x?new Date(x).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'';
@@ -64115,7 +64523,7 @@ async function orc2PedirAprovacao(){
   await orc2Salvar();_orc2RenderResumo();toast('Pedido de aprovação enviado — o administrador recebe um aviso','tok');
 }
 async function orc2DecidirAprovacao(ok){
-  if(!_getUserCat().isAdm){toast('Só administrador aprova','terr');return;}
+  if(!_pode('com_aprovar_orc')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   const d=orc2.doc;if(!d)return;const t=orc2Totais(d);let obs='';
   if(!ok){obs=String(prompt('Motivo da recusa (o vendedor vai ver):','')||'').trim();if(!obs){toast('Escreva o motivo da recusa','terr');return;}}
   d.aprovacao=Object.assign({},d.aprovacao||{},{status:ok?'aprovado':'recusado',decididoPor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',decididoEm:new Date().toISOString(),obs,motivos:_orc2AprovMotivos(d,t),descPct:_orcxArred(t.descPct,2),cmvMax:_orc2AprovMaxCmv(d)});
