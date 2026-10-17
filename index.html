@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-18.05';</script>
+<script>const APP_BUILD_VERSION='2026-10-18.06';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -10000,7 +10000,8 @@ async function _consOcAnexar(input){
   }catch(e){console.error('Cloudinary upload error',e);}
   input.value='';
   if(!url){toast('Não foi possível enviar o arquivo. Tente de novo.','terr');if(btn){btn.disabled=false;btn.textContent='📎 Anexar OC';}return;}
-  const num=((document.getElementById('cp-oc-num')||{}).value||'').trim();
+  let num=((document.getElementById('cp-oc-num')||{}).value||'').trim();
+  if(!num)num=await _ocLerNumero(f);
   p.ocUrl=url;
   if(num)p.numOC=num;
   p.ocAnexadaEm=new Date().toISOString();
@@ -10313,8 +10314,8 @@ async function _semOcAnexar(input,pid){
   if(!p){toast('Pedido não encontrado','terr');input.value='';return;}
   if(!_conselhoPodeMexer(p)){_conselhoBloqueioMsg(p);input.value='';return;}
   if(!(cfg.cld_cloud&&cfg.cld_preset)){toast('Envio de arquivos (Cloudinary) não está configurado.','terr');input.value='';return;}
-  const num=(prompt('Nº da Ordem de Compra (opcional):',p.numOC||'')||'').trim();
-  toast('⏳ Enviando OC...','tinf');
+  toast('⏳ Lendo e enviando a OC...','tinf');
+  const _ocLido=await _ocLerNumero(f);const num=_ocLido||String(p.numOC||'').trim();
   let url='';
   try{
     const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_pedidos');
@@ -10334,7 +10335,7 @@ async function _semOcAnexar(input,pid){
   try{
     await savePedidoFS(p);
     try{_invalidateDashCache();}catch(e){}
-    toast('Ordem de Compra anexada.','tok');
+    toast('Ordem de Compra anexada.'+(_ocLido?' Nº '+_ocLido+' lido do documento.':' Não achei o número no documento — dá para preencher em Editar Valores.'),'tok');
     renderConselhoPedidos();
     try{if(typeof renderDashVendas==='function')renderDashVendas();}catch(e){}
   }catch(e){toast('Erro ao salvar a OC: '+e.message,'terr');}
@@ -23321,6 +23322,32 @@ function _ocPedidoEmitido(p){return!!p&&p.conselhoStatus!=='rascunho'&&!!p.os;}
     return ev;
   };
 })();
+
+// ── Nº DA OC LIDO DO PRÓPRIO DOCUMENTO (2026-10-18) ──
+// Pedido do usuário: em vez de perguntar o número da OC, ler do PDF anexado e preencher sozinho.
+// Lê o texto do PDF (pdf.js, mesmo leitor da OS) e procura o número ao lado de "Ordem de Compra", "Pedido de
+// Compra", "Purchase Order", "OC", "PO" ou "Pedido". Imagem (foto da OC) não tem texto: fica sem número e dá para
+// preencher depois em Editar Valores.
+function _ocNumeroDoTexto(txt){
+  const t=String(txt||'').replace(/\s+/g,' ');
+  const rot='(ordem\\s+de\\s+compra|pedido\\s+de\\s+compra|purchase\\s+order|n[º°o]?\\.?\\s*(?:do|da)?\\s*pedido|pedido|\\bo\\.?\\s?c\\b\\.?|\\bp\\.?\\s?o\\b\\.?)';
+  const re=new RegExp(rot+'\\s*(?:n[º°o]\\.?|n[uú]mero|nr\\.?|no\\.|#)?\\s*[:\\-–]?\\s*([A-Z0-9][A-Z0-9\\-\\/\\.]{2,24})','gi');
+  let m;const cands=[];
+  while((m=re.exec(t))){
+    const c=m[2].replace(/[.\-\/]+$/,'');
+    const dig=(c.match(/\d/g)||[]).length;
+    if(dig<4||/^\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}$/.test(c)||/^\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}$/.test(c))continue;
+    cands.push({c,forte:/compra|purchase/i.test(m[1])});
+  }
+  const f=cands.find(x=>x.forte)||cands[0];return f?f.c:'';
+}
+async function _ocLerNumero(file){
+  try{
+    if(!file||!window.pdfjsLib)return'';
+    if(!/pdf/i.test(file.type||'')&&!/\.pdf$/i.test(file.name||''))return'';
+    return _ocNumeroDoTexto(await _extrairTextoPDF(file));
+  }catch(e){console.warn('ler nº da OC',e);return'';}
+}
 
 function renderComercialProdutos(){
   const el=document.getElementById('comprod-body');if(!el)return;
