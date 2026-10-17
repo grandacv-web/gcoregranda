@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-18.11';</script>
+<script>const APP_BUILD_VERSION='2026-10-18.14';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -6729,7 +6729,7 @@ function _getEmailPorNome(nome){
 // ({os,cliente,job}) — tarefa avulsa geral (sem venda) não tem isso.
 function buildTarefaEmailContent(t,pedidoInfo){
   const temPedido=!!(pedidoInfo&&pedidoInfo.os);
-  const html_content=`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+  const html_content=`<!DOCTYPE html><!--GRANDA-EMAIL-PADRAO--><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;padding:40px 16px">
 <tr><td align="center">
@@ -13450,7 +13450,7 @@ function buildEmissaoEmailContent(p){
       </td></tr>
       <tr><td colspan="2" style="padding:0">${rows?`<table width="100%" cellpadding="0" cellspacing="0">${rows}</table>`:''}</td></tr>`;
   };
-  const html_content=`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+  const html_content=`<!DOCTYPE html><!--GRANDA-EMAIL-PADRAO--><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;padding:40px 16px">
 <tr><td align="center">
@@ -23288,6 +23288,14 @@ async function _ttConfirmar(){
 // mesmo modelo do EmailJS da emissão. A pendência de OC some sozinha (é calculada: com OC, não existe mais);
 // as outras pendências registradas continuam.
 const OC_AVISO_PARA=['financeiro@granda.ind.br','paulo@granda.ind.br'];
+// (2026-10-18) cópia pro Guilherme; aviso do Financeiro não vai nem responde para pedidos@
+const OC_AVISO_COPIA=['guilherme.clabonde@granda.ind.br'];
+// (2026-10-18) + cópia pro vendedor responsável pelo pedido (e-mail do cadastro de usuários)
+function _ocAvisoCopias(p){
+  const l=OC_AVISO_COPIA.slice();
+  try{const e=String(_getEmailPorNome(p&&p.responsavel)||'').trim().toLowerCase();if(e&&/@/.test(e)&&!l.concat(OC_AVISO_PARA).includes(e))l.push(e);}catch(e){}
+  return l;
+}
 function _ocAvisoHtml(p){
   const E=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
   let liq='',bruto='';try{const r=pedidoToVendaRow(p);bruto=r&&r.vl?fmtR(Number(r.vl)):'';liq=r&&r.lq?fmtR(Number(r.lq)):'';}catch(e){}
@@ -23311,11 +23319,11 @@ async function _ocNotificarFinanceiro(p){
   if(!p||!p.ocUrl)return{ok:false};
   if(!window.emailjs){toast('Não consegui avisar o Financeiro: serviço de e-mail não carregou. Use "Reenviar aviso" no pedido.','terr');return{ok:false};}
   const subject=`OC recebida — OS ${p.os||'—'} · ${(typeof _pedNome==='function'?_pedNome(p):p.cliente)||''}`;
-  const reg={em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',para:OC_AVISO_PARA.slice(),numOC:p.numOC||'',ocUrl:p.ocUrl};
+  const reg={em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',para:OC_AVISO_PARA.concat(_ocAvisoCopias(p)),numOC:p.numOC||'',ocUrl:p.ocUrl};
   try{
     emailjs.init(cfg.k||'wtJbXi3uGODPaFIqc');
-    await emailjs.send(cfg.s||'service_t99xeta',cfg.t||'template_lzow9ef',{html_content:_ocAvisoHtml(p),to_email:OC_AVISO_PARA.join(','),cc:'',to_name:'Financeiro Granda',os_numero:String(p.os||''),subject,name:'GCORE - Sistema Granda',reply_to:'pedidos@granda.ind.br'});
-    reg.status='enviado';toast('📧 Financeiro avisado da OC (financeiro@ e paulo@)','tok');
+    await emailjs.send(cfg.s||'service_t99xeta',cfg.t||'template_lzow9ef',{html_content:_ocAvisoHtml(p),to_email:OC_AVISO_PARA.concat(_ocAvisoCopias(p)).join(','),cc:_ocAvisoCopias(p).join(','),to_name:'Financeiro Granda',os_numero:String(p.os||''),subject,name:'GCORE - Sistema Granda',reply_to:'financeiro@granda.ind.br'});
+    reg.status='enviado';toast('📧 Financeiro avisado da OC — cópia para '+_ocAvisoCopias(p).join(', '),'tok');
   }catch(e){reg.status='erro';reg.erro=String((e&&(e.text||e.message))||e);toast('Não consegui avisar o Financeiro por e-mail ('+reg.erro+'). Use "Reenviar aviso" no pedido.','terr');}
   p.ocAvisos=(p.ocAvisos||[]).concat([reg]).slice(-10);
   try{await savePedidoFS(p);}catch(e){console.warn('registro do aviso de OC',e);}
@@ -23615,6 +23623,117 @@ function _prodConfAbrir(){
   const _ri=renderProdIndicadores;renderProdIndicadores=function(){const r=_ri.apply(this,arguments);_prodConfBanner();return r;};
   const _rg=renderProdVisaoGeral;renderProdVisaoGeral=function(){const r=_rg.apply(this,arguments);_prodConfBanner();return r;};
 })();
+
+// ── PADRÃO VISUAL ÚNICO DOS E-MAILS (2026-10-18) ──
+// Pedido do usuário: "o design desse aviso precisa ser igual o da emissão, mesmo padrão visual, mesmas
+// cores, mesma fonte... não permita que novos e-mails saiam do padrão visual". Todo e-mail novo do
+// sistema monta o HTML por _emailGranda() — é a MESMA estrutura do e-mail de Emissão (cabeçalho preto
+// com logo, faixa rosa, rótulo + título + selo da OS, barra de informações, seções com título rosa,
+// linhas zebradas, rodapé "PENSE GRANDE, SEJA GRANDA!"). O verificador antes de publicar barra e-mail
+// que não use este padrão.
+function _emailGrandaEsc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function _emailGrandaSecao(titulo,linhas){
+  const rows=(linhas||[]).filter(l=>l&&l[1]!=null&&String(l[1]).trim()!=='').map(([k,v],i)=>`
+      <tr style="background:${i%2===0?'#ffffff':'#fafafa'}">
+        <td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;vertical-align:top;width:40%">${k}</td>
+        <td style="padding:10px 0;color:#111827;font-size:13px;font-weight:600;vertical-align:top">${v}</td>
+      </tr>`).join('');
+  if(!rows)return'';
+  return`
+      <tr><td colspan="2" style="padding:20px 0 0"></td></tr>
+      <tr><td colspan="2" style="padding:0 0 8px;border-bottom:2px solid #e91e63">
+        <span style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#111827">${titulo}</span>
+      </td></tr>
+      <tr><td colspan="2" style="padding:0"><table width="100%" cellpadding="0" cellspacing="0">${rows}</table></td></tr>`;
+}
+function _emailGrandaTexto(txt){return`<tr><td colspan="2" style="padding:0 0 4px;color:#374151;font-size:13px;line-height:1.7">${txt}</td></tr>`;}
+function _emailGrandaLink(label,url){return url?`<a href="${url}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">${label}</a>`:'';}
+// o={rotulo, titulo, subtitulo, os, tipo, info:[[rótulo,valor,destaque?]...], corpo(html de <tr>), extraRodape}
+function _emailGranda(o){
+  o=o||{};const info=(o.info||[]).filter(x=>x&&x[1]);
+  const infoHtml=info.length?`
+  <!-- INFO BAR -->
+  <tr><td style="background:#f8f9fa;border-bottom:1px solid #e9ecef;padding:16px 40px">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+      ${info.map(([l,v,dest],i)=>`${i?'<td align="center" style="font-size:12px;color:#dee2e6">|</td>':''}<td${i===info.length-1&&i?' align="right"':''} style="font-size:12px;color:#6b7280">${l} &nbsp;<strong style="color:${dest?'#e91e63':'#111827'}">${v}</strong></td>`).join('')}
+    </tr></table>
+  </td></tr>`:'';
+  return`<!DOCTYPE html><!--GRANDA-EMAIL-PADRAO--><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;padding:40px 16px">
+<tr><td align="center">
+<table width="620" cellpadding="0" cellspacing="0" style="max-width:620px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb;box-shadow:0 4px 24px rgba(0,0,0,0.08)">
+
+  <!-- HEADER -->
+  <tr><td style="background:#111827;padding:0">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr><td align="center" style="padding:32px 40px 24px">
+        <img src="https://grandacv-web.github.io/gcoregranda/logo_granda_branca.png" height="52" width="145" alt="Granda Comunicação Visual" style="height:52px;width:145px;display:block;margin:0 auto">
+      </td></tr>
+      <tr><td style="background:#e91e63;padding:3px 0"></td></tr>
+      <tr><td style="padding:24px 40px 28px;background:#111827">
+        <p style="margin:0 0 4px;color:#9ca3af;font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase">${o.rotulo||''}</p>
+        <p style="margin:0 0 8px;color:#ffffff;font-size:26px;font-weight:700;line-height:1.2">${o.titulo||''}</p>${o.subtitulo?`<p style="margin:-4px 0 10px;color:#9ca3af;font-size:12px">${o.subtitulo}</p>`:''}
+        ${o.os?`<table cellpadding="0" cellspacing="0"><tr>
+          <td style="background:#1f2937;border-radius:20px;padding:5px 14px">
+            <span style="color:#e91e63;font-size:12px;font-weight:700">OS Nº ${o.os}</span>${o.tipo?`
+            <span style="color:#6b7280;font-size:12px">&nbsp;·&nbsp;${o.tipo}</span>`:''}
+          </td>
+        </tr></table>`:''}
+      </td></tr>
+    </table>
+  </td></tr>
+${infoHtml}
+  <!-- BODY -->
+  <tr><td style="padding:32px 40px;background:#ffffff">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      ${o.corpo||''}
+    </table>
+  </td></tr>
+
+  <!-- FOOTER -->
+  ${o.extraRodape||''}
+  <tr><td style="background:#111827;padding:20px 40px">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td style="font-size:11px;color:#6b7280">PENSE GRANDE, SEJA GRANDA! - E-mail automático sistema Granda</td>
+      <td align="right"><img src="https://grandacv-web.github.io/gcoregranda/logo_granda_branca.png" height="20" width="56" alt="Granda" style="height:20px;width:56px;opacity:.5"></td>
+    </tr></table>
+  </td></tr>
+
+</table>
+</td></tr></table>
+</body></html>`.normalize('NFC');
+}
+// Aviso de OC ao Financeiro — no padrão da Emissão
+_ocAvisoHtml=function(p){
+  const E=_emailGrandaEsc;
+  let liq='',bruto='';try{const r=pedidoToVendaRow(p);bruto=r&&r.vl?fmtR(Number(r.vl)):(r&&r.br?fmtR(Number(r.br)):'');liq=r&&r.lq?fmtR(Number(r.lq)):'';}catch(e){}
+  const quando=p.ocAnexadaEm?new Date(p.ocAnexadaEm).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}):'';
+  const nome=p.nomeFantasia||p.cliente||'';
+  let tipo='';try{tipo=_tipoPedidoDisplay(p);}catch(e){tipo=p.tipo||'';}
+  const corpo=_emailGrandaTexto('Este pedido foi emitido sem a Ordem de Compra do cliente. A OC chegou e foi anexada no GCore — a pendência de OC foi baixada.')
+    +_emailGrandaSecao('Ordem de Compra',[
+      ['Nº da OC',E(p.numOC||'não informado')],
+      ['Valor da OC',E(p.ocValor||'')],
+      ['Documento',_emailGrandaLink('ORDEM DE COMPRA DO CLIENTE ↗',p.ocUrl?(typeof cldDownload==='function'?cldDownload(p.ocUrl):p.ocUrl):'')],
+      ['Anexada por',E(p.ocAnexadaPor||'')],
+      ['Anexada em',E(quando)]
+    ])
+    +_emailGrandaSecao('Pedido',[
+      ['Cliente',E(nome)],
+      ['Razão social',p.nomeFantasia&&p.nomeFantasia!==p.cliente?E(p.cliente):''],
+      ['JOB',E(p.job||'')],
+      ['Vendedor',E(p.responsavel||'')],
+      ['Valor bruto',bruto],
+      ['Valor líquido',liq]
+    ]);
+  return _emailGranda({
+    rotulo:'ORDEM DE COMPRA RECEBIDA',titulo:E(nome),subtitulo:p.nomeFantasia&&p.nomeFantasia!==p.cliente?'Razão social: '+E(p.cliente):'',
+    os:E(p.os||'—'),tipo:E(tipo),
+    info:[['Responsável',E(p.responsavel||'—')],['JOB',E(p.job||'—')],['Nº da OC',E(p.numOC||'—'),true]],
+    corpo
+  });
+};
 
 function renderComercialProdutos(){
   const el=document.getElementById('comprod-body');if(!el)return;
@@ -47992,7 +48111,7 @@ function buildFinalizacaoEmailContent(p){
       </a>
     </div>`;
   }).join('')}</div>`:'';
-  const html_content=`<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+  const html_content=`<!DOCTYPE html><!--GRANDA-EMAIL-PADRAO--><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:0;background:#ffffff;font-family:Arial,Helvetica,sans-serif">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;padding:40px 16px">
 <tr><td align="center">
