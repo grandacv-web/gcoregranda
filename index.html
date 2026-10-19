@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-19.14';</script>
+<script>const APP_BUILD_VERSION='2026-10-19.15';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -11940,7 +11940,7 @@ function validarAba(id){
     if(_emailOpc?(ed.email_comprador&&!ed.email_comprador.includes('@')):(!ed.email_comprador||!ed.email_comprador.includes('@')))erros.push('E-mail do Comprador(a) não informado ou inválido');
     if(_emailOpc?(ed.email_engenheiro&&!ed.email_engenheiro.includes('@')):(!ed.email_engenheiro||!ed.email_engenheiro.includes('@')))erros.push('E-mail do Engenheiro da Obra não informado ou inválido');
     _emEmailsValidar(ed,_emailOpc).forEach(m=>erros.push(m));
-    if(!ed.os)erros.push('Nº da Ordem de Serviço não informado');
+    if(!ed.os)erros.push('Nº da Ordem de Serviço não informado — fica na aba Conselho (a primeira)');
     // Pedido em PDF obrigatório (2026-08-28, a pedido do usuário: "sem ele não é
     // possível emitir um pedido") — aceita tanto um arquivo já anexado antes (edição de
     // rascunho salvo, ed.arq_os_url) quanto um recém-selecionado nesta aba (ed.arq_os).
@@ -12171,6 +12171,10 @@ document.addEventListener('keydown',function(e){
 });
 
 function saveSt(){
+  const _osAntes=(typeof ed!=='undefined'&&ed)?ed.os:undefined;
+  try{return _saveStBase.apply(this,arguments);}finally{try{const el=document.getElementById('em-os');if(el&&el.type!=='hidden')ed.os=el.value.trim();else if(!el&&_osAntes!==undefined)ed.os=_osAntes;}catch(e){}}
+}
+function _saveStBase(){
   const id=getTabs()[step].id;
   const gv=id2=>document.getElementById(id2)?.value||'';
   const gsel=cls=>document.querySelector('.'+cls+'.sel')?.dataset?.val||'';
@@ -15012,7 +15016,7 @@ async function submit(){
   if(_emailOpcS?(ed.email_comprador&&!ed.email_comprador.includes('@')):(!ed.email_comprador||!ed.email_comprador.includes('@')))erros.push({msg:'E-mail do Comprador(a) não informado ou inválido',aba:idxDados,label:'Dados Gerais'});
   if(_emailOpcS?(ed.email_engenheiro&&!ed.email_engenheiro.includes('@')):(!ed.email_engenheiro||!ed.email_engenheiro.includes('@')))erros.push({msg:'E-mail do Engenheiro da Obra não informado ou inválido',aba:idxDados,label:'Dados Gerais'});
   _emEmailsValidar(ed,_emailOpcS).forEach(m=>erros.push({msg:m,aba:idxDados,label:'Dados Gerais'}));
-  if(!ed.os)erros.push({msg:'Nº da Ordem de Serviço não informado',aba:idxDados,label:'Dados Gerais'});
+  if(!ed.os)erros.push({msg:'Nº da Ordem de Serviço não informado',aba:(idxConselho>=0?idxConselho:idxDados),label:(idxConselho>=0?'Conselho':'Dados Gerais')});
   // Pedido em PDF obrigatório (2026-08-28, a pedido do usuário) — segunda camada de
   // defesa, caso submit() seja chamado sem passar por validarAba('dados') antes.
   if(!ed.arq_os&&!ed.arq_os_url)erros.push({msg:'Anexe a Ordem de Serviço Granda (PDF)',aba:(typeof idxConselho!=='undefined'&&idxConselho>=0?idxConselho:idxDados),label:(typeof idxConselho!=='undefined'&&idxConselho>=0?'Conselho':'Dados Gerais')});
@@ -15026,7 +15030,7 @@ async function submit(){
   {
     const _pedOrigOs=editing?pedidos.find(x=>x.id===editing):null;
     if(ed.os&&(!_pedOrigOs||_pedOrigOs.os!==ed.os)&&_osJaEmUso(ed.os,editing,_pedOrigOs?_pedOrigOs.origPlanilhaOs:null)){
-      erros.push({msg:'Nº da OS "'+ed.os+'" já está em uso por outra venda — use um número diferente',aba:idxDados,label:'Dados Gerais'});
+      erros.push({msg:'Nº da OS "'+ed.os+'" já está em uso por outra venda — use um número diferente',aba:(idxConselho>=0?idxConselho:idxDados),label:(idxConselho>=0?'Conselho':'Dados Gerais')});
     }
   }
   // Aba valores — Garantia/Retrabalho, Interno, Amostra e Brinde não cobram do cliente,
@@ -24750,16 +24754,21 @@ async function _emOsPreencherCliente(texto){
           primeiro.insertAdjacentHTML('beforebegin',`<div class="fg" id="em-os-bloco-cons" style="background:#f8fafc;border:1.5px dashed #00bac7;border-radius:12px;padding:12px 14px;margin-bottom:16px">
             <label>Ordem de Serviço Granda (PDF) <span class="r">*</span></label>
             <div style="font-size:.7rem;color:var(--ink4);margin:2px 0 8px">Comece por aqui — o sistema lê a OS e já preenche a razão social, o nome fantasia, o Nº da OS e os valores.</div>
-            ${_emOsZonaHtml()}<div id="os-check-result"></div></div>`);
+            ${_emOsZonaHtml()}
+            <div class="fg" style="margin:12px 0 0;max-width:340px"><label>Nº da Ordem de Serviço <span class="r">*</span>${ed.os_travado?' <button type="button" id="em-os-unlock-btn" onclick="desbloquearOsManual()" style="background:none;border:none;color:#1d4ed8;font-size:.68rem;font-weight:700;cursor:pointer;text-decoration:underline;padding:0;margin-left:4px" title="Permitir edição manual — só se o PDF leu o número errado">🔓 corrigir</button>':''}</label>
+              <input class="fc" id="em-os" value="${_ptE(ed.os||'')}" placeholder="Lido automaticamente do PDF" oninput="ed.os=this.value.trim();checarOsDuplicado()" ${ed.os_travado?'readonly':''}>
+              <div id="em-os-dup-warn" style="display:none;color:#dc2626;font-size:.72rem;font-weight:700;margin-top:4px"></div>
+              ${ed.os_travado?'<div id="em-os-lock-note" style="font-size:.68rem;color:var(--ink4);margin-top:4px">🔒 Preenchido automaticamente a partir do PDF da Ordem de Serviço.</div>':''}
+            </div>
+            <div id="os-check-result"></div></div>`);
+          setTimeout(()=>{try{checarOsDuplicado();}catch(e){}},0);
         }
       }
       if(id==='conselho')_emOsRemoverBtn();
       if(id==='dados'){
-        const z=document.getElementById('uz-os');const fg=z&&z.closest('.fg');
-        if(fg){const tem=!!(ed.arq_os||ed.arq_os_url);
-          fg.innerHTML=`<label>Ordem de Serviço Granda (PDF)</label><div style="display:flex;align-items:center;gap:8px;min-height:42px;padding:8px 12px;border-radius:10px;font-size:.8rem;${tem?'background:#f0fdf4;border:1.5px solid #86efac;color:#166534':'background:#fef2f2;border:1.5px solid #fca5a5;color:#991b1b'}">${tem?`✓ ${_ptE(ed.arq_os||'Arquivo enviado')}${ed.arq_os_url?` <a href="${ed.arq_os_url}" target="_blank" style="color:var(--brand);font-size:.72rem">[abrir]</a>`:''}`:'Ainda não anexada'}<a href="javascript:void(0)" onclick="goStep(0)" style="margin-left:auto;font-size:.72rem;font-weight:700;color:#1d4ed8;white-space:nowrap">${tem?'trocar na aba Conselho':'anexar na aba Conselho'}</a></div>`;}
-        const dica=[...document.querySelectorAll('#em-bd div')].find(d=>d.children.length===0&&/Anexe o PDF primeiro/.test(d.textContent));if(dica)dica.remove();
-        const pc=document.getElementById('os-check-result');if(pc)pc.remove();
+        // (2026-10-19) A Ordem de Serviço (PDF + Nº) fica SÓ na aba Conselho — some o quadro inteiro daqui.
+        const n=document.getElementById('em-os');const card=n&&n.closest('div[style*="border:1.5px solid #eef0f5"]');
+        if(card)card.remove();
       }
     }catch(e){console.warn('OS na aba Conselho',e);}
     return r;
