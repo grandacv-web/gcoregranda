@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-19.02';</script>
+<script>const APP_BUILD_VERSION='2026-10-19.04';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -2727,10 +2727,10 @@ select.fc{cursor:pointer}
            de orçamentos do comercial"). Mesma tela de antes (renderComercialProdutos, cfg.produtos). -->
       <div id="proj-sec-produtos" style="display:none">
         <div class="dash-tabs-sub" style="margin:0 0 14px">
-          <button type="button" class="dash-tab-sub prod-sub-tab active" onclick="_prodSubTab('produtos',this)">📦 Produtos</button>
-          <button type="button" class="dash-tab-sub prod-sub-tab" onclick="_prodSubTab('mp',this)">🧱 Lista de matérias-primas</button>
-          <button type="button" class="dash-tab-sub prod-sub-tab" onclick="_prodSubTab('inst',this)">🛠️ Modelos de instalação</button>
-          <button type="button" class="dash-tab-sub prod-sub-tab" onclick="_prodSubTab('pxr',this)">📊 Planejado × real</button>
+          <button type="button" class="dash-tab-sub prod-sub-tab active" onclick="_prodSubTab('produtos',this)">Produtos</button>
+          <button type="button" class="dash-tab-sub prod-sub-tab" onclick="_prodSubTab('mp',this)">Matérias-primas</button>
+          <button type="button" class="dash-tab-sub prod-sub-tab" onclick="_prodSubTab('inst',this)">Modelos de instalação</button>
+          <button type="button" class="dash-tab-sub prod-sub-tab" onclick="_prodSubTab('pxr',this)">Planejado × real</button>
         </div>
         <div id="prod-sec-mp" style="display:none"><div id="mpb-body"></div></div>
         <div id="prod-sec-inst" style="display:none"><div id="mi-body"></div></div>
@@ -2742,9 +2742,10 @@ select.fc{cursor:pointer}
       </div>
       <div id="dash-produtos-body">
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
-          <input id="comprod-fil-busca" type="text" class="no-upper" oninput="renderComercialProdutos()" placeholder="🔎 Buscar por código, nome, categoria, variação ou medida…" style="box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;flex:1;min-width:200px">
+          <input id="comprod-fil-busca" type="text" class="no-upper" oninput="renderComercialProdutos()" placeholder="Buscar por código, nome, categoria, variação ou medida…" style="box-sizing:border-box;padding:9px 12px;border-radius:8px;border:1px solid #e2e8f0;font-size:.83rem;font-family:inherit;flex:1;min-width:200px">
+          <div id="comprod-filtros"></div>
           <button type="button" id="prodnovo-btn" onclick="(function(){const b=document.getElementById('prodnovo-box');b.open=!b.open;if(b.open)setTimeout(()=>{const s=document.getElementById('prodnovo-tipo');if(s)s.focus();},50);})()" style="background:#1a2b5e;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-size:.8rem;font-weight:700;cursor:pointer;white-space:nowrap">＋ Novo produto</button>
-          <button type="button" id="prodnovo-imp" title="Importar planilha com vários produtos" onclick="abrirImportarMateriaisMassa()" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:8px;padding:9px 12px;font-size:.78rem;font-weight:700;cursor:pointer">📥 Importar planilha</button>
+          <button type="button" id="prodnovo-imp" title="Importar planilha com vários produtos" onclick="abrirImportarMateriaisMassa()" style="background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;border-radius:8px;padding:9px 12px;font-size:.78rem;font-weight:700;cursor:pointer">Importar planilha</button>
         </div>
         <details id="prodnovo-box" style="margin-bottom:12px;background:#f8fafc;border:1.5px solid var(--border);border-radius:10px;padding:10px 14px">
           <summary style="display:none;cursor:pointer;font-weight:800;font-size:.84rem;color:#1a2b5e">＋ Cadastrar novo produto padrão</summary>
@@ -24391,6 +24392,141 @@ _prodCadernosBarHtml=function(produtos){
   `;document.head.appendChild(st);}catch(e){}
 })();
 
+// ── CRIAR CADERNO SEM SE PERDER (2026-10-19, a pedido do usuário: "cadastrei um novo caderno chamado UNIDAS e
+// ele não tá aparecendo"). Causa: o "＋ Caderno" perguntava o nome (prompt), depois "quer escolher a logo?"
+// (confirm) e só gravava o caderno DEPOIS da logo. Se a pessoa clicava OK e fechava a janela de arquivo sem
+// escolher, a espera nunca terminava e o caderno não era gravado — sem aviso nenhum.
+// Agora: janela própria (nome + logo opcional). O caderno é gravado na hora, com a sigla do código já fixada;
+// a logo, se escolhida, sobe depois e não trava nada. Confere no servidor que o caderno ficou salvo.
+// O UNIDAS é criado uma vez automaticamente (flag migUnidas20261019) para o usuário não precisar refazer.
+function _cadNovoFechar(){const o=document.getElementById('cadnovo-ov');if(o)o.remove();}
+_cadernoNovo=function(selEl){
+  if(!_prodPodeEditar()){toast('Apenas Projetos e administradores podem criar cadernos.','terr');if(selEl)selEl.value='';return;}
+  window._cadNovoSel=selEl||null;_cadNovoFechar();
+  const I='width:100%;box-sizing:border-box;padding:9px 11px;border:1.5px solid #e2e8f0;border-radius:8px;font-size:.84rem;font-family:inherit';
+  document.body.insertAdjacentHTML('beforeend',`<div id="cadnovo-ov" style="position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px">
+    <div style="background:#fff;border-radius:14px;width:100%;max-width:420px;padding:20px 22px;box-shadow:0 20px 50px rgba(0,0,0,.25);font-family:inherit">
+      <div style="font-weight:800;font-size:1rem;color:#1a2b5e;margin-bottom:14px">📚 Novo caderno</div>
+      <label style="font-size:.72rem;font-weight:700;color:#475569">Nome do caderno *<input id="cadnovo-nome" style="${I};margin-top:4px;text-transform:uppercase" placeholder="Ex.: UNIDAS, MADERO, BOB'S" oninput="_cadNovoPrev()" onkeydown="if(event.key==='Enter')_cadNovoCriar()"></label>
+      <div id="cadnovo-prev" style="font-size:.72rem;color:#64748b;margin:6px 0 12px;min-height:16px"></div>
+      <label style="font-size:.72rem;font-weight:700;color:#475569">Logo do cliente <span style="font-weight:400;color:#94a3b8">(opcional — dá pra pôr depois)</span><input id="cadnovo-logo" type="file" accept="image/*" style="display:block;margin-top:6px;font-size:.76rem"></label>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
+        <button type="button" onclick="_cadNovoFechar();if(window._cadNovoSel)window._cadNovoSel.value=''" style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;font-weight:700;color:#475569;cursor:pointer">Cancelar</button>
+        <button type="button" id="cadnovo-ok" onclick="_cadNovoCriar()" style="background:#1a2b5e;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-weight:700;cursor:pointer">Criar caderno</button>
+      </div></div></div>`);
+  setTimeout(()=>{const i=document.getElementById('cadnovo-nome');if(i)i.focus();},30);
+};
+function _cadNovoPrev(){
+  const k=_cadNorm((document.getElementById('cadnovo-nome')||{}).value),el=document.getElementById('cadnovo-prev');if(!el)return;
+  if(!k){el.textContent='';return;}
+  if(_cadernos().some(c=>c.nome===k)){el.innerHTML='<span style="color:#b45309;font-weight:700">Esse caderno já existe.</span>';return;}
+  let s='';try{s=_cadSigla(k);}catch(e){}
+  el.innerHTML=`Os produtos vão ter código <b style="color:#1a2b5e">${_ptE(s)}-0001</b>, <b style="color:#1a2b5e">${_ptE(s)}-0002</b>…`;
+}
+async function _cadNovoGravar(k,extra){
+  // grava a lista inteira de cadernos a partir da cópia local + o novo, com a sigla já fixada
+  _cadSiglaFixar(k);
+  const lista=(cfg.cadernos||[]).filter(Boolean).map(c=>_cadNorm(c.nome)===k?Object.assign({},c,extra||{},{nome:k,em:c.em||new Date().toISOString(),por:c.por||_pfQuem()}):c);
+  cfg.cadernos=lista;
+  await window._fbUpdateCfgField(['cadernos'],lista);
+  try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
+}
+async function _cadNovoCriar(){
+  const k=_cadNorm((document.getElementById('cadnovo-nome')||{}).value);
+  if(!k){toast('Digite o nome do caderno','terr');return;}
+  const sel=window._cadNovoSel;
+  if(_cadernos().some(c=>c.nome===k)){toast('Esse caderno já existe — selecionei ele pra você','tinf');_cadNovoFechar();_cadNovoDepois(k,sel);return;}
+  const f=((document.getElementById('cadnovo-logo')||{}).files||[])[0];
+  const btn=document.getElementById('cadnovo-ok');if(btn){btn.disabled=true;btn.textContent='Criando…';}
+  try{await _cadNovoGravar(k,{});}
+  catch(e){toast('Não consegui salvar o caderno: '+(e.message||e),'terr');if(btn){btn.disabled=false;btn.textContent='Criar caderno';}return;}
+  _cadNovoFechar();toast('Caderno '+k+' criado','tok');_cadNovoDepois(k,sel);
+  if(f){try{toast('⏳ Enviando a logo…','tinf');const url=await _cadernoUploadLogo(f);await _cadernoSalvar(k,{logoUrl:url});toast('Logo do caderno salva','tok');try{renderComercialProdutos();}catch(e){}}
+    catch(e){toast('O caderno foi criado, mas a logo não subiu: '+(e.message||e)+'. Coloque pelo ✏️ Logo.','terr');}}
+}
+function _cadNovoDepois(k,sel){
+  document.querySelectorAll('select.prod-cad-sel').forEach(s=>{const v=s===sel?k:s.value;s.innerHTML=_cadernoOptionsHtml(v);s.value=v;});
+  if(!sel)_prodCadernoFiltro=k;
+  try{renderComercialProdutos();}catch(e){}
+}
+// garante o UNIDAS que não chegou a ser gravado
+(function(){let n=0;const t=setInterval(()=>{n++;if(n>200){clearInterval(t);return;}
+  try{
+    if(!cfg||!usuarioLogado||!Array.isArray(cfg.produtos)||!window._fbUpdateCfgField)return;
+    if(cfg.migUnidas20261019){clearInterval(t);return;}
+    if(typeof _prodPodeEditar!=='function'||!_prodPodeEditar())return;
+    clearInterval(t);
+    (async()=>{try{
+      if(!(cfg.cadernos||[]).some(c=>c&&_cadNorm(c.nome)==='UNIDAS'))await _cadNovoGravar('UNIDAS',{});
+      cfg.migUnidas20261019=new Date().toISOString();await window._fbUpdateCfgField(['migUnidas20261019'],cfg.migUnidas20261019);
+      try{renderComercialProdutos();}catch(e){}
+    }catch(e){console.warn('caderno UNIDAS',e);}})();
+  }catch(e){}},5000);})();
+
+// ── CABEÇALHO DE PRODUTOS v2 — MENOS LINHAS (2026-10-19, a pedido do usuário: "aqui em cima ainda tá muito
+// poluído, ruim de ler… deixar mais limpo e menos carregado"). Antes eram 7 faixas empilhadas; agora 4:
+//  · a faixa "Semana / meta / ranking" de Projetos não aparece na aba Produtos (é da fila de projetos, não do catálogo);
+//  · "Só incompletos" / "Inativos" foram para a linha da busca (a linha só com esse botão sumiu);
+//  · a linha de detalhes do caderno virou um botão ⚙ no fim da faixa de cadernos, que abre um menu pequeno
+//    (logo, sigla, vigência) — só aparece com um caderno selecionado e para quem pode editar;
+//  · sub-abas e botões sem emoji, mais leves.
+(function(){
+  try{const st=document.createElement('style');st.textContent=`
+    body.proj-tab-produtos #meta-sem-det-PROJETOS{display:none!important}
+    #proj-sec-produtos .dash-tabs-sub{margin:0 0 12px!important}
+    .cadbar-wrap{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+    .cadbar-wrap .cadbar{flex:1;min-width:0;margin:0;padding:2px 0 4px}
+    .cadcfg{position:relative;flex-shrink:0}
+    .cadcfg>button{width:30px;height:30px;border-radius:50%;border:1px solid #e2e8f0;background:#fff;color:#64748b;cursor:pointer;font-size:.85rem;display:flex;align-items:center;justify-content:center}
+    .cadcfg>button:hover{background:#f8fafc;color:#1a2b5e}
+    .cadcfg .menu{display:none;position:absolute;right:0;top:36px;z-index:50;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 12px 30px rgba(15,23,42,.14);min-width:240px;padding:8px}
+    .cadcfg.open .menu{display:block}
+    .cadcfg .menu .hd{padding:6px 10px 8px;border-bottom:1px solid #f1f5f9;margin-bottom:4px;font-size:.72rem;color:#64748b;line-height:1.5}
+    .cadcfg .menu .hd b{display:block;color:#1a2b5e;font-size:.8rem}
+    .cadcfg .menu .it{display:block;width:100%;text-align:left;background:none;border:none;padding:7px 10px;border-radius:8px;font-size:.78rem;color:#334155;cursor:pointer;font-family:inherit}
+    .cadcfg .menu .it:hover{background:#f1f5f9}
+    #comprod-filtros{display:flex;gap:6px;flex-shrink:0}
+    #comprod-filtros button{padding:8px 12px;border-radius:8px;font-size:.76rem;font-weight:600;cursor:pointer;border:1px solid #e2e8f0;background:#fff;color:#475569;white-space:nowrap;font-family:inherit}
+    #comprod-filtros button.on{background:#fffbeb;border-color:#f59e0b;color:#92400e}
+    #comprod-filtros button .n{color:#94a3b8;font-weight:700;margin-left:4px}
+    #comprod-filtros button.on .n{color:#b45309}
+  `;document.head.appendChild(st);}catch(e){}
+  document.addEventListener('click',e=>{if(!e.target.closest||!e.target.closest('.cadcfg'))document.querySelectorAll('.cadcfg.open').forEach(x=>x.classList.remove('open'));});
+})();
+(function(){
+  const _st=projSetTab;
+  projSetTab=function(tab,btn){const r=_st.apply(this,arguments);try{document.body.classList.toggle('proj-tab-produtos',tab==='produtos');}catch(e){}return r;};
+})();
+(function(){
+  const _barra=_prodCadernosBarHtml;   // versão limpa (cadernos_barra_limpa_20261019)
+  _prodCadernosBarHtml=function(produtos){
+    let h=_barra(produtos);
+    // tira a linha de detalhes e troca por ⚙ com menu
+    const i=h.indexOf('<div class="cadinfo">');if(i>=0)h=h.slice(0,i);
+    let cfgBtn='';
+    const pode=_prodPodeEditar();
+    const sel=_prodCadernoFiltro&&_prodCadernoFiltro!=='__sem__'?_cadernos().find(c=>c.nome===_prodCadernoFiltro):null;
+    if(sel&&pode){
+      const k=_escJs(sel.nome);let st=null,v=null;try{v=_vigDe(sel.nome);st=_vigStatus(v);}catch(e){}
+      const n=produtos.filter(p=>_cadNorm(p.categoria)===sel.nome).length;
+      const vt=st?`<span style="color:${st.cor}">${st.k==='ok'?'Tabela válida até '+_vigFmt(v.fim):_ptE(st.txt)}</span>`:'Sem vigência definida';
+      cfgBtn=`<div class="cadcfg"><button type="button" title="Configurar o caderno ${_ptE(sel.nome)}" onclick="event.stopPropagation();this.parentElement.classList.toggle('open')">⚙</button>
+        <div class="menu"><div class="hd"><b>${_ptE(sel.nome)}</b>${n} produto${n===1?'':'s'} · códigos ${_ptE(_cadSigla(sel.nome))}-…<br>${vt}</div>
+        <button type="button" class="it" onclick="_cadernoTrocarLogo('${k}')">Trocar a logo</button>
+        <button type="button" class="it" onclick="_cadernoSiglaEditar('${k}')">Mudar a sigla do código</button>
+        <button type="button" class="it" onclick="_vigEditar('${k}')">Vigência da tabela de preço</button></div></div>`;
+    }
+    // filtros na linha da busca
+    try{
+      const box=document.getElementById('comprod-filtros');
+      if(box){const nInc=produtos.filter(x=>!x.inativo&&_prodFaltam(x).length).length,nIn=produtos.filter(x=>x.inativo).length;
+        box.innerHTML=(nInc||_prodSoIncompletos?`<button type="button" class="${_prodSoIncompletos?'on':''}" title="Mostrar só produtos com a ficha incompleta" onclick="_prodSoIncompletos=!_prodSoIncompletos;renderComercialProdutos()">Incompletos<span class="n">${nInc}</span></button>`:'')+
+          (nIn?`<button type="button" class="${_prodMostrarInativos?'on':''}" onclick="_prodMostrarInativos=!_prodMostrarInativos;renderComercialProdutos()">Inativos<span class="n">${nIn}</span></button>`:'');}
+    }catch(e){}
+    return`<div class="cadbar-wrap">${h}${cfgBtn}</div>`;
+  };
+})();
+
 function renderComercialProdutos(){
   const el=document.getElementById('comprod-body');if(!el)return;
   try{_prodIniciarPrecos();_prodMigrarCategorias();}catch(e){}
@@ -24542,7 +24678,7 @@ ${_getUserCat().isAdm?`<div class="dash-card"><div style="font-size:.68rem;color
   }).join('');
 
   const tabela=`
-    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:.72rem;color:var(--ink4)"><span></span><span style="margin-left:auto;display:flex;gap:6px">${(()=>{const nInc=produtos.filter(x=>!x.inativo&&_prodFaltam(x).length).length,nIn=produtos.filter(x=>x.inativo).length;const b=(on,txt,fn)=>`<button type="button" onclick="${fn}" style="padding:4px 10px;border-radius:999px;font-size:.7rem;font-weight:700;cursor:pointer;border:1.5px solid ${on?'#1a2b5e':'var(--border)'};background:${on?'#1a2b5e':'#fff'};color:${on?'#fff':'var(--ink3)'}">${txt}</button>`;return b(_prodSoIncompletos,`⚠️ Só incompletos (${nInc})`,'_prodSoIncompletos=!_prodSoIncompletos;renderComercialProdutos()')+(nIn?b(_prodMostrarInativos,`⏸ Mostrar inativos (${nIn})`,'_prodMostrarInativos=!_prodMostrarInativos;renderComercialProdutos()'):'');})()}</span></div>
+    
     ${gruposHtml}`;
 
   if(elCards)elCards.innerHTML=''; // cards de resumo removidos a pedido do usuário (2026-10-16)
