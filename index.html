@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-18.20';</script>
+<script>const APP_BUILD_VERSION='2026-10-19.02';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -24321,6 +24321,76 @@ const CARGA_DAF_2025={flag:'migDaf20261018',caderno:'DAF CAMINHÕES',aliases:['D
 (function(){let n=0;const t=setInterval(()=>{n++;if(n>360){clearInterval(t);return;}
   try{if(cfg&&cfg[CARGA_DAF_2025.flag]){clearInterval(t);return;}if(typeof _prodCargaCaderno==='function')_prodCargaCaderno(CARGA_DAF_2025);}catch(e){}},7000);})();
 
+// ── CABEÇALHO DE PRODUTOS MAIS LIMPO (2026-10-19, a pedido do usuário: "achei meio bagunçado esse
+// cabeçalho… não deixar assim poluído"). Chips dos cadernos só com logo + nome + quantidade; selecionado
+// em tom claro (não mais bloco azul-marinho). Sigla, trocar logo e vigência saem de dentro de cada chip
+// e aparecem numa linha discreta só para o caderno selecionado. Vigência vencendo/vencida continua
+// sinalizada por um pontinho colorido no chip. A caixa vazia abaixo da busca (cadastro fechado) some.
+(function(){
+  try{const st=document.createElement('style');st.textContent=`
+    #prodnovo-box:not([open]){display:none!important}
+    .cadbar{display:flex;gap:6px;overflow-x:auto;padding:2px 0 6px;margin-bottom:4px;scrollbar-width:thin}
+    .cadchip{cursor:pointer;display:flex;align-items:center;gap:7px;padding:4px 12px 4px 5px;border-radius:999px;white-space:nowrap;background:#fff;color:#334155;border:1px solid #e2e8f0;transition:background .12s,border-color .12s;position:relative}
+    .cadchip:hover{background:#f8fafc;border-color:#cbd5e1}
+    .cadchip.on{background:#eef2ff;border-color:#1a2b5e;color:#1a2b5e}
+    .cadchip .nm{font-size:.74rem;font-weight:700}
+    .cadchip.on .nm{font-weight:800}
+    .cadchip .qt{font-size:.68rem;font-weight:600;color:#94a3b8}
+    .cadchip.on .qt{color:#4f46e5}
+    .cadchip .dot{width:7px;height:7px;border-radius:50%;position:absolute;top:2px;right:4px}
+    .cadchip.novo{border-style:dashed;border-color:#c7d2fe;color:#4338ca;padding:4px 12px}
+    .cadinfo{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.72rem;color:#64748b;margin:0 0 10px 4px}
+    .cadinfo b{color:#1a2b5e}
+    .cadinfo .sep{color:#cbd5e1}
+    .cadinfo .ac{cursor:pointer;color:#4338ca;font-weight:700;padding:2px 6px;border-radius:6px}
+    .cadinfo .ac:hover{background:#eef2ff}
+    #prodnovo-imp{background:#fff!important;color:#475569!important;border:1px solid #e2e8f0!important}
+    #prodnovo-imp:hover{background:#f8fafc!important}
+  `;document.head.appendChild(st);}catch(e){}
+})();
+_prodCadernosBarHtml=function(produtos){
+  const pode=_prodPodeEditar();
+  const cont=new Map();let sem=0;
+  produtos.forEach(p=>{const k=_cadNorm(p.categoria);if(k)cont.set(k,(cont.get(k)||0)+1);else sem++;});
+  const vig=nome=>{try{const v=_vigDe(nome);return{v,st:_vigStatus(v)};}catch(e){return{v:null,st:null};}};
+  const chip=(chave,logo,nome,n,dot,tit)=>`<div class="cadchip${_prodCadernoFiltro===chave?' on':''}" onclick="_prodCadernoSel('${_escJs(chave)}')"${tit?` title="${_ptE(tit)}"`:''}>${logo}<span class="nm">${nome}</span><span class="qt">${n}</span>${dot||''}</div>`;
+  let h=chip('',`<span style="display:inline-flex;width:20px;height:20px;border-radius:50%;background:#eef2ff;align-items:center;justify-content:center;font-size:.7rem">📚</span>`,'TODOS',produtos.length);
+  _cadernos().forEach(c=>{
+    const{v,st}=vig(c.nome);
+    const dot=st&&st.k!=='ok'?`<span class="dot" style="background:${st.cor}"></span>`:'';
+    h+=chip(c.nome,_cadernoLogoHtml(c.nome,20),_ptE(c.nome),cont.get(c.nome)||0,dot,st&&st.k!=='ok'?st.txt:'');
+  });
+  if(sem)h+=chip('__sem__',_cadernoLogoHtml('',20),'SEM CADERNO',sem);
+  if(pode)h+=`<div class="cadchip novo" onclick="_cadernoNovo(null)" title="Novo caderno"><span class="nm">＋ Caderno</span></div>`;
+  // linha de detalhes só do caderno selecionado
+  let info='';
+  const sel=_prodCadernoFiltro&&_prodCadernoFiltro!=='__sem__'?_cadernos().find(c=>c.nome===_prodCadernoFiltro):null;
+  if(sel){
+    const{v,st}=vig(sel.nome),k=_escJs(sel.nome),S='<span class="sep">·</span>';
+    const vtxt=st?`<span style="color:${st.cor};font-weight:700">${st.k==='ok'?'Tabela válida até '+_vigFmt(v.fim):_ptE(st.txt)+' ('+_vigFmt(v.fim)+')'}</span>`:'Sem vigência definida';
+    info=`<div class="cadinfo"><b>${_ptE(sel.nome)}</b>${S}${cont.get(sel.nome)||0} produto${(cont.get(sel.nome)||0)===1?'':'s'}${S}códigos ${_ptE(_cadSigla(sel.nome))}-…${S}${vtxt}`+
+      (pode?`<span style="margin-left:auto;display:flex;gap:2px"><span class="ac" onclick="_cadernoTrocarLogo('${k}')">✏️ Logo</span><span class="ac" onclick="_cadernoSiglaEditar('${k}')">🔤 Sigla</span><span class="ac" onclick="_vigEditar('${k}')">📅 Vigência</span></span>`:'')+`</div>`;
+  }
+  return`<div class="cadbar">${h}</div>${info}`;
+};
+
+// ── LISTA DE USUÁRIOS SEM ENCAVALAR (2026-10-19, a pedido do usuário: "aqui nos usuários encavalou tudo").
+// Com Nível + Menus + Trocar pessoa + Nova Senha + Reset + Desligar, os botões ocupavam a linha toda e o nome
+// ficava espremido (uma palavra por linha, por baixo do seletor). Agora: nome e e-mail em cima com espaço
+// próprio; botões na mesma linha só se couberem, senão descem para a linha de baixo, sem sobrepor nada.
+(function(){
+  try{const st=document.createElement('style');st.textContent=`
+    #cfg-nomes-lista{line-height:1.35!important}
+    #cfg-nomes-lista .usr-linha{flex-wrap:wrap!important;align-items:center!important;row-gap:6px!important;column-gap:10px!important;padding:9px 0!important}
+    #cfg-nomes-lista .usr-linha>span:first-child{flex:1 1 230px!important;min-width:0!important;overflow-wrap:anywhere}
+    #cfg-nomes-lista .usr-linha>span:first-child strong{white-space:normal}
+    #cfg-nomes-lista .usr-linha>div{flex:0 1 auto!important;flex-shrink:1!important;max-width:100%;margin-left:auto;justify-content:flex-start!important;align-items:center!important;gap:5px!important}
+    #cfg-nomes-lista .usr-linha>div>*{white-space:nowrap;flex-shrink:0}
+    #cfg-nomes-busca{min-width:0!important;max-width:100%!important;flex:1 1 200px!important}
+    #cfg-nomes-preview{overflow-x:hidden}
+  `;document.head.appendChild(st);}catch(e){}
+})();
+
 function renderComercialProdutos(){
   const el=document.getElementById('comprod-body');if(!el)return;
   try{_prodIniciarPrecos();_prodMigrarCategorias();}catch(e){}
@@ -24472,7 +24542,7 @@ ${_getUserCat().isAdm?`<div class="dash-card"><div style="font-size:.68rem;color
   }).join('');
 
   const tabela=`
-    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:.72rem;color:var(--ink4)"><span>Clique num produto para ver as variações.</span><span style="margin-left:auto;display:flex;gap:6px">${(()=>{const nInc=produtos.filter(x=>!x.inativo&&_prodFaltam(x).length).length,nIn=produtos.filter(x=>x.inativo).length;const b=(on,txt,fn)=>`<button type="button" onclick="${fn}" style="padding:4px 10px;border-radius:999px;font-size:.7rem;font-weight:700;cursor:pointer;border:1.5px solid ${on?'#1a2b5e':'var(--border)'};background:${on?'#1a2b5e':'#fff'};color:${on?'#fff':'var(--ink3)'}">${txt}</button>`;return b(_prodSoIncompletos,`⚠️ Só incompletos (${nInc})`,'_prodSoIncompletos=!_prodSoIncompletos;renderComercialProdutos()')+(nIn?b(_prodMostrarInativos,`⏸ Mostrar inativos (${nIn})`,'_prodMostrarInativos=!_prodMostrarInativos;renderComercialProdutos()'):'');})()}</span></div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:.72rem;color:var(--ink4)"><span></span><span style="margin-left:auto;display:flex;gap:6px">${(()=>{const nInc=produtos.filter(x=>!x.inativo&&_prodFaltam(x).length).length,nIn=produtos.filter(x=>x.inativo).length;const b=(on,txt,fn)=>`<button type="button" onclick="${fn}" style="padding:4px 10px;border-radius:999px;font-size:.7rem;font-weight:700;cursor:pointer;border:1.5px solid ${on?'#1a2b5e':'var(--border)'};background:${on?'#1a2b5e':'#fff'};color:${on?'#fff':'var(--ink3)'}">${txt}</button>`;return b(_prodSoIncompletos,`⚠️ Só incompletos (${nInc})`,'_prodSoIncompletos=!_prodSoIncompletos;renderComercialProdutos()')+(nIn?b(_prodMostrarInativos,`⏸ Mostrar inativos (${nIn})`,'_prodMostrarInativos=!_prodMostrarInativos;renderComercialProdutos()'):'');})()}</span></div>
     ${gruposHtml}`;
 
   if(elCards)elCards.innerHTML=''; // cards de resumo removidos a pedido do usuário (2026-10-16)
