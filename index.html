@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-20.7';</script>
+<script>const APP_BUILD_VERSION='2026-10-20.9';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -13829,7 +13829,9 @@ async function _enviarEmailEmissao(p,destEmailsOverride){
     }
     // (2026-10-06, a pedido do usuário: "mandar o e-mail normal de emissão... apenas dar um aviso se tiver algum
     // e-mail errado pra corrigir") — se algum endereço falhou, o pedidos@ recebe o MESMO e-mail normal da emissão.
-    if((falhas.length||!entregues.length)&&!entregues.some(e=>e.toLowerCase()==='pedidos@granda.ind.br')){
+    // (2026-10-20) a cópia do pedidos@ sai SEMPRE daqui (envio próprio), não mais fixa no modelo do EmailJS —
+    // assim o modelo pode ser usado por avisos que NÃO devem ir para o pedidos@ (ex.: aviso de OC ao Financeiro).
+    if(!entregues.some(e=>e.toLowerCase()==='pedidos@granda.ind.br')){
       try{await envia(['pedidos@granda.ind.br']);entregues.push('pedidos@granda.ind.br');}catch(e2){console.error('envio pedidos@',e2);}
     }
     if(!entregues.length)throw new Error(errJunto||'Nenhum endereço aceitou o e-mail');
@@ -23762,8 +23764,9 @@ const OC_AVISO_COPIA=['guilherme.clabonde@granda.ind.br'];
 // (2026-10-18) + cópia pro vendedor responsável pelo pedido (e-mail do cadastro de usuários)
 function _ocAvisoCopias(p){
   const l=OC_AVISO_COPIA.slice();
-  try{const e=String(_getEmailPorNome(p&&p.responsavel)||'').trim().toLowerCase();if(e&&/@/.test(e)&&!l.concat(OC_AVISO_PARA).includes(e))l.push(e);}catch(e){}
-  return l;
+  // (2026-10-20) aviso de OC nunca vai para o pedidos@ (nem se for o e-mail cadastrado do vendedor)
+  try{const e=String(_getEmailPorNome(p&&p.responsavel)||'').trim().toLowerCase();if(e&&/@/.test(e)&&e!=='pedidos@granda.ind.br'&&!l.concat(OC_AVISO_PARA).includes(e))l.push(e);}catch(e){}
+  return l.filter(x=>x.toLowerCase()!=='pedidos@granda.ind.br');
 }
 function _ocAvisoHtml(p){
   const E=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
@@ -23857,10 +23860,24 @@ async function _ocLerNumero(file){
 //  · PDF: lê o texto (pdf.js).
 //  · Imagem (JPG/PNG/foto): lê com OCR (Tesseract, carregado só quando precisa).
 // Em todos: número e valor da OC preenchidos sozinhos.
+// (2026-10-20) Valor da OC = TOTAL do pedido de compra. Antes pegava o 1º "R$" do arquivo — em OC com
+// mais de um item isso era o valor do 1º item (ex.: OC 4505563290 lida como R$ 33.271,91 em vez do total).
+// Agora: 1º os valores com rótulo de total (Valor total / Total do pedido / Subtotal / Total), o maior deles;
+// sem rótulo, o maior valor em dinheiro do documento (o total é sempre ≥ qualquer item).
+function _ocNumMoeda(s){
+  s=String(s||'').trim();if(!s)return 0;
+  if(/,\d{2}$/.test(s))return parseFloat(s.replace(/\./g,'').replace(',','.'))||0;   // 109.387,98
+  if(/\.\d{2}$/.test(s))return parseFloat(s.replace(/,/g,''))||0;                    // 109,387.98
+  return parseFloat(s.replace(/[.,]/g,''))||0;
+}
+function _ocFmtMoeda(n){return 'R$ '+Number(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
 function _ocValorDoTexto(t){
   t=String(t||'').replace(/\s+/g,' ');
-  const m=t.match(/valor(?:\s+total)?\s*:?\s*R\$\s*([\d.]+,\d{2})/i)||t.match(/total\s*:?\s*R\$\s*([\d.]+,\d{2})/i)||t.match(/R\$\s*([\d.]{1,12},\d{2})/);
-  return m?'R$ '+m[1]:'';
+  const NUM='(\\d{1,3}(?:[.,]\\d{3})*[.,]\\d{2})(?!\\d)';
+  const max=re=>{let m,v=0;re.lastIndex=0;while((m=re.exec(t))){const n=_ocNumMoeda(m[1]);if(n>v)v=n;}return v;};
+  let v=max(new RegExp('(?:valor\\s+total(?:\\s+do\\s+pedido)?|total\\s+(?:do\\s+pedido|geral|da\\s+ordem)|sub\\s*total|\\btotal)\\s*(?:\\([^)]{0,20}\\))?\\s*:?\\s*(?:R\\$|BRL)?\\s*'+NUM,'gi'));
+  if(!(v>0))v=max(new RegExp('(?:R\\$|BRL)\\s*'+NUM,'gi'));
+  return v>0?_ocFmtMoeda(v):'';
 }
 // número: aceita "(Novo)" entre o rótulo e o número (formato do Ariba: "Pedido de compra (Novo) 4505563286")
 _ocNumeroDoTexto=function(txt){
@@ -23883,7 +23900,9 @@ function _ocLerHtml(html){
   const rotulo=lab=>{const el=[...d.querySelectorAll('td,span,div')].find(e=>e.children.length===0&&tx(e).replace(/:$/,'').toLowerCase()===lab.toLowerCase());if(!el)return'';const td=el.closest('td');const prox=td&&td.nextElementSibling;return tx(prox);};
   const o={};
   o.numero=(tx(d.querySelector('.po-INSPON-doc-num')).match(/[A-Z0-9\-\/]{4,}/i)||[''])[0]||_ocNumeroDoTexto(corpo);
-  o.valor=_ocValorDoTexto(tx(d.querySelector('.po-INSPON-std-money')))||_ocValorDoTexto(corpo);
+  // (2026-10-20) maior valor entre: todos os campos de dinheiro do Ariba e os totais rotulados do texto
+  {let v=0;[...d.querySelectorAll('.po-INSPON-std-money,[class*="std-money"],[class*="total"]')].forEach(el=>{const m=tx(el).match(/\d{1,3}(?:[.,]\d{3})*[.,]\d{2}(?!\d)/g)||[];m.forEach(x=>{const n=_ocNumMoeda(x);if(n>v)v=n;});});
+   const vt=moneyToNum(_ocValorDoTexto(corpo));if(vt>v)v=vt;o.valor=v>0?_ocFmtMoeda(v):'';}
   o.comprador=(corpo.match(/enviado por (.+?) AN\d/i)||[])[1]||'';
   o.enviado=((corpo.match(/Pedido enviado em:\s*(.+?)(?:Recebido|Este pedido|$)/i)||[])[1]||'').replace(/\s*GMT[+-]?[\d:]*\s*$/,'').trim();
   o.unidade=tx(d.querySelector('.fdml-ov-bill-to-gf-addr-name-val'));
@@ -24343,6 +24362,46 @@ function _ocCriarPendenciaValor(p,c){
     return false;
   };
 })();
+
+// ── OC: RELEITURA AUTOMÁTICA DO VALOR (2026-10-20) ──
+// As OCs anexadas antes da correção da leitura (valor do 1º item em vez do total) abriram pendência de
+// Conselho à toa. Quando um admin abre o sistema, cada pedido com conferência "diferente/não lido" tem o
+// arquivo original relido 1 vez; se agora bater com o bruto, a pendência e as tarefas fecham sozinhas.
+(function(){let n=0;const t=setInterval(async()=>{n++;if(n>240){clearInterval(t);return;}
+  try{if(!usuarioLogado||!_getUserCat().isAdm||typeof pedidos==='undefined'||!pedidos.length)return;clearInterval(t);
+    const alvo=pedidos.filter(x=>x&&x.ocConferencia&&x.ocConferencia.status!=='ok'&&x.ocReleituraValor!=='v2'&&(x.ocArquivoOriginal||x.ocUrl||x.arq_oc_url));
+    for(const p of alvo){
+      try{
+        const url=p.ocArquivoOriginal||p.ocUrl||p.arq_oc_url;
+        const r=await fetch(url);if(!r.ok)continue;
+        const b=await r.blob();
+        let nome=decodeURIComponent(String(url).split('?')[0].split('/').pop()||'oc');
+        let tipo=b.type||'';
+        if(!/\.(html?|pdf|jpe?g|png|webp|bmp)$/i.test(nome)){const head=(await b.slice(0,600).text()).toLowerCase();if(head.includes('<html')||head.includes('<!doctype'))nome+='.htm';else if(head.startsWith('%pdf'))nome+='.pdf';}
+        const lido=await _ocPreparar(new File([b],nome,{type:tipo}));
+        p.ocReleituraValor='v2';
+        const novo=lido.valor?moneyToNum(lido.valor):0;
+        if(novo>0&&Math.abs(novo-moneyToNum(p.ocValor||0))>0.009){
+          p.ocValor=lido.valor;
+          const c=_ocConferenciaValor(p);
+          if(c){
+            p.ocConferencia={status:c.status,oc:c.oc,br:c.br,em:new Date().toISOString(),releitura:true};
+            const quando=new Date().toISOString();
+            (p.conselhoPendencias||[]).filter(x=>x.tipoAuto==='oc_valor'&&!x.resolvida).forEach(x=>{
+              const ids=[x.tarefaId,...(x.tarefaIdsExtras||[])].filter(Boolean);
+              if(c.status==='ok'){
+                x.resolvida=true;x.resolvidaEm=quando;x.resolvidaPor='Sistema — OC relida: valor bate com o pedido';
+                (p.tarefasComerciais||[]).filter(tt=>ids.includes(tt.id)&&tt.status!=='concluida').forEach(tt=>{tt.status='concluida';tt.concluidaEm=quando;});
+              }else if(c.status==='diferente'){
+                x.texto=`Valor da Ordem de Compra${p.numOC?' nº '+p.numOC:''} (${fmtR(c.oc)}) diferente do valor bruto do pedido (${fmtR(c.br)}) — diferença de ${fmtR(Math.abs(c.dif))}. Revisar se a OC veio errada ou se o pedido está errado.`;
+              }
+            });
+          }
+        }
+        await savePedidoFS(p);
+      }catch(e){console.warn('releitura valor OC',p&&p.os,e);}
+    }
+  }catch(e){console.warn('releitura valor OC',e);}},6000);})();
 
 // ══ GESTÃO POR SETOR (2026-10-18) — pedidos do usuário ══════════════════════════════════════════
 // (A) Medição técnica, ART e Laudo passam a ter budget × realizado × save no Planejamento.
