@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-19.24';</script>
+<script>const APP_BUILD_VERSION='2026-10-20.5';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -695,6 +695,8 @@ table.fx-t{font-size:.74rem;font-weight:400}
 .lpx-tr-com2{border-bottom:1px solid #eef2f7;cursor:pointer;background:#fff}
 .lpx-tr-com2 td{padding:0 10px 9px 10px!important;font-size:.74rem;color:#64748b!important}
 .lpx-tr-com2 b{font-weight:600;color:#64748b}
+/* Último pedido comentado nesta visita (2026-10-20) — fundo mais escuro pra o diretor não se perder ao comentar um a um */
+.lpx-t2 tbody tr.lpx-ult,.lpx-t2 tbody tr.lpx-ult:hover{background:#dbe4ef!important}
 .lpx-1l{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lpx-c-seta{color:#94a3b8;font-size:.7rem;padding-left:8px!important}
 .lpx-c-os{font-weight:800;color:#0f172a}
@@ -1850,10 +1852,12 @@ select.fc{cursor:pointer}
     <div id="sec-cat-FERRAMENTAS" style="display:none">
       <div class="dash-tabs" style="margin-bottom:14px" id="ferr-tools-nav">
         <button class="dash-tab active" id="ferr-tool-tarefas" onclick="ferramentaTool('tarefas',this)">📌 Tarefas</button>
+        <button class="dash-tab" id="ferr-tool-chamados" onclick="ferramentaTool('chamados',this)" style="display:none">📣 Chamados entre setores<span id="ferr-ch-badge" style="display:none"></span></button>
         
         <button class="dash-tab" id="ferr-tool-rnc-link" onclick="window.open('https://gquali-granda.vercel.app/','_blank','noopener')" title="Abre o sistema de Qualidade (Gquali) em outra aba">🛡️ Abertura de RNC ↗</button>
       </div>
 
+      <div id="ferramenta-chamados" style="display:none"></div>
       <div id="ferramenta-tarefas">
         <div class="dash-tabs" style="margin-bottom:10px" id="tf-subtabs">
           <button class="dash-tab active" id="tf-tab-pend" onclick="tarefasTab('pendentes',this)">⏳ Pendentes<span id="tf-tab-pend-adiamento-count"></span></button>
@@ -6012,6 +6016,10 @@ window._fbOrcWatch=(nome,cb)=>onSnapshot(doc(db,'sistema',nome),s=>cb(s.exists()
 window._fbOrcSalvar=(nome,id,entrada)=>setDoc(doc(db,'sistema',nome),{itens:{[id]:entrada}},{merge:true});
 window._fbOrcExcluir=(nome,id)=>updateDoc(doc(db,'sistema',nome),new FieldPath('itens',id),deleteField());
 window._fbOrcSubstituir=(nome,itens)=>setDoc(doc(db,'sistema',nome),{itens});
+// Chamados entre setores (2026-10-20): sistema/chamados_AAAA_MM (um doc por mês de abertura) + sistema/chamadosSeq.
+window._fbChWatch=(nome,cb,errCb)=>onSnapshot(doc(db,'sistema',nome),s=>cb(s.exists()?(s.data().itens||{}):{}),errCb||(e=>console.warn('chamados watch',e)));
+window._fbChTx=(nome,fn)=>runTransaction(db,async(tx)=>{const ref=doc(db,'sistema',nome);const snap=await tx.get(ref);const itens=snap.exists()?JSON.parse(JSON.stringify(snap.data().itens||{})):{};const r=fn(itens);if(!r)return null;tx.update(ref,new FieldPath('itens',r.id),r.obj);return r;});
+window._fbChCriar=(nome,lista)=>runTransaction(db,async(tx)=>{const sref=doc(db,'sistema','chamadosSeq');const ref=doc(db,'sistema',nome);const ss=await tx.get(sref);const ms=await tx.get(ref);const n=Math.max(parseInt(ss.exists()&&ss.data().proximo)||1,1);const ids=[],itens={};lista.forEach(c=>{const id='c'+n+(c.sufixo?String(c.sufixo).toLowerCase():'');ids.push(id);itens[id]=Object.assign({},c,{id,num:n});});tx.set(sref,{proximo:n+1,em:new Date().toISOString()},{merge:true});if(ms.exists()){const args=[];ids.forEach(id=>{args.push(new FieldPath('itens',id),itens[id]);});tx.update(ref,...args);}else tx.set(ref,{itens});return{ids,num:n};});
 const _BACKUP_COLS=['sistema','pedidos','crmEmpresas','prospEmpresas','contasPagar','contasReceberManual','simReservas','lixeira','rhPonto','rhAtestadosAnexos','dreCongelado','produtosFicha','portalObras','pesagens'];
 window._fbBackupLerAtual=async()=>{
   const out={geradoEm:new Date().toISOString(),origem:'navegador',colecoes:{}};
@@ -8933,7 +8941,8 @@ function buildSidebarCats(){
   // Comercial" (sb-geral) no sidebar, como pedido pelo usuário. Passa pelo mesmo sistema de
   // _temMenu/MENUS_TOGGLE_DEFS do resto (admin sempre vê; default por categoria em
   // _menusPadraoPorCategoria).
-  const cats=_rhOnlySidebar?['RH']:_planOnlySidebar?['LISTA_PEDIDOS','PLANEJAMENTO']:[...(_temAcessoProspeccao()?['PROSPECCAO_CLIENTES']:[]),...(_temAcessoFerramentas()?['FERRAMENTAS']:[]),...(_temAcessoHistorico()?['HISTORICO']:[]),...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['LISTA_PEDIDOS','PLANEJAMENTO']:[]),...(_isSetorUser('PROJETOS')?['PROJETOS']:[]),...(_isSetorUser('COMPRAS')?['COMPRAS']:[]),...(_isSetorUser('PRODUÇÃO')?['PRODUÇÃO']:[]),...(_isRhUser()?['RH']:[]),...(_isSetorUser('QUALIDADE')?['QUALIDADE']:[])];
+  const _chSb=(typeof window._chPodeAcessar==='function'&&window._chPodeAcessar())?['FERRAMENTAS']:[];
+  const cats=_rhOnlySidebar?['RH',..._chSb]:_planOnlySidebar?['LISTA_PEDIDOS','PLANEJAMENTO',..._chSb]:[...(_temAcessoProspeccao()?['PROSPECCAO_CLIENTES']:[]),...(_temAcessoFerramentas()?['FERRAMENTAS']:[]),...(_temAcessoHistorico()?['HISTORICO']:[]),...(_isFinanceiroUser()?['FINANCEIRO']:[]),...(_isPlanejamentoUser()?['LISTA_PEDIDOS','PLANEJAMENTO']:[]),...(_isSetorUser('PROJETOS')?['PROJETOS']:[]),...(_isSetorUser('COMPRAS')?['COMPRAS']:[]),...(_isSetorUser('PRODUÇÃO')?['PRODUÇÃO']:[]),...(_isRhUser()?['RH']:[]),...(_isSetorUser('QUALIDADE')?['QUALIDADE']:[])];
   const catIcons={'FERRAMENTAS':'🧰','RH':'👥','FINANCEIRO':'💰','COMPRAS':'🛒','PCP':'📋','PRODUÇÃO':'🏭','QUALIDADE':'✅','PLANEJAMENTO':'🏗️','PROJETOS':'📐','HISTORICO':'🔍','COMISSAO_PLANEJAMENTO':'📈','LISTA_PEDIDOS':'📦','PROSPECCAO_CLIENTES':'🎯'};
   // Rótulos do sidebar em "Primeira maiúscula, resto minúsculo" (2026-08-19, a pedido do
   // usuário — só pra ficar mais bonito, os valores de `cat` continuam tudo maiúsculo por
@@ -9133,7 +9142,7 @@ function setSection(sec){
   }
   // Perfil RH puro (2026-07-30) — trava de verdade, não só esconder botão: mesmo que alguém
   // tente forçar setSection('geral') ou outra categoria pelo console, volta pra cat:RH.
-  if(_isRhOnly()&&sec!=='cat:RH'){
+  if(_isRhOnly()&&sec!=='cat:RH'&&!(sec==='cat:FERRAMENTAS'&&typeof window._chPodeAcessar==='function'&&window._chPodeAcessar())){
     toast('Seu acesso é restrito ao Menu RH','terr');
     setSection('cat:RH');
     return;
@@ -9141,7 +9150,7 @@ function setSection(sec){
   // Perfil PLANEJAMENTO puro (2026-08-03) — mesma trava de verdade que RH: mesmo que tente
   // forçar setSection('geral') ou outra categoria pelo console, volta pra cat:PLANEJAMENTO.
   // Lista de Pedidos continua liberada porque usa a mesma trava de acesso (_isPlanejamentoUser).
-  if(_isPlanejamentoOnly()&&sec!=='cat:PLANEJAMENTO'&&sec!=='cat:LISTA_PEDIDOS'){
+  if(_isPlanejamentoOnly()&&sec!=='cat:PLANEJAMENTO'&&sec!=='cat:LISTA_PEDIDOS'&&!(sec==='cat:FERRAMENTAS'&&typeof window._chPodeAcessar==='function'&&window._chPodeAcessar())){
     toast('Seu acesso é restrito ao Menu Planejamento','terr');
     setSection('cat:PLANEJAMENTO');
     return;
@@ -9258,6 +9267,7 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
       // depois, fica só valendo até a próxima vez que sair e voltar pro menu.
       const filStatusEl=document.getElementById('lp-fil-status');
       if(filStatusEl)filStatusEl.value='andamento';
+      _lpUltimoComentadoId='';_lpGrupoFiltro='';
       if(typeof renderListaPedidos==='function')renderListaPedidos();
     }catch(e){console.error('Erro ao abrir Lista de Pedidos',e);}},120);
     // PROJETOS ganhou visão própria em Lista/Kanban/Calendário (2026-07-31, mesmo padrão da
@@ -10622,6 +10632,15 @@ function toggleSidebar(){
 })();
 
 // VIEW PEDIDO
+// Seção padrão "📎 Documentos" (OS Granda + OC do cliente) — usada no Ver Pedido e no Resumo da
+// Venda (2026-10-20), mesmo visual nos dois.
+function _pedDocsHtml(p){
+  const _vpOcUrl=p.ocUrl||p.arq_oc_url||'';
+  return (p.arq_os_url||_vpOcUrl)?`<div class="vm-sec"><h4>📎 Documentos</h4><div class="vm-gr">
+      ${p.arq_os_url?`<div class="vf"><div class="l">Nossa Ordem de Serviço</div><div class="v"><a href="${cldDownload(p.arq_os_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">⬇️ Baixar OS GRANDA</a></div></div>`:`<div class="vf"><div class="l">Nossa Ordem de Serviço</div><div class="v" style="color:var(--ink4)">Não anexada</div></div>`}
+      ${_vpOcUrl?`<div class="vf"><div class="l">Ordem de Compra do Cliente</div><div class="v"><a href="${cldDownload(_vpOcUrl)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">⬇️ Baixar OC${p.numOC?' Nº '+p.numOC:''}</a></div></div>`:`<div class="vf"><div class="l">Ordem de Compra do Cliente</div><div class="v" style="color:var(--ink4)">Ainda não anexada</div></div>`}
+    </div></div>`:`<div class="vm-sec"><h4>📎 Documentos</h4><div style="font-size:.78rem;color:var(--ink4)">Nenhum documento anexado ainda — nem nossa Ordem de Serviço, nem a Ordem de Compra do cliente.</div></div>`;
+}
 function viewP(id){
   vid=id;const p=pedidos.find(x=>x.id===id);if(!p)return;
   document.getElementById('vp-t').textContent=`OS ${p.os||'—'} — ${_pedNome(p)}`;
@@ -10640,11 +10659,7 @@ function viewP(id){
   // do cliente só conseguir mandar a OC depois) — usa a mais recente (ocUrl) com fallback
   // pra a da emissão, sem precisar de nenhuma leitura extra (os campos já vêm carregados
   // junto com o pedido, então isso não pesa nada a mais).
-  const _vpOcUrl=p.ocUrl||p.arq_oc_url||'';
-  const docsHtml=(p.arq_os_url||_vpOcUrl)?`<div class="vm-sec"><h4>📎 Documentos</h4><div class="vm-gr">
-      ${p.arq_os_url?`<div class="vf"><div class="l">Nossa Ordem de Serviço</div><div class="v"><a href="${cldDownload(p.arq_os_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">⬇️ Baixar OS GRANDA</a></div></div>`:`<div class="vf"><div class="l">Nossa Ordem de Serviço</div><div class="v" style="color:var(--ink4)">Não anexada</div></div>`}
-      ${_vpOcUrl?`<div class="vf"><div class="l">Ordem de Compra do Cliente</div><div class="v"><a href="${cldDownload(_vpOcUrl)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">⬇️ Baixar OC${p.numOC?' Nº '+p.numOC:''}</a></div></div>`:`<div class="vf"><div class="l">Ordem de Compra do Cliente</div><div class="v" style="color:var(--ink4)">Ainda não anexada</div></div>`}
-    </div></div>`:`<div class="vm-sec"><h4>📎 Documentos</h4><div style="font-size:.78rem;color:var(--ink4)">Nenhum documento anexado ainda — nem nossa Ordem de Serviço, nem a Ordem de Compra do cliente.</div></div>`;
+  const docsHtml=_pedDocsHtml(p);
   document.getElementById('vp-bd').innerHTML=`
     <div class="vm-sec"><h4>Dados Gerais</h4><div class="vm-gr">
       <div class="vf"><div class="l">Tipo</div><div class="v">${p.tipo}</div></div>
@@ -33519,6 +33534,13 @@ function _lpTemElevacao(p){return (p.valores&&p.valores['Elevações'])==='Sim'|
 // salvarFgLancamento(). Dados gravados em p.planTarefas={<key>:{concluido,data,por}}, mesmo
 // padrão de p.diarios/p.finalizacao/p.lpBaixas.
 const PLAN_REGRA_5DU_DESDE='2026-10-05';
+const LP_ART_DIAS_ANTES_PRAZO=20; // Recebimento ART: 20 dias corridos antes do Prazo Final (2026-10-20)
+function _lpArtIso(prazoBaseIso){ // fim de semana/feriado volta pro dia útil anterior
+  if(!prazoBaseIso)return null;
+  const d=new Date(_opAddDias(prazoBaseIso,-LP_ART_DIAS_ANTES_PRAZO)+'T00:00:00');
+  while(d.getDay()===0||d.getDay()===6||getFeriadosTodos(d.getFullYear()).has(fmtISOLocal(d)))d.setDate(d.getDate()-1);
+  return fmtISOLocal(d);
+}
 const PLAN_TAREFAS_REGRAS={
   instalador:{label:'Contratar Instalador',diasUteis:7,base:'chegada'}, // 7 dias úteis antes do Início da Instalação
   frete:{label:'Contratar Frete',diasUteis:6,base:'coleta'},            // 6 dias úteis antes do Início do Frete (coleta)
@@ -33811,6 +33833,15 @@ function _lpCalcEtapas(p){
     else if(def.special==='final')iso=prazoIso;
     else{
       const _doPlanejamento=def.key==='art'||def.key==='saidaFrete';
+      // (2026-10-20, a pedido do usuário) Recebimento ART = 20 dias corridos antes do Prazo Final
+      // de entrega (se cair em fim de semana/feriado, volta pro dia útil anterior). Se o prazo
+      // for ADIADO, a ART NÃO acompanha — fica no prazo original; se for antecipado, acompanha.
+      if(def.key==='art'){
+        const _baseArt=(_prazoOrigIso&&_prazoOrigIso<prazoIso)?_prazoOrigIso:prazoIso;
+        iso=_lpArtIso(_baseArt);
+        const _semFabA=!_lpTemFabrica(p)&&LP_ETAPAS_FABRICA.includes(def.key);
+        return Object.assign({},def,{iso,aplicavel:_semFabA?false:(def.cond?CONDS[def.cond]:true)});
+      }
       iso=_lpAjustaDiaUtil(_opAddDias(emissaoIso,Math.round((_doPlanejamento?prazoInternoDias:_prazoInternoDiasProducao)*def.pct/100)));
     }
     const _semFab=!_lpTemFabrica(p)&&LP_ETAPAS_FABRICA.includes(def.key);
@@ -38934,6 +38965,9 @@ function _lpTopoHtml(infos,hoje){
 // Nenhum cálculo muda e nada é gravado. A visão "▦ Todas as colunas" continua igual. Se a lista
 // nova der qualquer erro, cai sozinha na compacta antiga (_lpCompactaHtmlV1).
 let _lpGrupoFiltro='';
+// Último pedido comentado (2026-10-20, a pedido do usuário: o diretor vai comentando um a um e quer ver
+// marcado o último que comentou). Fica só na memória da tela: ao sair do menu e voltar, a marca some.
+let _lpUltimoComentadoId='';
 let _lpGruposAbertos={atrasado:true,risco:true,incompleto:true,emdia:false,concluido:false};
 let _lpPainelTopo='';
 function lpSetGrupoFiltro(g){_lpGrupoFiltro=_lpGrupoFiltro===g?'':g;if(_lpGrupoFiltro)_lpGruposAbertos[g]=true;lpRenderAtivo();}
@@ -38952,11 +38986,10 @@ function _lpGrupoDe(x,hoje){
 function _lpTopoCompactoHtml(infos,hoje,ex){
   const c={atrasado:0,risco:0,emdia:0,passou:0,vai:0,concluido:0,incompleto:0};
   infos.forEach(x=>{const s=_lpGrupoDe(x,hoje);c[s.g]++;if(s.passou)c.passou++;if(s.vai)c.vai++;});
-  const kpi=(g,lbl,n,sub,cor)=>`<button type="button" class="lpx-kpi${_lpGrupoFiltro===g?' on':''}" onclick="lpSetGrupoFiltro('${g}')" title="Clique pra ver só estes pedidos"><span>${lbl}</span><b style="color:${cor}">${n}</b><small>${sub}</small></button>`;
+  const kpi=(g,lbl,n,sub,cor)=>`<div class="lpx-kpi lpx-kpi-tot"><span>${lbl}</span><b style="color:${cor}">${n}</b><small>${sub}</small></div>`;
   const ativos=c.atrasado+c.risco+c.emdia;
   let h=`<div class="lpx-topo-row"><div class="prosp-vis"><button type="button" class="on" onclick="lpSetModoLista('compacta')">☰ Compacta</button><button type="button" onclick="lpSetModoLista('completa')">▦ Todas as colunas</button></div>`
-    +(_lpGrupoFiltro?`<button type="button" class="plx-tg on" onclick="lpSetGrupoFiltro('${_lpGrupoFiltro}')">✕ Mostrar todas as situações</button>`:'')
-    +(_lpFilaEtapa?`<button type="button" class="plx-tg on" onclick="lpSetFila('${_lpFilaEtapa}')">✕ Tirar filtro da etapa</button>`:'')+`</div>`;
+        +(_lpFilaEtapa?`<button type="button" class="plx-tg on" onclick="lpSetFila('${_lpFilaEtapa}')">✕ Tirar filtro da etapa</button>`:'')+`</div>`;
   h+=`<div class="lpx-kpis">`
     +`<div class="lpx-kpi lpx-kpi-tot"><span>Pedidos em andamento</span><b>${ativos}</b><small>${c.concluido?c.concluido+' concluído'+(c.concluido===1?'':'s')+' na lista':'na lista filtrada'}${c.incompleto?' · '+c.incompleto+' com dados incompletos':''}</small></div>`
     +kpi('atrasado','🔴 Atrasados ou vão atrasar',c.atrasado,c.atrasado?`${c.passou} com prazo vencido · ${c.vai} ${c.vai===1?'vai':'vão'} passar do prazo`:'nenhum',c.atrasado?'#dc2626':'#0f172a')
@@ -38984,25 +39017,27 @@ function _lpCompactaHtml(infos,colunasEtapas,hoje){
   catch(err){console.error('_lpCompactaHtmlV2',err);return _lpCompactaHtmlV1(infos,colunasEtapas,hoje);}
 }
 function _lpCompactaHtmlV2(infos,hoje){
-  const grupos={atrasado:[],risco:[],emdia:[],incompleto:[],concluido:[]};
-  infos.forEach(x=>{const s=_lpGrupoDe(x,hoje);x._grp=s;grupos[s.g].push(x);});
-  // Atrasados: o mais atrasado primeiro; os outros grupos mantêm a ordem que a lista já tinha.
-  grupos.atrasado.sort((a,b)=>{const oa=_lpOnde(a,hoje),ob=_lpOnde(b,hoje);return((ob&&ob.atrasoDu)||0)-((oa&&oa.atrasoDu)||0);});
-  const defs=[['atrasado','🔴 Atrasados ou vão atrasar'],['risco','🟠 Em risco'],['emdia','Em dia'],['incompleto','⚠️ Dados incompletos'],['concluido','✅ Concluídos']];
+  // Lista ÚNICA, sem separar por situação (2026-10-20, a pedido do usuário: "tirar esses filtros da lista e
+  // deixar tudo na lista em ordem por data de finalização" — separado em grupos recolhidos alguém deixava
+  // de olhar algum pedido). Ordem: prazo final mais próximo primeiro; sem prazo/dados incompletos no fim.
+  // A situação de cada pedido continua na coluna Status e na faixa colorida da esquerda.
+  const _pzDe=x=>(x.ok?x.calc.prazoIso:_normPrazoIso(x.p.prazo))||'9999-99-99';
+  const todos=infos.slice();
+  todos.forEach(x=>{x._grp=_lpGrupoDe(x,hoje);});
+  todos.sort((a,b)=>_pzDe(a).localeCompare(_pzDe(b))||String(a.p.os||'').localeCompare(String(b.p.os||''),'pt-BR',{numeric:true}));
+  const grupos={todos};
+  const defs=[['todos','']];
   const lim7=Date.now()-7*86400000;
   const th='padding:9px 10px;font-size:.68rem;text-transform:uppercase;letter-spacing:.03em;color:#64748b;font-weight:700;background:#f8fafc;text-align:left';
   let corpo='';
   defs.forEach(([g,lbl])=>{
     const lista=grupos[g];
     if(!lista.length)return;
-    if(_lpGrupoFiltro&&_lpGrupoFiltro!==g)return;
-    const aberto=!!_lpGruposAbertos[g];
-    corpo+=`<tr class="lpx-gh lpx-gh-${g}" onclick="lpToggleGrupo('${g}')"><td colspan="7">${aberto?'▾':'▸'} ${lbl} <span class="lpx-gh-n">${lista.length}</span>${aberto?'':' <span class="lpx-gh-dica">clique pra ver</span>'}</td></tr>`;
-    if(!aberto)return;
     lista.forEach(x=>{
       const p=x.p,s=x._grp,abertoP=!!_lpExpandidos[p.id];
+      const ultCls=_lpUltimoComentadoId&&_lpUltimoComentadoId===p.id?' lpx-ult':'';
       const o=x.ok&&!x.concluido?_lpOnde(x,hoje):null;
-      const borda=g==='atrasado'?'#dc2626':g==='risco'?'#f59e0b':'transparent';
+      const borda=s.g==='atrasado'?'#dc2626':s.g==='risco'?'#f59e0b':'transparent';
       let onde;
       if(!x.ok)onde=`<span style="color:#b45309">${_plEsc(_lpProblemasTexto(x.calc.problemas))}</span>`;
       else if(x.concluido)onde='<span style="color:#16a34a">Finalizado</span>';
@@ -39017,7 +39052,7 @@ function _lpCompactaHtmlV2(infos,hoje){
       const prev=s.vai&&o&&o.cascata?` <span class="lpx-red" style="font-size:.72rem" title="Entrega prevista se nada mudar">→ ~${fmtD(o.cascata.iso)}</span>`:'';
       const aten=x._atencao?` <span class="lpx-aten" title="${_plEsc(x._atencao.join(' | '))}">⚠️</span>`:'';
       const vend=[p.responsavel].filter(Boolean).join('');
-      corpo+=`<tr class="lpx-tr lpx-tr2" style="box-shadow:inset 3px 0 0 ${borda}" onclick="lpToggleLinha('${p.id}')" title="${_plEsc((p.cliente||'')+(vend?' · vendedor: '+vend:''))}">
+      corpo+=`<tr class="lpx-tr lpx-tr2${ultCls}" style="box-shadow:inset 3px 0 0 ${borda}" onclick="lpToggleLinha('${p.id}')" title="${_plEsc((p.cliente||'')+(vend?' · vendedor: '+vend:''))}">
         <td class="lpx-c-seta">${abertoP?'▾':'▸'}</td>
         <td class="lpx-c-os">${_plEsc(p.os||'—')}</td>
         <td class="lpx-c-cli"><div class="lpx-1l">${_lpTipoBadge(p)}${_plEsc(_pedNomeCliJob(p))}</div></td>
@@ -39029,7 +39064,7 @@ function _lpCompactaHtmlV2(infos,hoje){
       const cl=_lpTodosComentarios(p),uc=cl.length?cl[cl.length-1]:null;
       const ucT=uc&&uc.c.dataHora?new Date(uc.c.dataHora).getTime():0;
       if(uc&&ucT>=lim7&&!abertoP){
-        corpo+=`<tr class="lpx-tr-com lpx-tr-com2" style="box-shadow:inset 3px 0 0 ${borda}" onclick="lpToggleLinha('${p.id}')"><td></td><td></td><td colspan="5"><div class="lpx-1l" title="${_plEsc(uc.c.texto||'')}">💬 <b>${_plEsc(uc.c.por||'—')}</b> · ${_lpFmtDataHoraComent(uc.c.dataHora)}${uc.k!==LP_COMENT_GERAL?' · '+_plEsc(uc.label):''} — ${_plEsc(uc.c.texto||'')}${cl.length>1?` <span style="color:#94a3b8">(+${cl.length-1})</span>`:''}</div></td></tr>`;
+        corpo+=`<tr class="lpx-tr-com lpx-tr-com2${ultCls}" style="box-shadow:inset 3px 0 0 ${borda}" onclick="lpToggleLinha('${p.id}')"><td></td><td></td><td colspan="5"><div class="lpx-1l" title="${_plEsc(uc.c.texto||'')}">💬 <b>${_plEsc(uc.c.por||'—')}</b> · ${_lpFmtDataHoraComent(uc.c.dataHora)}${uc.k!==LP_COMENT_GERAL?' · '+_plEsc(uc.label):''} — ${_plEsc(uc.c.texto||'')}${cl.length>1?` <span style="color:#94a3b8">(+${cl.length-1})</span>`:''}</div></td></tr>`;
       }
       if(abertoP&&x.ok){
         const info=`<div class="lpx-det-info"><span><b>Vendedor:</b> ${_plEsc(vend||'—')}</span><span><b>Emitido em:</b> ${fmtD(x.calc.emissaoIso)}</span>${o&&o.prox?`<span><b>Depois:</b> ${_plEsc(o.prox.label)}</span>`:''}<span style="display:inline-flex;align-items:center;gap:6px"><b>Etapas:</b> ${_lpTrilhaHtml(x,hoje)}</span><span style="display:inline-flex;align-items:center;gap:6px"><b>Assertividade:</b> ${_lpAssertividadeBarraHtml(x.assert)}</span><button type="button" class="plx-tg" onclick="event.stopPropagation();portalCopiarLinkObra('${p.id}')" title="Link que o cliente abre no celular pra acompanhar esta obra (etapas, datas, diário com fotos e documentos da entrega)">🔗 Copiar link do cliente</button></div>`;
@@ -39367,6 +39402,7 @@ function _simAvaliar(P,prazoIso,emissaoIso,ctx){
     if(def.key==='producao'&&prodBuf)iso=prodBuf;
     else if(def.special==='chegada')iso=chegada;
     else if(def.special==='final')iso=prazoIso;
+    else if(def.key==='art')iso=_lpArtIso(prazoIso);
     else iso=_lpAjustaDiaUtil(_opAddDias(emissaoIso,Math.round(dias*def.pct/100)));
     return{key:def.key,label:def.label,iso};
   });
@@ -39930,6 +39966,7 @@ function _lpSimular(){
     if(def.key==='producao'&&_producaoBufferIsoSim)iso=_producaoBufferIsoSim;
     else if(def.special==='chegada')iso=chegadaIso;
     else if(def.special==='final')iso=prazoIso;
+    else if(def.key==='art')iso=_lpArtIso(prazoIso);
     else iso=_lpAjustaDiaUtil(_opAddDias(hojeIso,Math.round(prazoInternoDias*def.pct/100)));
     return Object.assign({},def,{iso});
   });
@@ -40410,6 +40447,20 @@ function _lpComentarioCardHtml(p,etapaKey){
     <button type="button" onclick="event.stopPropagation();lpAbrirComentarioEtapa('${p.id}','${etapaKey}')" style="margin-top:4px;width:100%;background:none;border:1px dashed var(--border);border-radius:6px;padding:3px 4px;font-size:.6rem;font-weight:700;color:var(--ink4);cursor:pointer">💬 Fazer Comentário${lista.length?' ('+lista.length+')':''}</button>
   </div>`;
 }
+// Prazos no topo da janela de comentário (2026-10-20, a pedido do usuário): Produção, Frete
+// (início = saída, fim = chegada/início da instalação) e Prazo Final — mesmo _lpCalcEtapas
+// usado no resto do Pipeline, nunca conta própria.
+function _lpComentPrazosHtml(p){
+  try{
+    const c=_lpCalcEtapas(p);
+    if(!c||!c.ok)return'';
+    const d=iso=>iso?`<span style="white-space:nowrap">${_tlDataSem(iso)}</span>`:'—';
+    const prod=c.etapas.find(e=>e.key==='producao'&&e.aplicavel);
+    const frete=c.temFrete?`${d(c.coletaIso)} até ${d(c.chegadaIso)}`:'<span style="color:#94a3b8">sem frete</span>';
+    const cel=(ic,lbl,val)=>`<div style="background:#f1f5f9;border-radius:8px;padding:6px 9px"><div style="font-size:.62rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.03em">${ic} ${lbl}</div><div style="font-size:.78rem;font-weight:800;color:#0f172a;margin-top:2px">${val}</div></div>`;
+    return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:10px">${cel('🏭','Prazo de Produção',prod?d(prod.iso):'<span style="color:#94a3b8">sem produção</span>')}${cel('🏁','Prazo Final do Pedido',d(c.prazoIso))}<div style="grid-column:1/-1">${cel('🚚','Frete (início → fim)',frete)}</div></div>`;
+  }catch(e){console.error('_lpComentPrazosHtml',e);return'';}
+}
 function lpAbrirComentarioEtapa(pedidoId,etapaKey){
   if(!_isPlanejamentoUser()){toast('Só Planejamento ou administrador pode comentar aqui.','terr');return;}
   const p=pedidos.find(x=>x.id===pedidoId);
@@ -40422,7 +40473,7 @@ function lpAbrirComentarioEtapa(pedidoId,etapaKey){
   const lEl=document.getElementById('lpc-label-texto');if(lEl)lEl.innerHTML='Novo comentário <span class="r">*</span>';
   const bEl=document.getElementById('lpc-btn-salvar');if(bEl)bEl.textContent='💾 Salvar Comentário';
   const infoEl=document.getElementById('lpc-info');
-  if(infoEl)infoEl.innerHTML=`OS Nº <strong>${p.os||'—'}</strong> · ${_pedNome(p)}<br>${etapaKey===LP_COMENT_GERAL?'<strong>Comentário geral do pedido</strong>':`Etapa: <strong>${(def&&def.label)||etapaKey}</strong>`}`;
+  if(infoEl)infoEl.innerHTML=`OS Nº <strong>${p.os||'—'}</strong> · ${_pedNome(p)}<br>${etapaKey===LP_COMENT_GERAL?'<strong>Comentário geral do pedido</strong>':`Etapa: <strong>${(def&&def.label)||etapaKey}</strong>`}${_lpComentPrazosHtml(p)}`;
   const txtEl=document.getElementById('lpc-texto');if(txtEl)txtEl.value='';
   const listaExistente=etapaKey===LP_COMENT_GERAL?_lpTodosComentarios(p).map(o=>Object.assign({},o.c,{_lbl:o.label})):_lpComentariosDaEtapa(p,etapaKey);
   const histEl=document.getElementById('lpc-historico');
@@ -40457,7 +40508,7 @@ function lpEditarComentarioEtapa(pedidoId,etapaKey,idx){
   const lEl=document.getElementById('lpc-label-texto');if(lEl)lEl.innerHTML='Comentário <span class="r">*</span>';
   const bEl=document.getElementById('lpc-btn-salvar');if(bEl)bEl.textContent='💾 Salvar Alteração';
   const infoEl=document.getElementById('lpc-info');
-  if(infoEl)infoEl.innerHTML=`OS Nº <strong>${p.os||'—'}</strong> · ${_pedNome(p)}<br>${etapaKey===LP_COMENT_GERAL?'<strong>Comentário geral do pedido</strong>':`Etapa: <strong>${(def&&def.label)||etapaKey}</strong>`}`;
+  if(infoEl)infoEl.innerHTML=`OS Nº <strong>${p.os||'—'}</strong> · ${_pedNome(p)}<br>${etapaKey===LP_COMENT_GERAL?'<strong>Comentário geral do pedido</strong>':`Etapa: <strong>${(def&&def.label)||etapaKey}</strong>`}${_lpComentPrazosHtml(p)}`;
   const txtEl=document.getElementById('lpc-texto');if(txtEl)txtEl.value=c.texto||'';
   const histEl=document.getElementById('lpc-historico');if(histEl)histEl.innerHTML='';
   openM('mo-comentario-etapa');
@@ -40500,6 +40551,7 @@ async function lpSalvarComentarioEtapa(){
     await savePedidoFS(p);
     toast('Comentário adicionado ✅','tok');
   }
+  _lpUltimoComentadoId=p.id;
   closeM('mo-comentario-etapa');
   lpRenderAtivo();
 }
@@ -54438,6 +54490,7 @@ function verVendaDetalhe(os,pedidoId){
           ${p.obs?`<div class="vf" style="grid-column:span 2"><div class="l">Observações</div><div class="v">${p.obs}</div></div>`:''}
       ${p.rncPedidoOrigem&&p.rncPedidoOrigem.os?`<div class="vf" style="grid-column:span 2"><div class="l">RNC — Pedido de origem (venda)</div><div class="v">${_rncOrigemLabel(p.rncPedidoOrigem)}</div></div>`:''}
         </div></div>
+        ${_pedDocsHtml(p)}
         ${secHtml('Valores',vBase)}${secHtml('Elevações',vElev)}
         ${parcRows.length?`<div class="vm-sec"><h4>Datas de Pagamento</h4><div class="vm-gr">${parcRows.map(r=>`<div class="vf"><div class="l">${r.l}</div><div class="v">${r.v}</div></div>`).join('')}</div></div>`:secHtml('Pagamento',pg)}
         ${secHtml('Instalação',inst)}${secHtml('Frete',fr)}
@@ -70699,6 +70752,649 @@ function _portalBoot(){
   else _ptPortalEngenheiro();
 }
 if(window.__GCORE_PORTAL){if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_portalBoot);else _portalBoot();}
+
+</script>
+<style>
+/* Chamados entre setores (2026-10-20) */
+.chx-topo{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.chx-tabs{flex:1;min-width:280px;margin-bottom:0!important}
+.chx-novo{padding:9px 16px!important;font-size:.8rem!important;background:#1d4ed8!important}
+.chx-novo:hover{background:#1e40af!important}
+.chx-barra{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.chx-busca{max-width:380px;text-transform:none!important;padding:8px 12px!important}
+.chx-n{display:inline-block;background:#e2e8f0;color:#0f172a;border-radius:20px;padding:0 7px;font-size:.68rem;font-weight:800;margin-left:3px}
+.chx-n.al{background:#e91e63;color:#fff}
+.chx-t{width:100%;border-collapse:collapse;font-size:.82rem;table-layout:fixed;background:#fff}
+.chx-t td{padding:10px;vertical-align:middle;color:#1e293b;border-bottom:1px solid #eef2f7}
+.chx-tr{cursor:pointer}
+.chx-tr:hover{background:#f1f7ff}
+.chx-tr.chx-acao{background:#fffbeb}
+.chx-tr.chx-acao:hover{background:#fef3c7}
+.chx-num{font-weight:800;color:#0f172a;white-space:nowrap}
+.chx-1l{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chx-nw{white-space:nowrap}
+.chx-sub{font-size:.7rem;color:#64748b;line-height:1.35}
+.chx-mut{color:#64748b}
+.chx-pill{display:inline-block;font-size:.72rem;font-weight:700;padding:2px 10px;border-radius:20px;white-space:nowrap}
+.chx-acao-tag{display:inline-block;font-size:.72rem;font-weight:800;color:#92400e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.chx-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:600px){.chx-grid2{grid-template-columns:1fr}}
+.chx-tn{text-transform:none!important;font-family:inherit!important}
+.chx-prio{display:flex;gap:8px;flex-wrap:wrap}
+.chx-btn-main{width:100%;background:#1d4ed8;color:#fff;border:none;border-radius:9px;padding:11px;font-size:.85rem;font-weight:700;cursor:pointer;font-family:inherit}
+.chx-btn-main:hover{background:#1e40af}
+.chx-btn-main.del{background:#dc2626}
+.chx-btn-main:disabled{opacity:.6;cursor:wait}
+.chx-info{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+@media(max-width:600px){.chx-info{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.chx-info>div{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px;min-width:0}
+.chx-info>div>span:first-child{display:block;font-size:.64rem;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin-bottom:2px}
+.chx-info b{font-size:.84rem;color:#0f172a}
+.chx-desc{white-space:pre-wrap;font-size:.84rem;color:#1e293b;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;margin-bottom:10px;line-height:1.45}
+.chx-aviso{background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;border-radius:10px;padding:9px 12px;font-size:.8rem;margin-bottom:10px}
+.chx-sol{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;border-radius:10px;padding:9px 12px;font-size:.8rem;margin-bottom:10px}
+.chx-bts{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 4px}
+.chx-b{width:auto;height:auto;border:1.5px solid var(--border);background:#fff;border-radius:8px;padding:8px 13px;font-size:.76rem;font-weight:700;color:#334155;cursor:pointer;font-family:inherit;white-space:nowrap}
+.chx-b:hover{border-color:#94a3b8}
+.chx-b.ok{background:#1d4ed8;border-color:#1d4ed8;color:#fff}
+.chx-b.ok:hover{background:#1e40af}
+.chx-b.no{color:#b91c1c;border-color:#fecaca}
+.chx-b.del{color:#b91c1c;border-color:#fecaca;margin-left:auto}
+.chx-hist-t{font-size:.7rem;font-weight:800;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin:14px 0 6px}
+.chx-hist{display:flex;flex-direction:column;gap:8px}
+.chx-h{display:flex;gap:9px;font-size:.78rem;color:#334155;border-left:2px solid #e2e8f0;padding-left:9px}
+.chx-h-ic{flex-shrink:0;width:18px}
+#ferr-ch-badge{background:#e91e63;color:#fff;border-radius:20px;padding:0 7px;font-size:.66rem;font-weight:800;margin-left:4px}
+.chx-tr.chx-atr td.chx-num{color:#b91c1c}
+.chx-arq-bt{display:inline-flex!important;align-items:center;gap:6px;border:1.5px dashed #94a3b8;border-radius:8px;padding:7px 12px;font-size:.76rem!important;font-weight:700!important;color:#334155!important;cursor:pointer;background:#f8fafc;margin-bottom:0!important}
+.chx-arq-bt:hover{border-color:#1d4ed8;color:#1d4ed8!important}
+.chx-arqs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chx-arq{display:inline-flex;align-items:center;gap:5px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:20px;padding:3px 10px;font-size:.72rem;color:#334155;text-decoration:none;max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+a.chx-arq:hover{border-color:#1d4ed8;color:#1d4ed8}
+.chx-arq button{background:none;border:none;cursor:pointer;color:#94a3b8;font-size:.72rem;padding:0 0 0 2px;width:auto;height:auto}
+.chx-anx{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.chx-anx img{width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;display:block}
+.chx-aval{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:9px 12px;font-size:.8rem;margin-bottom:10px}
+.chx-grp{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:.76rem;color:#334155;margin:4px 0 10px}
+.chx-grp-i{width:auto;height:auto;display:inline-flex;align-items:center;gap:6px;border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:4px 8px;font-size:.74rem;font-weight:700;color:#0f172a;cursor:pointer;font-family:inherit}
+.chx-grp-i:hover{border-color:#94a3b8}
+.chx-ph{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}
+.chx-pht{width:100%;border-collapse:collapse;font-size:.74rem}
+.chx-pht th{text-align:left;font-size:.62rem;text-transform:uppercase;letter-spacing:.03em;color:#64748b;padding:5px 6px;border-bottom:1px solid #e2e8f0}
+.chx-pht td{padding:6px;border-bottom:1px solid #f1f5f9;vertical-align:top;color:#1e293b}
+</style>
+<script>
+// ══ CHAMADOS ENTRE SETORES (2026-10-20, a pedido do usuário) ══════════════════════════════════════
+// "organizar em FERRAMENTAS uma ABERTURA DE CHAMADO, para um setor abrir chamado para outro setor; só abre
+// chamado usuário de supervisor e acima; sempre um chamado é de um SETOR contra o outro e tem prazo pra ser
+// solucionado". Regras combinadas com o usuário:
+//  - Só Supervisor, Gestor, Diretoria e Administrador veem o menu. Operador nem vê.
+//  - O supervisor (ou acima) do setor que RECEBEU responde pela área.
+//  - Prioridade com prazo padrão: Urgente = 2 dias úteis · Normal = 5 · Não urgente = 10.
+//  - Quem recebe e não consegue cumprir pede MAIS PRAZO (nova data + motivo); quem abriu aprova ou recusa.
+//    Enquanto não é aprovado, vale o prazo atual. A partir da 2ª prorrogação só Gestor/Diretoria aprova.
+//    Todo pedido de prazo fica num histórico (quem pediu, quando, de/para, motivo, quem decidiu, quando).
+//  - Quem recebe marca como resolvido COMPROVANDO: texto ou anexo (pelo menos um dos dois é obrigatório).
+//  - Quem abriu confirma avaliando se a solicitação foi atendida (totalmente / em parte) ou reabre.
+//  - Quem abriu pode encerrar a qualquer momento se não precisar mais (com motivo).
+//  - NADA encerra sozinho — atrasado fica na lista, marcado, e tem a aba "Atrasados" pra ler na reunião.
+//  - NINGUÉM exclui chamado, só administrador. Quem recebe não tira o chamado da lista dele.
+//  - Um chamado pode ir para vários setores: vira um chamado por setor (CH-0012-A, CH-0012-B...), cada um com
+//    o próprio prazo, responsável e situação, ligados entre si.
+//  - E-mail para os supervisores (e acima) do setor quando o chamado é aberto.
+//  - Sem indicadores por enquanto.
+// Gravação: documentos sistema/chamados_AAAA_MM (um por mês de abertura, pra nunca estourar o limite de
+// tamanho do documento) + sistema/chamadosSeq (numeração). Toda alteração é feita numa transação, então duas
+// pessoas mexendo ao mesmo tempo não se sobrescrevem. Não precisa publicar regra nova no banco.
+(function(){
+const CH_PRIO={URGENTE:{l:'Urgente',d:2,cor:'#b91c1c',bg:'#fee2e2'},NORMAL:{l:'Normal',d:5,cor:'#1d4ed8',bg:'#dbeafe'},NAO_URGENTE:{l:'Não urgente',d:10,cor:'#475569',bg:'#f1f5f9'}};
+const CH_TIPOS=['Prazo / atraso','Qualidade / retrabalho','Informação errada ou faltando','Material / compras','Comunicação','Outro'];
+const CH_STATUS={ABERTO:'Aguardando o setor assumir',ANDAMENTO:'Em andamento',RESOLVIDO:'Resolvido — aguardando confirmação',ENCERRADO:'Encerrado'};
+const CH_AVAL={TOTAL:{l:'Atendida',cor:'#15803d',bg:'#dcfce7'},PARCIAL:{l:'Atendida em parte',cor:'#b45309',bg:'#fef3c7'}};
+const CH_INICIO='2026_10';
+const CH_MAX_ARQ=5,CH_MAX_MB=10;
+let _chItens={};          // id -> chamado (todos os meses)
+let _chPorDoc={};         // nome do doc -> {id:chamado}
+let _chWatching={};       // nome do doc -> true
+let _chAba='recebidos';
+let _chBusca='';
+let _chArqs={};           // id do campo de arquivo -> [File]
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const hojeIso=()=>_hojeIso();
+const agora=()=>new Date().toISOString();
+const _ul=()=>(typeof usuarioLogado!=='undefined'&&usuarioLogado)||null;
+const meuNome=()=>(_ul()&&_ul().nomeExibicao)||_getUserCat().email||'—';
+const fmtDH=iso=>{if(!iso)return'';const d=new Date(iso);if(isNaN(d))return'';return d.toLocaleDateString('pt-BR')+' às '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});};
+const duTxt=n=>n+' '+(n===1?'dia útil':'dias úteis');
+const SIGLAS={PCP:'PCP',RH:'RH'};
+const setorLbl=s=>{if(!s)return'—';if(s==='DIRETORIA')return'Diretoria';if(SIGLAS[s])return SIGLAS[s];const t=String(s).toLowerCase();return t.charAt(0).toUpperCase()+t.slice(1);};
+const numTxt=c=>'CH-'+String(c.num||0).padStart(4,'0')+(c.sufixo?'-'+c.sufixo:'');
+function _chSetoresTodos(){return(typeof CATEGORIAS_USUARIOS!=='undefined'?CATEGORIAS_USUARIOS:[]).filter(c=>c!=='ADMINISTRADOR');}
+
+// ── Quem pode o quê ──
+function _chNivelRank(){try{const u=_getUserCat();if(u.isAdm)return 99;return _nivelRank(_nivelDe(u.email));}catch(e){return 0;}}
+function _chPodeAcessar(){try{if(!_ul())return false;return _chNivelRank()>=2;}catch(e){return false;}}
+function _chVeTudo(){try{const u=_getUserCat();return u.isAdm||_nivelDe(u.email)==='DIRETORIA';}catch(e){return false;}}
+function _chIsAdm(){try{return!!_getUserCat().isAdm;}catch(e){return false;}}
+function _chMeusSetores(){try{return _minhasCats().filter(c=>c&&c!=='ADMINISTRADOR');}catch(e){return[];}}
+function _chSouDestino(c){return _chPodeAcessar()&&(_chMeusSetores().includes(c.destino));}
+function _chSouOrigem(c){if(!_chPodeAcessar())return false;const em=_getUserCat().email;return _chMeusSetores().includes(c.origem)||(c.criadoPorEmail&&c.criadoPorEmail===em);}
+// Diretoria e admin podem agir pelos dois lados (ex.: destravar quando o supervisor está fora).
+function _chAgeDestino(c){return _chSouDestino(c)||_chVeTudo();}
+function _chAgeOrigem(c){return _chSouOrigem(c)||_chVeTudo();}
+// A partir da 2ª prorrogação, só Gestor ou acima (do setor que abriu) / Diretoria / admin aprova — evita empurrar prazo sem fim.
+function _chPodeAprovarPrazo(c){if(!_chAgeOrigem(c))return false;if((c.prorrogacoes||0)<1)return true;return _chVeTudo()||_chNivelRank()>=3;}
+function _chVisivel(c){if(!c||c.excluido)return false;return _chVeTudo()||_chSouDestino(c)||_chSouOrigem(c);}
+window._chPodeAcessar=_chPodeAcessar;
+
+// ── Prazo / situação ──
+function _chDiasAtraso(c){const h=hojeIso();return c.prazo&&c.prazo<h?_lpDuEntre(c.prazo,h):0;}
+function _chAtrasado(c){return c.status!=='ENCERRADO'&&c.status!=='RESOLVIDO'&&!c.excluido&&!!c.prazo&&c.prazo<hojeIso();}
+function _chSituacao(c){
+  if(c.status==='ENCERRADO')return{k:'enc',txt:c.encerradoTipo==='SEM_NECESSIDADE'?'Encerrado por quem abriu':'Encerrado',cor:'#16a34a',bg:'#dcfce7'};
+  if(c.status==='RESOLVIDO')return{k:'res',txt:'Aguardando confirmação',cor:'#0369a1',bg:'#e0f2fe'};
+  const h=hojeIso();
+  if(c.prazo<h){const n=_lpDuEntre(c.prazo,h);return{k:'atr',txt:'🔴 Atrasado'+(n?' '+duTxt(n):''),cor:'#b91c1c',bg:'#fee2e2'};}
+  if(c.prazo===h)return{k:'hoje',txt:'Vence hoje',cor:'#c2410c',bg:'#ffedd5'};
+  const n=_lpDuEntre(h,c.prazo);
+  if(n<=1)return{k:'amanha',txt:'Vence amanhã',cor:'#c2410c',bg:'#ffedd5'};
+  return{k:'ok',txt:'Faltam '+duTxt(n),cor:'#475569',bg:'#f1f5f9'};
+}
+// O que está esperando por MIM neste chamado (texto curto) — base das contagens, do destaque e dos avisos.
+function _chMinhaAcao(c){
+  if(!c||c.excluido||c.status==='ENCERRADO')return'';
+  const dest=_chSouDestino(c),orig=_chSouOrigem(c);
+  if(orig&&c.pedidoPrazo)return _chPodeAprovarPrazo(c)?'Responder pedido de mais prazo':'Pedido de prazo — Gestor ou Diretoria decide';
+  if(orig&&c.status==='RESOLVIDO')return'Confirmar a solução';
+  if(dest&&c.status==='ABERTO')return'Assumir o chamado';
+  if(dest&&c.status==='ANDAMENTO'&&!c.pedidoPrazo){const s=_chSituacao(c);if(s.k==='atr'||s.k==='hoje'||s.k==='amanha')return s.k==='atr'?'Resolver — está atrasado':'Resolver — '+s.txt.toLowerCase();}
+  return'';
+}
+
+// ── Banco ──
+function _chDocNome(mes){return'chamados_'+mes;}
+function _chMesesAteHoje(){const out=[];let [y,m]=CH_INICIO.split('_').map(Number);const d=new Date();const yf=d.getFullYear(),mf=d.getMonth()+1;while(y<yf||(y===yf&&m<=mf)){out.push(y+'_'+String(m).padStart(2,'0'));m++;if(m>12){m=1;y++;}}return out;}
+function _chRecalcItens(){const t={};Object.values(_chPorDoc).forEach(o=>Object.assign(t,o||{}));_chItens=t;}
+function _chIniciarWatch(){
+  if(!window._fbChWatch||!_ul()||!_chPodeAcessar())return;
+  _chMesesAteHoje().forEach(mes=>{
+    const nome=_chDocNome(mes);if(_chWatching[nome])return;_chWatching[nome]=true;
+    window._fbChWatch(nome,itens=>{_chPorDoc[nome]=itens||{};_chRecalcItens();_chAoMudar();},e=>{console.warn('chamados watch',e);_chWatching[nome]=false;});
+  });
+}
+setInterval(_chIniciarWatch,4000);
+function _chAoMudar(){
+  try{_chAtualizarBotaoFerr();}catch(e){}
+  try{const el=document.getElementById('ferramenta-chamados');if(el&&el.style.display!=='none'&&el.offsetParent!==null)_chRender();}catch(e){}
+  try{const m=document.getElementById('mo-chamado');if(m&&m.classList.contains('open')&&m.dataset.id)_chRenderDetalhe(m.dataset.id);}catch(e){}
+  try{if(typeof _atualizarBadgeAvisos==='function')_atualizarBadgeAvisos();}catch(e){}
+}
+// Altera UM chamado dentro de uma transação: lê a versão do servidor, aplica fn e grava só aquele chamado.
+async function _chAlterar(id,fn,mes){
+  const c0=_chItens[id];if(!c0&&!mes)throw new Error('Chamado não encontrado');
+  const nome=_chDocNome((c0&&c0.mes)||mes);
+  return window._fbChTx(nome,(itens)=>{
+    const c=itens[id];if(!c)throw new Error('Chamado não encontrado no servidor');
+    const r=fn(c);if(r===false)return null;
+    c.atualizadoEm=agora();
+    return{id,obj:c};
+  });
+}
+function _chHist(c,tipo,txt,anexos){c.hist=Array.isArray(c.hist)?c.hist:[];const h={em:agora(),por:meuNome(),tipo,txt:String(txt||'').slice(0,1500)};if(anexos&&anexos.length)h.anexos=anexos;c.hist.push(h);}
+
+// ── Anexos (foto ou PDF) — sobem pro mesmo Cloudinary dos outros anexos do sistema ──
+window.chArqEscolher=function(campo,input){
+  const atuais=_chArqs[campo]||[];const novos=[...(input.files||[])];input.value='';
+  for(const f of novos){
+    const ok=/^image\//.test(f.type)||f.type==='application/pdf'||/\.pdf$/i.test(f.name);
+    if(!ok){toast(`"${f.name}" não é foto nem PDF`,'terr');continue;}
+    if(f.size>CH_MAX_MB*1024*1024){toast(`"${f.name}" passa de ${CH_MAX_MB} MB`,'terr');continue;}
+    if(atuais.length>=CH_MAX_ARQ){toast(`Máximo de ${CH_MAX_ARQ} arquivos`,'twar');break;}
+    atuais.push(f);
+  }
+  _chArqs[campo]=atuais;_chArqLista(campo);
+};
+window.chArqTirar=function(campo,i){(_chArqs[campo]||[]).splice(i,1);_chArqLista(campo);};
+function _chArqLista(campo){const el=document.getElementById(campo+'-lista');if(!el)return;el.innerHTML=(_chArqs[campo]||[]).map((f,i)=>`<span class="chx-arq">${/^image\//.test(f.type)?'🖼️':'📄'} ${esc(f.name)} <button type="button" onclick="chArqTirar('${campo}',${i})" title="Tirar">✕</button></span>`).join('');}
+function _chArqCampo(campo,label){_chArqs[campo]=[];return`<div class="fg"><label>${label}</label><label class="chx-arq-bt">📎 Anexar foto ou PDF<input type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="chArqEscolher('${campo}',this)"></label><span class="chx-sub" style="margin-left:8px">até ${CH_MAX_ARQ} arquivos de ${CH_MAX_MB} MB</span><div id="${campo}-lista" class="chx-arqs"></div></div>`;}
+async function _chSubirArqs(campo){
+  const fs=_chArqs[campo]||[];if(!fs.length)return[];
+  if(!(cfg.cld_cloud&&cfg.cld_preset))throw new Error('o envio de arquivos não está configurado (Cloudinary)');
+  const out=[];
+  for(const f of fs){
+    const img=/^image\//.test(f.type);
+    const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_chamados');
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/${img?'image':'raw'}/upload`,{method:'POST',body:fd});
+    const d=await r.json();if(!d.secure_url)throw new Error(`não consegui enviar "${f.name}"`);
+    try{if(typeof _cldRegistrarUpload==='function')_cldRegistrarUpload(f.size);}catch(e){}
+    out.push({nome:f.name,url:d.secure_url,img,tam:f.size});
+  }
+  return out;
+}
+function _chAnexosHtml(l){if(!l||!l.length)return'';return`<div class="chx-anx">${l.map(a=>a.img?`<a href="${esc(a.url)}" target="_blank" title="${esc(a.nome)}"><img src="${esc(a.url)}" alt="${esc(a.nome)}"></a>`:`<a class="chx-arq" href="${esc(a.url)}" target="_blank">📄 ${esc(a.nome)}</a>`).join('')}</div>`;}
+
+// ── Menu Ferramentas ──
+function _chAtualizarBotaoFerr(){
+  const b=document.getElementById('ferr-tool-chamados');if(!b)return;
+  const ok=_chPodeAcessar();b.style.display=ok?'':'none';
+  if(!ok)return;
+  const n=Object.values(_chItens).filter(c=>_chVisivel(c)&&_chMinhaAcao(c)).length;
+  const sp=document.getElementById('ferr-ch-badge');if(sp){sp.textContent=n?String(n):'';sp.style.display=n?'':'none';}
+  const bt=document.getElementById('ferr-tool-tarefas');
+  if(bt)bt.style.display=(typeof _chTemFerrOriginal==='function'&&!_chTemFerrOriginal())?'none':'';
+}
+const _ferrOrig=window.ferramentaTool;
+window.ferramentaTool=function(tool,btn){
+  try{if(tool==='tarefas'&&typeof _chTemFerrOriginal==='function'&&!_chTemFerrOriginal()&&_chPodeAcessar()){tool='chamados';btn=document.getElementById('ferr-tool-chamados');}}catch(e){}
+  _ferrOrig(tool,btn);
+  try{_chAtualizarBotaoFerr();}catch(e){}
+  if(tool==='chamados'){
+    if(!_chPodeAcessar()){const el=document.getElementById('ferramenta-chamados');if(el)el.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO — só Supervisor ou acima.</div>';return;}
+    _chIniciarWatch();
+    // Sempre abre em "Recebidos"; se só tiver pendência do lado de quem abriu, abre em "Abertos pelo meu setor".
+    try{const t=Object.values(_chItens).filter(_chVisivel);const pr=t.some(c=>_chSouDestino(c)&&_chMinhaAcao(c)),pe=t.some(c=>_chSouOrigem(c)&&_chMinhaAcao(c));_chAba=(!pr&&pe)?'enviados':'recebidos';}catch(e){_chAba='recebidos';}
+    _chRender();
+  }
+};
+// Supervisor de setor que não tem o menu Ferramentas (ex.: Planejamento, RH) passa a ter, só pra ver Chamados.
+const _tafOrig=window._temAcessoFerramentas;
+window._chTemFerrOriginal=function(){try{return _tafOrig();}catch(e){return false;}};
+window._temAcessoFerramentas=function(){return window._chTemFerrOriginal()||_chPodeAcessar();};
+
+// ── Lista ──
+window.chSetAba=function(a){_chAba=a;_chRender();};
+window.chBuscar=function(v){_chBusca=String(v||'');_chRender(true);};
+function _chListaDaAba(){
+  const todos=Object.values(_chItens).filter(_chVisivel);
+  const b=_chBusca.trim().toLowerCase();
+  let l;
+  if(_chAba==='recebidos')l=todos.filter(c=>c.status!=='ENCERRADO'&&_chSouDestino(c));
+  else if(_chAba==='enviados')l=todos.filter(c=>c.status!=='ENCERRADO'&&_chSouOrigem(c));
+  else if(_chAba==='atrasados')l=todos.filter(_chAtrasado);
+  else if(_chAba==='todos')l=todos.filter(c=>c.status!=='ENCERRADO');
+  else l=todos.filter(c=>c.status==='ENCERRADO');
+  if(b)l=l.filter(c=>[numTxt(c),c.titulo,c.descricao,c.origem,c.destino,c.os,c.criadoPor,c.tipo].join(' ').toLowerCase().includes(b));
+  if(_chAba==='encerrados')l.sort((x,y)=>String(y.encerradoEm||'').localeCompare(String(x.encerradoEm||'')));
+  else if(_chAba==='atrasados')l.sort((x,y)=>(_chDiasAtraso(y)-_chDiasAtraso(x))||String(x.destino).localeCompare(String(y.destino)));
+  else l.sort((x,y)=>{const ax=_chMinhaAcao(x)?0:1,ay=_chMinhaAcao(y)?0:1;return(ax-ay)||String(x.prazo).localeCompare(String(y.prazo))||((x.num||0)-(y.num||0))||String(x.sufixo||'').localeCompare(String(y.sufixo||''));});
+  return l;
+}
+function _chPill(txt,cor,bg){return`<span class="chx-pill" style="color:${cor};background:${bg}">${esc(txt)}</span>`;}
+function _chRender(soLista){
+  const el=document.getElementById('ferramenta-chamados');if(!el)return;
+  const todos=Object.values(_chItens).filter(_chVisivel);
+  const nRec=todos.filter(c=>c.status!=='ENCERRADO'&&_chSouDestino(c)).length;
+  const nEnv=todos.filter(c=>c.status!=='ENCERRADO'&&_chSouOrigem(c)).length;
+  const nAtr=todos.filter(_chAtrasado).length;
+  const aRec=todos.filter(c=>_chSouDestino(c)&&_chMinhaAcao(c)).length;
+  const aEnv=todos.filter(c=>_chSouOrigem(c)&&!_chSouDestino(c)&&_chMinhaAcao(c)).length;
+  const veTudo=_chVeTudo();
+  if(!veTudo&&_chAba==='todos')_chAba='recebidos';
+  const tab=(k,txt,n,alerta)=>`<button class="dash-tab${_chAba===k?' active':''}" onclick="chSetAba('${k}')">${txt}${n?` <span class="chx-n${alerta?' al':''}">${n}</span>`:''}</button>`;
+  const l=_chListaDaAba();
+  const th='padding:9px 10px;font-size:.68rem;text-transform:uppercase;letter-spacing:.03em;color:#64748b;font-weight:700;background:#f8fafc;text-align:left';
+  const enc=_chAba==='encerrados',atrAba=_chAba==='atrasados';
+  const linhas=l.map(c=>{
+    const s=_chSituacao(c),p=CH_PRIO[c.prioridade]||CH_PRIO.NORMAL,acao=_chMinhaAcao(c);
+    const borda=s.k==='atr'?'#dc2626':(s.k==='hoje'||s.k==='amanha')?'#f59e0b':'transparent';
+    const prorr=c.prorrogacoes?`<div class="chx-sub" style="color:#b45309">Prorrogado ${c.prorrogacoes}x · original ${fmtD(c.prazoOriginal)}</div>`:'';
+    const extra=c.pedidoPrazo?`<div class="chx-sub" style="color:#c2410c">⏳ Pediu mais prazo: até ${fmtD(c.pedidoPrazo.novo)}</div>`:prorr;
+    let prazoCol,sitCol,ultCol;
+    if(enc){
+      prazoCol=`<span class="chx-mut">${fmtD(String(c.encerradoEm||'').slice(0,10))}</span>${c.resolvidoNoPrazo===false?`<div class="chx-sub" style="color:#b91c1c">🔴 resolvido com ${duTxt(c.diasAtrasoResolucao||0)} de atraso</div>`:''}${prorr}`;
+      const av=c.avaliacao&&CH_AVAL[c.avaliacao.nota];
+      sitCol=_chPill(s.txt,s.cor,s.bg);ultCol=av?_chPill(av.l,av.cor,av.bg):(c.encerradoTipo==='SEM_NECESSIDADE'?'<span class="chx-sub">Não precisou mais</span>':'');
+    }else{
+      prazoCol=`${fmtD(c.prazo)}${extra}`;
+      sitCol=`${_chPill(s.txt,s.cor,s.bg)}<div class="chx-sub">${esc(c.status==='ABERTO'?'Ninguém assumiu ainda':c.status==='ANDAMENTO'?('Com '+(c.responsavel||'o setor')):'')}</div>`;
+      ultCol=acao?`<span class="chx-acao-tag">👉 ${esc(acao)}</span>`:'';
+    }
+    return`<tr class="chx-tr${acao&&!enc?' chx-acao':''}${s.k==='atr'?' chx-atr':''}" style="box-shadow:inset 3px 0 0 ${borda}" onclick="chAbrir('${c.id}')">
+      <td class="chx-num">${numTxt(c)}</td>
+      <td><div class="chx-1l"><b>${esc(setorLbl(c.origem))}</b> <span class="chx-mut">→</span> <b>${esc(setorLbl(c.destino))}</b></div>${c.grupoSetores&&c.grupoSetores.length>1?`<div class="chx-sub chx-1l">conjunto com ${c.grupoSetores.filter(x=>x!==c.destino).map(setorLbl).join(', ')}</div>`:''}</td>
+      <td><div class="chx-1l" title="${esc(c.titulo)}">${esc(c.titulo)}</div><div class="chx-sub chx-1l">${esc(c.tipo||'')}${c.os?' · OS '+esc(c.os):''} · aberto por ${esc(c.criadoPor||'—')}</div></td>
+      <td>${_chPill(p.l,p.cor,p.bg)}</td>
+      <td class="chx-nw">${prazoCol}</td>
+      <td class="chx-nw">${sitCol}</td>
+      <td>${ultCol}</td>
+    </tr>`;
+  }).join('');
+  const vazio={recebidos:'Nenhum chamado aberto para o seu setor.',enviados:'Seu setor não tem chamado em aberto.',atrasados:'Nenhum chamado atrasado. 👏',todos:'Nenhum chamado em aberto.',encerrados:'Nenhum chamado encerrado ainda.'}[_chAba];
+  const tabela=`<div style="overflow-x:auto"><table class="chx-t"><thead><tr><th style="${th};width:92px">Nº</th><th style="${th};width:190px">De → Para</th><th style="${th}">Assunto</th><th style="${th};width:100px">Prioridade</th><th style="${th};width:150px">${enc?'Encerrado em':'Prazo'}</th><th style="${th};width:175px">Situação</th><th style="${th};width:200px">${enc?'Avaliação':'Precisa de você'}</th></tr></thead><tbody>${linhas||`<tr><td colspan="7" style="text-align:center;padding:30px;color:#94a3b8">${vazio}</td></tr>`}</tbody></table></div>`;
+  if(soLista){const t=document.getElementById('chx-lista');if(t){t.innerHTML=tabela;return;}}
+  el.innerHTML=`<div class="chx-topo">
+      <div class="dash-tabs chx-tabs">${tab('recebidos','📥 Recebidos pelo meu setor',nRec,aRec)}${tab('enviados','📤 Abertos pelo meu setor',nEnv,aEnv)}${tab('atrasados','🔴 Atrasados',nAtr,nAtr)}${veTudo?tab('todos','🏢 Todos os setores',todos.filter(c=>c.status!=='ENCERRADO').length):''}${tab('encerrados','✅ Encerrados',0)}</div>
+      <button type="button" class="dash-btn-conf chx-novo" onclick="chNovo()">📣 Abrir chamado</button>
+    </div>
+    <div class="chx-barra"><input class="fc chx-busca" placeholder="🔎 Buscar por número, assunto, setor ou OS" value="${esc(_chBusca)}" oninput="chBuscar(this.value)">${atrAba?`<button type="button" class="plx-tg" onclick="chImprimirAtrasados()">🖨️ Imprimir para a reunião</button><span class="chx-mut" style="font-size:.72rem">Do mais atrasado para o menos atrasado.</span>`:`<span class="chx-mut" style="font-size:.72rem">${enc?'Os encerrados mais recentes primeiro.':'Ordem: o que precisa de você primeiro, depois o prazo mais próximo.'}</span>`}</div>
+    <div id="chx-lista">${tabela}</div>`;
+}
+
+// ── Atrasados: versão para imprimir / salvar em PDF na reunião ──
+window.chImprimirAtrasados=function(){
+  const l=Object.values(_chItens).filter(c=>_chVisivel(c)&&_chAtrasado(c)).sort((x,y)=>(_chDiasAtraso(y)-_chDiasAtraso(x))||String(x.destino).localeCompare(String(y.destino)));
+  const w=window.open('','_blank');if(!w){toast('O navegador bloqueou a janela de impressão — libere pop-ups para o GCORE','terr');return;}
+  const ult=c=>{const h=(c.prazoHist||[]).filter(x=>x.tipo==='PEDIDO');const u=h[h.length-1];return u?`${fmtD(u.de)} → ${fmtD(u.para)} (${u.decisao==='APROVADO'?'aprovado':u.decisao==='RECUSADO'?'recusado':'aguardando'}): ${esc(u.motivo)}`:'';};
+  const rows=l.map(c=>`<tr><td><b>${numTxt(c)}</b></td><td><b>${esc(setorLbl(c.destino))}</b><br><small>aberto por ${esc(setorLbl(c.origem))}</small></td><td>${esc(c.titulo)}${c.os?'<br><small>OS '+esc(c.os)+'</small>':''}</td><td>${esc((CH_PRIO[c.prioridade]||CH_PRIO.NORMAL).l)}</td><td>${fmtD(c.prazo)}${c.prorrogacoes?'<br><small>original '+fmtD(c.prazoOriginal)+'</small>':''}</td><td class="r">${duTxt(_chDiasAtraso(c))}</td><td>${c.prorrogacoes||0}</td><td>${esc(c.responsavel||'ninguém assumiu')}</td><td><small>${ult(c)}</small></td></tr>`).join('');
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Chamados atrasados — ${fmtD(hojeIso())}</title><style>body{font-family:Arial,sans-serif;color:#111827;margin:24px}h1{font-size:18px;margin:0 0 4px}p{color:#6b7280;font-size:12px;margin:0 0 14px}table{width:100%;border-collapse:collapse;font-size:11px}th{background:#111827;color:#fff;text-align:left;padding:7px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.04em}td{padding:7px 6px;border-bottom:1px solid #e5e7eb;vertical-align:top}tr:nth-child(even) td{background:#f9fafb}td.r{color:#b91c1c;font-weight:700;white-space:nowrap}small{color:#6b7280}@page{size:landscape;margin:12mm}</style></head><body><h1>🔴 Chamados atrasados</h1><p>GCORE - Sistema Granda · ${l.length} ${l.length===1?'chamado':'chamados'} · gerado em ${fmtDH(agora())} por ${esc(meuNome())}</p><table><thead><tr><th>Nº</th><th>Setor responsável</th><th>Assunto</th><th>Prioridade</th><th>Prazo</th><th>Atraso</th><th>Prorrogações</th><th>Responsável</th><th>Último pedido de prazo</th></tr></thead><tbody>${rows||'<tr><td colspan="9">Nenhum chamado atrasado.</td></tr>'}</tbody></table><script>setTimeout(()=>window.print(),300)<\/script></body></html>`);
+  w.document.close();
+};
+
+// ── Abrir chamado ──
+function _chPrazoDe(prio,base){const d=_addDiasUteis(base||hojeIso(),(CH_PRIO[prio]||CH_PRIO.NORMAL).d);return _isoLocal(d);}
+window.chNovo=function(){
+  if(!_chPodeAcessar()){toast('Só Supervisor ou acima abre chamado.','terr');return;}
+  const veTudo=_chVeTudo();
+  const origens=veTudo?['DIRETORIA',..._chSetoresTodos()]:_chMeusSetores();
+  if(!origens.length){toast('Seu usuário não tem setor cadastrado. Fale com o administrador.','terr');return;}
+  const op=a=>a.map(s=>`<option value="${esc(s)}">${esc(setorLbl(s))}</option>`).join('');
+  const prioBt=Object.keys(CH_PRIO).map(k=>`<button type="button" class="plx-tg${k==='NORMAL'?' on':''}" data-prio="${k}" onclick="chEscolherPrio('${k}')">${CH_PRIO[k].l} · ${duTxt(CH_PRIO[k].d)}</button>`).join('');
+  _chModal('mo-chamado-novo','📣 Abrir chamado',`
+    <div class="fg"><label>Setor que abre <span class="r">*</span></label><select id="chn-origem" class="fc" onchange="chAtualizarDestinos()" style="max-width:280px">${op(origens)}</select></div>
+    <div class="fg"><label>Setor(es) que vão resolver <span class="r">*</span> <span class="chx-sub">— pode marcar mais de um</span></label><div class="chx-prio" id="chn-destinos"></div><div class="chx-sub" id="chn-dest-info" style="margin-top:6px"></div></div>
+    <div class="fg"><label>Assunto <span class="r">*</span></label><input id="chn-titulo" class="fc chx-tn" maxlength="120" placeholder="Resumo em uma linha"></div>
+    <div class="chx-grid2">
+      <div class="fg"><label>Tipo <span class="r">*</span></label><select id="chn-tipo" class="fc">${CH_TIPOS.map(t=>`<option>${esc(t)}</option>`).join('')}</select></div>
+      <div class="fg"><label>OS do pedido (se tiver)</label><input id="chn-os" class="fc chx-tn" maxlength="30" placeholder="Ex.: 326"></div>
+    </div>
+    <div class="fg"><label>Prioridade <span class="r">*</span></label><div class="chx-prio" id="chn-prio" data-v="NORMAL">${prioBt}</div><div id="chn-prazo-prev" class="chx-sub" style="margin-top:6px"></div></div>
+    <div class="fg"><label>O que precisa ser resolvido <span class="r">*</span></label><textarea id="chn-desc" class="fc chx-tn" rows="5" maxlength="2000" placeholder="Descreva o problema e o que o outro setor precisa fazer."></textarea></div>
+    ${_chArqCampo('chn-arq','Fotos ou documentos (se tiver)')}
+    <div class="chx-sub" style="margin:-6px 0 12px">Os supervisores do(s) setor(es) recebem um e-mail avisando do chamado.</div>
+    <button type="button" class="chx-btn-main" onclick="chSalvarNovo(this)">📣 Abrir chamado</button>`,600);
+  chAtualizarDestinos();chEscolherPrio('NORMAL');
+};
+window.chAtualizarDestinos=function(){
+  const o=(document.getElementById('chn-origem')||{}).value;const w=document.getElementById('chn-destinos');if(!w)return;
+  const marc=new Set([...w.querySelectorAll('button.on')].map(b=>b.dataset.s));
+  w.innerHTML=_chSetoresTodos().filter(s=>s!==o).map(s=>`<button type="button" class="plx-tg${marc.has(s)?' on':''}" data-s="${esc(s)}" onclick="this.classList.toggle('on');chInfoDestinos()">${esc(setorLbl(s))}</button>`).join('');
+  chInfoDestinos();
+};
+window.chInfoDestinos=function(){
+  const w=document.getElementById('chn-destinos'),el=document.getElementById('chn-dest-info');if(!w||!el)return;
+  const n=w.querySelectorAll('button.on').length;
+  el.textContent=n>1?`Vai abrir ${n} chamados ligados (um para cada setor), cada um com o próprio prazo e responsável.`:'';
+};
+window.chEscolherPrio=function(k){
+  const w=document.getElementById('chn-prio');if(!w)return;w.dataset.v=k;
+  w.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.prio===k));
+  const pv=document.getElementById('chn-prazo-prev');if(pv)pv.innerHTML=`Prazo para resolver: <b>${fmtD(_chPrazoDe(k))}</b>`;
+};
+window.chSalvarNovo=async function(btn){
+  const v=id=>(document.getElementById(id)||{}).value||'';
+  const origem=v('chn-origem'),titulo=v('chn-titulo').trim(),tipo=v('chn-tipo'),os=v('chn-os').trim(),desc=v('chn-desc').trim();
+  const destinos=[...document.querySelectorAll('#chn-destinos button.on')].map(b=>b.dataset.s).filter(s=>s&&s!==origem);
+  const prio=(document.getElementById('chn-prio')||{dataset:{}}).dataset.v||'NORMAL';
+  if(!destinos.length){toast('Escolha pelo menos um setor que vai resolver','terr');return;}
+  if(!titulo){toast('Escreva o assunto','terr');return;}
+  if(!desc){toast('Descreva o que precisa ser resolvido','terr');return;}
+  if(!_chVeTudo()&&!_chMeusSetores().includes(origem)){toast('Você só abre chamado em nome do seu setor','terr');return;}
+  // Chamado repetido: mesma OS já tem chamado em aberto para algum desses setores
+  if(os){
+    const dup=Object.values(_chItens).filter(c=>!c.excluido&&c.status!=='ENCERRADO'&&String(c.os||'').trim().toUpperCase()===os.toUpperCase()&&destinos.includes(c.destino));
+    if(dup.length&&!confirm(`Já existe chamado em aberto para a OS ${os}:\n\n${dup.map(c=>`${numTxt(c)} · ${setorLbl(c.destino)} · ${c.titulo}`).join('\n')}\n\nAbrir outro mesmo assim?`))return;
+  }
+  if(btn){btn.disabled=true;btn.textContent='Abrindo...';}
+  try{
+    const anexos=await _chSubirArqs('chn-arq');
+    const mes=(()=>{const d=new Date();return d.getFullYear()+'_'+String(d.getMonth()+1).padStart(2,'0');})();
+    const prazo=_chPrazoDe(prio);const LET='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lista=destinos.map((destino,i)=>{
+      const c={mes,origem,destino,titulo,tipo,os,descricao:desc,anexos,prioridade:prio,prazo,prazoOriginal:prazo,status:'ABERTO',
+        sufixo:destinos.length>1?LET[i]:'',grupoSetores:destinos,
+        criadoPor:meuNome(),criadoPorEmail:_getUserCat().email,criadoEm:agora(),responsavel:'',pedidoPrazo:null,prorrogacoes:0,prazoHist:[],hist:[]};
+      _chHist(c,'abertura',`Chamado aberto por ${setorLbl(origem)} para ${setorLbl(destino)}${destinos.length>1?' (chamado conjunto com '+destinos.filter(x=>x!==destino).map(setorLbl).join(', ')+')':''} · prioridade ${CH_PRIO[prio].l} · prazo ${fmtD(prazo)}`);
+      return c;
+    });
+    const r=await window._fbChCriar(_chDocNome(mes),lista);
+    _chWatching[_chDocNome(mes)]||_chIniciarWatch();
+    closeM('mo-chamado-novo');
+    toast(`${r.ids.length>1?r.ids.length+' chamados abertos':'Chamado aberto'} — CH-${String(r.num).padStart(4,'0')} ✅`,'tok');
+    _chAba='enviados';_chRender();
+    lista.forEach((c,i)=>{c.id=r.ids[i];c.num=r.num;_chEmailAbertura(c);});
+  }catch(e){console.error(e);toast('Não consegui abrir o chamado: '+(e.message||e),'terr');if(btn){btn.disabled=false;btn.textContent='📣 Abrir chamado';}}
+};
+
+// ── E-mail de abertura (padrão visual da Emissão, mesmo serviço do aviso de OC — não precisa configurar nada) ──
+function _chEmailsDoSetor(setor){
+  const out=new Set();const cats=cfg.usuarioCats||{},ext=cfg.usuarioCatsExtras||{};
+  const emails=new Set([...Object.keys(cats),...Object.keys(ext)]);
+  emails.forEach(em=>{
+    const e=String(em||'').toLowerCase();if(!e||!e.includes('@'))return;
+    const minhas=[cats[em]].concat(Array.isArray(ext[em])?ext[em]:[]);
+    if(!minhas.includes(setor))return;
+    try{if(_nivelRank(_nivelDe(e))<2)return;}catch(x){return;}
+    out.add(e);
+  });
+  return[...out];
+}
+function _chEmailHtml(c){
+  const E=_emailGrandaEsc,p=CH_PRIO[c.prioridade]||CH_PRIO.NORMAL;
+  const anx=(c.anexos||[]).map(a=>_emailGrandaLink('📎 '+E(a.nome),a.url)).join('<br>');
+  return _emailGranda({
+    rotulo:'Chamado entre setores',
+    titulo:E(numTxt(c)+' · '+c.titulo),
+    subtitulo:E(setorLbl(c.origem)+' → '+setorLbl(c.destino)),
+    info:[['Prioridade',E(p.l),c.prioridade==='URGENTE'],['Prazo',E(fmtD(c.prazo)),true],['Aberto por',E(c.criadoPor)]],
+    corpo:_emailGrandaSecao('Chamado',[['Setor que abriu',E(setorLbl(c.origem))],['Setor que vai resolver',E(setorLbl(c.destino))],['Tipo',E(c.tipo)],['OS do pedido',E(c.os)],['Chamado conjunto com',c.grupoSetores&&c.grupoSetores.length>1?E(c.grupoSetores.filter(x=>x!==c.destino).map(setorLbl).join(', ')):''],['Aberto em',E(fmtDH(c.criadoEm))]])
+      +_emailGrandaSecao('O que precisa ser resolvido',[['Descrição',E(c.descricao).replace(/\n/g,'<br>')],['Anexos',anx]])
+      +_emailGrandaTexto(`<br>Entre no GCORE → <b>Ferramentas → Chamados entre setores</b> para assumir o chamado. Se não der para cumprir o prazo, peça mais prazo por lá.`)
+  });
+}
+async function _chEmailAbertura(c){
+  const para=_chEmailsDoSetor(c.destino);
+  if(!para.length){toast(`Ninguém de ${setorLbl(c.destino)} com nível Supervisor ou acima tem e-mail cadastrado — o e-mail do chamado ${numTxt(c)} não foi enviado`,'twar');return;}
+  if(!window.emailjs){toast('O serviço de e-mail não carregou — o chamado foi aberto, mas o e-mail não foi enviado','twar');return;}
+  let reg;
+  try{
+    emailjs.init(cfg.k||'wtJbXi3uGODPaFIqc');
+    await emailjs.send(cfg.s||'service_t99xeta',cfg.t||'template_lzow9ef',{html_content:_chEmailHtml(c),to_email:para.join(','),cc:'',to_name:'Supervisão '+setorLbl(c.destino),os_numero:String(c.os||''),subject:`📣 Chamado ${numTxt(c)} para ${setorLbl(c.destino)} — ${c.titulo}`,name:'GCORE - Sistema Granda',reply_to:c.criadoPorEmail||'grandacv@gmail.com'});
+    reg=`E-mail do chamado enviado para ${para.join(', ')}`;
+  }catch(e){reg=`Não consegui enviar o e-mail do chamado (${(e&&(e.text||e.message))||e})`;toast(reg,'twar');}
+  try{await _chAlterar(c.id,x=>{_chHist(x,'email',reg);},c.mes);}catch(e){console.warn('registro e-mail chamado',e);}
+}
+
+// ── Detalhe ──
+window.chAbrir=function(id){
+  const c=_chItens[id];if(!c||!_chVisivel(c)){toast('Chamado não encontrado','terr');return;}
+  _chModal('mo-chamado','','',760);
+  const m=document.getElementById('mo-chamado');m.dataset.id=id;
+  _chRenderDetalhe(id);
+};
+const HIST_IC={abertura:'📣',assumiu:'✋',comentario:'💬',pedido_prazo:'⏳',prazo_aprovado:'✅',prazo_recusado:'⛔',resolvido:'🛠️',confirmado:'🏁',reaberto:'🔁',sem_necessidade:'🗂️',excluido:'🗑️',email:'📧'};
+function _chPrazoHistHtml(c){
+  const l=c.prazoHist||[];
+  const dec=x=>x.decisao==='APROVADO'?_chPill('Aprovado','#15803d','#dcfce7'):x.decisao==='RECUSADO'?_chPill('Recusado','#b91c1c','#fee2e2'):x.decisao==='SEM_DECISAO'?_chPill('Sem decisão (resolvido antes)','#475569','#f1f5f9'):_chPill('Aguardando decisão','#c2410c','#ffedd5');
+  const linhas=l.map(x=>x.tipo==='REABERTURA'
+    ?`<tr><td>🔁 Reabertura</td><td>${fmtD(x.de)} → <b>${fmtD(x.para)}</b></td><td>${esc(x.por)}<div class="chx-sub">${fmtDH(x.em)}</div></td><td colspan="2">${esc(x.motivo||'')}</td></tr>`
+    :`<tr><td>⏳ Pedido de prazo${x.atrasadoAoPedir?'<div class="chx-sub" style="color:#b91c1c">feito com o prazo já vencido</div>':''}</td><td>${fmtD(x.de)} → <b>${fmtD(x.para)}</b></td><td>${esc(x.pedidoPor)}<div class="chx-sub">${fmtDH(x.pedidoEm)}</div></td><td>${esc(x.motivo)}</td><td>${dec(x)}${x.decididoPor?`<div class="chx-sub">${esc(x.decididoPor)} · ${fmtDH(x.decididoEm)}</div>`:''}${x.obs?`<div class="chx-sub">${esc(x.obs)}</div>`:''}</td></tr>`).join('');
+  return`<div class="chx-hist-t">📅 Histórico de prazos</div>
+    <div class="chx-ph"><div class="chx-sub" style="margin-bottom:6px">Prazo original: <b style="color:#0f172a">${fmtD(c.prazoOriginal)}</b> · prazo atual: <b style="color:#0f172a">${fmtD(c.prazo)}</b> · ${c.prorrogacoes?`prorrogado <b style="color:#b45309">${c.prorrogacoes}x</b>`:'nunca prorrogado'}${c.reaberturas?` · reaberto ${c.reaberturas}x`:''}</div>
+    ${l.length?`<div style="overflow-x:auto"><table class="chx-pht"><thead><tr><th>O quê</th><th>Prazo</th><th>Quem / quando</th><th>Motivo</th><th>Decisão</th></tr></thead><tbody>${linhas}</tbody></table></div>`:''}</div>`;
+}
+function _chRenderDetalhe(id){
+  const c=_chItens[id];const m=document.getElementById('mo-chamado');if(!m)return;
+  const box=m.querySelector('.chx-mbody');const tit=m.querySelector('.chx-mtit');
+  if(!c||c.excluido){if(box)box.innerHTML='<div style="padding:20px;color:#94a3b8">Este chamado foi excluído pelo administrador.</div>';return;}
+  const s=_chSituacao(c),p=CH_PRIO[c.prioridade]||CH_PRIO.NORMAL;
+  if(tit)tit.textContent=numTxt(c)+' · '+c.titulo;
+  const ageD=_chAgeDestino(c),ageO=_chAgeOrigem(c),aberto=c.status!=='ENCERRADO';
+  const bts=[];
+  if(aberto){
+    if(c.pedidoPrazo&&ageO){
+      if(_chPodeAprovarPrazo(c))bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','aprovar_prazo')">✅ Aprovar novo prazo</button>`,`<button class="chx-b no" onclick="chAcao('${id}','recusar_prazo')">⛔ Recusar novo prazo</button>`);
+    }
+    if(c.status==='RESOLVIDO'&&ageO){bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','confirmar')">🏁 Confirmar e avaliar</button>`,`<button class="chx-b no" onclick="chAcao('${id}','reabrir')">🔁 Não resolveu — reabrir</button>`);}
+    if(c.status==='ABERTO'&&ageD)bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','assumir')">✋ Assumir o chamado</button>`);
+    if((c.status==='ABERTO'||c.status==='ANDAMENTO')&&ageD){
+      bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','resolver')">🛠️ Marcar como resolvido</button>`);
+      if(!c.pedidoPrazo)bts.push(`<button class="chx-b" onclick="chAcao('${id}','pedir_prazo')">⏳ Pedir mais prazo</button>`);
+    }
+    if(ageO&&c.status!=='RESOLVIDO')bts.push(`<button class="chx-b" onclick="chAcao('${id}','sem_necessidade')">🗂️ Não preciso mais — encerrar</button>`);
+  }
+  if(ageD||ageO)bts.push(`<button class="chx-b" onclick="chAcao('${id}','comentar')">💬 Comentar</button>`);
+  if(_chIsAdm())bts.push(`<button class="chx-b del" onclick="chAcao('${id}','excluir')">🗑️ Excluir chamado</button>`);
+  const limite=c.pedidoPrazo&&ageO&&!_chPodeAprovarPrazo(c)?`<div class="chx-sub" style="color:#b45309;margin-top:4px">Este chamado já foi prorrogado ${c.prorrogacoes}x — a partir da 2ª prorrogação, só Gestor ou Diretoria aprova.</div>`:'';
+  const pend=c.pedidoPrazo?`<div class="chx-aviso">⏳ <b>${esc(setorLbl(c.destino))} pediu mais prazo</b> — de ${fmtD(c.prazo)} para <b>${fmtD(c.pedidoPrazo.novo)}</b>.<div style="margin-top:3px">Motivo: ${esc(c.pedidoPrazo.motivo)}</div><div class="chx-sub">${esc(c.pedidoPrazo.por)} · ${fmtDH(c.pedidoPrazo.em)} · enquanto ${esc(setorLbl(c.origem))} não responder, vale o prazo atual.</div>${limite}</div>`:'';
+  const sol=(c.status==='RESOLVIDO'||c.status==='ENCERRADO')&&(c.solucao||(c.solucaoAnexos||[]).length)?`<div class="chx-sol"><b>🛠️ Comprovação da solução — ${esc(setorLbl(c.destino))}</b> <span class="chx-sub">${esc(c.resolvidoPor||'')} · ${fmtDH(c.resolvidoEm)}${c.resolvidoNoPrazo===false?` · <b style="color:#b91c1c">🔴 ${duTxt(c.diasAtrasoResolucao||0)} de atraso</b>`:' · no prazo'}</span>${c.solucao?`<div style="white-space:pre-wrap;margin-top:4px">${esc(c.solucao)}</div>`:''}${_chAnexosHtml(c.solucaoAnexos)}</div>`:'';
+  const av=c.avaliacao&&CH_AVAL[c.avaliacao.nota]?`<div class="chx-aval">⭐ <b>Avaliação de ${esc(setorLbl(c.origem))}:</b> ${_chPill(CH_AVAL[c.avaliacao.nota].l,CH_AVAL[c.avaliacao.nota].cor,CH_AVAL[c.avaliacao.nota].bg)} <span class="chx-sub">${esc(c.avaliacao.por)} · ${fmtDH(c.avaliacao.em)}</span>${c.avaliacao.obs?`<div style="margin-top:3px;white-space:pre-wrap">${esc(c.avaliacao.obs)}</div>`:''}</div>`:'';
+  const irmaos=c.grupoSetores&&c.grupoSetores.length>1?Object.values(_chItens).filter(x=>x.num===c.num&&x.id!==c.id&&!x.excluido):[];
+  const grupo=irmaos.length?`<div class="chx-grp"><b>Chamado conjunto:</b> ${irmaos.sort((a,b)=>String(a.sufixo).localeCompare(String(b.sufixo))).map(x=>{const sx=_chSituacao(x);return`<button type="button" class="chx-grp-i" onclick="chAbrir('${x.id}')">${numTxt(x)} · ${esc(setorLbl(x.destino))} ${_chPill(sx.txt,sx.cor,sx.bg)}</button>`;}).join('')}</div>`:'';
+  const hist=(c.hist||[]).slice().reverse().map(h=>`<div class="chx-h"><div class="chx-h-ic">${HIST_IC[h.tipo]||'•'}</div><div style="min-width:0"><div class="chx-sub"><b style="color:#0f172a">${esc(h.por)}</b> · ${fmtDH(h.em)}</div><div style="white-space:pre-wrap">${esc(h.txt)}</div>${_chAnexosHtml(h.anexos)}</div></div>`).join('');
+  const prazoInfo=c.prazoOriginal&&c.prazoOriginal!==c.prazo?` <span class="chx-sub">(original ${fmtD(c.prazoOriginal)})</span>`:'';
+  box.innerHTML=`
+    <div class="chx-info">
+      <div><span>De</span><b>${esc(setorLbl(c.origem))}</b></div>
+      <div><span>Para</span><b>${esc(setorLbl(c.destino))}</b></div>
+      <div><span>Prioridade</span>${_chPill(p.l,p.cor,p.bg)}</div>
+      <div><span>Prazo</span><b>${fmtD(c.prazo)}</b>${prazoInfo}</div>
+      <div><span>Situação</span>${_chPill(s.txt,s.cor,s.bg)}</div>
+      <div><span>Responsável</span><b>${esc(c.responsavel||'Ninguém assumiu ainda')}</b></div>
+    </div>
+    <div class="chx-sub" style="margin:8px 0 4px">${esc(c.tipo||'')}${c.os?' · OS '+esc(c.os):''} · aberto por ${esc(c.criadoPor)} em ${fmtDH(c.criadoEm)} · ${esc(CH_STATUS[c.status]||'')}</div>
+    ${grupo}
+    <div class="chx-desc">${esc(c.descricao)}${_chAnexosHtml(c.anexos)}</div>
+    ${pend}${sol}${av}
+    ${bts.length?`<div class="chx-bts">${bts.join('')}</div>`:''}
+    ${_chPrazoHistHtml(c)}
+    <div class="chx-hist-t">Linha do tempo</div>
+    <div class="chx-hist">${hist||'<div class="chx-sub">Sem registros.</div>'}</div>`;
+}
+
+// ── Ações ──
+const ACOES={
+  assumir:{t:'✋ Assumir o chamado',campo:false},
+  comentar:{t:'💬 Comentar',campo:'Comentário',obrig:true,arq:true},
+  pedir_prazo:{t:'⏳ Pedir mais prazo',campo:'Por que precisa de mais prazo?',obrig:true,data:true},
+  aprovar_prazo:{t:'✅ Aprovar novo prazo',campo:'Observação (opcional)',obrig:false},
+  recusar_prazo:{t:'⛔ Recusar novo prazo',campo:'Por que o prazo não pode ser estendido?',obrig:true},
+  resolver:{t:'🛠️ Marcar como resolvido',campo:'O que foi feito para resolver?',obrig:false,arq:true},
+  confirmar:{t:'🏁 Confirmar e encerrar',campo:'Comentário sobre o atendimento (opcional)',obrig:false},
+  reabrir:{t:'🔁 Reabrir chamado',campo:'O que ainda não foi resolvido?',obrig:true},
+  sem_necessidade:{t:'🗂️ Encerrar — não preciso mais',campo:'Por que não precisa mais?',obrig:true},
+  excluir:{t:'🗑️ Excluir chamado',campo:'Motivo da exclusão',obrig:true}
+};
+window.chAcao=function(id,acao){
+  const c=_chItens[id],a=ACOES[acao];if(!c||!a)return;
+  let html='';
+  if(acao==='pedir_prazo'){const min=_isoLocal(_addDiasUteis(c.prazo<hojeIso()?hojeIso():c.prazo,1));html+=`<div class="fg"><label>Novo prazo <span class="r">*</span></label><input type="date" id="cha-data" class="fc" min="${min}" value="${min}"><div class="chx-sub" style="margin-top:5px">Prazo atual: ${fmtD(c.prazo)}${c.prorrogacoes?` · já prorrogado ${c.prorrogacoes}x (a próxima aprovação é só de Gestor ou Diretoria)`:''}. Quem abriu o chamado (${esc(setorLbl(c.origem))}) precisa aprovar.</div></div>`;}
+  if(acao==='assumir')html+=`<div style="font-size:.82rem;color:#334155;margin-bottom:14px">Você passa a ser o responsável por este chamado em ${esc(setorLbl(c.destino))}. Prazo: <b>${fmtD(c.prazo)}</b>.</div>`;
+  if(acao==='resolver')html+=`<div class="chx-sub" style="margin-bottom:10px">Comprove a solução: escreva o que foi feito <b>e/ou</b> anexe foto ou documento — pelo menos um dos dois é obrigatório.${c.prazo<hojeIso()?` <b style="color:#b91c1c">O prazo venceu em ${fmtD(c.prazo)} — vai ficar registrado como resolvido com ${duTxt(_chDiasAtraso(c))} de atraso.</b>`:''}</div>`;
+  if(acao==='confirmar')html+=`<div class="fg"><label>A solicitação foi atendida? <span class="r">*</span></label><div class="chx-prio" id="cha-aval">${Object.keys(CH_AVAL).map(k=>`<button type="button" class="plx-tg" data-v="${k}" onclick="this.parentNode.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===this))">${k==='TOTAL'?'✅ ':'⚠️ '}${CH_AVAL[k].l}</button>`).join('')}</div><div class="chx-sub" style="margin-top:6px">Se não foi atendida, feche esta janela e use "Não resolveu — reabrir".</div></div>`;
+  if(acao==='reabrir')html+=`<div class="chx-sub" style="margin-bottom:10px">O chamado volta para ${esc(setorLbl(c.destino))} com novo prazo de ${duTxt((CH_PRIO[c.prioridade]||CH_PRIO.NORMAL).d)}: <b>${fmtD(_chPrazoDe(c.prioridade))}</b>.</div>`;
+  if(acao==='excluir')html+=`<div class="chx-aviso" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">O chamado some da lista de todos os setores. Só o administrador pode fazer isso.</div>`;
+  if(a.campo)html+=`<div class="fg"><label>${esc(a.campo)}${a.obrig?' <span class="r">*</span>':''}</label><textarea id="cha-txt" class="fc chx-tn" rows="4" maxlength="1500"></textarea></div>`;
+  if(a.arq)html+=_chArqCampo('cha-arq',acao==='resolver'?'Fotos ou documentos que comprovam':'Anexar (opcional)');
+  html+=`<button type="button" class="chx-btn-main${acao==='excluir'?' del':''}" onclick="chConfirmarAcao('${id}','${acao}',this)">${esc(a.t)}</button>`;
+  _chModal('mo-chamado-acao',a.t,html,500);
+};
+window.chConfirmarAcao=async function(id,acao,btn){
+  const a=ACOES[acao];const txt=((document.getElementById('cha-txt')||{}).value||'').trim();
+  const data=(document.getElementById('cha-data')||{}).value||'';
+  const nArq=(_chArqs['cha-arq']||[]).length;
+  if(a.obrig&&!txt){toast('Preencha: '+a.campo,'terr');return;}
+  if(acao==='resolver'&&!txt&&!nArq){toast('Comprove a solução: escreva o que foi feito ou anexe uma foto/documento','terr');return;}
+  const avalEl=document.querySelector('#cha-aval button.on');const aval=avalEl?avalEl.dataset.v:'';
+  if(acao==='confirmar'&&!aval){toast('Diga se a solicitação foi atendida','terr');return;}
+  if(acao==='pedir_prazo'){const c=_chItens[id];if(!data||data<=c.prazo||data<=hojeIso()){toast('O novo prazo tem que ser depois do prazo atual e de hoje','terr');return;}}
+  if(btn){btn.disabled=true;btn.textContent='Salvando...';}
+  const eu=meuNome();
+  try{
+    const anexos=a.arq?await _chSubirArqs('cha-arq'):[];
+    const _res=await _chAlterar(id,c=>{
+      const fechado=c.status==='ENCERRADO';
+      c.prazoHist=Array.isArray(c.prazoHist)?c.prazoHist:[];
+      const ultPedido=()=>{for(let i=c.prazoHist.length-1;i>=0;i--)if(c.prazoHist[i].tipo==='PEDIDO'&&c.prazoHist[i].decisao==='PENDENTE')return c.prazoHist[i];return null;};
+      switch(acao){
+        case'assumir':if(c.status!=='ABERTO')return false;
+          if(!_chAgeDestino(c))throw new Error('Só o setor que recebeu assume');
+          c.status='ANDAMENTO';c.responsavel=eu;_chHist(c,'assumiu',`${eu} assumiu o chamado por ${setorLbl(c.destino)}`);break;
+        case'comentar':_chHist(c,'comentario',txt,anexos);break;
+        case'pedir_prazo':if(fechado||c.pedidoPrazo)return false;if(!_chAgeDestino(c))throw new Error('Só o setor que recebeu pede prazo');
+          c.pedidoPrazo={novo:data,motivo:txt,por:eu,em:agora(),prazoAntes:c.prazo,atrasadoAoPedir:c.prazo<hojeIso()};
+          c.prazoHist.push({tipo:'PEDIDO',de:c.prazo,para:data,motivo:txt,pedidoPor:eu,pedidoEm:c.pedidoPrazo.em,atrasadoAoPedir:c.pedidoPrazo.atrasadoAoPedir,decisao:'PENDENTE'});
+          if(c.status==='ABERTO'){c.status='ANDAMENTO';if(!c.responsavel)c.responsavel=eu;}
+          _chHist(c,'pedido_prazo',`Pediu mais prazo: de ${fmtD(c.prazo)} para ${fmtD(data)}${c.pedidoPrazo.atrasadoAoPedir?' (pedido feito com o prazo já vencido)':''}\nMotivo: ${txt}`);break;
+        case'aprovar_prazo':case'recusar_prazo':{
+          if(!c.pedidoPrazo)return false;if(!_chPodeAprovarPrazo(c))throw new Error((c.prorrogacoes||0)>=1?'A partir da 2ª prorrogação, só Gestor ou Diretoria aprova':'Só quem abriu decide o prazo');
+          const up=ultPedido();const aprov=acao==='aprovar_prazo';
+          if(up){up.decisao=aprov?'APROVADO':'RECUSADO';up.decididoPor=eu;up.decididoEm=agora();up.obs=txt;}
+          if(aprov){_chHist(c,'prazo_aprovado',`Novo prazo aprovado: ${fmtD(c.prazo)} → ${fmtD(c.pedidoPrazo.novo)}${txt?'\n'+txt:''}`);c.prazo=c.pedidoPrazo.novo;c.prorrogacoes=(c.prorrogacoes||0)+1;}
+          else _chHist(c,'prazo_recusado',`Pedido de prazo recusado — continua valendo ${fmtD(c.prazo)}\nMotivo: ${txt}`);
+          c.ultimaDecisaoPrazo={tipo:aprov?'aprovado':'recusado',em:agora()};c.pedidoPrazo=null;break;}
+        case'resolver':if(fechado||c.status==='RESOLVIDO')return false;if(!_chAgeDestino(c))throw new Error('Só o setor que recebeu resolve');
+          c.status='RESOLVIDO';c.solucao=txt;c.solucaoAnexos=anexos;c.resolvidoEm=agora();c.resolvidoPor=eu;c.resolvidoNoPrazo=hojeIso()<=c.prazo;c.diasAtrasoResolucao=_chDiasAtraso(c);if(!c.responsavel)c.responsavel=eu;
+          if(c.pedidoPrazo){const up=ultPedido();if(up){up.decisao='SEM_DECISAO';}c.pedidoPrazo=null;}
+          _chHist(c,'resolvido',`Marcado como resolvido${c.resolvidoNoPrazo?' (no prazo)':' com '+duTxt(c.diasAtrasoResolucao)+' de atraso'}${txt?'\n'+txt:''}`,anexos);break;
+        case'confirmar':if(c.status!=='RESOLVIDO')return false;if(!_chAgeOrigem(c))throw new Error('Só quem abriu confirma');
+          c.status='ENCERRADO';c.encerradoTipo='CONFIRMADO';c.encerradoEm=agora();c.encerradoPor=eu;c.avaliacao={nota:aval,obs:txt,por:eu,em:agora()};
+          _chHist(c,'confirmado',`Solução confirmada — ${CH_AVAL[aval].l.toLowerCase()} — chamado encerrado${txt?'\n'+txt:''}`);break;
+        case'reabrir':{if(c.status!=='RESOLVIDO')return false;if(!_chAgeOrigem(c))throw new Error('Só quem abriu reabre');
+          const novo=_chPrazoDe(c.prioridade);c.prazoHist.push({tipo:'REABERTURA',de:c.prazo,para:novo,motivo:txt,por:eu,em:agora()});
+          c.status='ANDAMENTO';c.reaberturas=(c.reaberturas||0)+1;c.prazo=novo;c.reabertoEm=agora();
+          _chHist(c,'reaberto',`Reaberto (não atendeu) — novo prazo ${fmtD(c.prazo)}\n${txt}`);break;}
+        case'sem_necessidade':if(fechado)return false;if(!_chAgeOrigem(c))throw new Error('Só quem abriu encerra');
+          if(c.pedidoPrazo){const up=ultPedido();if(up)up.decisao='SEM_DECISAO';}
+          c.status='ENCERRADO';c.encerradoTipo='SEM_NECESSIDADE';c.encerradoEm=agora();c.encerradoPor=eu;c.pedidoPrazo=null;_chHist(c,'sem_necessidade',`Encerrado por quem abriu — não precisa mais\n${txt}`);break;
+        case'excluir':if(!_chIsAdm())throw new Error('Só o administrador exclui chamado');
+          c.excluido=true;c.excluidoEm=agora();c.excluidoPor=eu;_chHist(c,'excluido',`Excluído pelo administrador\n${txt}`);break;
+      }
+    });
+    closeM('mo-chamado-acao');
+    if(!_res){toast('Nada foi alterado — o chamado já tinha sido atualizado por outra pessoa. Veja a situação atual.','twar');return;}
+    if(acao==='excluir')closeM('mo-chamado');
+    toast({assumir:'Chamado assumido ✅',comentar:'Comentário registrado ✅',pedir_prazo:'Pedido de prazo enviado ✅',aprovar_prazo:'Novo prazo aprovado ✅',recusar_prazo:'Pedido de prazo recusado',resolver:'Marcado como resolvido ✅',confirmar:'Chamado encerrado ✅',reabrir:'Chamado reaberto',sem_necessidade:'Chamado encerrado',excluir:'Chamado excluído'}[acao],'tok');
+  }catch(e){console.error(e);toast('Não consegui salvar: '+(e.message||e),'terr');if(btn){btn.disabled=false;btn.textContent=a.t;}}
+};
+
+// ── Janelas (no padrão .mov/.mvmod do sistema; fecham só pelo ✕) ──
+function _chModal(id,titulo,html,larg){
+  let m=document.getElementById(id);
+  if(!m){m=document.createElement('div');m.className='mov';m.id=id;document.body.appendChild(m);}
+  m.innerHTML=`<div class="mvmod" style="width:${larg||520}px;max-width:96vw;max-height:90vh;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px"><h3 class="chx-mtit" style="margin-bottom:0">${esc(titulo)}</h3><button onclick="fecharJanela('${id}')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button></div>
+    <div class="chx-mbody">${html}</div></div>`;
+  openM(id);
+}
+
+// ── Avisos no sino (só pra quem é do setor envolvido; cada acontecimento novo gera um aviso novo) ──
+function _chAvisos(){
+  const out=[];if(!_chPodeAcessar())return out;
+  const h=hojeIso();
+  Object.values(_chItens).forEach(c=>{
+    if(!c||c.excluido||c.status==='ENCERRADO')return;
+    const dest=_chMeusSetores().includes(c.destino),orig=_chMeusSetores().includes(c.origem)||c.criadoPorEmail===_getUserCat().email;
+    const base={automatico:true,tipoAuto:'chamado',chId:c.id,destinatarioTipo:'chamado'};
+    const n=numTxt(c);
+    if(dest){
+      if(c.status==='ABERTO')out.push({...base,id:'ch_'+c.id+'_novo',assunto:'📣 Chamado novo para o seu setor',texto:`${n} de ${setorLbl(c.origem)}: "${c.titulo}" — prazo ${fmtD(c.prazo)}.`});
+      if(c.status!=='RESOLVIDO'){
+        if(c.ultimaDecisaoPrazo)out.push({...base,id:'ch_'+c.id+'_dec_'+c.ultimaDecisaoPrazo.em,assunto:c.ultimaDecisaoPrazo.tipo==='aprovado'?'✅ Novo prazo aprovado':'⛔ Pedido de prazo recusado',texto:`${n} "${c.titulo}" — prazo agora: ${fmtD(c.prazo)}.`});
+        if(c.reabertoEm)out.push({...base,id:'ch_'+c.id+'_reab_'+c.reabertoEm,assunto:'🔁 Chamado reaberto',texto:`${n} "${c.titulo}" voltou — ${setorLbl(c.origem)} disse que não foi resolvido. Novo prazo ${fmtD(c.prazo)}.`});
+        if(!c.pedidoPrazo){
+          if(c.prazo<h)out.push({...base,id:'ch_'+c.id+'_atr_'+c.prazo,assunto:'🔴 Chamado atrasado',texto:`${n} "${c.titulo}" venceu em ${fmtD(c.prazo)}. Resolva ou peça mais prazo.`});
+          else if(c.prazo===h||_lpDuEntre(h,c.prazo)<=1)out.push({...base,id:'ch_'+c.id+'_vence_'+c.prazo,assunto:'⏰ Chamado vencendo',texto:`${n} "${c.titulo}" vence ${c.prazo===h?'hoje':'amanhã'} (${fmtD(c.prazo)}).`});
+        }
+      }
+    }
+    if(orig){
+      if(c.pedidoPrazo&&_chPodeAprovarPrazo(c))out.push({...base,id:'ch_'+c.id+'_pp_'+c.pedidoPrazo.em,assunto:'⏳ Pedido de mais prazo',texto:`${setorLbl(c.destino)} pediu para passar o ${n} "${c.titulo}" de ${fmtD(c.prazo)} para ${fmtD(c.pedidoPrazo.novo)}. Aprove ou recuse.`});
+      if(c.status==='RESOLVIDO')out.push({...base,id:'ch_'+c.id+'_res_'+c.resolvidoEm,assunto:'🛠️ Chamado resolvido — confirme',texto:`${setorLbl(c.destino)} marcou o ${n} "${c.titulo}" como resolvido. Confira a comprovação e avalie.`});
+    }
+  });
+  return out;
+}
+const _autoOrig=window._avisosAutomaticos;
+window._avisosAutomaticos=function(){const o=_autoOrig();try{return o.concat(_chAvisos());}catch(e){console.warn('avisos chamados',e);return o;}};
+const _aplicOrig=window._avisoAplicavelPara;
+window._avisoAplicavelPara=function(av){if(av&&av.tipoAuto==='chamado')return true;return _aplicOrig.apply(this,arguments);};
+const _destOrig=window._avisoDestino;
+window._avisoDestino=function(av){
+  if(av&&av.tipoAuto==='chamado'){if(!_chPodeAcessar())return null;return{label:'Abrir chamado',go:()=>{_avisoFecharPaineis();setSection('cat:FERRAMENTAS');setTimeout(()=>{try{ferramentaTool('chamados',document.getElementById('ferr-tool-chamados'));chAbrir(av.chId);}catch(e){}},250);}};}
+  return _destOrig.apply(this,arguments);
+};
+window._chItensDebug=()=>_chItens;
+})();
 
 </script>
 </body>
