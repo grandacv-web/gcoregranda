@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-23.4';</script>
+<script>const APP_BUILD_VERSION='2026-10-23.6';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -43815,7 +43815,15 @@ function _rhValorPorRotulo(root,rotulos){
 // aqui como TEXTO fixo pra mostrar na tela (usuário pediu "já coloca no sistema o horário
 // padrão... esse é o padrão da empresa") e como FALLBACK de minutos previstos quando um arquivo
 // não tiver essa tabela reconhecível (em vez de previsto virar 0 e mascarar tudo como falta).
-const RH_HORARIO_PADRAO_EMPRESA={
+// ── HORÁRIO NOVO (2026-10-23, a pedido do Guilherme pelo RH): a partir de 01/10/2026 o padrão de TODOS os
+// colaboradores (menos quem tem horário personalizado) passa a ser Seg a Sex 07:45–12:00 e 13:00–17:33.
+// Vale na LEITURA dos dias (_rhDiasDoFuncionario → _rhAplicarPadraoEmpresa): os dias de 01/10 em diante são
+// recalculados com esse horário, ignorando a escala que veio dentro do arquivo do Hponto; dias até 30/09
+// continuam exatamente como foram calculados no upload (horário antigo 07:30–17:18). O dado bruto do Hponto
+// (rhPontoMeses) nunca é alterado. Feriados continuam fora: status do Hponto (folga/feriado/férias/dsr) e,
+// além disso, os feriados do calendário do sistema (nacionais + Ponta Grossa, getFeriadosTodos).
+const RH_HORARIO_NOVO_DESDE='2026-10-01';
+const RH_HORARIO_PADRAO_ANTERIOR={
   seg:{entrada:'07:30',saidaAlmoco:'12:00',voltaAlmoco:'13:00',saida:'17:18'},
   ter:{entrada:'07:30',saidaAlmoco:'12:00',voltaAlmoco:'13:00',saida:'17:18'},
   qua:{entrada:'07:30',saidaAlmoco:'12:00',voltaAlmoco:'13:00',saida:'17:18'},
@@ -43823,8 +43831,27 @@ const RH_HORARIO_PADRAO_EMPRESA={
   sex:{entrada:'07:30',saidaAlmoco:'12:00',voltaAlmoco:'13:00',saida:'17:18'},
   sab:null,dom:null
 };
+const RH_HORARIO_PADRAO_EMPRESA={
+  seg:{entrada:'07:45',saidaAlmoco:'12:00',voltaAlmoco:'13:00',saida:'17:33'},
+  ter:{entrada:'07:45',saidaAlmoco:'12:00',voltaAlmoco:'13:00',saida:'17:33'},
+  qua:{entrada:'07:45',saidaAlmoco:'12:00',voltaAlmoco:'13:00',saida:'17:33'},
+  qui:{entrada:'07:45',saidaAlmoco:'12:00',voltaAlmoco:'13:00',saida:'17:33'},
+  sex:{entrada:'07:45',saidaAlmoco:'12:00',voltaAlmoco:'13:00',saida:'17:33'},
+  sab:null,dom:null
+};
 function _rhHorarioPadraoTexto(){
-  return'Seg a Sex: 07:30–12:00 e 13:00–17:18 · Sáb e Dom: sem expediente';
+  return'Seg a Sex: 07:45–12:00 e 13:00–17:33 · Sáb, Dom e feriados: sem expediente · vale desde 01/10/2026 (antes: 07:30–12:00 e 13:00–17:18)';
+}
+let _rhPadraoNovoCalc=null;
+function _rhAplicarPadraoEmpresa(d){
+  if(!d||!d.data||d.data<RH_HORARIO_NOVO_DESDE)return d;
+  const st=(d.status||'').toLowerCase();
+  if(_RH_STATUS_NAO_UTIL.some(k=>st.includes(k))||d.atestado||d.dispensaJustificada||d.afastamento||d.desligado)return d;
+  let feriado=false;
+  try{feriado=getFeriadosTodos(+d.data.slice(0,4)).has(d.data);}catch(e){}
+  if(feriado)return Object.assign({},d,{previstoMin:0,atrasoEntradaMin:0,atrasoAlmocoMin:0,atrasoMin:0,incompleto:false,status:d.status||'Feriado'});
+  if(!_rhPadraoNovoCalc)_rhPadraoNovoCalc=_rhHorarioDeEscala(RH_HORARIO_PADRAO_EMPRESA);
+  return _rhRecalcularComHorarioPersonalizado(d,_rhPadraoNovoCalc);
 }
 // Minutos previstos por dia da semana, derivados do RH_HORARIO_PADRAO_EMPRESA acima —
 // usado como fallback (ver _rhParseHorarioSemanal).
@@ -44165,7 +44192,7 @@ async function _rhParseArquivo(file){
     diag.push(`⚙️ Usando o horário PERSONALIZADO cadastrado no RH pra este colaborador (botão "Horários deste Colaborador"): ${descEscala.texto}.`);
   }else if(horario.fonte==='arquivo'){
     diag.push(`Escala semanal (Horário de Trabalho) lida do arquivo: ${descEscala.texto}.`);
-    if(descEscala.divergencias.length)diag.push(`⚠️ Escala do arquivo diferente da oficial da empresa (07:30–12:00 e 13:00–17:18) em: ${descEscala.divergencias.join('; ')}. Isso muda direto as "Horas Perdidas" calculadas pra este colaborador — confira se é isso mesmo ou se é erro de cadastro no Hponto.`);
+    if(descEscala.divergencias.length)diag.push(`⚠️ Escala do arquivo diferente da oficial da empresa (Seg a Sex 07:45–12:00 e 13:00–17:33) em: ${descEscala.divergencias.join('; ')}. Isso muda direto as "Horas Perdidas" calculadas pra este colaborador — confira se é isso mesmo ou se é erro de cadastro no Hponto.`);
   }else{
     diag.push(`⚠️ Não achei a tabela "Horário de Trabalho" no arquivo — usando o horário oficial da empresa como padrão: ${descEscala.texto}.`);
   }
@@ -44372,6 +44399,7 @@ function _rhDiasDoFuncionario(funcionarioId,anoMesFiltro,dataDe,dataAte){
       if(dataAte&&data>dataAte)return;
       let d={data,...diasMap[data]};
       if(horarioPersonalizadoCalc)d=_rhRecalcularComHorarioPersonalizado(d,horarioPersonalizadoCalc);
+      else d=_rhAplicarPadraoEmpresa(d);
       if(dataDesligamento&&data>dataDesligamento){
         d=Object.assign({},d,{previstoMin:0,desligado:true,status:'Desligado'});
       }else{
@@ -45363,10 +45391,10 @@ function rhAbrirModalHorario(funcionarioId){
     return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f1f5f9">
       <label style="width:88px;font-size:.78rem;font-weight:700;color:#334155;flex-shrink:0"><input type="checkbox" id="rh-h-${abr}-off" onchange="_rhHorarioToggleDia('${abr}')" ${semExp?'checked':''} style="margin-right:5px;vertical-align:middle">${label}</label>
       <div id="rh-h-${abr}-campos" style="display:${semExp?'none':'flex'};gap:6px;flex:1;flex-wrap:wrap">
-        <input type="time" id="rh-h-${abr}-entrada" value="${h&&h.entrada||'07:30'}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 7px;font-size:.76rem;font-family:inherit">
+        <input type="time" id="rh-h-${abr}-entrada" value="${h&&h.entrada||'07:45'}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 7px;font-size:.76rem;font-family:inherit">
         <input type="time" id="rh-h-${abr}-saidaAlmoco" value="${h&&h.saidaAlmoco||'12:00'}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 7px;font-size:.76rem;font-family:inherit">
         <input type="time" id="rh-h-${abr}-voltaAlmoco" value="${h&&h.voltaAlmoco||'13:00'}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 7px;font-size:.76rem;font-family:inherit">
-        <input type="time" id="rh-h-${abr}-saida" value="${h&&h.saida||'17:18'}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 7px;font-size:.76rem;font-family:inherit">
+        <input type="time" id="rh-h-${abr}-saida" value="${h&&h.saida||'17:33'}" style="border:1px solid #e5e7eb;border-radius:6px;padding:5px 7px;font-size:.76rem;font-family:inherit">
       </div>
       ${semExp?'<span style="font-size:.72rem;color:#94a3b8;flex:1">Sem expediente</span>':''}
     </div>`;
