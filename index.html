@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-26.2';</script>
+<script>const APP_BUILD_VERSION='2026-10-26.9';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -63063,6 +63063,7 @@ function getOrcamentistas(){
   Object.entries(cats).forEach(([email,cat])=>{
     if(cat!=='COMERCIAL')return;
     const nome=(nomes[email]||email).toUpperCase().trim();
+    if(/(^|\s)TESTE(\s|$)/.test(nome))return; // usuário de teste (ex.: PAÇOCA TESTE) não entra nos indicadores (2026-10-26)
     if(nome&&tipos[nome]==='ORCAMENTISTA')r.add(nome);
   });
   return[...r].sort();
@@ -63139,7 +63140,7 @@ function _crmOrcamentosDados(orcNome){
   for(let i=5;i>=0;i--){
     const d=new Date(yA,mA-i,1),y=d.getFullYear(),m=d.getMonth();
     const o=orcC.filter(c=>noMes(c,y,m)),r=revC.filter(c=>noMes(c,y,m));
-    meses.push({rot:d.toLocaleDateString('pt-BR',{month:'short',year:'2-digit'}).replace('.',''),qtdO:o.length,medO:media(o),qtdR:r.length,medR:media(r)});
+    meses.push({rot:MESES_PT[m+1]+' '+y,qtdO:o.length,medO:media(o),qtdR:r.length,medR:media(r)});
   }
   const filaOrc=fila.filter(c=>c.tipo==='orcamento'),filaRev=fila.filter(c=>c.tipo==='revisao_orcamento');
   return{orcC,revC,orcMes,revMes,medOrcMes:media(orcMes),medOrcTotal:media(orcC),medRevMes:media(revMes),medRevTotal:media(revC),
@@ -63164,24 +63165,66 @@ function _crmOrcamentosHtml(orcNome){
   try{d=_crmOrcamentosDados(orcNome);}catch(err){console.error('_crmOrcamentosDados',err);return'<div style="padding:20px;color:#dc2626">Erro ao calcular o indicador de orçamentos.</div>';}
   const esc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;');
   const tiles=[
+    ...(orcNome&&typeof _orcavResumo==='function'?[(()=>{
+      // Assertividade do mês corrente (2026-10-26) — mesma conta do bloco 🎯 lá em cima
+      const h=new Date(),r=_orcavResumo(_orcavRegistros(orcNome),h.getFullYear(),h.getMonth()+1);
+      const ok=r.pct!=null&&r.pct>=ORCAV_META;
+      return{cls:r.pct==null?'az':ok?'vd':'ro',icon:'🎯',label:'Assertividade no Mês',val:r.pct==null?'—':r.pct+'%',
+        sub:r.pct==null?`Meta ${ORCAV_META}% · nenhum orçamento avaliado ainda`:`Meta ${ORCAV_META}% · ${ok?'✅ comissão liberada':'❌ sem comissão'} · ${r.contados.length} ${_plural(r.contados.length,'avaliado','avaliados')}`};})()]:[]),
     {cls:'az',icon:'⏱️',label:'Tempo Médio de Orçamentação',val:_fmtDuracaoUtil(d.medOrcMes),sub:`Este mês · histórico: ${_fmtDuracaoUtil(d.medOrcTotal)}`},
     {cls:'vd',icon:'✅',label:'Orçamentos Concluídos',val:String(d.orcMes.length),sub:`Este mês · histórico: ${d.orcC.length}`},
-    {cls:'la',icon:'🔁',label:'Revisões Concluídas',val:String(d.revMes.length),sub:`Este mês · tempo médio ${_fmtDuracaoUtil(d.medRevMes)}`},
+    orcNome?(()=>{const lim=(typeof ORCAV_PRAZO_DU!=='undefined'?ORCAV_PRAZO_DU:2)*86400000;const noPz=d.orcMes.filter(c=>c.msUteis<=lim).length;return{cls:'la',icon:'⏰',label:'Entregues no Prazo',val:d.orcMes.length?Math.round(noPz/d.orcMes.length*100)+'%':'—',sub:`Este mês · ${noPz} de ${d.orcMes.length} em até ${typeof ORCAV_PRAZO_DU!=='undefined'?ORCAV_PRAZO_DU:2} dias úteis`};})()
+    :{cls:'la',icon:'🔁',label:'Revisões Concluídas',val:String(d.revMes.length),sub:`Este mês · tempo médio ${_fmtDuracaoUtil(d.medRevMes)}`},
     {cls:'ro',icon:'📥',label:'Fila de Orçamentos Agora',val:String(d.filaOrc.length),sub:d.filaOrc.length?`Mais antigo esperando há ${_fmtDuracaoUtil(d.maisAntigoMs)}`:'Fila vazia 🎉'}
   ];
   const tilesHtml=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:16px">${tiles.map(c=>`<div class="gc-kp ${c.cls}">
       <div class="gc-kl">${c.icon} ${c.label}</div><div class="gc-kv">${c.val}</div><div class="gc-ks">${c.sub}</div></div>`).join('')}</div>`;
   const mesesHtml=`<div class="dash-card" style="min-width:0"><div class="dash-sec-title">📅 Últimos 6 meses</div><div style="overflow-x:auto;margin-top:8px">
-    <table class="dash-table"><thead><tr><th>Mês</th><th>Orçamentos concluídos</th><th>Tempo médio</th><th>Revisões concluídas</th><th>Tempo médio revisão</th></tr></thead>
-    <tbody>${d.meses.map(m=>`<tr><td style="font-weight:600;text-transform:capitalize;white-space:nowrap">${m.rot}</td><td>${m.qtdO}</td><td>${_fmtDuracaoUtil(m.medO)}</td><td>${m.qtdR}</td><td>${_fmtDuracaoUtil(m.medR)}</td></tr>`).join('')}</tbody></table></div></div>`;
+    <table class="dash-table"><thead><tr><th>Mês</th><th>Orçamentos concluídos</th><th>Tempo médio</th>${orcNome?'':'<th>Revisões concluídas</th><th>Tempo médio revisão</th>'}</tr></thead>
+    <tbody>${d.meses.map(m=>`<tr><td style="font-weight:600;text-transform:capitalize;white-space:nowrap">${m.rot}</td><td>${m.qtdO}</td><td>${_fmtDuracaoUtil(m.medO)}</td>${orcNome?'':`<td>${m.qtdR}</td><td>${_fmtDuracaoUtil(m.medR)}</td>`}</tr>`).join('')}</tbody></table></div></div>`;
+  // Tela do orçamentista (2026-10-26): o tempo em REVISÃO é do gestor, não do orçamentista — só ORÇAMENTO aqui.
+  if(orcNome){d.filaRev=[];d.ultimos=d.ultimos.filter(c=>c.tipo==='orcamento');}
   const filaHtml=`<div class="dash-card" style="min-width:0"><div class="dash-sec-title">📥 Fila agora (ordem de chegada)</div><div style="overflow-x:auto;margin-top:8px">
     <table class="dash-table"><thead><tr><th>Negócio</th><th>Etapa</th><th>Responsável</th><th>Entrou em</th><th>Esperando há</th></tr></thead>
     <tbody>${[...d.filaOrc,...d.filaRev].length?[...d.filaOrc,...d.filaRev].map(c=>`<tr onclick="crmAbrirCard('${c.e.id}')" style="cursor:pointer"><td style="font-weight:600">${esc(c.e.nome||'—')}</td><td>${c.tipo==='orcamento'?'Orçamento':'Revisão'}</td><td>${esc(c.e.responsavel||'—')}</td><td>${_fmtDataHora(new Date(c.iniMs).toISOString())}</td><td>${_fmtDuracaoUtil(_msUteisEntre(c.iniMs,Date.now()))}</td></tr>`).join(''):'<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:14px">Nenhum orçamento na fila.</td></tr>'}</tbody></table></div></div>`;
   const ultHtml=`<div class="dash-card"><div class="dash-sec-title">🧾 Últimos concluídos${orcNome?' por '+esc(orcNome):''}</div><div style="overflow-x:auto;margin-top:8px">
     <table class="dash-table"><thead><tr><th>Negócio</th><th>Tipo</th><th>Entrou</th><th>Saiu</th><th>Tempo</th><th>Foi para</th>${orcNome?'':'<th>Quem fez</th>'}<th>Proposta (líq.)</th></tr></thead>
     <tbody>${d.ultimos.length?d.ultimos.map(c=>`<tr onclick="crmAbrirCard('${c.e.id}')" style="cursor:pointer"><td style="font-weight:600">${esc(c.e.nome||'—')}</td><td>${c.tipo==='orcamento'?'Orçamento':'Revisão'}</td><td>${_fmtDataHora(new Date(c.iniMs).toISOString())}</td><td>${_fmtDataHora(new Date(c.fimMs).toISOString())}</td><td style="font-weight:700">${_fmtDuracaoUtil(c.msUteis)}</td><td>${esc(c.destino)}</td>${orcNome?'':`<td>${esc(c.quem||'—')}</td>`}<td>${c.e.propostaValorLiquido?fmtR(c.e.propostaValorLiquido):'—'}</td></tr>`).join(''):'<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:14px">Nenhum orçamento concluído registrado ainda.</td></tr>'}</tbody></table></div>
-    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px">Tempo = da entrada na etapa ORÇAMENTO (ou REVISÃO DE ORÇAMENTO) até o card sair dela, contando só dias úteis. Baseado no histórico de mudança de etapa de cada card.</div></div>`;
-  return tilesHtml+`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,720px),1fr));gap:14px;margin-bottom:14px">${mesesHtml}${filaHtml}</div>`+ultHtml;
+    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px">${orcNome?'Tempo = da entrada do card em ORÇAMENTO até ele ir para REVISÃO DE ORÇAMENTO, contando só dias úteis. O tempo que o card fica na revisão não conta para o orçamentista.':'Tempo = da entrada na etapa ORÇAMENTO (ou REVISÃO DE ORÇAMENTO) até o card sair dela, contando só dias úteis. Baseado no histórico de mudança de etapa de cada card.'}</div></div>`;
+  let valHtml='';
+  if(orcNome){try{valHtml=_orcValorOrcadoHtml(d.orcC);}catch(err){console.error('valor orçado',err);}}
+  return tilesHtml+valHtml+`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,720px),1fr));gap:14px;margin-bottom:14px">${mesesHtml}${filaHtml}</div>`+ultHtml;
+}
+// ══ VALOR ORÇADO POR MÊS (2026-10-26, a pedido do usuário: "o valor do que orçou por mes, bruto,
+// operacionais e liquidos separados"). Fonte: a proposta do card do CRM no momento em que o card saiu
+// de ORÇAMENTO (última entrada de propostaHistorico até a saída; senão os valores atuais do card).
+// Mesmo card orçado 2x no mesmo mês (ex.: devolvido e refeito) conta 1x — vale o último valor.
+// Mês = mês em que o orçamentista entregou (saída de ORÇAMENTO). Só leitura.
+function _orcValorDoCiclo(c){
+  const e=c.e,lim=(c.fimMs||Date.now())+60000;
+  const hs=(e.propostaHistorico||[]).filter(h=>{const t=Date.parse(h&&h.anexadoEm||'');return!isNaN(t)&&t<=lim&&(h.valorBruto>0||h.valorLiquido>0);});
+  const h=hs[hs.length-1];
+  if(h){const b=+h.valorBruto||0,o=+h.valorOperacionais||0;return{b,o,l:+h.valorLiquido||Math.max(0,b-o-(+h.valorDesconto||0))};}
+  const b=+e.propostaValorBruto||0,o=+e.propostaOperacionais||0;
+  return{b,o,l:+e.propostaValorLiquido||Math.max(0,b-o)};
+}
+function _orcValorOrcadoHtml(ciclos){
+  const agora=new Date(),meses=[];
+  for(let i=5;i>=0;i--){const dt=new Date(agora.getFullYear(),agora.getMonth()-i,1);meses.push({y:dt.getFullYear(),m:dt.getMonth(),rot:MESES_PT[dt.getMonth()+1]+' '+dt.getFullYear(),porCard:{}});}
+  (ciclos||[]).forEach(c=>{if(c.fimMs==null)return;const dt=new Date(c.fimMs);const mm=meses.find(x=>x.y===dt.getFullYear()&&x.m===dt.getMonth());if(!mm)return;
+    const ant=mm.porCard[c.e.id];if(!ant||ant.fimMs<c.fimMs)mm.porCard[c.e.id]={fimMs:c.fimMs,v:_orcValorDoCiclo(c)};});
+  const linhas=meses.map(mm=>{const l=Object.values(mm.porCard);return{rot:mm.rot,qtd:l.length,semValor:l.filter(x=>!(x.v.b>0)).length,b:l.reduce((s,x)=>s+x.v.b,0),o:l.reduce((s,x)=>s+x.v.o,0),l:l.reduce((s,x)=>s+x.v.l,0)};}).reverse();
+  const at=linhas[0];
+  const mini=(lbl,val,cor)=>`<div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:9px;padding:8px 12px;min-width:0"><div style="color:var(--ink4);font-size:.68rem">${lbl}</div><div style="font-weight:800;color:${cor||'var(--ink)'};font-size:1rem;white-space:nowrap">${val}</div></div>`;
+  return`<div class="dash-card" style="margin-bottom:14px">
+    <div class="dash-sec-title">💰 Valor orçado por mês</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px">
+      ${mini(at.rot+' · Bruto',fmtR(at.b))}${mini('Operacionais',fmtR(at.o))}${mini('Líquido',fmtR(at.l),'#15803d')}${mini('Orçamentos entregues',String(at.qtd))}
+    </div>
+    <div style="overflow-x:auto;margin-top:12px"><table class="dash-table"><thead><tr><th>Mês</th><th>Orçamentos</th><th>Bruto</th><th>Operacionais</th><th>Líquido</th></tr></thead>
+    <tbody>${linhas.map(x=>`<tr><td style="font-weight:700;white-space:nowrap">${x.rot}</td><td style="white-space:nowrap">${x.qtd}${x.semValor?` <span style="color:#b45309;font-size:.7rem">(${x.semValor} sem valor no card)</span>`:''}</td><td style="white-space:nowrap">${fmtR(x.b)}</td><td style="white-space:nowrap">${fmtR(x.o)}</td><td style="white-space:nowrap;font-weight:800;color:#15803d">${fmtR(x.l)}</td></tr>`).join('')}</tbody></table></div>
+    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px">Valores da proposta do card no momento em que o orçamento foi para a revisão, no mês em que o orçamentista entregou. Card orçado de novo no mesmo mês conta uma vez só, com o último valor.</div>
+  </div>`;
 }
 // ══ COBERTURA DE META (2026-09-24, a pedido do usuário) ══
 // Por vendedor, no mês corrente: meta (cfg.metasMes — SEM o fallback de getMetaMes, que devolve
@@ -63559,7 +63602,7 @@ function renderCrmIndicadores(){
   const _meuNomeCrmInd=usuarioLogado?.nomeExibicao||'';
   const todosVendTabs=_isAdmCrmInd?todosVend:todosVend.filter(v=>vendedorMatch(v,_meuNomeCrmInd));
   // Abas de ORÇAMENTISTA (2026-09-24) — valor 'ORC:<NOME>'; admin vê todas, orçamentista só a dele.
-  const todosOrcTabs=getOrcamentistas().filter(o=>_isAdmCrmInd||vendedorMatch(o,_meuNomeCrmInd)||vendedorMatch(_meuNomeCrmInd,o));
+  const todosOrcTabs=[]; // 2026-10-26: abas do orçamentista foram para Orçamentos → 🎯 Indicadores do orçamentista
   const _ehAbaOrc=String(crmIndVendIdx).startsWith('ORC:');
   if(_ehAbaOrc&&!todosOrcTabs.includes(String(crmIndVendIdx).slice(4)))crmIndVendIdx='GERAL';
   else if(!_isAdmCrmInd&&!_ehAbaOrc&&crmIndVendIdx!=='GERAL'&&!vendedorMatch(crmIndVendIdx,_meuNomeCrmInd)){
@@ -64801,7 +64844,7 @@ setSection=function(sec){const r=_lptSetSectionOrig.apply(this,arguments);try{_l
 // histórico de ponto dentro do modal do RH e o ano das Férias.
 const _MESX_MESES=['','JANEIRO','FEVEREIRO','MARÇO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO','SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'];
 // <select>s que já tinham "Todos os meses" (ou "Ano todo") como opção — viram mês + botão
-const _MESX_SELECTS=['vnd-fil-mes','f-mes','rh-bh-mes','fech-mes','fnr-fil-mes','com-per-mes','semoc-mes'];
+const _MESX_SELECTS=['vnd-fil-mes','f-mes','rh-bh-mes','fech-mes','fnr-fil-mes','com-per-mes','semoc-mes','orcav-mes'];
 const _mesxPad=n=>String(n).padStart(2,'0');
 // Navegadores ◀ ▶ — fn: nome da função da seta (acha o container), hide: botões a esconder,
 // lbl: id do rótulo (ou 'entre' = o elemento entre as setas), tipo: 'ym' {y,m} | 'm' (1..12 ou
@@ -68065,6 +68108,7 @@ function orcxRender(){
   if(orc2.view==='editor'&&orc2.doc)return _orc2RenderEditor(c);
   if(orc2.view==='novo')return _orc2RenderNovo(c);
   _orc8Watch();
+  if(orc2.view==='orcamentista'){if(_orcavPodeVer())return _orcavRenderTela(c);orc2.view='lista';}
   if(orc2.view==='painel'){if(_getUserCat().isAdm)return _orc8RenderPainel(c);orc2.view='lista';}
   if(orc2.view==='config'&&!_getUserCat().isAdm)orc2.view='lista';
   if(orc2.view==='config')return _orc2RenderConfig(c);
@@ -68114,15 +68158,19 @@ function _orc2RenderLista(c){
 const ORC2_LS_SUB='gcore_orc2_subaba';
 function orc2SubAba(){if(orc2._sub==null){try{orc2._sub=localStorage.getItem(ORC2_LS_SUB)||'';}catch(e){orc2._sub='';}if(['','completo','produto','operacionais'].indexOf(orc2._sub)<0)orc2._sub='';}return orc2._sub;}
 function orc2SetSubAba(k){
+  if(k==='orcamentista'){if(!_orcavPodeVer()){toast('Só administrador e orçamentista acessam os indicadores do orçamentista','terr');return;}orc2.view='orcamentista';orc2Render();return;}
   if(k==='painel'){if(!_getUserCat().isAdm){toast('Só administrador acessa o painel','terr');return;}orc2.view='painel';orc2Render();return;}
   if(k==='config'){if(!_getUserCat().isAdm){toast('Só administrador acessa matérias-primas e preços','terr');return;}orc2.view='config';orc2Render();return;}
   orc2._sub=k;try{localStorage.setItem(ORC2_LS_SUB,k);}catch(e){}
   orc3.imp=null;orc2.view='lista';orc2Render();
 }
 function _orc2HtmlSubAbas(){
-  const at=orc2.view==='config'?'config':orc2.view==='painel'?'painel':orc2SubAba();
-  const b=(k,l)=>`<button type="button" class="dash-tab-sub ${at===k?'active':''}" data-sub="${k}" onclick="orc2SetSubAba('${k}')">${l}${k==='config'||k==='painel'?'':' <span class="cnt"></span>'}</button>`;
-  return`<div class="dash-tabs-sub orc2-subabas" style="flex-wrap:wrap;gap:18px">${b('','Todos')}${b('completo','📦🚚 Produto e instalação')}${b('produto','📦 Só produto')}${b('operacionais','🚚 Só operacionais')}${_getUserCat().isAdm?`<span style="flex:1"></span>${b('painel','📊 Painel')}${b('config','⚙️ Matérias-primas e preços')}`:''}</div>`;
+  const at=orc2.view==='config'?'config':orc2.view==='painel'?'painel':orc2.view==='orcamentista'?'orcamentista':orc2SubAba();
+  const b=(k,l)=>`<button type="button" class="dash-tab-sub ${at===k?'active':''}" data-sub="${k}" onclick="orc2SetSubAba('${k}')">${l}${k==='config'||k==='painel'||k==='orcamentista'?'':' <span class="cnt"></span>'}</button>`;
+  // Indicadores do orçamentista (2026-10-26): saíram do CRM → Indicadores e vieram pra cá (admin + orçamentistas)
+  let _vInd=false;try{_vInd=_orcavPodeVer();}catch(e){}
+  const _adm=_getUserCat().isAdm;
+  return`<div class="dash-tabs-sub orc2-subabas" style="flex-wrap:wrap;gap:18px">${b('','Todos')}${b('completo','📦🚚 Produto e instalação')}${b('produto','📦 Só produto')}${b('operacionais','🚚 Só operacionais')}${_vInd||_adm?'<span style="flex:1"></span>':''}${_vInd?b('orcamentista','🎯 Indicadores do orçamentista'):''}${_adm?`${b('painel','📊 Painel')}${b('config','⚙️ Matérias-primas e preços')}`:''}</div>`;
 }
 function orc2Filtro(k,v){orc2.filtro[k]=v;orc2Render();if(k==='busca'){const i=document.getElementById('orc2-busca');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}}}
 
@@ -69704,6 +69752,414 @@ function _crmzCorpo(e){
     const _r=_crmRenderCard;
     _crmRenderCard=function(e){const r=_r.apply(this,arguments);try{_crmzCabecalho(e);_crmzCorpo(e);}catch(err){console.error('card limpo',err);}return r;};
   }
+})();
+
+
+// ══ AVALIAÇÃO DO ORÇAMENTISTA NA REVISÃO DE ORÇAMENTO (2026-10-26, a pedido do usuário) ══════════
+// "quando eu abro o card no revisão de orçamentos eu preciso avaliar como foi aquela cotação do
+// orçamentista... se ele tiver assertividade acima de 80% eu pago comissão pra ele".
+// Regras combinadas com o usuário:
+//  • Tirar o card da REVISÃO DE ORÇAMENTO (admin) abre a avaliação — sem avaliar o card não sai.
+//    🟢 Aprovado de primeira = 100 · 🟡 Ajuste leve = 50 · 🔴 Devolvido = 0 · ⚪ Não conta (cliente mudou).
+//  • Prazo: 2 dias úteis da entrada em ORÇAMENTO até a entrada na REVISÃO. Atrasou = −20 pontos.
+//  • Devolvido (🔴): quando volta e está certo, NÃO conta ponto; se errar de novo, conta mais um 0.
+//  • Assertividade do mês = média das notas que contam. 80% ou mais = comissão liberada.
+//  • Só admin tira o card da REVISÃO pra frente; orçamento pronto (não-admin) vai sempre pra REVISÃO.
+//  • Avaliação fica gravada no card (e.avalOrc[]) e aparece pro admin e pros orçamentistas.
+// Tudo embrulha funções existentes com try/catch — se algo falhar, o funil segue como antes.
+const ORCAV_PRAZO_DU=2,ORCAV_META=80,ORCAV_PEN_ATRASO=20;
+const ORCAV_RES={
+  verde:{t:'Aprovado de primeira',d:'Estava tudo certo, vai para o cliente.',ic:'🟢',nota:100,cor:'#15803d',bg:'#f0fdf4',bd:'#86efac'},
+  amarelo:{t:'Aprovado com ajuste leve',d:'Você corrigiu algo pequeno, sem mudar o preço de forma relevante.',ic:'🟡',nota:50,cor:'#b45309',bg:'#fffbeb',bd:'#fcd34d'},
+  vermelho:{t:'Devolvido para correção',d:'Tinha erro que mudaria o preço ou o escopo. Volta para ORÇAMENTO.',ic:'🔴',nota:0,cor:'#dc2626',bg:'#fef2f2',bd:'#fca5a5'},
+  nao_conta:{t:'Não conta',d:'O cliente mudou o pedido — não é erro do orçamentista.',ic:'⚪',nota:null,cor:'#475569',bg:'#f8fafc',bd:'#cbd5e1'}
+};
+const ORCAV_ERROS=[['item','Faltou item'],['medida','Medida ou quantidade errada'],['preco','Matéria-prima ou preço errado'],['operacionais','Operacionais (frete, instalação, elevação, ART)'],['outro','Outro']];
+let _orcavMes=new Date().getMonth()+1,_orcavAno=new Date().getFullYear(),_orcavPend=null;
+function _orcavEsc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function _orcavIsAdm(){try{return!!_getUserCat().isAdm;}catch(err){return false;}}
+function _orcavIdx(k){try{return _crmEtapas().findIndex(x=>x.key===k);}catch(err){return-1;}}
+function _orcavLabel(k){try{return(_crmEtapas().find(x=>x.key===k)||{}).label||k;}catch(err){return k;}}
+function _orcavCanon(n){
+  if(!n)return'';
+  try{const orcs=getOrcamentistas();return orcs.find(o=>vendedorMatch(o,n)||vendedorMatch(n,o))||'';}catch(err){return'';}
+}
+function _orcavSouOrcamentista(){
+  const n=(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
+  return!!_orcavCanon(n);
+}
+function _orcavPodeVer(){return _orcavIsAdm()||_orcavSouOrcamentista();}
+function _orcavNomeEhAdmin(n){
+  if(!n)return false;
+  try{
+    const nomes=cfg.usuarioNomes||{},cats=cfg.usuarioCats||{};
+    for(const email in nomes){const nm=nomes[email];if(nm&&(vendedorMatch(nm,n)||vendedorMatch(n,nm))&&(cats[email]==='ADMINISTRADOR'||_ADMINS.includes(String(email).toLowerCase())))return true;}
+    const eu=(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
+    if(eu&&_orcavIsAdm()&&(vendedorMatch(eu,n)||vendedorMatch(n,eu)))return true;
+  }catch(err){}
+  return false;
+}
+// Ciclo atual: entrada em ORÇAMENTO → entrada na REVISÃO (e.etapaEntradaEm, card está na revisão)
+function _orcavCiclo(e){
+  const lab=k=>String(_orcavLabel(k)||'').trim().toUpperCase();
+  const lOrc=lab('orcamento'),lRev=lab('revisao_orcamento');
+  const re=/^Etapa alterada:\s*(.+?)\s*→\s*(.+?)\s*$/;
+  const fim=Date.parse(e.etapaEntradaEm||'')||null;
+  const evs=(e.timeline||[]).filter(ev=>ev&&ev.sistema&&ev.em&&re.test(ev.texto||'')).map(ev=>{const m=ev.texto.match(re);return{t:Date.parse(ev.em),de:m[1].trim().toUpperCase(),para:m[2].trim().toUpperCase(),autor:ev.autor||''};}).filter(x=>!isNaN(x.t)).sort((a,b)=>a.t-b.t);
+  let ini=null,autorRev='';
+  evs.forEach(x=>{if(fim!=null&&x.t>fim+5000)return;if(x.para===lOrc)ini=x.t;if(x.para===lRev)autorRev=x.autor;});
+  if(ini==null&&evs.length&&evs[0].de===lOrc){const c=Date.parse(e.criadoEm||'');if(!isNaN(c))ini=c;}
+  const msUteis=(ini!=null&&fim!=null&&fim>ini)?_msUteisEntre(ini,fim):null;
+  let quem=_orcavCanon(autorRev);
+  if(!quem&&ini!=null){
+    const props=(e.propostaHistorico||[]).filter(pp=>{const t=Date.parse(pp.anexadoEm||'');return t>=ini&&t<=(fim||Date.now())+60000;});
+    for(let i=props.length-1;i>=0&&!quem;i--)quem=_orcavCanon(props[i].anexadoPor);
+  }
+  // Orçamento do sistema ligado ao card, salvo por um orçamentista dentro do ciclo
+  if(!quem&&ini!=null){try{
+    (_orc5OrcDoCard(e.id)||[]).some(o=>{const t=Date.parse(o.atualizadoEm||o.dataSalvo||'');if(isNaN(t)||t<ini||t>(fim||Date.now())+60000)return false;quem=_orcavCanon(o.atualizadoPor||o.por||'');return!!quem;});
+  }catch(err){}}
+  const ult=(e.avalOrc||[]).slice(-1)[0];
+  if(!quem&&ult&&ult.resultado==='vermelho')quem=ult.orcamentista||'';
+  // Quem colocou na REVISÃO foi um admin (ex.: o Guilherme fez o orçamento pra agilizar) e não há
+  // sinal de orçamentista no ciclo → não tem avaliação (2026-10-26, a pedido do usuário).
+  const feitoPorAdmin=!quem&&!!autorRev&&_orcavNomeEhAdmin(autorRev);
+  // Sem histórico nenhum de quem mandou pra revisão: se só existe 1 orçamentista, sugere ele
+  if(!quem&&!autorRev){try{const o=getOrcamentistas();if(o.length===1)quem=o[0];}catch(err){}}
+  return{ini,fim,msUteis,atrasado:msUteis!=null&&msUteis>ORCAV_PRAZO_DU*86400000,quem,feitoPorAdmin,autorRev};
+}
+function _orcavEhCorrecao(e){const ult=(e.avalOrc||[]).slice(-1)[0];return!!(ult&&ult.resultado==='vermelho');}
+function _orcavConta(e,res){if(res==='nao_conta')return false;if(_orcavEhCorrecao(e))return res==='vermelho';return true;}
+function _orcavNota(e,res,atrasado){
+  if(!_orcavConta(e,res))return null;
+  const base=ORCAV_RES[res].nota;
+  return(atrasado&&res!=='vermelho')?Math.max(0,base-ORCAV_PEN_ATRASO):base;
+}
+// ── Janela de avaliação ──
+function _orcavAbrir(e,destKey){
+  const ciclo=_orcavCiclo(e);
+  const iRev=_orcavIdx('revisao_orcamento');
+  const frente=_orcavIdx(destKey)>iRev;
+  _orcavPend={id:e.id,dest:destKey,frente,ciclo,res:'',correcao:_orcavEhCorrecao(e)};
+  const old=document.getElementById('orcav-modal');if(old)old.remove();
+  const modal=document.createElement('div');modal.id='orcav-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10050;display:flex;align-items:center;justify-content:center;padding:20px';
+  _dynModalSemFechaClique(modal);
+  let orcs=[];try{orcs=getOrcamentistas();}catch(err){}
+  const prazoTxt=ciclo.msUteis==null
+    ?'<span style="color:#64748b">Sem registro da entrada em ORÇAMENTO — o prazo não entra na nota.</span>'
+    :ciclo.atrasado
+      ?`<span style="color:#dc2626;font-weight:800">⏰ Fora do prazo</span> — ficou pronto em ${_fmtDuracaoUtil(ciclo.msUteis)} (prazo: ${ORCAV_PRAZO_DU} dias úteis). Perde ${ORCAV_PEN_ATRASO} pontos.`
+      :`<span style="color:#15803d;font-weight:800">✅ No prazo</span> — ficou pronto em ${_fmtDuracaoUtil(ciclo.msUteis)} (prazo: ${ORCAV_PRAZO_DU} dias úteis).`;
+  const opc=Object.entries(ORCAV_RES).map(([k,r])=>{
+    const bloq=!frente&&(k==='verde'||k==='amarelo');
+    return`<button type="button" class="orcav-opt" data-k="${k}" ${bloq?'disabled title="Para aprovar, mova o card para frente"':''} onclick="_orcavEscolher('${k}')" style="text-align:left;border:2px solid ${r.bd};background:#fff;border-radius:12px;padding:10px 12px;cursor:${bloq?'not-allowed':'pointer'};opacity:${bloq?'.4':'1'};font-family:inherit;display:flex;gap:10px;align-items:flex-start">
+      <span style="font-size:1.3rem;line-height:1">${r.ic}</span>
+      <span><b style="font-size:.86rem;color:${r.cor}">${r.t}</b><br><span style="font-size:.72rem;color:#64748b">${r.d}</span></span>
+    </button>`;}).join('');
+  modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:20px 22px;max-width:620px;width:100%;max-height:92vh;overflow:auto">
+    <div style="font-size:1rem;font-weight:800;color:#101B3D">🎯 Avaliar o orçamento — ${_orcavEsc(e.nome||'')}</div>
+    <div style="font-size:.76rem;color:#64748b;margin:4px 0 12px">Antes de tirar o card da REVISÃO DE ORÇAMENTO, diga como veio o trabalho do orçamentista.</div>
+    ${_orcavPend.correcao?`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:8px 12px;font-size:.76rem;color:#991b1b;margin-bottom:10px">🔁 Este orçamento já foi devolvido uma vez. Se agora estiver certo, não conta ponto. Se errar de novo, conta mais um 0.</div>`:''}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+      <label style="font-size:.76rem;font-weight:700;color:#334155">Orçamentista</label>
+      <select id="orcav-quem" style="padding:7px 10px;border:1.5px solid #cbd5e1;border-radius:8px;font-size:.8rem;font-weight:700;font-family:inherit">
+        <option value="">Selecione</option>${orcs.map(o=>`<option value="${_orcavEsc(o)}" ${o===ciclo.quem?'selected':''}>${_orcavEsc(o)}</option>`).join('')}
+      </select>
+    </div>
+    <div style="font-size:.76rem;color:#334155;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;margin-bottom:12px">${prazoTxt}</div>
+    <div style="display:flex;flex-direction:column;gap:8px">${opc}</div>
+    <div id="orcav-erros-box" style="display:none;margin-top:12px">
+      <div style="font-size:.76rem;font-weight:800;color:#334155;margin-bottom:6px">Onde estava o erro?</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${ORCAV_ERROS.map(([k,t])=>`<label style="display:inline-flex;align-items:center;gap:6px;border:1.5px solid #e2e8f0;border-radius:999px;padding:5px 12px;font-size:.76rem;cursor:pointer;white-space:nowrap"><input type="checkbox" class="orcav-erro" value="${k}" style="accent-color:#e91e63">${t}</label>`).join('')}</div>
+    </div>
+    <div id="orcav-com-box" style="display:none;margin-top:12px">
+      <div id="orcav-com-lbl" style="font-size:.76rem;font-weight:800;color:#334155;margin-bottom:6px">Comentário</div>
+      <textarea id="orcav-com" class="no-upper" rows="2" placeholder="Uma linha explicando o que aconteceu" style="width:100%;box-sizing:border-box;border:1.5px solid #e5e7eb;border-radius:8px;padding:8px 10px;font-size:.82rem;font-family:inherit;resize:vertical"></textarea>
+    </div>
+    <div id="orcav-nota" style="margin-top:12px;font-size:.82rem;font-weight:800;color:#101B3D;min-height:1.2em"></div>
+    <div id="orcav-erro" style="font-size:.78rem;color:#dc2626;margin-top:6px;min-height:1em"></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button type="button" onclick="_orcavCancelar()" class="dash-btn-conf" style="background:#94a3b8;flex:1">Cancelar</button>
+      <button type="button" id="orcav-ok" onclick="_orcavConfirmar()" class="dash-btn-conf" style="background:#101B3D;flex:2">Escolha uma opção</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+}
+function _orcavEscolher(k){
+  const p=_orcavPend;if(!p)return;
+  if(!p.frente&&(k==='verde'||k==='amarelo'))return;
+  p.res=k;
+  const e=crmEmpresas.find(x=>x.id===p.id);
+  document.querySelectorAll('#orcav-modal .orcav-opt').forEach(b=>{
+    const r=ORCAV_RES[b.dataset.k],on=b.dataset.k===k;
+    b.style.background=on?r.bg:'#fff';b.style.boxShadow=on?'0 0 0 2px '+r.cor:'none';
+  });
+  const comErro=k==='amarelo'||k==='vermelho';
+  document.getElementById('orcav-erros-box').style.display=comErro?'':'none';
+  document.getElementById('orcav-com-box').style.display=k==='verde'?'none':'';
+  document.getElementById('orcav-com-lbl').textContent=k==='verde'?'Comentário':'Comentário (obrigatório)';
+  const nota=e?_orcavNota(e,k,p.ciclo.atrasado):null;
+  const nEl=document.getElementById('orcav-nota');
+  if(k==='nao_conta')nEl.textContent='Este orçamento não entra na conta da assertividade.';
+  else if(nota==null)nEl.textContent='Correção aprovada — não conta ponto (só o erro anterior conta).';
+  else nEl.innerHTML=`Nota deste orçamento: <span style="color:${nota>=ORCAV_META?'#15803d':'#dc2626'}">${nota}%</span>${p.ciclo.atrasado&&k!=='vermelho'?' <span style="font-weight:600;color:#64748b">(perdeu '+ORCAV_PEN_ATRASO+' pontos pelo prazo)</span>':''}`;
+  const alvo=_orcavAlvo(p);
+  document.getElementById('orcav-ok').textContent=k==='vermelho'?'Salvar e devolver para '+_orcavLabel('orcamento'):'Salvar e mover para '+_orcavLabel(alvo);
+  document.getElementById('orcav-erro').textContent='';
+}
+function _orcavAlvo(p){return p.res==='vermelho'?'orcamento':p.dest;}
+function _orcavCancelar(){
+  const m=document.getElementById('orcav-modal');if(m)m.remove();
+  _orcavPend=null;
+  try{renderCrmKanban();}catch(err){}
+}
+async function _orcavConfirmar(){
+  const p=_orcavPend;if(!p)return;
+  const erro=document.getElementById('orcav-erro');
+  const e=crmEmpresas.find(x=>x.id===p.id);if(!e){_orcavCancelar();return;}
+  if(!p.res){erro.textContent='Escolha uma das opções.';return;}
+  const quem=document.getElementById('orcav-quem')?.value||'';
+  const erros=[...document.querySelectorAll('#orcav-modal .orcav-erro:checked')].map(x=>x.value);
+  const com=(document.getElementById('orcav-com')?.value||'').trim();
+  if(p.res!=='nao_conta'&&!quem){erro.textContent='Selecione o orçamentista que fez o orçamento.';return;}
+  if((p.res==='amarelo'||p.res==='vermelho')&&!erros.length){erro.textContent='Marque onde estava o erro.';return;}
+  if(p.res!=='verde'&&!com){erro.textContent='Escreva o comentário (uma linha já basta).';return;}
+  const alvo=_orcavAlvo(p);
+  try{_crmCardPropostaSincronizar(e);}catch(err){}
+  try{
+    if((e.tipoNegocio||'Venda')==='Venda'&&_crmEtapaExigeProposta(alvo)&&!(e.propostaValorBruto>0)){
+      erro.textContent='Antes de aprovar, falta o valor bruto da proposta no card (aba Proposta).';return;
+    }
+  }catch(err){}
+  const agora=new Date().toISOString(),por=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  const conta=_orcavConta(e,p.res),nota=_orcavNota(e,p.res,p.ciclo.atrasado);
+  const reg={id:'av_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),em:agora,por,orcamentista:quem,resultado:p.res,erros,comentario:com,
+    conta,nota,correcao:!!p.correcao,atrasado:!!p.ciclo.atrasado,msUteis:p.ciclo.msUteis,
+    iniEm:p.ciclo.ini!=null?new Date(p.ciclo.ini).toISOString():null,fimEm:p.ciclo.fim!=null?new Date(p.ciclo.fim).toISOString():null,prazoDu:ORCAV_PRAZO_DU};
+  const r=ORCAV_RES[p.res];
+  if(!Array.isArray(e.avalOrc))e.avalOrc=[];
+  e.avalOrc.push(reg);
+  if(!e.timeline)e.timeline=[];
+  const txtNota=nota==null?'não conta':'nota '+nota+'%';
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:`🎯 Avaliação do orçamento${quem?' ('+quem+')':''}: ${r.ic} ${r.t} · ${txtNota}${reg.atrasado&&conta&&p.res!=='vermelho'?' · fora do prazo':''}${erros.length?' · erro: '+erros.map(k=>(ORCAV_ERROS.find(x=>x[0]===k)||[k,k])[1]).join(', '):''}${com?' — '+com:''}`,autor:por,em:agora,sistema:true});
+  const m=document.getElementById('orcav-modal');if(m)m.remove();
+  _orcavPend=null;
+  window._orcavOk=true;
+  const pularCk=alvo==='orcamento'; // devolução não reabre o checklist "O que orçar"
+  if(pularCk)window._crmChecklistOrcOk=true;
+  try{await crmMoverEtapa(e.id,alvo);}catch(err){console.error('orcav mover',err);}
+  finally{window._orcavOk=false;if(pularCk)window._crmChecklistOrcOk=false;}
+  if(e.etapa!==alvo){
+    // Não moveu (ex.: abriu o checklist ou outra trava) — a avaliação fica gravada mesmo assim
+    // só se o card saiu da revisão; senão desfaz pra não contar 2x.
+    if(e.etapa==='revisao_orcamento'){
+      e.avalOrc=e.avalOrc.filter(x=>x.id!==reg.id);
+      e.timeline=e.timeline.filter(x=>!(x.em===agora&&String(x.texto).indexOf('🎯 Avaliação do orçamento')===0));
+      toast('A avaliação não foi salva porque o card não saiu da revisão.','twar');
+    }else{try{await _crmSalvarEmpresaObj(e);}catch(err){}}
+  }else toast(`🎯 Avaliação salva: ${r.ic} ${r.t}${nota!=null?' · '+nota+'%':''}`,'tok');
+}
+function _orcavAbrirDoCard(id){
+  const e=crmEmpresas.find(x=>x.id===id);if(!e||e.etapa!=='revisao_orcamento')return;
+  const et=_crmEtapas(),iRev=_orcavIdx('revisao_orcamento');
+  const dest=et.some(x=>x.key==='orcamento_aprovado')?'orcamento_aprovado':(et[iRev+1]||{}).key;
+  if(!dest){toast('Não há etapa depois da REVISÃO DE ORÇAMENTO no funil','terr');return;}
+  crmMoverEtapa(e.id,dest); // passa pela mesma regra do arrastar (avaliação obrigatória ou dispensa se foi o gestor)
+}
+// ── Bloco no card (aba Geral) — só admin e orçamentistas veem ──
+function _orcavRegHtml(a){
+  const r=ORCAV_RES[a.resultado]||ORCAV_RES.nao_conta;
+  const nota=a.nota==null?(a.resultado==='nao_conta'?'não conta':'correção — não conta'):a.nota+'%';
+  const errs=(a.erros||[]).map(k=>(ORCAV_ERROS.find(x=>x[0]===k)||[k,k])[1]);
+  return`<div style="background:#fff;border:1px solid ${r.bd};border-left:4px solid ${r.cor};border-radius:8px;padding:7px 10px;margin-top:6px">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.78rem"><b style="color:${r.cor}">${r.ic} ${r.t}</b><span style="font-weight:800;color:#101B3D;white-space:nowrap">${nota}</span>${a.atrasado&&a.conta&&a.resultado!=='vermelho'?'<span style="font-size:.66rem;font-weight:800;background:#fee2e2;color:#991b1b;border-radius:999px;padding:1px 8px;white-space:nowrap">⏰ fora do prazo</span>':''}</div>
+    ${errs.length?`<div style="font-size:.72rem;color:#334155;margin-top:3px">Erro: ${_orcavEsc(errs.join(', '))}</div>`:''}
+    ${a.comentario?`<div style="font-size:.74rem;color:#1e293b;margin-top:3px">“${_orcavEsc(a.comentario)}”</div>`:''}
+    <div style="font-size:.66rem;color:#94a3b8;margin-top:3px">${_orcavEsc(a.orcamentista||'—')} · avaliado por ${_orcavEsc(a.por||'—')} em ${_fmtDataHora(a.em)}</div>
+  </div>`;
+}
+function _orcavBlocoCard(e){
+  if(!_orcavPodeVer())return'';
+  const lista=Array.isArray(e.avalOrc)?e.avalOrc:[];
+  const naRev=e.etapa==='revisao_orcamento'&&!e.fechamento,adm=_orcavIsAdm();
+  if(!lista.length&&!(naRev&&adm))return'';
+  let _orcavCic=null;if(naRev&&adm){try{_orcavCic=_orcavCiclo(e);}catch(err){}}
+  return`<div id="orcav-bloco" style="background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:10px;padding:10px 12px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap">
+      <div style="font-size:.74rem;font-weight:800;color:#5b21b6;text-transform:uppercase;letter-spacing:.04em">🎯 Avaliação do orçamento</div>
+      ${naRev&&adm?`<button type="button" onclick="_orcavAbrirDoCard('${e.id}')" style="background:#5b21b6;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:.74rem;font-weight:800;cursor:pointer;white-space:nowrap">${_orcavCic&&_orcavCic.feitoPorAdmin?'✅ Aprovar':'🎯 Avaliar e aprovar'}</button>`:''}
+    </div>
+    ${naRev&&adm?`<div style="font-size:.72rem;color:#5b21b6;margin-top:4px">${_orcavCic&&_orcavCic.feitoPorAdmin?'Orçamento feito por '+_orcavEsc(_orcavCic.autorRev)+' — não precisa de avaliação.':'Revise o orçamento e avalie o trabalho do orçamentista'+(_orcavCic&&_orcavCic.quem?' ('+_orcavEsc(_orcavCic.quem)+')':'')+' antes de mandar para o cliente.'}</div>`:''}
+    ${lista.slice().reverse().map(_orcavRegHtml).join('')}
+  </div>`;
+}
+// ── Cálculo da assertividade ──
+function _orcavRegistros(orcNome){
+  const out=[];
+  (crmEmpresas||[]).forEach(e=>(Array.isArray(e.avalOrc)?e.avalOrc:[]).forEach(a=>{
+    if(!a||!a.em)return;
+    if(orcNome&&!(a.orcamentista&&(vendedorMatch(orcNome,a.orcamentista)||vendedorMatch(a.orcamentista,orcNome))))return;
+    out.push({e,a,t:Date.parse(a.em)});
+  }));
+  return out.filter(x=>!isNaN(x.t)).sort((x,y)=>y.t-x.t);
+}
+function _orcavResumo(regs,y,m){
+  const doPer=regs.filter(x=>{const d=new Date(x.t);return d.getFullYear()===y&&(!m||d.getMonth()+1===m);});
+  const contados=doPer.filter(x=>x.a.conta&&x.a.nota!=null);
+  const pct=contados.length?Math.round(contados.reduce((s,x)=>s+x.a.nota,0)/contados.length):null;
+  const qtd={verde:0,amarelo:0,vermelho:0,nao_conta:0};doPer.forEach(x=>{if(qtd[x.a.resultado]!=null)qtd[x.a.resultado]++;});
+  const erros={};ORCAV_ERROS.forEach(([k])=>erros[k]=0);doPer.forEach(x=>(x.a.erros||[]).forEach(k=>{if(erros[k]!=null)erros[k]++;}));
+  const atrasados=contados.filter(x=>x.a.atrasado&&x.a.resultado!=='vermelho').length;
+  const tempos=doPer.filter(x=>x.a.msUteis!=null&&!x.a.correcao).map(x=>x.a.msUteis);
+  const tempoMed=tempos.length?tempos.reduce((s,v)=>s+v,0)/tempos.length:null;
+  return{doPer,contados,pct,qtd,erros,atrasados,tempoMed};
+}
+function _orcavReRender(){try{if(typeof currentSection!=='undefined'&&currentSection==='cat:ORCAMENTOS'&&orc2.view==='orcamentista')orc2Render();else renderCrmIndicadores();}catch(err){console.error(err);}}
+function _orcavMesMudou(v){_orcavMes=v?+v:'';_orcavReRender();}
+let _orcavSel='';
+function _orcavRenderTela(c){
+  const adm=_orcavIsAdm(),meu=_orcavCanon((usuarioLogado&&usuarioLogado.nomeExibicao)||'');
+  let lista=[];try{lista=adm?getOrcamentistas():(meu?[meu]:[]);}catch(err){}
+  if(!lista.length){c.innerHTML=_orc2HtmlSubAbas()+'<div class="dash-card" style="color:#64748b;font-size:.85rem">Nenhum orçamentista cadastrado ainda.</div>';return;}
+  if(!lista.includes(_orcavSel))_orcavSel=lista[0];
+  const chips=lista.length>1?`<div class="gc-vend-tabs" style="margin-bottom:14px">${lista.map(o=>`<button type="button" class="gc-vend-tab ${o===_orcavSel?'active':''}" onclick="_orcavSel='${o.replace(/'/g,"\\'")}';orc2Render()">📐 ${_orcavEsc(o)}</button>`).join('')}</div>`:'';
+  let corpo='';try{corpo=_crmOrcamentosHtml(_orcavSel);}catch(err){console.error('orcav tela',err);corpo='<div class="dash-card" style="color:#dc2626">Erro ao calcular os indicadores do orçamentista.</div>';}
+  c.innerHTML=_orc2HtmlSubAbas()+chips+corpo;
+}
+function _orcavPainelHtml(orcNome){
+  const regs=_orcavRegistros(orcNome);
+  const anos=[...new Set(regs.map(x=>new Date(x.t).getFullYear()).concat([new Date().getFullYear()]))].sort((a,b)=>b-a);
+  if(!anos.includes(_orcavAno))_orcavAno=anos[0];
+  const y=_orcavAno,m=_orcavMes||null;
+  const r=_orcavResumo(regs,y,m);
+  const per=m?MESES_PT[m]+' '+y:'ANO DE '+y;
+  const ok=r.pct!=null&&r.pct>=ORCAV_META;
+  const cor=r.pct==null?'#94a3b8':ok?'#15803d':'#dc2626';
+  const status=r.pct==null?'Nenhum orçamento avaliado neste período':!m?(ok?'Média do ano acima da meta':'Média do ano abaixo da meta'):ok?'✅ Comissão liberada':'❌ Abaixo da meta — sem comissão';
+  const filtro=`<span style="display:inline-flex;gap:6px;align-items:center">
+    <select id="orcav-mes" onchange="_orcavMesMudou(this.value)"><option value="" ${!m?'selected':''}>📅 Todos os meses</option>${MESES_PT.slice(1).map((t,i)=>`<option value="${i+1}" ${m===i+1?'selected':''}>${t}</option>`).join('')}</select>
+    ${anos.length>1?`<select id="orcav-ano" onchange="_orcavAno=+this.value;_orcavReRender()">${anos.map(a=>`<option value="${a}" ${a===y?'selected':''}>${a}</option>`).join('')}</select>`:''}
+  </span>`;
+  const mini=(lbl,val)=>`<div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:9px;padding:8px 10px;min-width:0"><div style="color:var(--ink4);font-size:.68rem">${lbl}</div><div style="font-weight:800;color:var(--ink);font-size:.95rem;white-space:nowrap">${val}</div></div>`;
+  const barra=`<div style="position:relative;height:12px;background:#e2e8f0;border-radius:999px;margin-top:10px;overflow:visible">
+      <div style="height:100%;width:${Math.min(100,r.pct||0)}%;background:${cor};border-radius:999px"></div>
+      <div title="Meta ${ORCAV_META}%" style="position:absolute;top:-4px;bottom:-4px;left:${ORCAV_META}%;width:2px;background:#101B3D"></div>
+    </div><div style="position:relative;height:14px;font-size:.62rem;color:#475569;font-weight:700"><span style="position:absolute;left:${ORCAV_META}%;transform:translateX(-50%);white-space:nowrap">meta ${ORCAV_META}%</span></div>`;
+  const topo=`<div class="dash-card" style="border-left:5px solid ${cor};margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <div class="dash-sec-title" style="margin:0">🎯 Assertividade — ${_orcavEsc(orcNome)}</div>${filtro}
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:16px;margin-top:12px;align-items:start">
+      <div>
+        <div style="font-size:.7rem;color:var(--ink4);font-weight:700;text-transform:uppercase">${per}</div>
+        <div style="font-size:2.6rem;font-weight:900;color:${cor};line-height:1.1">${r.pct==null?'—':r.pct+'%'}</div>
+        ${barra}
+        <div style="font-weight:800;color:${cor};font-size:.86rem;margin-top:4px">${status}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
+        ${mini('Contam na nota',String(r.contados.length))}
+        ${mini('🟢 De primeira',String(r.qtd.verde))}
+        ${mini('🟡 Ajuste leve',String(r.qtd.amarelo))}
+        ${mini('🔴 Devolvidos',String(r.qtd.vermelho))}
+        ${mini('⏰ Fora do prazo',String(r.atrasados))}
+        ${mini('⏱️ Tempo médio',_fmtDuracaoUtil(r.tempoMed))}
+      </div>
+    </div>
+  </div>`;
+  const totErr=Object.values(r.erros).reduce((s,v)=>s+v,0);
+  const errHtml=totErr?`<div class="dash-card" style="min-width:0"><div class="dash-sec-title">🔎 Onde mais erra</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${ORCAV_ERROS.filter(([k])=>r.erros[k]).sort((a,b)=>r.erros[b[0]]-r.erros[a[0]]).map(([k,t])=>{const pc=Math.round(r.erros[k]/totErr*100);
+      return`<div><div style="display:flex;justify-content:space-between;gap:8px;font-size:.76rem"><span style="color:#1e293b">${t}</span><b style="white-space:nowrap">${r.erros[k]} · ${pc}%</b></div><div style="height:8px;background:#f1f5f9;border-radius:999px;margin-top:3px"><div style="height:100%;width:${pc}%;background:#e91e63;border-radius:999px"></div></div></div>`;}).join('')}</div></div>`:'';
+  let mesesHtml='';
+  if(!m){
+    const linhas=[];
+    for(let mm=1;mm<=12;mm++){const rm=_orcavResumo(regs,y,mm);if(!rm.doPer.length)continue;
+      const okm=rm.pct!=null&&rm.pct>=ORCAV_META;
+      linhas.push(`<tr style="cursor:pointer" onclick="_orcavMesMudou(${mm})"><td style="font-weight:700">${MESES_PT[mm]}</td><td>${rm.contados.length}</td><td style="font-weight:800;color:${rm.pct==null?'#94a3b8':okm?'#15803d':'#dc2626'}">${rm.pct==null?'—':rm.pct+'%'}</td><td style="white-space:nowrap;font-weight:700;color:${rm.pct==null?'#94a3b8':okm?'#15803d':'#dc2626'}">${rm.pct==null?'—':okm?'✅ Comissão liberada':'❌ Sem comissão'}</td></tr>`);}
+    mesesHtml=`<div class="dash-card" style="min-width:0"><div class="dash-sec-title">📅 Mês a mês — ${y}</div><div style="overflow-x:auto;margin-top:8px"><table class="dash-table"><thead><tr><th>Mês</th><th>Contam na nota</th><th>Assertividade</th><th>Situação</th></tr></thead><tbody>${linhas.join('')||'<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:14px">Nenhuma avaliação neste ano.</td></tr>'}</tbody></table></div></div>`;
+  }
+  const lista=`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">🧾 Orçamentos avaliados — ${per}</div><div style="overflow-x:auto;margin-top:8px">
+    <table class="dash-table"><thead><tr><th>Data</th><th>Negócio</th><th>Resultado</th><th>Nota</th><th>Prazo</th><th>Erro</th><th>Comentário</th><th>Avaliado por</th></tr></thead>
+    <tbody>${r.doPer.length?r.doPer.map(x=>{const a=x.a,rr=ORCAV_RES[a.resultado]||ORCAV_RES.nao_conta;
+      const errs=(a.erros||[]).map(k=>(ORCAV_ERROS.find(z=>z[0]===k)||[k,k])[1]).join(', ');
+      const prazo=a.msUteis==null?'—':((a.atrasado&&a.conta&&a.resultado!=='vermelho')?`<span style="color:#dc2626;font-weight:700;white-space:nowrap">⏰ ${_fmtDuracaoUtil(a.msUteis)}</span>`:`<span style="white-space:nowrap">${_fmtDuracaoUtil(a.msUteis)}</span>`);
+      return`<tr style="cursor:pointer" onclick="crmAbrirCard('${x.e.id}')"><td style="white-space:nowrap">${_fmtDataHora(a.em)}</td><td style="font-weight:600">${_orcavEsc(x.e.nome||'—')}</td><td style="white-space:nowrap;color:${rr.cor};font-weight:700">${rr.ic} ${rr.t}</td><td style="font-weight:800;white-space:nowrap">${a.nota==null?'<span style="color:#94a3b8;font-weight:600">não conta</span>':a.nota+'%'}</td><td>${prazo}</td><td>${_orcavEsc(errs||'—')}</td><td style="max-width:260px">${_orcavEsc(a.comentario||'—')}</td><td style="white-space:nowrap">${_orcavEsc(a.por||'—')}</td></tr>`;}).join(''):'<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:14px">Nenhum orçamento avaliado neste período.</td></tr>'}</tbody></table></div>
+    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px">🟢 vale 100%, 🟡 vale 50% e 🔴 vale 0%. Se o orçamento for para a revisão depois de ${ORCAV_PRAZO_DU} dias úteis da entrada em ORÇAMENTO, perde ${ORCAV_PEN_ATRASO} pontos. Orçamento devolvido que volta certo não conta de novo; se voltar errado, conta mais um 0. ⚪ não entra na conta. Assertividade = média das notas do mês; ${ORCAV_META}% ou mais libera a comissão.</div></div>`;
+  const meio=(errHtml||mesesHtml)?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px;margin-bottom:14px">${mesesHtml}${errHtml}</div>`:'';
+  return topo+meio+lista;
+}
+// ── Ganchos nas funções existentes ──
+(function(){
+  try{
+    if(typeof crmMoverEtapa==='function'){
+      const _orig=crmMoverEtapa;
+      crmMoverEtapa=async function(id,etapaKey){
+        try{
+          const e=crmEmpresas.find(x=>x.id===id);
+          if(e&&!window._orcavOk&&e.etapa!==etapaKey&&!e.fechamento){
+            const iRev=_orcavIdx('revisao_orcamento'),iDest=_orcavIdx(etapaKey),adm=_orcavIsAdm();
+            if(iRev>=0){
+              if(e.etapa==='revisao_orcamento'){
+                if(adm){
+                  const cic=_orcavCiclo(e);
+                  if(cic.feitoPorAdmin){
+                    // Orçamento feito pelo próprio gestor: dispensa avaliação (não tem comissão)
+                    if(!e.timeline)e.timeline=[];
+                    e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'🎯 Sem avaliação: orçamento feito por '+cic.autorRev+' (gestor)',autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString(),sistema:true});
+                    window._orcavOk=true;
+                    try{return await _orig.call(this,id,etapaKey);}finally{window._orcavOk=false;}
+                  }
+                  _orcavAbrir(e,etapaKey);return;
+                }
+                if(iDest>iRev){toast('Só o gestor tira o card da REVISÃO DE ORÇAMENTO — ele avalia o orçamento e aprova.','terr');try{renderCrmKanban();}catch(err){}return;}
+              }else if(e.etapa==='orcamento'&&!adm&&iDest>iRev){
+                toast('Orçamento pronto vai para REVISÃO DE ORÇAMENTO — o gestor revisa antes de ir para o cliente.','tinf');
+                etapaKey='revisao_orcamento';
+              }
+            }
+          }
+        }catch(err){console.error('orcav mover',err);}
+        return _orig.call(this,id,etapaKey);
+      };
+    }
+    // Barra do editor de orçamento e "mover depois do PDF": não-admin sempre manda pra REVISÃO
+    ['_orc5DestinoMover','_orc10DestinoPdf'].forEach(fn=>{
+      const o=window[fn];if(typeof o!=='function')return;
+      window[fn]=function(e){
+        const r=o.apply(this,arguments);
+        try{
+          const iRev=_orcavIdx('revisao_orcamento');
+          if(r&&e&&iRev>=0&&!_orcavIsAdm()){
+            if(e.etapa==='revisao_orcamento')return null;
+            if(e.etapa==='orcamento'&&_orcavIdx(r)>iRev)return'revisao_orcamento';
+          }
+        }catch(err){}
+        return r;
+      };
+    });
+    if(typeof _crmOrcamentosHtml==='function'){
+      const _oh=_crmOrcamentosHtml;
+      _crmOrcamentosHtml=function(orcNome){
+        let topo='';
+        if(orcNome){try{topo=_orcavPainelHtml(orcNome)+'<div class="crm-vp-sep">⏱️ Tempo e fila de orçamentos</div>';}catch(err){console.error('orcav painel',err);}}
+        return topo+_oh.apply(this,arguments);
+      };
+    }
+    if(typeof _crmRenderCard==='function'){
+      const _rc=_crmRenderCard;
+      _crmRenderCard=function(e){
+        const r=_rc.apply(this,arguments);
+        try{
+          const old=document.getElementById('orcav-bloco');if(old)old.remove();
+          const h=_orcavBlocoCard(e);
+          if(h){const ck=document.getElementById('crm-ck-bloco'),tab=document.getElementById('crm-tab-geral');
+            if(ck)ck.insertAdjacentHTML('afterend',h);else if(tab)tab.insertAdjacentHTML('afterbegin',h);}
+        }catch(err){console.error('orcav card',err);}
+        return r;
+      };
+    }
+  }catch(err){console.error('orcav ganchos',err);}
 })();
 
 </script>
