@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-23.7';</script>
+<script>const APP_BUILD_VERSION='2026-10-26.2';</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -24121,6 +24121,9 @@ function _prodConferir(){
   // H) parado há muito tempo
   const parado=base.filter(x=>x.aProduzirTotal>0.005&&x.etapa.iso&&_opAddDias(x.etapa.iso,30)<hoje).map(x=>linhaP(x.p,x.aProduzirTotal,'prazo de produção era '+fmtD(x.etapa.iso)+' · '+Math.round(x.pctValor)+'% produzido'));
   add('atencao','Atrasados há mais de 30 dias','Esse saldo entra como "a produzir" no mês atual. Se já foi produzido e só faltou dar baixa, o mês atual está inflado.',parado,'pode somar a mais');
+  // J) baixas em lote (2026-10-26) — data do clique não é a data em que foi produzido
+  const lotesL=[];try{_prodLotesSuspeitos(base).forEach(lt=>lt.pedidos.forEach(o=>{const l=linhaP(o.x.p,o.valor,'baixa em '+fmtD(lt.dia)+' '+new Date(o.t).toTimeString().slice(0,5)+' por '+lt.por+' · prazo de produção era '+(o.x.etapa&&o.x.etapa.iso?fmtD(o.x.etapa.iso):'—')+' — clique para informar a data real');l.acao=`prodInformarDataReal('${o.x.p.id}','${lt.dia}')`;lotesL.push(l);}));}catch(e){console.error('lotes',e);}
+  add('erro','Baixas em lote — a data pode não ser a real','A mesma pessoa deu baixa em 5 ou mais pedidos em poucos minutos, a maioria com prazo de produção num mês anterior. Isso costuma ser regularização, não produção do dia — e joga o valor no mês errado. Clique em cada pedido e informe o dia em que foi realmente produzido.',lotesL,'muda o mês do produzido');
   // I) consistência matemática (soma dos meses = total, nada no futuro, nada acima do pedido)
   const mat=[];
   base.forEach(x=>{
@@ -24160,7 +24163,7 @@ function _prodConfAbrir(){
         <span style="font-weight:800;font-size:.82rem;color:#0f172a;flex:1;min-width:200px">${_pconfEsc(s.titulo)} <span style="color:#64748b;font-weight:600">(${s.linhas.length})</span></span>
         ${tot>0.005?`<span style="font-size:.76rem;font-weight:800;color:${k};white-space:nowrap">${fmtR(tot)}</span>`:''}</summary>
       <div style="padding:8px 14px 12px"><div style="font-size:.74rem;color:#475569;line-height:1.5;margin-bottom:8px">${_pconfEsc(s.explica)}</div>
-      <table style="width:100%;border-collapse:collapse;font-size:.75rem">${s.linhas.map(l=>`<tr style="border-top:1px solid #f1f5f9;${l.pid?'cursor:pointer':''}" ${l.pid?`onclick="${l.venda?`verVendaDetalhe('${_pconfEsc(l.os)}','${l.pid}')`:`prodAbrirChecklist('${l.pid}')`}"`:''}>
+      <table style="width:100%;border-collapse:collapse;font-size:.75rem">${s.linhas.map(l=>`<tr style="border-top:1px solid #f1f5f9;${l.pid?'cursor:pointer':''}" ${l.pid?`onclick="${l.acao?l.acao:l.venda?`verVendaDetalhe('${_pconfEsc(l.os)}','${l.pid}')`:`prodAbrirChecklist('${l.pid}')`}"`:''}>
         <td style="padding:6px 6px 6px 0;font-weight:700;white-space:nowrap;vertical-align:top">OS ${_pconfEsc(l.os)}</td>
         <td style="padding:6px;vertical-align:top"><div style="font-weight:600;color:#0f172a">${_pconfEsc(l.nome)}</div><div style="color:#64748b;font-size:.7rem;margin-top:1px">${_pconfEsc(l.detalhe)}</div></td>
         <td style="padding:6px 0 6px 6px;text-align:right;white-space:nowrap;vertical-align:top;font-weight:700">${l.valor?fmtR(l.valor):''}</td></tr>`).join('')}</table></div></details>`;}).join('');
@@ -65228,7 +65231,7 @@ function _prodRealEntradas(x){
   // _prodLedgerRegistrar): vale por si só; a reconstrução abaixo só completa o período ANTERIOR a ele.
   const led=(p.prodLedger&&typeof p.prodLedger==='object'?Object.values(p.prodLedger):[]).filter(e=>e&&e.em);
   const ledIni=led.length?led.reduce((m,e)=>(!m||e.em<m)?e.em:m,''):'';
-  led.forEach(e=>{const d=new Date(e.em);if(!isNaN(d)){temLog=true;out.push({iso:_isoLocal(d),valor:Number(e.valor)||0,fonte:'registro exato'});}});
+  led.forEach(e=>{const d=new Date(e.em);if(!isNaN(d)){temLog=true;const dr=e.dataReal&&/^\d{4}-\d{2}-\d{2}$/.test(String(e.dataReal))?String(e.dataReal):'';out.push({iso:dr||_isoLocal(d),valor:Number(e.valor)||0,fonte:dr?'data informada na baixa':'registro exato',ledger:true,informada:!!dr,clique:e.em,por:e.por||''});}});
   const antesDoLedger=h=>!ledIni||String(h.em)<ledIni;
   try{
     if(x.progItens&&x.progItens.temItens){
@@ -65260,17 +65263,17 @@ function _prodRealEntradas(x){
           const d=new Date(h.em);if(isNaN(d))return;
           if(!antesDoLedger(h))return;
           temLog=true;
-          out.push({iso:_isoLocal(d),valor:L*peso*delta/100,fonte:'histórico de baixas'});
+          out.push({iso:_isoLocal(d),valor:L*peso*delta/100,fonte:'histórico de baixas',clique:h.em,por:h.por||''});
         });
       });
     }else{
       const subs=x.subs||[];
       const s=subs.find(z=>z.key==='producao');const b=p.lpBaixas&&p.lpBaixas.producao;
-      if(s&&s.feito&&b&&b.data&&!b.viaLimpezaLote&&subs.length&&(!ledIni||(b.dataHora||b.data)<ledIni)){temLog=true;out.push({iso:String(b.data).slice(0,10),valor:alvo,fonte:'baixa PRODUZIR'});}
+      if(s&&s.feito&&b&&b.data&&!b.viaLimpezaLote&&subs.length&&(!ledIni||(b.dataHora||b.data)<ledIni)){temLog=true;out.push({iso:String(b.data).slice(0,10),valor:alvo,fonte:'baixa PRODUZIR',clique:b.dataHora||'',por:b.por||''});}
     }
   }catch(e){console.error('prodreal',e);}
   const soma=out.reduce((s,e)=>s+e.valor,0);
-  if(soma>alvo+0.5&&soma>0){const rec=out.filter(e=>e.fonte!=='registro exato');const sr=rec.reduce((s,e)=>s+e.valor,0),sl=soma-sr;if(sr>0&&alvo-sl>=0){const f=(alvo-sl)/sr;rec.forEach(e=>{e.valor*=f;});}}
+  if(soma>alvo+0.5&&soma>0){const rec=out.filter(e=>!e.ledger);const sr=rec.reduce((s,e)=>s+e.valor,0),sl=soma-sr;if(sr>0){const f=Math.max(0,alvo-sl)/sr;rec.forEach(e=>{e.valor*=f;});}}  // (2026-10-26) registro exato já cobre tudo: o histórico antigo não soma de novo (OS 321/367 contavam R$ 2,2 mil a mais)
   else if(alvo-soma>0.5&&x.finalizadaSemBaixa&&p.finalizacao&&p.finalizacao.dataFinalizacao){
     // (2026-10-18) obra entregue sem todas as baixas: o que faltava conta na data da finalização
     let isoF=_normPrazoIso(p.finalizacao.dataFinalizacao)||hoje;if(isoF>hoje)isoF=hoje;
@@ -65293,9 +65296,141 @@ function _prodRealEntradas(x){
     if(!temLog&&b&&b.data&&!b.viaLimpezaLote&&x.progItens&&x.progItens.temItens){iso=String(b.data).slice(0,10);est=false;}
     else{iso=(x.etapa&&x.etapa.iso)||hoje;const lim='2026-09-24';if(iso>lim)iso=lim;}
     if(iso>hoje)iso=hoje;
-    out.push({iso,valor:alvo-soma,estimado:est,fonte:est?'sem data':'conclusão'});
+    out.push(Object.assign({iso,valor:alvo-soma,estimado:est,fonte:est?'sem data':'conclusão'},est?{}:{clique:b.dataHora||'',por:b.por||''}));
   }
+  // (2026-10-26, a pedido do usuário: diretoria questionou "Produzido" de setembro = R$ 2,2 mi)
+  // Em 10/09/2026, 17:56–18:03, a Produção regularizou de uma vez a baixa PRODUZIR de 23 pedidos que
+  // já tinham sido fabricados antes (vários com a obra entregue em julho/agosto) — R$ 1,14 mi caíram
+  // em setembro só pela data do clique. Regra: produção nunca acontece DEPOIS da entrega da obra.
+  // Se a baixa foi dada depois da Data de Finalização, vale a data programada de produção (limitada à
+  // finalização). Só muda a DATA — o valor produzido de cada pedido continua igual.
+  // (2026-10-26, "não permita que esse erro aconteça de novo") — vale para TODAS as fontes:
+  //  • p.prodDataReal[dia do clique] = data real informada depois (Conferência → Baixas em lote);
+  //  • nada produzido depois da entrega da obra (trava automática, não depende de ninguém).
+  try{
+    const inf=p.prodDataReal&&typeof p.prodDataReal==='object'?p.prodDataReal:null;
+    if(inf)out.forEach(e=>{if(e.informada||!e.clique)return;const dc=new Date(e.clique);if(isNaN(dc))return;const r=inf[_isoLocal(dc)];if(r&&r.iso){e.iso=String(r.iso).slice(0,10);e.informada=true;e.estimado=false;e.fonte='data informada pela Produção';}});
+    const finIso=p.finalizacao&&p.finalizacao.dataFinalizacao?_normPrazoIso(p.finalizacao.dataFinalizacao):'';
+    if(finIso)out.forEach(e=>{if(!e.informada&&e.iso>finIso){const pr=(x.etapa&&x.etapa.iso)||finIso;e.iso=pr<finIso?pr:finIso;e.fonte='baixa dada depois da entrega da obra';e.estimado=true;e.corrigida=true;}});
+    out.forEach(e=>{if(e.iso>hoje)e.iso=hoje;});
+  }catch(e){}
   return out.filter(e=>e.iso&&Math.abs(e.valor)>0.004);
+}
+// ── TRAVA DA DATA REAL DE PRODUÇÃO (2026-10-26) ──
+// Pedido do usuário depois do "Produzido" de setembro inflado (R$ 2,2 mi; baixa em lote de 10/09):
+// "não permita que esse erro aconteça de novo". O Produzido usa a data do clique da baixa — certo
+// quando a baixa é dada no dia, errado quando alguém regulariza depois. Três camadas:
+//  1) NA HORA DA BAIXA: se o pedido já teve a obra finalizada, ou o prazo de produção era de um mês
+//     anterior, o sistema pergunta "Quando isso foi produzido?" (padrão: hoje; nunca futuro, nunca
+//     antes da emissão, nunca depois da entrega da obra). A resposta vale pra esse pedido por 10 min
+//     (vários setores seguidos = uma pergunta só) e vai em p.prodLedger[id].dataReal.
+//  2) AUTOMÁTICO (_prodRealEntradas): nada conta como produzido depois da finalização da obra.
+//  3) ALERTA: baixas em lote (mesma pessoa, 5+ pedidos em poucos minutos, a maioria com prazo de
+//     mês anterior) aparecem em vermelho no card Produzido e na Conferência dos números, com como
+//     corrigir (informar a data real → p.prodDataReal[dia do clique]).
+const _prodDataRealMem={};
+let _prodDataRealResolve=null,_prodDataRealCfg=null;
+function _prodPerguntarDataReal(p,info){
+  return new Promise(resolve=>{
+    _prodDataRealResolve=resolve;_prodDataRealCfg=info;
+    let m=document.getElementById('mo-prod-data-real');
+    if(!m){m=document.createElement('div');m.id='mo-prod-data-real';
+      m.style.cssText='position:fixed;inset:0;z-index:10050;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);backdrop-filter:blur(3px)';
+      document.body.appendChild(m);}
+    m.innerHTML=`<div style="background:#fff;border-radius:18px;padding:28px 28px 22px;max-width:480px;width:92%;box-shadow:0 20px 60px rgba(0,0,0,.25);font-family:inherit">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div style="width:36px;height:36px;border-radius:50%;background:#dcfce7;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0">📅</div>
+        <div style="min-width:0;flex:1"><div style="font-size:.95rem;font-weight:800;color:#111">Quando isso foi produzido?</div><div title="${_pconfEsc(_pedNome(p))}" style="font-size:.75rem;color:#6b7280;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">OS ${_pconfEsc(p.os||'—')} · ${_pconfEsc(p.nomeFantasia||_pedNome(p))}</div></div>
+      </div>
+      <div style="font-size:.82rem;color:#374151;padding:5px 0 5px 12px;border-left:2px solid #fbbf24;margin-bottom:12px">🟡 ${_pconfEsc(info.motivo)} Informe o dia em que a peça foi realmente produzida — é essa data que conta no Produzido do mês.</div>
+      <label style="display:block;font-size:.72rem;font-weight:700;color:#475569;margin-bottom:4px">Data em que foi produzido</label>
+      <input id="prod-data-real-inp" type="date" value="${info.sugerida}" ${info.min?`min="${info.min}"`:''} max="${info.max}" style="width:100%;box-sizing:border-box;padding:9px 10px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:.88rem;font-family:inherit">
+      <div style="display:flex;gap:10px;margin-top:18px">
+        ${info.podeHoje?`<button onclick="_prodDataRealResolver(true)" style="flex:1;padding:10px;border-radius:10px;border:1.5px solid #e5e7eb;background:#fff;font-size:.82rem;font-weight:700;cursor:pointer;color:#374151">Foi produzido hoje</button>`:''}
+        <button onclick="_prodDataRealResolver(false)" style="flex:1;padding:10px;border-radius:10px;border:none;background:#e91e63;color:#fff;font-size:.82rem;font-weight:700;cursor:pointer">Confirmar data</button>
+      </div>
+    </div>`;
+    m.style.display='flex';
+  });
+}
+function _prodDataRealResolver(usarHoje){
+  const c=_prodDataRealCfg||{};const hoje=_hojeIso();
+  let iso=usarHoje?hoje:String((document.getElementById('prod-data-real-inp')||{}).value||'');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(iso)){toast('Escolha a data em que foi produzido','terr');return;}
+  if(iso>c.max){toast('A data não pode ser depois de '+fmtD(c.max)+(c.max<hoje?' (entrega da obra)':''),'terr');return;}
+  if(c.min&&iso<c.min){toast('A data não pode ser antes da emissão do pedido ('+fmtD(c.min)+')','terr');return;}
+  const m=document.getElementById('mo-prod-data-real');if(m)m.style.display='none';
+  if(_prodDataRealResolve){const r=_prodDataRealResolve;_prodDataRealResolve=null;r(iso);}
+}
+async function _prodDataRealAntesDeSalvar(p){
+  try{
+    if(!p||!p.id||!window._fbBasePedido)return;
+    // só quando é alguém clicando agora (migrações e rotinas automáticas nunca perguntam)
+    if(!(navigator.userActivation&&navigator.userActivation.isActive))return;
+    const mem=_prodDataRealMem[p.id];if(mem&&Date.now()-mem.t<10*60000)return;
+    const base=window._fbBasePedido(p.id);if(!base)return;
+    const a=_prodLedgerPct(base),d=_prodLedgerPct(p);if(!a||!d)return;
+    const lm=_prodLedgerMem[p.id];const antes=(lm&&Date.now()-lm.t<60000)?lm.pct:a.pct;
+    if(!(((d.pct||0)-(antes||0))>0.01))return;
+    const hoje=_hojeIso();const x=_prodInfo(p,hoje);if(!x||!x.ok)return;
+    const finIso=p.finalizacao&&p.finalizacao.dataFinalizacao?_normPrazoIso(p.finalizacao.dataFinalizacao):'';
+    const hd=new Date(hoje+'T12:00:00');const iniMes=_isoLocal(new Date(hd.getFullYear(),hd.getMonth(),1));
+    const prz=(x.etapa&&x.etapa.iso)||'';
+    let motivo='';
+    if(finIso&&finIso<=hoje)motivo='A obra deste pedido já foi finalizada em '+fmtD(finIso)+'.';
+    else if(prz&&prz<iniMes)motivo='O prazo de produção deste pedido era '+fmtD(prz)+', num mês que já fechou.';
+    if(!motivo)return;
+    const max=finIso&&finIso<hoje?finIso:hoje;
+    const min=_normPrazoIso(p.emissaoEm)||'';
+    let sug=finIso&&finIso<=hoje?((prz&&prz<finIso)?prz:finIso):hoje;if(sug>max)sug=max;if(min&&sug<min)sug=min;
+    const iso=await _prodPerguntarDataReal(p,{motivo,sugerida:sug,max,min,podeHoje:max===hoje});
+    if(!iso)return;
+    _prodDataRealMem[p.id]={iso,t:Date.now()};
+    const b=p.lpBaixas&&p.lpBaixas.producao;
+    if(b&&!b.viaLimpezaLote&&String(b.data||'').slice(0,10)===hoje&&iso!==hoje){b.data=iso;b.dataInformada=true;}
+  }catch(e){console.warn('data real produção',e);}
+}
+// baixas em lote que parecem regularização (camada 3)
+function _prodLotesSuspeitos(base,ini,fim){
+  const ev=[];
+  (base||[]).forEach(x=>(x.entradasTodas||[]).forEach(e=>{
+    if(e.informada||e.corrigida||!e.clique||!(e.valor>0.004))return;
+    if(ini&&(e.iso<ini||e.iso>fim))return;
+    const t=Date.parse(e.clique);if(isNaN(t))return;
+    ev.push({x,por:String(e.por||'—'),t,valor:e.valor});
+  }));
+  const porP={};ev.forEach(v=>(porP[v.por]=porP[v.por]||[]).push(v));
+  const lotes=[];
+  Object.keys(porP).forEach(por=>{const l=porP[por].sort((a,b)=>a.t-b.t);let i=0;
+    while(i<l.length){let j=i;while(j+1<l.length&&l[j+1].t-l[j].t<=15*60000)j++;
+      const g=l.slice(i,j+1);const ped={};g.forEach(v=>{const k=v.x.p.id;(ped[k]=ped[k]||{x:v.x,valor:0,t:v.t}).valor+=v.valor;});
+      const lista=Object.values(ped);
+      if(lista.length>=5){
+        const dB=new Date(g[0].t);const iniMes=_isoLocal(new Date(dB.getFullYear(),dB.getMonth(),1));
+        const vT=lista.reduce((s,o)=>s+o.valor,0),vAnt=lista.filter(o=>o.x.etapa&&o.x.etapa.iso&&o.x.etapa.iso<iniMes).reduce((s,o)=>s+o.valor,0);
+        if(vT>0&&vAnt/vT>=0.5)lotes.push({por,ini:g[0].t,fim:g[g.length-1].t,dia:_isoLocal(dB),pedidos:lista,valor:vT});
+      }
+      i=j+1;}});
+  return lotes;
+}
+// corrigir a data de baixas antigas (linha da Conferência → Baixas em lote)
+async function prodInformarDataReal(pid,dia){
+  if(!_isSetorUser('PRODUÇÃO')){toast('Só Produção ou Administrador podem informar a data de produção','terr');return;}
+  const p=(pedidos||[]).find(x=>x.id===pid);if(!p){toast('Pedido não encontrado','terr');return;}
+  const hoje=_hojeIso();let x=null;try{x=_prodInfo(p,hoje);}catch(e){}
+  const finIso=p.finalizacao&&p.finalizacao.dataFinalizacao?_normPrazoIso(p.finalizacao.dataFinalizacao):'';
+  const prz=(x&&x.etapa&&x.etapa.iso)||'';
+  let max=dia<hoje?dia:hoje;if(finIso&&finIso<max)max=finIso;
+  const min=_normPrazoIso(p.emissaoEm)||'';
+  let sug=prz&&prz<max?prz:max;if(min&&sug<min)sug=min;
+  const iso=await _prodPerguntarDataReal(p,{motivo:'A baixa deste pedido foi dada em '+fmtD(dia)+' junto com vários outros pedidos (baixa em lote).',sugerida:sug,max,min,podeHoje:false});
+  if(!iso)return;
+  p.prodDataReal=p.prodDataReal&&typeof p.prodDataReal==='object'&&!Array.isArray(p.prodDataReal)?p.prodDataReal:{};
+  p.prodDataReal[dia]={iso,por:(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—',em:new Date().toISOString()};
+  await savePedidoFS(p);
+  toast('Data de produção corrigida ✅','tok');
+  try{if(document.getElementById('mo-prod-conf')&&document.getElementById('mo-prod-conf').classList.contains('open'))_prodConfAbrir();}catch(e){}
+  try{renderProdIndicadores();}catch(e){}
 }
 // ── VISÃO NOVA (2026-09-30, a pedido do usuário: "preciso ver quanto produziu no mês que tá
 // passando e quanto tem pra produzir nos meses seguintes... a data original confunde"). Duas
@@ -65388,13 +65523,13 @@ function renderProdIndicadores(){
   const c=_prodVCalc(base,r.ini,r.fim);
   const occ=c.cap>0?Math.round(c.aProduzir/c.cap*100):null;
   const T=[
-    {key:'produzido',icon:'✅',label:'Produzido'+(c.inclHoje?' até agora':''),val:fmtR(c.produzido),sub:c.prods.length+' pedido'+(c.prods.length===1?'':'s'),bg:'#dcfce7',fg:'#166534'},
+    {key:'produzido',icon:'✅',label:'Produzido'+(c.inclHoje?' até agora':''),val:fmtR(c.produzido),sub:c.prods.length+' pedido'+(c.prods.length===1?'':'s'),bg:'#dcfce7',fg:'#166534',alerta:(()=>{try{const lt=_prodLotesSuspeitos(base,r.ini,r.fim);if(!lt.length)return'';const v=lt.reduce((s,o)=>s+o.valor,0);return'⚠ '+_crmFmtCurto(v)+' de baixas em lote — conferir datas';}catch(e){return'';}})()},
     {key:'aproduzir',icon:'📋',label:'A produzir',val:c.passado?'—':fmtR(c.aProduzir),sub:c.passado?'mês encerrado':(c.atrasados>0.005?'dos quais '+_crmFmtCurto(c.atrasados)+' atrasados':'saldo programado'),bg:'#fef3c7',fg:'#92400e'},
     {key:'ocupacao',icon:'📊',label:'Ocupação',val:occ==null?'—':occ+'%',sub:c.cap>0?fmtR(c.cap)+' de capacidade em '+c.diasCap+' dias úteis':'—',bg:occ!=null&&occ>=100?'#fee2e2':'#f1f5f9',fg:occ!=null&&occ>=100?'#b91c1c':'#475569'}
   ];
   const tiles=`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">${T.map(t=>`<div ${t.key!=='ocupacao'?`onclick="prodIndAbrirTile('${t.key}')" `:''}style="${t.key!=='ocupacao'?'cursor:pointer;':''}flex:1 1 220px;min-width:0;display:flex;align-items:center;gap:10px;background:${t.bg};border-radius:10px;padding:12px;box-sizing:border-box">
     <div style="flex-shrink:0;width:34px;height:34px;border-radius:999px;background:rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-size:1rem">${t.icon}</div>
-    <div style="min-width:0;flex:1"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${t.fg}">${t.label}</div><div style="font-size:1.1rem;font-weight:800;color:${t.fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.val}</div><div style="font-size:.64rem;color:${t.fg};opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.sub}</div></div></div>`).join('')}</div>`;
+    <div style="min-width:0;flex:1"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${t.fg}">${t.label}</div><div style="font-size:1.1rem;font-weight:800;color:${t.fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.val}</div><div style="font-size:.64rem;color:${t.fg};opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.sub}</div>${t.alerta?`<div onclick="event.stopPropagation();_prodConfAbrir()" title="Abrir a Conferência dos números" style="margin-top:3px;font-size:.66rem;font-weight:800;color:#b91c1c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer">${t.alerta}</div>`:''}</div></div>`).join('')}</div>`;
   const th='padding:8px 10px',tag=(txt,fg,bg)=>` <span style="font-size:.6rem;font-weight:800;color:${fg};background:${bg};border-radius:20px;padding:1px 7px;white-space:nowrap">${txt}</span>`;
   const secProd=`<div class="dash-sec-title" style="margin:6px 0 8px">✅ Produzido em ${r.label} <span style="font-weight:600;color:#166534">· ${fmtR(c.produzido)}</span></div>
     ${c.prods.length?`<div style="overflow-x:auto;margin-bottom:20px"><table style="width:100%;border-collapse:collapse;font-size:.82rem"><thead><tr style="background:#f0fdf4;text-align:left">
@@ -65490,11 +65625,12 @@ function _prodLedgerRegistrar(p){
     if(!p.prodLedger||typeof p.prodLedger!=='object'||Array.isArray(p.prodLedger))p.prodLedger={};
     const id='pl'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
     p.prodLedger[id]={em:new Date().toISOString(),valor,de:Math.round(a.pct*10)/10,para:Math.round(d.pct*10)/10,por:(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—'};
+    const dr=_prodDataRealMem[p.id];if(dr&&Date.now()-dr.t<10*60000&&dr.iso&&dr.iso!==_hojeIso()&&valor>0)p.prodLedger[id].dataReal=dr.iso;
     _prodLedgerMem[p.id]={pct:d.pct,t:Date.now()};
   }catch(e){console.warn('prodLedger',e);}
 }
 (function(){
-  if(typeof savePedidoFS==='function'){const _o=savePedidoFS;savePedidoFS=async function(p){_prodLedgerRegistrar(p);return _o.apply(this,arguments);};}
+  if(typeof savePedidoFS==='function'){const _o=savePedidoFS;savePedidoFS=async function(p){await _prodDataRealAntesDeSalvar(p);_prodLedgerRegistrar(p);return _o.apply(this,arguments);};}
 })();
 // ══ MENU ORÇAMENTOS — FASE 1: CUSTOS OPERACIONAIS (2026-09-30) ══════════════════════════════
 // A pedido do usuário: "criar um menu ORÇAMENTOS... usar ele mesmo pra gerar as paradas sem usar
