@@ -18,7 +18,56 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-26.18';</script>
+<script>const APP_BUILD_VERSION='2026-10-27.7';</script>
+<script>
+// ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
+// distorcer nem mudar o nome do arquivo") ──
+// Todo upload do sistema passa por aqui (são dezenas de telas, todas via fetch pro
+// api.cloudinary.com/.../upload). Se o envio não tem public_id próprio, o sistema manda o nome
+// original do arquivo como public_id, dentro de uma subpasta curta aleatória (pra dois arquivos
+// com o mesmo nome nunca se sobreporem): .../gcore_crm_propostas/k3j9xq/Proposta Madero.pdf
+// Ao abrir ou baixar, o arquivo aparece com o nome que foi enviado. Se o Cloudinary recusar
+// por qualquer motivo, reenvia do jeito antigo — o upload nunca falha por causa disso.
+(function(){
+  if(typeof window==='undefined'||!window.fetch||window._cldNomeOriginalAtivo)return;
+  window._cldNomeOriginalAtivo=true;
+  const _f=window.fetch.bind(window);
+  function nomeLimpo(n){
+    return String(n||'').replace(/[\u0000-\u001f\u007f?&#\\%<>+]/g,'').replace(/\s+/g,' ').trim().slice(0,150);
+  }
+  window._cldPublicIdOriginal=function(nome,tipo){
+    let n=nomeLimpo(nome);if(!n)return'';
+    if(tipo!=='raw'){const i=n.lastIndexOf('.');if(i>0)n=n.slice(0,i).trim();} // imagem/vídeo: o Cloudinary põe a extensão
+    n=n.replace(/^\.+|\.+$/g,'').trim();if(!n)return'';
+    return Math.random().toString(36).slice(2,8)+'/'+n;
+  };
+  window.fetch=async function(input,init){
+    try{
+      const url=typeof input==='string'?input:(input&&input.url)||'';
+      const m=/^https:\/\/api\.cloudinary\.com\/v1_1\/[^/]+\/(raw|image|video|auto)\/upload\/?(\?|$)/.exec(url);
+      const body=init&&init.body;
+      if(m&&body&&typeof FormData!=='undefined'&&body instanceof FormData&&!body.has('public_id')){
+        const arq=body.get('file');
+        const nome=arq&&typeof arq==='object'&&arq.name;
+        if(nome&&!/^blob$/i.test(nome)){
+          const pid=window._cldPublicIdOriginal(nome,m[1]);
+          if(pid){
+            const fd2=new FormData();
+            for(const [k,v] of body.entries())fd2.append(k,v);
+            fd2.append('public_id',pid);
+            try{
+              const r=await _f(input,Object.assign({},init,{body:fd2}));
+              if(r.ok)return r;
+              console.warn('Cloudinary recusou o nome original — enviando do jeito antigo',r.status);
+            }catch(e){console.warn('Cloudinary nome original falhou — enviando do jeito antigo',e);}
+          }
+        }
+      }
+    }catch(e){console.warn('cld nome original',e);}
+    return _f(input,init);
+  };
+})();
+</script>
 <script>
 // Portal do cliente (2026-10-15): ?obra=TOKEN (link de uma obra) ou ?portal=1 (portal do engenheiro).
 // Nesse modo o sistema interno NÃO inicia (initAuth/load) — só a página do portal aparece.
@@ -5272,6 +5321,7 @@ select.fc{cursor:pointer}
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
           <div class="fg"><label>Limite de Produção por dia (R$ líquido)</label><input class="fc no-upper" type="text" inputmode="numeric" id="cfg-lp-cap-producao" oninput="fmtMoney(this)" placeholder="75.000,00"></div>
           <div class="fg"><label>Limite de Instalações começando no mesmo dia</label><input class="fc no-upper" type="number" min="1" id="cfg-lp-cap-instalacoes" placeholder="3"></div>
+          <div class="fg"><label>Limite de obras em andamento ao mesmo tempo</label><input class="fc no-upper" type="number" min="1" id="cfg-lp-cap-inst-simult" placeholder="Sem limite"></div>
         </div>
       </div>
       <!-- AVISOS -->
@@ -5642,10 +5692,17 @@ function _fbGuardarBasesSnap(col,snap){
     });
   }catch(e){console.warn('_fbGuardarBasesSnap',col,e);}
 }
+// (2026-10-27) Base POR OBJETO — bug real: a tela guardava um pedido "velho" (pego antes de outra
+// gravação chegar, ex.: status do e-mail de emissão) e, ao salvar, o merge comparava com a base MAIS
+// NOVA do servidor. O campo que só existia na base nova parecia "apagado localmente" e era removido
+// (OS 428/430 perderam o "✅ Enviado" assim). Agora cada pedido vindo do servidor lembra a versão de
+// onde ele saiu; o merge usa ESSA base, então campo gravado por outra pessoa depois nunca é apagado.
+window._fbObjBase=window._fbObjBase||new WeakMap();
 function _fbSaveMerge(col,id,data){
   id=String(id);
   const ref=doc(db,col,id);
-  const base=_fbBases[col]&&_fbBases[col][id];
+  let base=null;try{base=(data&&typeof data==='object'&&window._fbObjBase.get(data))||null;}catch(e){}
+  if(!base)base=_fbBases[col]&&_fbBases[col][id];
   if(!base)return setDoc(ref,data);
   return runTransaction(db,async(tx)=>{
     const snap=await tx.get(ref);
@@ -5867,7 +5924,7 @@ window._fbWatchCrmEmpresas=(cb,errCb)=>onSnapshot(collection(db,'crmEmpresas'),s
 // recebido, preservando inclusive deleções de chave aninhada feitas localmente antes de
 // chamar isso aqui (ex.: delete cfg.comissaoPagaFora[confKey]) — só os 5 campos já
 // blindados saem da jogada.
-window._fbSaveCfg=(data)=>{
+const _fbSaveCfgTx=(data)=>{
   return runTransaction(db,async(tx)=>{
     const ref=doc(db,'sistema','config');
     const snap=await tx.get(ref);
@@ -5902,12 +5959,55 @@ window._fbSaveCfg=(data)=>{
     return Promise.reject(e);
   });
 };
+// Trava (2026-10-26): nunca grava as configurações antes de elas chegarem do servidor.
+// Migrações do admin rodam quando os pedidos chegam; se isso acontecesse ANTES das
+// configurações, o _fbSaveCfg(cfg) regravava o documento inteiro só com os valores padrão
+// do código (apagando tudo o que existe só no servidor). Agora a gravação espera o load()
+// terminar (window._fbCfgMarcarCarregada); se em 30 s não carregar, não grava nada e avisa.
+let _cfgServidorOk=false;const _cfgServidorEspera=[];
+window._fbCfgMarcarCarregada=()=>{if(_cfgServidorOk)return;_cfgServidorOk=true;_cfgServidorEspera.splice(0).forEach(f=>{try{f();}catch(e){}});};
+window._fbSaveCfg=(data)=>{
+  if(_cfgServidorOk)return _fbSaveCfgTx(data);
+  return new Promise(res=>{const t=setTimeout(()=>res(false),30000);_cfgServidorEspera.push(()=>{clearTimeout(t);res(true);});})
+    .then(ok=>{
+      if(!ok){
+        const e=new Error('as configurações do servidor ainda não carregaram');
+        console.error('_fbSaveCfg: não gravou —',e.message);
+        if(typeof toast==='function')toast('Não foi possível salvar agora: o sistema ainda não terminou de carregar. Atualize a página (F5) e tente de novo.','terr');
+        return Promise.reject(e);
+      }
+      return new Promise(r=>setTimeout(r,0)).then(()=>_fbSaveCfgTx(data));
+    });
+};
 // (2026-09-30) Lê SÓ sistema/config — antes baixava a coleção 'sistema' inteira, o que ficaria pesado
 // no login com os documentos do menu Orçamentos (base de matérias-primas, orçamentos salvos).
 window._fbLoadCfg=()=>getDoc(doc(db,'sistema','config')).then(s=>s.exists()?s.data():null);
 // Número sequencial de orçamento (2026-09-30) — transação: dois usuários nunca pegam o mesmo número.
 window._fbOrcProxNumero=()=>runTransaction(db,async(tx)=>{const ref=doc(db,'sistema','orcamentosConfig');const snap=await tx.get(ref);const it=(snap.exists()&&snap.data().itens)||{};const n=Math.max(parseInt(it.contador&&it.contador.proximo)||1,1);tx.set(ref,{itens:{contador:{proximo:n+1,em:new Date().toISOString()}}},{merge:true});return n;});
 window._fbWatchCfg=(cb)=>onSnapshot(doc(db,'sistema','config'),snap=>{if(snap.exists()){_fbGuardarBase('sistema','config',snap.data());cb(snap.data());}});
+// Abertura mais leve (2026-10-26): antes o load() fazia getDoc(sistema/config) e logo depois
+// abria um onSnapshot do MESMO documento — as configurações eram baixadas 2 vezes a cada
+// abertura. Agora a 1ª leitura vem do próprio listener. Erro ou demora acima de 20 s → rejeita
+// e o load() volta pro caminho antigo (getDoc + _fbWatchCfg), então nada fica travado.
+window._fbCfgPrimeiraEWatch=(cb)=>new Promise((res,rej)=>{
+  let primeiro=true,un=null,tmr=null;const P=window.__gcPerf;
+  try{const a=performance.now();if(P&&P.ini.cfgGetDoc==null)P.ini.cfgGetDoc=a;if(P&&P.ini._fbWatchCfg==null)P.ini._fbWatchCfg=a;}catch(e){}
+  const falhar=(err)=>{if(!primeiro)return;primeiro=false;clearTimeout(tmr);try{if(un)un();}catch(e){}rej(err);};
+  un=onSnapshot(doc(db,'sistema','config'),snap=>{
+    const d=snap.exists()?snap.data():null;
+    if(d)_fbGuardarBase('sistema','config',d);
+    if(primeiro){
+      primeiro=false;clearTimeout(tmr);
+      try{const t=performance.now();if(P&&P.t.cfgGetDoc==null)P.t.cfgGetDoc=t;if(P&&P.t._fbWatchCfg==null)P.t._fbWatchCfg=t;}catch(e){}
+      res(d);
+      // Igual ao listener antigo: o 1º retorno também passa pelo callback (badge, botão etc.).
+      if(d)setTimeout(()=>{try{cb(d);}catch(e){console.error('cfg watch',e);}},0);
+      return;
+    }
+    if(d){try{cb(d);}catch(e){console.error('cfg watch',e);}}
+  },err=>{if(primeiro)falhar(err);else console.warn('cfg watch',err);});
+  tmr=setTimeout(()=>falhar(new Error('cfg: sem resposta em 20 s')),20000);
+});
 // Escrita ATÔMICA de um campo aninhado só (2026-08-04) — usada por setPagConf() pra confirmar
 // recebimento/comissão sem correr risco de perder confirmações de outras parcelas. Motivo:
 // _fbSaveCfg(cfg) faz setDoc SEM merge, reescrevendo o documento 'config' INTEIRO com o que
@@ -7056,11 +7156,22 @@ function fmtMoney(el){
 async function load(){
   // Carrega config do Firestore (compartilhada entre todos os usuários)
   if(window._fbLoadCfg){
-    try{
+    // Listener em tempo real: se alguém mudar as configs, todos atualizam automaticamente
+    const _cbCfg=data=>{cfg=Object.assign(cfg,data);if(cfg.k)try{emailjs.init(cfg.k)}catch(e){}atualizarBotaoNovoPedido();_atualizarBadgeAvisos();};
+    let _cfgOk=false;
+    if(window._fbCfgPrimeiraEWatch){
+      try{
+        const remoteCfg=await window._fbCfgPrimeiraEWatch(_cbCfg);
+        if(remoteCfg) cfg=Object.assign(cfg,remoteCfg);
+        _cfgOk=true;
+        if(window._fbCfgMarcarCarregada)window._fbCfgMarcarCarregada();
+      }catch(e){console.warn('cfg: leitura única falhou, usando o caminho antigo',e);}
+    }
+    if(!_cfgOk)try{
       const remoteCfg=await window._fbLoadCfg();
       if(remoteCfg) cfg=Object.assign(cfg,remoteCfg);
-      // Listener em tempo real: se alguém mudar as configs, todos atualizam automaticamente
-      window._fbWatchCfg(data=>{cfg=Object.assign(cfg,data);if(cfg.k)try{emailjs.init(cfg.k)}catch(e){}atualizarBotaoNovoPedido();_atualizarBadgeAvisos();});
+      if(window._fbCfgMarcarCarregada)window._fbCfgMarcarCarregada();
+      window._fbWatchCfg(_cbCfg);
     }catch(e){
       // Fallback para localStorage se Firestore não responder
       const cfg2=localStorage.getItem('gcore_cfg');
@@ -7506,7 +7617,8 @@ async function _migrarLimparCamposReservadosFirestore(){
 function setupRealtimeSync(){
   if(!window._fbWatchPedidos)return;
   window._fbWatchPedidos(function(snapshot){
-    pedidos=snapshot.docs.map(d=>d.data());
+    // (2026-10-27) cada objeto lembra a versão do servidor de onde saiu — ver _fbSaveMerge.
+    pedidos=snapshot.docs.map(d=>{const o=d.data();try{const b=window._fbBasePedido&&window._fbBasePedido(d.id);if(b&&window._fbObjBase)window._fbObjBase.set(o,b);}catch(e){}return o;});
     try{pedidos.forEach(_projNormExpedicao);}catch(e){}
     // (2026-10-01) Pedido emitido com Data do Conselho DEPOIS da emissão (data planejada que
     // foi confirmada sem corrigir) — o Conselho não pode ter sido depois; usa a data da emissão
@@ -7768,10 +7880,20 @@ let rhPontoMeses=[];
 // reconsultar o Firestore. Cap de retenção (_LIXEIRA_MAX) evita crescimento sem limite.
 let lixeira=[];
 const _LIXEIRA_MAX=200;
+let _lixeiraSyncAtivo=false;
 function setupLixeiraSync(){
-  if(!window._fbWatchLixeira)return;
+  if(!window._fbWatchLixeira||_lixeiraSyncAtivo)return;
+  _lixeiraSyncAtivo=true;
   window._fbWatchLixeira(function(snapshot){
     lixeira=snapshot.docs.map(d=>({id:d.id,...d.data()}));
+    // Quem não é admin não baixa a lixeira, então não apaga o excedente ao mandar item pra ela —
+    // o admin mantém o limite de _LIXEIRA_MAX itens (sempre os mais antigos).
+    try{
+      if(lixeira.length>_LIXEIRA_MAX&&window._fbDeleteLixeiraItem){
+        const ordenado=[...lixeira].sort((a,b)=>(a.apagadoEm||'').localeCompare(b.apagadoEm||''));
+        ordenado.slice(0,ordenado.length-_LIXEIRA_MAX).forEach(x=>window._fbDeleteLixeiraItem(x.id).catch(()=>{}));
+      }
+    }catch(e){}
     if(typeof renderLixeiraPainel==='function')renderLixeiraPainel();
   });
 }
@@ -13852,8 +13974,8 @@ function _emConfirmarEmails(e){
     m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10050;display:flex;align-items:center;justify-content:center;padding:20px';
     m.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:520px;width:94%;box-shadow:0 8px 40px rgba(0,0,0,.25)">
       <div style="font-size:1rem;font-weight:800;color:#1a1f36;margin-bottom:4px">📧 Confira pra quem vai o pedido</div>
-      <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">O e-mail de emissão vai pra estes endereços (e sempre uma cópia pro pedidos@granda.ind.br):</div>
-      ${linhas||'<div style="font-size:.82rem;color:#64748b;margin-bottom:10px">Nenhum e-mail do cliente — vai só pro pedidos@granda.ind.br.</div>'}
+      <div style="font-size:.78rem;color:#64748b;margin-bottom:14px">O e-mail de emissão vai pra estes endereços (e sempre uma cópia pro pedidos@granda.ind.br e pro vendedor do pedido):</div>
+      ${linhas||'<div style="font-size:.82rem;color:#64748b;margin-bottom:10px">Nenhum e-mail do cliente — vai só pro pedidos@granda.ind.br e pro vendedor do pedido.</div>'}
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
         <button type="button" id="em-conf-voltar" style="background:#f1f5f9;border:none;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer">✏️ Voltar e corrigir</button>
         <button type="button" id="em-conf-ok" style="background:#16a34a;color:#fff;border:none;border-radius:8px;padding:9px 14px;font-weight:800;cursor:pointer">✅ Está certo, emitir</button>
@@ -13868,6 +13990,32 @@ function _emDestinatariosEmissao(p){
   const l=[p.email_comprador,p.email_engenheiro,p.email_financeiro].map(e=>String(e||'').trim()).filter(Boolean).filter(e=>!bloq.includes(e.toLowerCase())).filter((v,i,a)=>a.indexOf(v)===i);
   return l.length?l:['pedidos@granda.ind.br'];
 }
+// (2026-10-27, a pedido do usuário) Vendedor do pedido (p.responsavel → e-mail do cadastro de usuários)
+// recebe a emissão e a finalização junto com o cliente e o pedidos@. Nunca o pedidos@ nem o
+// guilherme.clabonde@ (bloqueado na emissão desde 2026-09-28).
+function _emEmailVendedor(p){
+  try{
+    const e=String(_getEmailPorNome(p&&p.responsavel)||'').trim().toLowerCase();
+    if(!e||_emEmailErroFormato(e))return'';
+    if(e==='pedidos@granda.ind.br'||e==='guilherme.clabonde@granda.ind.br')return'';
+    return e;
+  }catch(err){return'';}
+}
+function _emComVendedor(lista,p){
+  const l=(lista||[]).slice();const v=_emEmailVendedor(p);
+  if(v&&!l.some(x=>String(x||'').trim().toLowerCase()===v))l.push(v);
+  return l;
+}
+// (2026-10-27) Grava SÓ os campos de status do e-mail, numa transação sobre o documento atual do
+// servidor — nunca regrava o pedido inteiro. Se o pedido ainda não chegou no servidor (emissão
+// acabou de acontecer), tenta de novo algumas vezes e, no fim, cai no salvamento normal.
+async function _emGravarStatusEmail(p,patch){
+  for(let t=0;t<4;t++){
+    try{if(!window._fbTx)break;await window._fbTx(String(p.id),()=>patch);return;}
+    catch(e){if(!/não encontrado/i.test(String(e&&e.message||e)))break;await new Promise(r=>setTimeout(r,1500));}
+  }
+  try{await savePedidoFS(p);}catch(e){console.error('Erro ao gravar status de e-mail:',e);}
+}
 async function _enviarEmailEmissao(p,destEmailsOverride){
   // E-mail Financeiro (envio de NF's) adicionado aos destinatários (2026-08-25, a pedido do
   // usuário) — antes só ia pro e-mail de Finalização de Obra (_enviarEmailFinalizacao), mas o
@@ -13877,7 +14025,7 @@ async function _enviarEmailEmissao(p,destEmailsOverride){
   // (2026-09-28, a pedido do usuário) Internamente só o pedidos@granda.ind.br recebe a emissão —
   // os e-mails internos de Configurações (cfg.e, ex.: guilherme.clabonde@) saíram daqui. Vão os
   // contatos do cliente; sem nenhum (Interno/Garantia), vai só pro pedidos@.
-  const destEmails=destEmailsOverride||_emDestinatariosEmissao(p);
+  const destEmails=_emComVendedor(destEmailsOverride||_emDestinatariosEmissao(p),p);
   if(!destEmails.length){
     return{ok:false,destinatarios:[],erro:'Nenhum e-mail de destino cadastrado neste pedido (comprador/engenheiro/financeiro/config).'};
   }
@@ -13925,12 +14073,12 @@ async function _enviarEmailEmissao(p,destEmailsOverride){
     const agora=new Date().toISOString();
     p.emailStatus=falhas.length?'parcial':'enviado';p.emailEnviadoEm=agora;p.emailDestinatarios=entregues;
     p.emailFalhas=falhas;p.emailErro=falhas.length?('Não chegou em: '+falhas.join(', ')):'';
-    savePedidoFS(p).catch(e=>console.error('Erro ao gravar status de e-mail:',e));
+    _emGravarStatusEmail(p,{emailStatus:p.emailStatus,emailEnviadoEm:agora,emailDestinatarios:entregues,emailFalhas:falhas,emailErro:p.emailErro});
     return{ok:true,destinatarios:entregues,falhas,erro:p.emailErro};
   }catch(e){
     const msg=(e&&(e.text||e.message))||'Erro desconhecido no envio';
     p.emailStatus='erro';p.emailErro=String(msg);p.emailErroEm=new Date().toISOString();
-    savePedidoFS(p).catch(e2=>console.error('Erro ao gravar status de e-mail:',e2));
+    _emGravarStatusEmail(p,{emailStatus:'erro',emailErro:p.emailErro,emailErroEm:p.emailErroEm});
     console.error('Erro ao enviar e-mail de emissão',e);
     return{ok:false,destinatarios:destEmails,erro:String(msg)};
   }
@@ -15474,6 +15622,8 @@ function saveCfg(){
   if(capProdEl){const v=moneyToNum(capProdEl.value);if(v>0)cfg.lpCapProducaoDia=v;}
   const capInstEl=document.getElementById('cfg-lp-cap-instalacoes');
   if(capInstEl){const v=parseInt(capInstEl.value,10);if(v>0)cfg.lpCapInstalacoesDia=v;}
+  const capSimEl=document.getElementById('cfg-lp-cap-inst-simult');
+  if(capSimEl){const v=parseInt(capSimEl.value,10);cfg.lpCapInstSimult=v>0?v:null;}
   // Salvar permissões por categoria (quem pode emitir novo pedido)
   const kPermChks=document.querySelectorAll('.kperm-chk');
   if(kPermChks.length){
@@ -16451,7 +16601,7 @@ function initAuth(tries){
         try{setupFinxSync();}catch(e){console.error('Gestão financeira',e);}
         setupRhPontoSync();
         setupRhAtestadosAnexosSync();
-        setupLixeiraSync();
+        // Lixeira (2026-10-26): baixada só por admin, depois que a categoria é conhecida (ver abaixo).
         setupProspSync();
         setupCrmSync();
         setupSimReservasSync();
@@ -16489,6 +16639,7 @@ function initAuth(tries){
             }
           }catch(e){}
           _migrarPinAdmin(); // (2026-09-30) PIN antigo em texto puro → hash, só quando admin entra
+          try{if(_getUserCat().isAdm)setupLixeiraSync();}catch(e){console.error('lixeira',e);}
           atualizarBotaoNovoPedido();
           buildSidebarCats();
           _refreshTarefasBadge();
@@ -33891,6 +34042,8 @@ function _lpRenderCfgEtapas(){
   if(capProdEl)capProdEl.value=fmtR(_lpCapProducaoDia()).replace('R$','').trim();
   const capInstEl=document.getElementById('cfg-lp-cap-instalacoes');
   if(capInstEl)capInstEl.value=_lpCapInstalacoesDia();
+  const capSimEl=document.getElementById('cfg-lp-cap-inst-simult');
+  if(capSimEl)capSimEl.value=_lpCapInstSimult()||'';
 }
 // Calcula as datas de todas as etapas de um pedido.
 // Retorno de erro: {ok:false,problemas:[{campo,motivo:'faltando'|'invalido',valor}]} quando
@@ -39493,15 +39646,15 @@ function _simToggleInstalacao(){
 function _simDiasFrete(cidade,uf,modalidade){
   const tabela=getFreteTable();
   if(modalidade!=='Dedicado'){
-    if(uf&&tabela[uf]!=null)return{dias:tabela[uf],texto:`${tabela[uf]} ${_plural(tabela[uf],'dia útil','dias úteis')} — Tabela de Fretes Fracionados (${uf})`};
-    return{dias:3,texto:'3 dias úteis (padrão — UF não configurado na Tabela de Fretes)'};
+    if(uf&&tabela[uf]!=null)return{dias:tabela[uf],texto:`${tabela[uf]} ${_plural(tabela[uf],'dia útil','dias úteis')} — Tabela de Fretes Fracionados (${uf})`,uteis:true};
+    return{dias:3,texto:'3 dias úteis (padrão — UF não configurado na Tabela de Fretes)',uteis:true};
   }
   const origemCidade=((cfg.freteOrigem||'PONTA GROSSA/PR').split('/')[0]||'').trim();
-  if(cidade&&norm(cidade)===norm(origemCidade))return{dias:1,texto:'1 dia útil (entrega na própria cidade de origem)'};
+  if(cidade&&norm(cidade)===norm(origemCidade))return{dias:1,texto:'1 dia útil (entrega na própria cidade de origem)',uteis:true};
   const dist=DIST_PG_NORM[norm(cidade||'')]||null;
-  if(!dist)return{dias:3,texto:'3 dias corridos (cidade fora da tabela de distâncias — estimativa padrão)'};
+  if(!dist)return{dias:3,texto:'3 dias corridos (cidade fora da tabela de distâncias — estimativa padrão)',uteis:false};
   const dias=Math.ceil(dist/800);
-  return{dias,texto:`${dias} ${_plural(dias,'dia','dias')} ${_plural(dias,'corrido','corridos')} — ${dist}km de ${cfg.freteOrigem||'Ponta Grossa/PR'}`};
+  return{dias,texto:`${dias} ${_plural(dias,'dia','dias')} ${_plural(dias,'corrido','corridos')} — ${dist}km de ${cfg.freteOrigem||'Ponta Grossa/PR'}`,uteis:false};
 }
 // ══════════════ SIMULADOR 2.0 (2026-09-24, a pedido do usuário) ══════════════
 // Camada NOVA por cima do simulador que já existia (_lpSimular continua igual, só ganha um
@@ -39516,14 +39669,14 @@ function _simParamsTela(){
   const temInst=document.getElementById('sim-tem-inst')?.value==='sim';
   const fmod=document.getElementById('sim-fmod')?.value||'Fracionado';
   const diasInst=temInst?(parseInt(document.getElementById('sim-dias-inst')?.value,10)||3):0;
-  let diasFrete=0;
+  let diasFrete=0,freteUteis=false;
   if(temFrete){
     const cidade=(document.getElementById('sim-cidade')?.value||'').trim();
     const uf=(document.getElementById('sim-uf')?.value||'').trim();
     if(!cidade||!uf)return null;
-    diasFrete=_simDiasFrete(cidade,uf,fmod).dias;
+    const rf=_simDiasFrete(cidade,uf,fmod);diasFrete=rf.dias;freteUteis=!!rf.uteis;
   }
-  return{liquido,temFrete,temInst,diasFrete,diasInst,prazoCliente:document.getElementById('sim-prazo')?.value||''};
+  return{liquido,temFrete,temInst,diasFrete,diasInst,freteUteis,prazoCliente:document.getElementById('sim-prazo')?.value||''};
 }
 // ── Setor com prazo ESPREMIDO (2026-09-29, a pedido do usuário: "2 dias pra chegar uma compra
 // nao ta saudavel e vc ta colocando como seguro no simulador, nao é seguro se tinha 7 pra comprar
@@ -39590,33 +39743,88 @@ function _setorNivelEspremido(key,du,normal){
   if(r<0.75)return'atencao';
   return'';
 }
-function _simCtx(){return{mapaProd:_lpMapaProducaoPorDia(),mapaInst:_lpMapaInstalacoesPorDia(),ativ:{}};}
+// ══ SIMULADOR MAIS CONFIÁVEL (2026-10-27, a pedido do usuário: "eu queria mais confiabilidade") ══
+// 1) UMA conta só de datas-base pro resumo (Simulador 2.0) e pra tabela de detalhes (_lpSimular) —
+//    antes cada um fazia a sua e as duas partes da tela podiam mostrar datas diferentes.
+// 2) Frete fracionado (Tabela de Fretes por UF) é em dias ÚTEIS — antes era descontado como dias
+//    corridos e um frete que atravessa fim de semana "chegava" ~2 dias antes do real.
+// 3) Fim de semana/feriado nas datas de logística (entrega, início da instalação, coleta) sempre
+//    volta pro dia útil ANTERIOR — antes domingo/feriado empurrava pra frente e roubava dias do
+//    frete/instalação.
+// 4) Recebimento ART (20 dias antes da entrega) não é pré-requisito da Produção — antes, com
+//    instalação+frete longos, a ART caía depois da produção e o simulador dizia "Não dá" pra
+//    QUALQUER data. Agora só avisa quando a ART cairia antes da emissão (sem tempo pra ART).
+// 5) Instalação: além das obras COMEÇANDO no mesmo dia, conta as obras EM ANDAMENTO em cada dia
+//    útil do período da instalação (Início → Final), com limite opcional em Configurações.
+// Só o Simulador usa estas regras — as datas dos pedidos reais (Pipeline) não mudaram.
+function _simDiaUtilAnterior(iso){let g=0;while(iso&&!_isDiaUtil(iso)&&g<15){iso=_opAddDias(iso,-1);g++;}return iso;}
+function _simDatasBase(P,prazoIso,emissaoIso){
+  const out={prazoPedido:prazoIso,prazoIso:_simDiaUtilAnterior(prazoIso),erro:null,etapas:[],coletaIso:null,chegadaIso:null,diasInternos:0};
+  out.prazoAjustado=out.prazoIso!==prazoIso;
+  const pz=out.prazoIso;
+  if(!pz||!emissaoIso){out.erro='prazo inválido';return out;}
+  const chegada=(P.temInst&&P.diasInst>0)?_simDiaUtilAnterior(_opAddDias(pz,-P.diasInst)):pz;
+  let coleta=chegada;
+  if(P.temFrete&&P.diasFrete>0)coleta=P.freteUteis?_lpSubtraiDiasUteis(chegada,P.diasFrete):_simDiaUtilAnterior(_opAddDias(chegada,-P.diasFrete));
+  const dias=Math.round((new Date(coleta+'T00:00:00')-new Date(emissaoIso+'T00:00:00'))/86400000);
+  out.coletaIso=coleta;out.chegadaIso=chegada;out.diasInternos=dias;
+  if(!(dias>0)){out.erro='prazo curto demais pro frete + instalação';return out;}
+  const conds={medicao:true,art:true,frete:!!P.temFrete,instalacao:!!P.temInst};
+  const defs=_lpEtapasDefParaPedido(null).filter(d=>!d.cond||conds[d.cond]);
+  const temEmb=defs.some(d=>d.key==='embalagem');
+  const prodBuf=temEmb?_lpSubtraiDiasUteis(coleta,LP_DIAS_EMBALAGEM):null;
+  out.etapas=defs.map(def=>{
+    let iso;
+    if(def.key==='producao'&&prodBuf)iso=prodBuf;
+    else if(def.special==='chegada')iso=chegada;
+    else if(def.special==='final')iso=pz;
+    else if(def.key==='art')iso=_lpArtIso(pz);
+    else iso=_lpAjustaDiaUtil(_opAddDias(emissaoIso,Math.round(dias*def.pct/100)));
+    return Object.assign({},def,{iso});
+  });
+  return out;
+}
+// Limite opcional de obras EM ANDAMENTO ao mesmo tempo (Configurações → Etapas de Pedidos).
+// 0 = sem limite (só informa o pico no Simulador, não muda o resultado).
+function _lpCapInstSimult(){const v=parseInt(cfg.lpCapInstSimult,10);return v>0?v:0;}
+// {iso:{qtd,itens}} — quantas obras estão EM ANDAMENTO (Início → Final da Instalação) em cada dia
+// útil. Pedidos reais com obra já finalizada não contam. Reservas ativas do Simulador contam.
+function _lpMapaInstalacoesEmAndamento(){
+  const mapa={};
+  const marca=(ini,fim,item)=>{
+    if(!ini||!fim)return;
+    let d=ini,g=0;
+    while(d<=fim&&g<370){if(_isDiaUtil(d)){(mapa[d]=mapa[d]||{qtd:0,itens:[]}).qtd++;mapa[d].itens.push(item);}d=_opAddDias(d,1);g++;}
+  };
+  _lpPedidosElegiveis().forEach(p=>{
+    if(_lpObraFinalizada(p))return;
+    const c=_lpCalcEtapas(p);
+    if(!c.ok||!c.temInst)return;
+    marca(c.chegadaIso,c.prazoIso,p);
+  });
+  _simReservasAtivas().filter(r=>r.temInstalacao&&r.chegadaIso).forEach(r=>marca(r.chegadaIso,r.prazoClienteIso||r.chegadaIso,{_reserva:true,cliente:r.cliente}));
+  return mapa;
+}
+// Dia útil com MAIS obras em andamento dentro de [ini, fim] — {qtd, iso}.
+function _simPicoInstalacao(mapa,ini,fim){
+  const pk={qtd:0,iso:ini};
+  let d=ini,g=0;
+  while(d&&fim&&d<=fim&&g<370){if(_isDiaUtil(d)){const q=((mapa||{})[d]||{qtd:0}).qtd;if(q>pk.qtd){pk.qtd=q;pk.iso=d;}}d=_opAddDias(d,1);g++;}
+  return pk;
+}
+function _simCtx(){return{mapaProd:_lpMapaProducaoPorDia(),mapaInst:_lpMapaInstalacoesPorDia(),mapaInstAnd:_lpMapaInstalacoesEmAndamento(),ativ:{}};}
 function _simAvaliar(P,prazoIso,emissaoIso,ctx){
   // 2026-09-24.22 (teste automático achou): entrega final em sábado/domingo/feriado deixava a
   // chegada do frete DEPOIS da entrega e dava "ok" pra datas antes do "Mais rápido". Agora a
   // conta usa o dia útil ANTERIOR (conservador) e a tela avisa.
-  const prazoPedido=prazoIso;
-  if(prazoIso&&typeof _isDiaUtil==='function'){let g=0;while(!_isDiaUtil(prazoIso)&&g<15){prazoIso=_opAddDias(prazoIso,-1);g++;}}
-  const res={prazoIso,emissaoIso,status:'nao',motivos:[],etapas:[],aloc:null,chegadaIso:null,coletaIso:null,prazoPedido,prazoAjustado:prazoIso!==prazoPedido};
-  const coletaRaw=_opAddDias(prazoIso,-(P.diasInst+P.diasFrete));
-  const chegadaRaw=_opAddDias(prazoIso,-P.diasInst);
-  const dias=coletaRaw?Math.round((new Date(coletaRaw+'T00:00:00')-new Date(emissaoIso+'T00:00:00'))/86400000):0;
-  if(!coletaRaw||!(dias>0)){res.motivos.push('prazo curto demais pro frete + instalação');return res;}
-  const coleta=_lpAjustaDiaUtil(coletaRaw),chegada=_lpAjustaDiaUtil(chegadaRaw);
+  // (2026-10-27) Datas-base vêm de _simDatasBase — a MESMA conta da tabela de detalhes.
+  const base=_simDatasBase(P,prazoIso,emissaoIso);
+  const res={prazoIso:base.prazoIso,emissaoIso,status:'nao',motivos:[],etapas:[],aloc:null,chegadaIso:null,coletaIso:null,prazoPedido:base.prazoPedido,prazoAjustado:base.prazoAjustado};
+  if(base.erro){res.motivos.push(base.erro);return res;}
+  prazoIso=base.prazoIso;
+  const coleta=base.coletaIso,chegada=base.chegadaIso;
   res.coletaIso=coleta;res.chegadaIso=P.temInst?chegada:null;
-  const conds={medicao:true,art:true,frete:P.temFrete,instalacao:P.temInst};
-  const defs=_lpEtapasDefParaPedido(null).filter(d=>!d.cond||conds[d.cond]);
-  const temEmb=defs.some(d=>d.key==='embalagem');
-  const prodBuf=temEmb?_lpSubtraiDiasUteis(coleta,LP_DIAS_EMBALAGEM):null;
-  res.etapas=defs.map(def=>{
-    let iso;
-    if(def.key==='producao'&&prodBuf)iso=prodBuf;
-    else if(def.special==='chegada')iso=chegada;
-    else if(def.special==='final')iso=prazoIso;
-    else if(def.key==='art')iso=_lpArtIso(prazoIso);
-    else iso=_lpAjustaDiaUtil(_opAddDias(emissaoIso,Math.round(dias*def.pct/100)));
-    return{key:def.key,label:def.label,iso};
-  });
+  res.etapas=base.etapas.map(e=>({key:e.key,label:e.label,iso:e.iso}));
   const etProd=res.etapas.find(e=>e.key==='producao');
   if(etProd&&etProd.iso<emissaoIso){res.motivos.push('não sobra tempo pra produção');return res;}
   let apertado=false;
@@ -39630,12 +39838,23 @@ function _simAvaliar(P,prazoIso,emissaoIso,ctx){
   // Etapas anteriores à produção (projeto, compras...) não podem cair depois do prazo da produção.
   if(etProd){
     const iP=res.etapas.indexOf(etProd);
-    if(res.etapas.slice(0,iP).some(e=>e.iso>etProd.iso)){res.motivos.push('prazo curto demais pras etapas antes da produção');return res;}
+    if(res.etapas.slice(0,iP).some(e=>e.key!=='art'&&e.iso>etProd.iso)){res.motivos.push('prazo curto demais pras etapas antes da produção');return res;}
   }
   if(P.temInst){
     const q=(ctx.mapaInst[chegada]||{qtd:0}).qtd;
     if(q>=_lpCapInstalacoesDia()){apertado=true;res.motivos.push(`instalação lotada em ${fmtD(chegada)} (${q} obras)`);}
+    // (2026-10-27) Obras EM ANDAMENTO em cada dia útil da instalação, não só as que começam junto.
+    const pk=_simPicoInstalacao(ctx.mapaInstAnd||(ctx.mapaInstAnd=_lpMapaInstalacoesEmAndamento()),chegada,prazoIso);
+    res.picoInst=pk;
+    const capS=_lpCapInstSimult();
+    if(capS&&pk.qtd+1>capS){apertado=true;res.motivos.push(`instalação: já há ${pk.qtd} ${_plural(pk.qtd,'obra','obras')} em andamento em ${fmtD(pk.iso)} (limite ${capS} ao mesmo tempo)`);}
   }
+  // (2026-10-27) ART NUNCA limita o prazo (a pedido do usuário: "ela pode ser emitida até mesmo
+  // depois da obra executada, isso não é limitador") — só vira AVISO, sem mudar o resultado.
+  res.avisos=[];
+  const etArt=res.etapas.find(e=>e.key==='art');
+  const artSemTempo=!!(etArt&&etArt.iso&&etArt.iso<=emissaoIso);
+  if(artSemTempo)res.avisos.push(`Não dá tempo de ter a ART 20 dias antes da entrega (seria até ${fmtD(etArt.iso)}, antes da emissão). Não impede a venda — a ART pode ser emitida depois.`);
   res.etapas.forEach(e=>{
     const lim=LP_LIMITE_ATIVIDADES_ETAPA[e.key];
     if(lim==null)return;
@@ -39650,6 +39869,10 @@ function _simAvaliar(P,prazoIso,emissaoIso,ctx){
     res.etapas.forEach(e=>{
       e.du=jan[e.key];e.duNormal=normais[e.key];
       e.espremido=_setorNivelEspremido(e.key,e.du,e.duNormal);
+      if(e.key==='art'){ // ART: só aviso, nunca deixa a simulação "apertada"
+        if(e.espremido==='critico'&&!artSemTempo)res.avisos.push(`ART com pouco tempo: ${e.du} ${_plural(e.du,'dia','dias')} ${_plural(e.du,'útil','úteis')} (normal ${e.duNormal}). Não impede a venda — a ART pode ser emitida depois.`);
+        return;
+      }
       if(e.espremido==='critico'){apertado=true;res.motivos.push(`${e.label} com só ${e.du} ${_plural(e.du,'dia','dias')} ${_plural(e.du,'útil','úteis')} (normal ${e.duNormal})`);}
     });
   }catch(err){console.error('setor espremido',err);}
@@ -39943,6 +40166,7 @@ function _simRenderExtras(){
     <div style="font-size:1.15rem;font-weight:800;color:${v.cor}">${v.ico} ${frase}</div>
     ${pedido.status!=='ok'&&pedido.motivos.length>2?`<div style="font-size:.8rem;margin-top:6px;color:var(--ink2)">${pedido.motivos.slice(2).map(m=>'• '+_tlEsc(m)).join('<br>')}</div>`:''}
     ${(()=>{try{const t=typeof _fechDesvioUfTxt==='function'?_fechDesvioUfTxt(document.getElementById('sim-uf')?.value):'';return t?`<div style="font-size:.8rem;margin-top:6px;color:#7c2d12">${t}</div>`:'';}catch(e){return'';}})()}
+    ${(pedido.avisos||[]).map(a=>`<div style="font-size:.8rem;margin-top:6px;color:#475569">📄 ${_tlEsc(a)}</div>`).join('')}
     ${pedido.prazoAjustado?`<div style="font-size:.8rem;margin-top:6px;color:#b45309">📅 ${fmtD(P.prazoCliente)} não é dia útil (fim de semana/feriado) — a conta considerou a entrega no dia útil anterior, <b>${fmtD(pedido.prazoIso)}</b>.</div>`:''}
     ${validade?`<div style="font-size:.8rem;margin-top:6px;color:var(--ink3)">⏳ Essa condição vale se o pedido for emitido até <b>${fmtD(validade)}</b> — depois disso não sobra tempo pras etapas antes da produção (projeto, compras...) ou a fábrica já estará ocupada. Considera a ocupação de hoje; outras vendas podem ocupar a vaga antes.</div>`:''}
   </div>`;
@@ -40141,7 +40365,7 @@ function _lpSimular(){
   const fmod=document.getElementById('sim-fmod')?.value||'Fracionado';
   const diasInstManual=parseInt(document.getElementById('sim-dias-inst')?.value,10)||3;
 
-  let diasFrete=0,freteTxt='sem frete próprio (cliente retira/contrata)';
+  let diasFrete=0,freteUteis=false,freteTxt='sem frete próprio (cliente retira/contrata)';
   if(temFrete){
     // CEP deixou de ser exigido aqui (2026-08-24, a pedido do usuário) — Cidade+UF digitados
     // direto já bastam, _simDiasFrete() sempre foi uma função pura por cidade/UF (nunca
@@ -40150,37 +40374,22 @@ function _lpSimular(){
     const ufSim=(document.getElementById('sim-uf')?.value||'').trim();
     if(!cidadeSim||!ufSim){toast('Informe a Cidade e o Estado (UF) de entrega pra calcular o frete.','terr');return;}
     const r=_simDiasFrete(cidadeSim,ufSim,fmod);
-    diasFrete=r.dias;freteTxt=r.texto;
+    diasFrete=r.dias;freteTxt=r.texto;freteUteis=!!r.uteis;
   }
   const diasInst=temInst?diasInstManual:0;
 
   const hojeIso=_hojeIso();
-  const coletaIsoRaw=_opAddDias(prazoIso,-(diasInst+diasFrete));
-  const chegadaIsoRaw=_opAddDias(prazoIso,-diasInst);
-  const prazoInternoDias=coletaIsoRaw?Math.round((new Date(coletaIsoRaw+'T00:00:00')-new Date(hojeIso+'T00:00:00'))/86400000):0;
-  if(!coletaIsoRaw||!(prazoInternoDias>0)){
+  // (2026-10-27) Mesmas datas-base do resumo (_simDatasBase) — nunca mais duas contas diferentes na tela.
+  const _base=_simDatasBase({liquido,temFrete,temInst,diasFrete,diasInst,freteUteis},prazoIso,hojeIso);
+  const prazoInternoDias=_base.diasInternos||0;
+  if(_base.erro){
     out.innerHTML=`<div style="padding:14px 16px;background:#fee2e2;border-radius:10px;color:#b91c1c;font-weight:700">⚠️ Prazo curto demais: ${temFrete?`${diasFrete} ${_plural(diasFrete,'dia','dias')} de frete`:'sem frete'}${temInst?` + ${diasInst} ${_plural(diasInst,'dia','dias')} de instalação`:''} não cabem entre hoje e ${fmtD(prazoIso)}. Esse prazo não é seguro pra vender — peça mais dias ao cliente.</div>`;
     try{_simRenderExtras();}catch(e){console.error('Simulador 2.0',e);}
     return;
   }
-  const coletaIso=_lpAjustaDiaUtil(coletaIsoRaw);
-  const chegadaIso=_lpAjustaDiaUtil(chegadaIsoRaw);
-  const condsSim={medicao:true,art:true,frete:temFrete,instalacao:temInst};
-  // Mesma regra de Embalagem (2 dias úteis fixos antes da Saída do Frete) aplicada aqui pra
-  // nunca divergir do que _lpCalcEtapas calcula pra pedido de verdade — ver comentário lá
-  // (2026-08-04).
-  const _etapasDefSim=_lpEtapasDefParaPedido(null).filter(d=>!d.cond||condsSim[d.cond]);
-  const _embalagemAtivaSim=_etapasDefSim.some(d=>d.key==='embalagem');
-  const _producaoBufferIsoSim=_embalagemAtivaSim?_lpSubtraiDiasUteis(coletaIso,LP_DIAS_EMBALAGEM):null;
-  const etapas=_etapasDefSim.map(def=>{
-    let iso;
-    if(def.key==='producao'&&_producaoBufferIsoSim)iso=_producaoBufferIsoSim;
-    else if(def.special==='chegada')iso=chegadaIso;
-    else if(def.special==='final')iso=prazoIso;
-    else if(def.key==='art')iso=_lpArtIso(prazoIso);
-    else iso=_lpAjustaDiaUtil(_opAddDias(hojeIso,Math.round(prazoInternoDias*def.pct/100)));
-    return Object.assign({},def,{iso});
-  });
+  const coletaIso=_base.coletaIso;
+  const chegadaIso=_base.chegadaIso;
+  const etapas=_base.etapas;
 
   const mapaProd=_lpMapaProducaoPorDia();
   const mapaInst=_lpMapaInstalacoesPorDia();
@@ -40217,6 +40426,12 @@ function _lpSimular(){
       const sugestaoI=_lpProximoDiaLivreInstalacao(chegadaIso,mapaInst);
       instHtml=`<div style="padding:10px 14px;background:#fee2e2;border-radius:8px;color:#b91c1c;font-weight:700;margin-top:8px">❌ Instalação (${fmtD(chegadaIso)}): ${diaAtualI.qtd} ${_plural(diaAtualI.qtd,'obra','obras')} já começando nesse dia (limite ${capI}) — sugerimos começar em <u>${fmtD(sugestaoI)}</u> pra não sobrecarregar a equipe.</div>`;
     }
+    // (2026-10-27) Obras EM ANDAMENTO durante todo o período desta instalação.
+    const pkI=_simPicoInstalacao(_lpMapaInstalacoesEmAndamento(),chegadaIso,_base.prazoIso);
+    const capS=_lpCapInstSimult();
+    const estS=!!(capS&&pkI.qtd+1>capS);
+    const txtPk=pkI.qtd?`até ${pkI.qtd} ${_plural(pkI.qtd,'outra obra','outras obras')} em andamento ao mesmo tempo (pico em ${fmtD(pkI.iso)})`:'nenhuma outra obra em andamento';
+    instHtml+=`<div style="padding:10px 14px;background:${estS?'#fee2e2':'#f1f5f9'};border-radius:8px;color:${estS?'#b91c1c':'var(--ink2)'};font-weight:700;margin-top:8px">${estS?'❌':'👷'} Durante a instalação (${fmtD(chegadaIso)} a ${fmtD(_base.prazoIso)}): ${txtPk}${capS?` — limite: ${capS} ao mesmo tempo`:' — sem limite configurado (Configurações → Etapas de Pedidos)'}.</div>`;
   }
   // Dias úteis + atividades por setor (2026-08-04, a pedido do usuário) — pra cada etapa, além
   // da data, mostra quantos dias ÚTEIS aquele setor realmente tem (do fim da etapa anterior até
@@ -40264,6 +40479,7 @@ function _lpSimular(){
   const podeReservar=_simPodeReservar();
   const btnReservarHtml=podeReservar?`<button onclick="_simReservarData()" class="dash-btn-conf" style="background:#0891b2;margin-top:16px" type="button">📌 Reservar Data (segura a vaga por 3 dias úteis)</button>`:'';
   out.innerHTML=`
+    ${_base.prazoAjustado?`<div style="font-size:.8rem;color:#b45309;margin-bottom:6px">📅 ${fmtD(prazoIso)} não é dia útil — a conta considerou a entrega em <b>${fmtD(_base.prazoIso)}</b>.</div>`:''}
     <div style="font-size:.8rem;color:var(--ink4);margin-bottom:10px">📅 Emissão hipotética: hoje (${fmtD(hojeIso)}) · Frete: ${freteTxt} · Instalação: ${temInst?diasInst+' '+_plural(diasInst,'dia','dias')+' '+_plural(diasInst,'estimado','estimados')+'':'sem instalação própria'} · Dias internos disponíveis pro time (Projeto→Embalagem): ${prazoInternoDias}</div>
     ${prodHtml}${instHtml}${tabelaEtapas}${btnReservarHtml}`;
   // Calendário + painel de reservas sempre refletem o resultado mais recente (2026-08-18).
@@ -50143,7 +50359,7 @@ function buildFinalizacaoEmailContent(p){
 // Destinatários: os 3 e-mails de contato da emissão (comprador/engenheiro/financeiro) +
 // pedidos@granda.ind.br, exatamente como pedido pelo usuário.
 async function _enviarEmailFinalizacao(p){
-  const destEmails=[p.email_comprador,p.email_engenheiro,p.email_financeiro,'pedidos@granda.ind.br'].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i);
+  const destEmails=_emComVendedor([p.email_comprador,p.email_engenheiro,p.email_financeiro,'pedidos@granda.ind.br'].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i),p);
   if(!destEmails.length){
     return{ok:false,destinatarios:[],erro:'Nenhum e-mail de destino cadastrado neste pedido.'};
   }
@@ -64429,6 +64645,62 @@ function _crmxDestacarAberto(){
 }
 const _crmxRenderKanbanOrig=renderCrmKanban;
 renderCrmKanban=function(){_crmxCss();_crmxRenderKanbanOrig();try{_crmxPosKanban();}catch(err){console.error('crmx kanban',err);}};
+// ── CRM Comercial: rolagem dos cards fica onde o usuário parou (2026-10-27, a pedido do usuário) ──
+// Guarda a rolagem de cada coluna do funil (por etapa), a rolagem lateral do quadro e a da lista
+// enquanto o usuário rola; sempre que o funil é redesenhado (dado novo, filtro, card fechado) ou
+// volta a aparecer (saiu do CRM e voltou), devolve cada coluna pra onde estava. Vale até fechar a aba.
+const _CRM_SCROLL_IDS=['crm-kanban-scroll-wrap','crm-kanban-body','crm-lista-wrap'];
+const _crmScrollMem=(()=>{try{return JSON.parse(sessionStorage.getItem('crmScrollMem')||'{}')||{};}catch(e){return{};}})();
+let _crmScrollRestaurando=false,_crmScrollAgendado=false;
+function _crmScrollGravar(){try{sessionStorage.setItem('crmScrollMem',JSON.stringify(_crmScrollMem));}catch(e){}}
+document.addEventListener('scroll',ev=>{
+  if(_crmScrollRestaurando)return;
+  const t=ev.target;if(!t||t.nodeType!==1)return;
+  try{
+    if(_CRM_SCROLL_IDS.includes(t.id)){_crmScrollMem['id:'+t.id]={top:t.scrollTop,left:t.scrollLeft};_crmScrollGravar();return;}
+    const col=t.closest&&t.closest('#crm-kanban-body .crm-col');
+    if(!col)return;
+    const idx=t===col?-1:[...col.children].indexOf(t);
+    if(t!==col&&idx<0)return;
+    _crmScrollMem['col:'+col.getAttribute('data-etapa')+'|'+idx]={top:t.scrollTop};_crmScrollGravar();
+  }catch(e){}
+},true);
+function _crmScrollRestaurar(){
+  _crmScrollRestaurando=true;
+  try{
+    _CRM_SCROLL_IDS.forEach(id=>{const el=document.getElementById(id),m=_crmScrollMem['id:'+id];if(el&&m&&el.offsetParent!==null){el.scrollTop=m.top||0;el.scrollLeft=m.left||0;}});
+    document.querySelectorAll('#crm-kanban-body .crm-col').forEach(col=>{
+      if(col.offsetParent===null)return;
+      const pre='col:'+col.getAttribute('data-etapa')+'|';
+      Object.keys(_crmScrollMem).forEach(k=>{
+        if(!k.startsWith(pre))return;
+        const idx=parseInt(k.slice(pre.length),10);
+        const el=idx<0?col:col.children[idx];
+        if(el)el.scrollTop=_crmScrollMem[k].top||0;
+      });
+    });
+  }catch(e){console.warn('crm rolagem',e);}
+  setTimeout(()=>{_crmScrollRestaurando=false;},120);
+}
+function _crmScrollAgendar(){
+  if(_crmScrollAgendado)return;_crmScrollAgendado=true;
+  requestAnimationFrame(()=>{_crmScrollAgendado=false;_crmScrollRestaurar();});
+}
+(function _crmScrollIniciar(){
+  const kb=document.getElementById('crm-kanban-body'),lb=document.getElementById('crm-lista-body');
+  if(!kb){setTimeout(_crmScrollIniciar,500);return;}
+  try{
+    // funil redesenhado (colunas trocadas) → volta a rolagem
+    const mo=new MutationObserver(_crmScrollAgendar);
+    mo.observe(kb,{childList:true});if(lb)mo.observe(lb,{childList:true});
+    // funil volta a aparecer (saiu do CRM e voltou, trocou Kanban/Lista) → volta a rolagem
+    if(window.ResizeObserver){
+      let vis=new WeakMap();
+      const ro=new ResizeObserver(ents=>ents.forEach(en=>{const v=en.contentRect.width>0;if(v&&!vis.get(en.target))_crmScrollAgendar();vis.set(en.target,v);}));
+      _CRM_SCROLL_IDS.forEach(id=>{const el=document.getElementById(id);if(el)ro.observe(el);});
+    }
+  }catch(e){console.warn('crm rolagem init',e);}
+})();
 // ── Card aberto (painel lateral) ──
 function _crmxOrdem(){
   const sel=_crmFunilView==='lista'?'#crm-lista-body tr[onclick]':'#crm-kanban-body .crm-card';
@@ -71422,10 +71694,14 @@ function _ptShell(inner,sub){
   return`<div class="pt-top"><div class="pt-top-in"><img src="${PORTAL_BASE_URL}logo_granda_branca.png" alt="Granda" class="pt-logo"><div class="pt-top-t">${_ptE(sub||'Acompanhamento de obras')}</div>${_pt.user?`<button class="pt-sair" onclick="_ptSair()">Sair</button>`:''}</div></div><div class="pt-wrap">${inner}</div>
   <div class="pt-foot">Granda Comunicação Visual · Pense grande, seja Granda!</div>`;
 }
+// (2026-10-27, a pedido do usuário) Etapas com duração mostram "Finalização de ..." — só "Produção"
+// ou "Embalagem" não deixava claro se a data era o início ou o fim. Pelo grupo (k), então vale
+// também pras cópias já gravadas no portalObras sem precisar regravar nada.
+const PT_ROTULO_FIM={medicao:'Finalização da medição técnica',projeto:'Finalização do projeto',materiais:'Finalização da preparação dos materiais',producao:'Finalização da produção',embalagem:'Finalização da embalagem'};
 function _ptEtapas(o){
   const hoje=_ptHoje();
   const feita=pt=>o.concluido||(pt.fim?false:(pt.ok===true||(pt.ok===null&&pt.iso<=hoje)));
-  const gs=(o.etapas||[]).map(g=>{const done=g.partes.every(feita);const iso=g.partes.reduce((m,x)=>x.iso>m?x.iso:m,'');const dt=g.partes.reduce((m,x)=>x.dt>m?x.dt:m,'');return{l:g.l,done,rec:done&&g.partes.some(x=>x.ok===true),iso,dt};});
+  const gs=(o.etapas||[]).map(g=>{const done=g.partes.every(feita);const iso=g.partes.reduce((m,x)=>x.iso>m?x.iso:m,'');const dt=g.partes.reduce((m,x)=>x.dt>m?x.dt:m,'');return{l:PT_ROTULO_FIM[g.k]||g.l,l0:g.l,done,rec:done&&g.partes.some(x=>x.ok===true),iso,dt};});
   // A linha do tempo só anda pra frente: se uma etapa posterior já tem REGISTRO de feita (baixa do
   // setor), as anteriores também aparecem concluídas pro cliente (ex.: obra já em campo).
   let depois=false;for(let i=gs.length-1;i>=0;i--){if(gs[i].rec)depois=true;else if(depois)gs[i].done=true;}
@@ -71435,7 +71711,7 @@ function _ptEtapas(o){
 function _ptStatusObra(o){
   const{gs,atual}=_ptEtapas(o);
   if(o.concluido)return{txt:'Obra concluída',cls:'ok',sub:'em '+_ptD(o.dataFinalizacao),gs,atual};
-  return{txt:'Em andamento',cls:'and',sub:atual>=0?gs[atual].l:'Finalizando',gs,atual};
+  return{txt:'Em andamento',cls:'and',sub:atual>=0?gs[atual].l0:'Finalizando',gs,atual};
 }
 function _ptFotosHtml(fotos){
   if(!fotos||!fotos.length)return'';
@@ -71576,22 +71852,15 @@ async function _ptCarregarObras(){
     _ptRenderLista();
   }catch(e){console.error(e);_ptMsg('Não foi possível carregar suas obras','Tente de novo em instantes. Se continuar, fale com a Granda.');}
 }
+// (2026-10-27, a pedido do usuário) Login por e-mail do portal do engenheiro DESLIGADO: quem entrava
+// por ali virava usuário logado do mesmo Firebase do GCore e as regras atuais liberam tudo pra
+// qualquer logado. Ficam só os links sem login (?obra=TOKEN e ?lista=TOKEN). Quem abrir ?portal=1
+// (ou um link de acesso antigo) é deslogado e vê o aviso pra usar o link recebido da Granda.
 async function _ptPortalEngenheiro(){
-  _ptRoot().innerHTML=_ptShell('<div class="pt-load">Carregando…</div>','Portal do engenheiro');
-  let fb;try{fb=await _ptFb();}catch(e){_ptMsg('Não foi possível carregar','Verifique sua conexão e tente de novo.');return;}
-  const{U,auth}=fb;
-  try{
-    if(U.isSignInWithEmailLink(auth,location.href)){
-      let email='';try{email=localStorage.getItem('gcPortalEmail')||'';}catch(e){}
-      if(!email)email=(window.prompt('Para confirmar o acesso, digite o seu e-mail:')||'').trim().toLowerCase();
-      if(email){await U.signInWithEmailLink(auth,email,location.href);try{localStorage.setItem('gcPortalEmail',email);}catch(e){}}
-      history.replaceState(null,'',location.pathname+'?portal=1');
-    }
-  }catch(e){console.error(e);_ptRoot().innerHTML=_ptLoginHtml('Este link de acesso expirou ou já foi usado. Peça um novo abaixo.');return;}
-  U.onAuthStateChanged(auth,u=>{
-    _pt.user=u&&u.email?u:null;
-    if(_pt.user)_ptCarregarObras();else _ptRoot().innerHTML=_ptLoginHtml();
-  });
+  try{const{U,auth}=await _ptFb();if(auth&&auth.currentUser)await U.signOut(auth);}catch(e){console.warn('portal sair',e);}
+  try{localStorage.removeItem('gcPortalEmail');}catch(e){}
+  try{history.replaceState(null,'',location.pathname+'?portal=1');}catch(e){}
+  _ptMsg('Acesse pelo link da sua obra','O acompanhamento das obras agora é feito só pelo link que a Granda envia por e-mail, sem login nem senha. Se você não encontrar o link, fale com a Granda que reenviamos.');
 }
 function _portalBoot(){
   const m=window.__GCORE_PORTAL;if(!m)return;
