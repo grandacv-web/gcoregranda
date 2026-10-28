@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-27.11';</script>
+<script>const APP_BUILD_VERSION='2026-10-28.7';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -1513,7 +1513,7 @@ select.fc{cursor:pointer}
              no DRE (ver dreMesTodos()/_mesAnoNavCiclo()). -->
         <button type="button" class="dash-mes-nav-btn" onclick="gcMesTodos()" style="background:#fff;color:#101B3D;border:1px solid #cbd5e1;border-radius:8px;white-space:nowrap;padding:9px 14px;font-size:.78rem;font-weight:700;cursor:pointer;margin-left:6px">📅 Todos os meses</button>
         <button class="dash-btn-conf" onclick="exportarExcelGraficos()" style="background:#16a34a;margin-left:auto;width:auto;height:auto" type="button">📊 Excel</button>
-        <button class="dash-btn-conf" onclick="gerarPDFGraficos()" style="background:#dc2626;width:auto;height:auto" type="button">📄 PDF</button>
+        <button class="dash-btn-conf" onclick="_gcPdfMenu(this)" style="background:#dc2626;width:auto;height:auto" type="button">📄 PDF ▾</button>
       </div>
       <!-- Tabs de vendedor -->
       <div class="gc-vend-tabs" id="gc-vend-tabs"></div>
@@ -2214,8 +2214,8 @@ select.fc{cursor:pointer}
             <select id="dre-fil-empresa" onchange="dreSetEmpresa(this.value)" style="margin-left:auto;padding:8px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer;min-width:0;max-width:100%">
               <option value="">🏢 Todas as empresas (consolidado)</option>
             </select>
-            <button onclick="gerarPDFDRE()" class="dash-btn-conf" style="background:#dc2626" type="button">📄 PDF</button>
-            <button onclick="exportarExcelDRE()" class="dash-btn-conf" style="white-space:nowrap;background:#16a34a">📊 Excel</button>
+            <button onclick="_dreExpMenu(this,'pdf')" class="dash-btn-conf" style="background:#dc2626" type="button">📄 PDF ▾</button>
+            <button onclick="_dreExpMenu(this,'excel')" class="dash-btn-conf" style="white-space:nowrap;background:#16a34a">📊 Excel ▾</button>
           </div>
           <!-- Indicadores por Centro de Custo (2026-08-21) — fica no TOPO da página do DRE,
                antes dos cards/tabela que já existiam abaixo, a pedido do usuário. Ver
@@ -6930,7 +6930,7 @@ function buildTarefaEmailContent(t,pedidoInfo){
 </table>
 </td></tr></table>
 </body></html>`;
-  const subject=`NOVA TAREFA: ${t.tipo}${temPedido?' · OS '+pedidoInfo.os:''}`;
+  const subject=String(`NOVA TAREFA: ${t.tipo}${temPedido?' · OS '+pedidoInfo.os:''}`).replace(/\//g,'-').replace(/&/g,' e ');
   return{html_content,subject};
 }
 // Dispara o e-mail de notificação pro responsável — chamado só na criação manual de tarefa
@@ -7113,7 +7113,11 @@ async function setUpload(zoneId,nameId,input,edKey){
   z.classList.add('has-file');
   const icon=z.querySelector('.uz-icon');if(icon)icon.textContent='⏳';
   const title=z.querySelector('.uz-title');if(title)title.textContent='Enviando para a nuvem...';
-  if(edKey==='arq_oc'&&f){try{const _ocArq=await _ocPreparar(f);f=_ocArq.file;ed.oc_num=_ocArq.numero||'';ed.oc_valor=_ocArq.valor||'';ed.oc_original=_ocArq.original||'';}catch(e){}}
+  if(edKey==='arq_oc'&&f){try{const _ocArq=await _ocPreparar(f);f=_ocArq.file;ed.oc_num=_ocArq.numero||'';ed.oc_valor=_ocArq.valor||'';ed.oc_original=_ocArq.original||'';}catch(e){}
+    // (2026-10-28) confere o valor da OC com o valor total do pedido ANTES de enviar — janela travada se não bater
+    try{const _d=await _ocDecidirForm(readInput('em-vt',ed.vtotal),ed.oc_valor,ed.oc_num,'Emissão do pedido');
+      if(_d.acao==='cancelar'){_ocResetZona(zoneId,input);toast('OC não anexada. Peça a Ordem de Compra com o valor certo ao cliente.','tinf');return;}
+      if(_d.valor>0)ed.oc_valor=_ocFmtMoeda(_d.valor);window._ocDecPend=_d;}catch(e){console.warn('OC decisão',e);}}
   // Upload Cloudinary
   let url='';
   if(cfg.cld_cloud&&cfg.cld_preset){
@@ -7127,6 +7131,7 @@ async function setUpload(zoneId,nameId,input,edKey){
     }catch(e){console.error('Cloudinary upload error',e);}
   }
   if(edKey)ed[edKey+'_url']=url;
+  if(edKey==='arq_oc'&&url&&window._ocDecPend){window._ocDecisoes[url]=window._ocDecPend;window._ocDecPend=null;}
   if(icon)icon.textContent=url?'✅':'📄';
   if(title)title.textContent=url?'Arquivo enviado com sucesso':'Arquivo selecionado (sem Cloudinary)';
   let nm=z.querySelector('.uz-file');
@@ -10344,7 +10349,7 @@ function renderPedidosSemOC(){
       acao=`<span style="font-size:.7rem;color:#475569" title="${esc(na.motivo||'')}">✔️ N.A. por ${esc(na.por||'—')}${na.em?' em '+esc(fmtD(String(na.em).slice(0,10))):''}${na.motivo?' · '+esc(na.motivo):''}</span>`;
       if(isAdm)acao+=` <button ${data} onclick="_semOcDesfazerNA(this)" style="background:#fff;color:#475569;border:1.5px solid #cbd5e1;border-radius:6px;padding:4px 8px;font-size:.7rem;font-weight:700;cursor:pointer;margin-left:4px;white-space:nowrap">↩️ Desfazer</button>`;
     }else{
-      if(ped&&pode)acao=`<label style="display:inline-block;background:#fffbeb;color:#92400e;border:1.5px solid #fde68a;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">📎 Anexar OC<input type="file" accept=".pdf,.htm,.html,image/*" style="display:none" onchange="_semOcAnexar(this,'${ped.id}')"></label>`;
+      if(ped&&pode)acao=`<label style="display:inline-block;background:#fffbeb;color:#92400e;border:1.5px solid #fde68a;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">${ped.ocParcial?'🧩 OC complementar · faltam '+fmtR(_ocFaltante(ped)):'📎 Anexar OC'}<input type="file" accept=".pdf,.htm,.html,image/*" style="display:none" onchange="_semOcAnexar(this,'${ped.id}')"></label>`;
       else if(!ped&&isAdm)acao=`<button onclick="editarVendaLista('${esc(x.os)}')" title="Venda da planilha — anexe a OC em Editar Valores" style="background:#fff;color:#1d4ed8;border:1.5px solid #bfdbfe;border-radius:6px;padding:5px 10px;font-size:.72rem;font-weight:700;cursor:pointer;white-space:nowrap">✏️ Editar Valores</button>`;
       else acao='<span style="font-size:.7rem;color:var(--ink4)">só admin/dono</span>';
       if(isAdm)acao+=` <button ${data} onclick="_semOcMarcarNA(this)" title="Não se aplica Ordem de Compra — o pedido sai da lista" style="background:#fff;color:#475569;border:1.5px solid #cbd5e1;border-radius:6px;padding:5px 9px;font-size:.72rem;font-weight:800;cursor:pointer;margin-left:4px;white-space:nowrap">N.A.</button>`;
@@ -11410,6 +11415,8 @@ async function uploadEvOc(input){
   const icon=z?.querySelector('.uz-icon');if(icon)icon.textContent='⏳';
   const title=z?.querySelector('.uz-title');if(title)title.textContent='Enviando para a nuvem...';
   const _ocArq=await _ocPreparar(f0);const f=_ocArq.file;
+  let _ocDec=null;try{_ocDec=await _ocDecidirForm(moneyToNum((document.getElementById('ev-br')||{}).value),_ocArq.valor,_ocArq.numero||((document.getElementById('ev-numoc')||{}).value||''),'Editar Valores');}catch(e){console.warn('OC decisão',e);}
+  if(_ocDec&&_ocDec.acao==='cancelar'){_ocResetZona('ev-oc-zone',input);if(_evOcUrl&&z){z.classList.add('has-file');const _ic=z.querySelector('.uz-icon');if(_ic)_ic.textContent='✅';const _t=z.querySelector('.uz-title');if(_t)_t.textContent='Documento já enviado (clique para trocar)';}toast('OC não anexada. Peça a Ordem de Compra com o valor certo ao cliente.','tinf');return;}
   let url='';
   if(cfg.cld_cloud&&cfg.cld_preset){
     try{
@@ -11422,6 +11429,7 @@ async function uploadEvOc(input){
     }catch(e){console.error('Cloudinary upload error',e);}
   }
   _evOcUrl=url;
+  if(url&&_ocDec)window._ocDecisoes[url]=_ocDec;
   if(_ocArq.numero){const _i=document.getElementById('ev-numoc');if(_i&&!String(_i.value||'').trim())_i.value=_ocArq.numero;}
   if(icon)icon.textContent=url?'✅':'📄';
   if(title)title.textContent=url?'Arquivo enviado com sucesso':'Arquivo selecionado (sem Cloudinary configurado)';
@@ -11659,6 +11667,8 @@ async function uploadVmOc(input){
   const icon=z?.querySelector('.uz-icon');if(icon)icon.textContent='⏳';
   const title=z?.querySelector('.uz-title');if(title)title.textContent='Enviando para a nuvem...';
   const _ocArq=await _ocPreparar(f0);const f=_ocArq.file;
+  let _ocDec=null;try{_ocDec=await _ocDecidirForm(moneyToNum((document.getElementById('vm-br')||{}).value),_ocArq.valor,_ocArq.numero||((document.getElementById('vm-oc-num')||{}).value||''),'Venda Manual');}catch(e){console.warn('OC decisão',e);}
+  if(_ocDec&&_ocDec.acao==='cancelar'){_ocResetZona('vm-oc-zone',input);toast('OC não anexada. Peça a Ordem de Compra com o valor certo ao cliente.','tinf');return;}
   let url='';
   if(cfg.cld_cloud&&cfg.cld_preset){
     try{
@@ -11671,6 +11681,7 @@ async function uploadVmOc(input){
     }catch(e){console.error('Cloudinary upload error',e);}
   }
   _vmOcUrl=url;
+  if(url&&_ocDec)window._ocDecisoes[url]=_ocDec;
   if(_ocArq.numero){const _i=document.getElementById('vm-oc-num');if(_i&&!String(_i.value||'').trim())_i.value=_ocArq.numero;}
   if(icon)icon.textContent=url?'✅':'📄';
   if(title)title.textContent=url?'Arquivo enviado com sucesso':'Arquivo selecionado (sem Cloudinary configurado)';
@@ -14022,6 +14033,9 @@ function _emComVendedor(lista,p){
   if(v&&!l.some(x=>String(x||'').trim().toLowerCase()===v))l.push(v);
   return l;
 }
+// (2026-10-27) O EmailJS escapa o assunto ({{subject}}): "/" chegava como "&#x2F;", "&" como "&amp;"
+// (ex.: "SOROCABA VERGUEIRO&#x2F;SP"). Todo assunto de aviso passa por aqui antes de enviar.
+function _assuntoEmail(t){return String(t||'').replace(/\//g,'-').replace(/&/g,' e ').replace(/[<>"]/g,'').replace(/'/g,'’').replace(/\s{2,}/g,' ').trim();}
 // (2026-10-27) Grava SÓ os campos de status do e-mail, numa transação sobre o documento atual do
 // servidor — nunca regrava o pedido inteiro. Se o pedido ainda não chegou no servidor (emissão
 // acabou de acontecer), tenta de novo algumas vezes e, no fim, cai no salvamento normal.
@@ -24057,7 +24071,7 @@ function _ocAvisoHtml(p){
 async function _ocNotificarFinanceiro(p){
   if(!p||!p.ocUrl)return{ok:false};
   if(!window.emailjs){toast('Não consegui avisar o Financeiro: serviço de e-mail não carregou. Use "Reenviar aviso" no pedido.','terr');return{ok:false};}
-  const subject=`[Aviso OC] OS ${p.os||'—'} · ${(typeof _pedNome==='function'?_pedNome(p):p.cliente)||''}`;
+  const subject=_assuntoEmail(`[Aviso OC] OS ${p.os||'—'} · ${(typeof _pedNome==='function'?_pedNome(p):p.cliente)||''}`);
   const reg={em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',para:OC_AVISO_PARA.concat(_ocAvisoCopias(p)),numOC:p.numOC||'',ocUrl:p.ocUrl};
   try{
     emailjs.init(cfg.k||'wtJbXi3uGODPaFIqc');
@@ -24714,6 +24728,193 @@ function _ocCriarPendenciaValor(p,c){
       }catch(e){console.warn('releitura valor OC',p&&p.os,e);}
     }
   }catch(e){console.warn('releitura valor OC',e);}},6000);})();
+
+
+// ══ OC × VALOR DO PEDIDO — DECISÃO NA HORA DE ANEXAR (2026-10-28) ════════════════════════════════
+// Pedido do usuário: "o sistema confira se o valor da ordem de compra anexada bate com o valor do pedido e
+// se não bater perguntar o que o usuário quer fazer: deixa vazio e pede nova OC, ou anexa essa OC faltando
+// valor e o pedido fica pendente pra vir uma OC com o valor adicional. Se a OC estiver com valor maior,
+// também avisar e perguntar. Dar as opções, deixar travado."
+// - Antes de ENVIAR o arquivo, o sistema compara o valor lido (ou digitado) com o valor bruto do pedido.
+//   Se não bater, abre uma janela que não fecha sem escolher uma opção.
+//   OC MENOR: (1) não anexar e pedir nova OC · (2) anexar como OC PARCIAL — o pedido continua pendente,
+//             aguardando OC complementar com o valor que falta · (3) anexar e revisar o valor do pedido.
+//   OC MAIOR: (1) não anexar e pedir OC corrigida · (2) anexar e revisar o valor do pedido.
+//   SEM VALOR LIDO: digitar o valor da OC (e conferir) · anexar sem valor (pendência) · não anexar.
+// - OC parcial: p.ocParcial={faltante,em,por}; as OCs seguintes entram em p.ocComplementares[] e o sistema
+//   confere a SOMA das OCs com o pedido. Enquanto for parcial, o pedido conta como "sem OC" (lista Sem OC,
+//   pendência virtual "falta OC complementar de R$ X"). Quando a soma bate, a pendência some sozinha.
+// - "Revisar o valor do pedido" abre a mesma pendência de Conselho de antes (oc_valor, vendedor + gestor).
+// - Vale nos 5 jeitos de anexar: Pendências do Conselho, lista Sem OC, Emissão, Editar Valores, Venda Manual.
+function _ocNum(v){return typeof v==='number'?v:moneyToNum(v)||0;}
+function _ocSoma(p){if(!p)return 0;return _ocNum(p.ocValor)+(p.ocComplementares||[]).reduce((s,c)=>s+_ocNum(c&&c.valor),0);}
+function _ocBrutoPedido(p){try{return Number(pedidoToVendaRow(p).br)||0;}catch(e){return 0;}}
+function _ocFaltante(p){return Math.max(0,_ocBrutoPedido(p)-_ocSoma(p));}
+// pedido com OC parcial continua "sem OC completa"
+{const _t=_pedTemOC;_pedTemOC=function(p){return _t(p)&&!(p&&p.ocParcial);};}
+{const _v=_pedPendOcVirtual;_pedPendOcVirtual=function(p){
+  if(p&&p.ocParcial&&!(p.tipo&&p.tipo!=='Venda')){let canc=false;try{canc=!!(p.os&&isVendaCancelada(p.os));}catch(e){}
+    if(!canc)return{id:'__oc__',auto:'oc',setor:'COMERCIAL',resolvida:false,texto:`📎 Falta OC complementar de ${fmtR(_ocFaltante(p))} — OC parcial anexada: ${fmtR(_ocSoma(p))} de ${fmtR(_ocBrutoPedido(p))}`};}
+  return _v(p);};}
+// ── janela de decisão (travada) ──────────────────────────────────────────────────────────────────
+// ctx: {br, valor(número ou 0), numero, ja (soma das OCs já anexadas, se complementar), nome}
+// devolve Promise<{acao:'ok'|'cancelar'|'parcial'|'revisar'|'semvalor', valor}>
+function _ocDecidir(ctx){
+  const br=Number(ctx.br)||0;
+  if(!(br>0))return Promise.resolve({acao:'ok',valor:_ocNum(ctx.valor),semBruto:true});
+  const ja=Number(ctx.ja)||0;
+  const bate=v=>Math.abs(ja+v-br)<=OC_TOLERANCIA_VALOR;
+  const v0=_ocNum(ctx.valor);
+  if(v0>0&&bate(v0))return Promise.resolve({acao:'ok',valor:v0});
+  return new Promise(res=>{
+    const old=document.getElementById('oc-dec');if(old)old.remove();
+    const m=document.createElement('div');m.id='oc-dec';
+    m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:10080;display:flex;align-items:center;justify-content:center;padding:20px';
+    const fim=r=>{m.remove();document.removeEventListener('keydown',esc,true);res(r);};
+    const esc=ev=>{if(ev.key==='Escape'){ev.stopPropagation();ev.preventDefault();}};
+    document.addEventListener('keydown',esc,true);
+    let valor=v0,editando=!(v0>0);
+    const opc=(cor,ic,tit,sub,fn)=>`<button type="button" data-a="${fn}" style="display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;background:#fff;border:1.5px solid ${cor};border-radius:10px;padding:10px 12px;margin-top:8px;cursor:pointer;font-family:inherit"><span style="font-size:1.1rem">${ic}</span><span><b style="font-size:.85rem;color:#0f172a">${tit}</b><br><span style="font-size:.74rem;color:#64748b">${sub}</span></span></button>`;
+    const desenhar=()=>{
+      const tot=ja+valor,dif=tot-br,menor=dif<0;
+      const linha=(l,v,b)=>`<tr><td style="padding:4px 0;color:#475569">${l}</td><td style="padding:4px 0;text-align:right;${b?'font-weight:800;':''}">${v}</td></tr>`;
+      let corpo='',ops='';
+      if(editando){
+        corpo=`<div style="font-size:.84rem;color:#334155;margin:6px 0 10px">${v0>0?'Digite o valor certo da OC:':'Não consegui ler o valor desta Ordem de Compra. Digite o <b>valor total</b> dela pra conferir com o pedido:'}</div>
+          <div style="display:flex;gap:8px"><input id="oc-dec-val" class="fc no-upper" placeholder="ex.: 52.643,91" value="${valor>0?String(valor.toFixed(2)).replace('.',','):''}" style="flex:1"><button type="button" data-a="conferir" class="dash-btn-conf" style="background:#1d4ed8;width:auto">Conferir</button></div>
+          <div id="oc-dec-err" style="font-size:.74rem;color:#dc2626;min-height:1em;margin-top:4px"></div>`;
+        ops=opc('#f59e0b','📎','Anexar sem conferir o valor','fica uma pendência de Conselho pra conferir a OC com o pedido','semvalor')
+          +opc('#94a3b8','✋','Não anexar','o pedido continua sem OC','cancelar');
+      }else{
+        corpo=`<table style="width:100%;font-size:.84rem;border-collapse:collapse;margin:6px 0 4px">
+          ${linha('Valor bruto do pedido',fmtR(br),true)}
+          ${ja>0?linha('OCs já anexadas',fmtR(ja))+linha('Esta OC'+(ctx.numero?' nº '+_ocEscH(ctx.numero):''),fmtR(valor))+linha('Total das OCs',fmtR(tot),true):linha('Valor desta OC'+(ctx.numero?' nº '+_ocEscH(ctx.numero):''),fmtR(valor),true)}
+          <tr><td style="padding:6px 0 0;color:${menor?'#b45309':'#b91c1c'};font-weight:800">${menor?'Falta na OC':'OC maior que o pedido em'}</td><td style="padding:6px 0 0;text-align:right;color:${menor?'#b45309':'#b91c1c'};font-weight:800">${fmtR(Math.abs(dif))}</td></tr></table>
+          <a href="javascript:void 0" data-a="editar" style="font-size:.72rem;color:#1d4ed8">O valor lido está errado? Digitar o valor certo</a>`;
+        ops=menor
+          ?opc('#94a3b8','✋','Não anexar — pedir nova OC','o campo fica vazio e o pedido continua aguardando a OC com o valor certo','cancelar')
+            +opc('#f59e0b','🧩','Anexar como OC parcial',`anexa esta OC e o pedido fica PENDENTE aguardando uma OC complementar de ${fmtR(Math.abs(dif))}`,'parcial')
+            +opc('#dc2626','🔎','Anexar e revisar o valor do pedido','o pedido pode estar com valor maior que o combinado — abre pendência de Conselho','revisar')
+          :opc('#94a3b8','✋','Não anexar — pedir OC corrigida','o campo fica vazio e o pedido continua aguardando a OC certa','cancelar')
+            +opc('#dc2626','🔎','Anexar e revisar o valor do pedido','pode estar faltando item no pedido — abre pendência de Conselho','revisar');
+      }
+      m.innerHTML=`<div style="background:#fff;border-radius:14px;width:100%;max-width:520px;max-height:90vh;overflow:auto;padding:18px 20px">
+        <div style="font-size:1rem;font-weight:800;color:#0f172a">${editando?'📎 Valor da Ordem de Compra':'⚠️ O valor da OC não bate com o pedido'}</div>
+        ${ctx.nome?`<div style="font-size:.74rem;color:#64748b;margin-top:2px">${_ocEscH(ctx.nome)}</div>`:''}
+        ${corpo}<div style="font-size:.74rem;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;margin-top:12px">Como quer seguir?</div>${ops}</div>`;
+      m.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{
+        const a=b.dataset.a;
+        if(a==='editar'){editando=true;desenhar();setTimeout(()=>{const i=document.getElementById('oc-dec-val');if(i){i.focus();i.select();}},0);return;}
+        if(a==='conferir'){const v=moneyToNum((document.getElementById('oc-dec-val')||{}).value);
+          if(!(v>0)){const e=document.getElementById('oc-dec-err');if(e)e.textContent='Digite o valor da OC.';return;}
+          valor=v;if(bate(v)){fim({acao:'ok',valor:v,digitado:true});return;}editando=false;desenhar();return;}
+        fim({acao:a,valor:a==='semvalor'?0:valor,digitado:valor!==v0});
+      });
+      const iv=document.getElementById('oc-dec-val');if(iv)iv.onkeydown=ev=>{if(ev.key==='Enter'){const b=m.querySelector('[data-a="conferir"]');if(b)b.click();}};
+    };
+    document.body.appendChild(m);desenhar();
+    if(editando)setTimeout(()=>{const i=document.getElementById('oc-dec-val');if(i)i.focus();},0);
+  });
+}
+function _ocEscH(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+// ── aplica a decisão no pedido (já com o arquivo enviado) ─────────────────────────────────────────
+function _ocAplicarDecisao(p,dec,info){
+  const agora=new Date().toISOString(),quem=(usuarioLogado&&usuarioLogado.nomeExibicao)||'';
+  const br=_ocBrutoPedido(p)||Number(dec.br)||0;
+  const comp=!!(info&&info.complementar);
+  const vfmt=dec.valor>0?_ocFmtMoeda(dec.valor):'';
+  if(info){
+    if(comp){p.ocComplementares=(p.ocComplementares||[]).concat([{url:info.url,numero:info.numero||'',valor:vfmt,original:info.original||'',nome:info.nome||'',em:agora,por:quem}]);}
+    else{p.ocUrl=info.url;if(info.numero)p.numOC=info.numero;if(info.original)p.ocArquivoOriginal=info.original;if(info.nomeTrocado)p.ocArquivoNome=info.nome;
+      p.ocAnexadaEm=agora;p.ocAnexadaPor=quem;delete p.ocParcial;p.ocComplementares=[];if(vfmt)p.ocValor=vfmt;else delete p.ocValor;}
+  }else if(vfmt){p.ocValor=vfmt;}
+  if(p.pagamento&&Object.prototype.hasOwnProperty.call(p.pagamento,'Ordem de Compra do Cliente'))p.pagamento['Ordem de Compra do Cliente']='Sim';
+  const soma=_ocSoma(p),url=p.ocUrl||p.arq_oc_url;
+  p.ocReleituraValor='v2'; // decidido pelo usuário — a releitura automática não mexe
+  if(dec.semBruto)return; // pedido ainda sem valor: a conferência automática roda quando tiver
+  p.ocValorConferidoPara=url;
+  if(dec.acao==='ok'){delete p.ocParcial;p.ocConferencia={status:'ok',oc:soma,br,em:agora};
+    // complemento fechou o valor: a pendência de "OC parcial" (virtual) some sozinha
+  }else if(dec.acao==='parcial'){p.ocParcial={faltante:Math.max(0,br-soma),em:agora,por:quem};p.ocConferencia={status:'parcial',oc:soma,br,em:agora};
+  }else if(dec.acao==='revisar'){delete p.ocParcial;p.ocConferencia={status:'diferente',oc:soma,br,em:agora,decisao:'revisar'};_ocCriarPendenciaValor(p,{status:'diferente',oc:soma,br,dif:soma-br});
+  }else if(dec.acao==='semvalor'){delete p.ocParcial;p.ocConferencia={status:'sem_valor',oc:0,br,em:agora};_ocCriarPendenciaValor(p,{status:'sem_valor',oc:0,br});}
+  p.ocDecisoes=(p.ocDecisoes||[]).concat([{acao:dec.acao,oc:soma,br,valorDigitado:!!dec.digitado,em:agora,por:quem}]).slice(-20);
+}
+function _ocMsgDecisao(dec,p){
+  if(dec.acao==='parcial')return`🧩 OC parcial anexada. O pedido continua pendente aguardando OC complementar de ${fmtR(_ocFaltante(p))}.`;
+  if(dec.acao==='revisar')return'🔎 OC anexada. Ficou uma pendência de Conselho pra revisar o valor do pedido.';
+  if(dec.acao==='semvalor')return'📎 OC anexada sem valor conferido — ficou pendência de Conselho pra conferir.';
+  return'✅ Ordem de Compra anexada — o valor confere com o pedido.';
+}
+async function _ocUploadCld(f){
+  try{const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_pedidos');
+    const isRaw=!(/^image\//i.test(f.type||'')&&!/svg/i.test(f.type||''));
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/${isRaw?'raw':'image'}/upload`,{method:'POST',body:fd});
+    const d=await r.json();const url=d.secure_url||'';if(url)_cldRegistrarUpload(f.size);return url;}
+  catch(e){console.error('Cloudinary upload error',e);return'';}
+}
+// fluxo comum: Pendências do Conselho e lista Sem OC (pedido já existe)
+async function _ocAnexarNoPedido(p,f0,numDigitado,aoTerminar){
+  const comp=!!(p.ocParcial&&(p.ocUrl||p.arq_oc_url));
+  const lido=await _ocPreparar(f0);const f=lido.file;
+  const numero=String(numDigitado||'').trim()||lido.numero||'';
+  const dec=await _ocDecidir({br:_ocBrutoPedido(p),valor:lido.valor,numero,ja:comp?_ocSoma(p):0,nome:`OS ${p.os||'—'} · ${_pedNome(p)}`});
+  if(dec.acao==='cancelar'){toast('OC não anexada. O pedido continua aguardando a Ordem de Compra'+(comp?' complementar':'')+'.','tinf');if(aoTerminar)aoTerminar(false);return false;}
+  toast('⏳ Enviando a OC...','tinf');
+  const url=await _ocUploadCld(f);
+  if(!url){toast('Não foi possível enviar o arquivo. Tente de novo.','terr');if(aoTerminar)aoTerminar(false);return false;}
+  _ocAplicarDecisao(p,dec,{url,numero,original:lido.original,nome:f0.name,nomeTrocado:f!==f0,complementar:comp});
+  try{await savePedidoFS(p);}catch(e){toast('Erro ao salvar a OC: '+e.message,'terr');if(aoTerminar)aoTerminar(false);return false;}
+  try{_invalidateDashCache();}catch(e){}
+  toast(_ocMsgDecisao(dec,p)+(numero?' (Nº '+numero+')':''),dec.acao==='ok'?'tok':'twar');
+  if(aoTerminar)aoTerminar(true);return true;
+}
+_consOcAnexar=async function(input){
+  const f0=input&&input.files&&input.files[0];if(!f0)return;
+  const p=pedidos.find(x=>x.id===_consPendPedidoId);
+  if(!p){toast('Pedido não encontrado','terr');return;}
+  if(!_conselhoPodeMexer(p)){_conselhoBloqueioMsg(p);input.value='';return;}
+  if(!(cfg.cld_cloud&&cfg.cld_preset)){toast('Envio de arquivos (Cloudinary) não está configurado.','terr');input.value='';return;}
+  const btn=document.getElementById('cp-oc-btn');if(btn){btn.disabled=true;btn.textContent='⏳ Lendo a OC...';}
+  const num=((document.getElementById('cp-oc-num')||{}).value||'').trim();input.value='';
+  await _ocAnexarNoPedido(p,f0,num,ok=>{
+    if(btn){btn.disabled=false;btn.textContent='📎 Anexar OC';}
+    if(ok){try{_renderPendenciasConselho();}catch(e){}try{renderConselhoPedidos();}catch(e){}try{if(typeof renderDashVendas==='function')renderDashVendas();}catch(e){}}
+  });
+};
+_semOcAnexar=async function(input,pid){
+  const f0=input&&input.files&&input.files[0];if(!f0)return;
+  const p=pedidos.find(x=>x.id===pid);
+  if(!p){toast('Pedido não encontrado','terr');input.value='';return;}
+  if(!_conselhoPodeMexer(p)){_conselhoBloqueioMsg(p);input.value='';return;}
+  if(!(cfg.cld_cloud&&cfg.cld_preset)){toast('Envio de arquivos (Cloudinary) não está configurado.','terr');input.value='';return;}
+  input.value='';toast('⏳ Lendo a OC...','tinf');
+  await _ocAnexarNoPedido(p,f0,'',ok=>{if(ok){try{renderConselhoPedidos();}catch(e){}try{if(typeof renderDashVendas==='function')renderDashVendas();}catch(e){}}});
+};
+// fluxos de formulário (Emissão, Editar Valores, Venda Manual): a decisão é tomada antes do envio e
+// aplicada quando o pedido for salvo (pelo endereço do arquivo enviado).
+window._ocDecisoes=window._ocDecisoes||{};
+async function _ocDecidirForm(br,valorLido,numero,nome){
+  return _ocDecidir({br,valor:valorLido,numero,ja:0,nome});
+}
+function _ocResetZona(zoneId,input){
+  const z=document.getElementById(zoneId);if(input)input.value='';if(!z)return;
+  z.classList.remove('has-file');const ic=z.querySelector('.uz-icon');if(ic)ic.textContent='📎';
+  const t=z.querySelector('.uz-title');if(t)t.textContent='Clique para selecionar';const nm=z.querySelector('.uz-file');if(nm)nm.style.display='none';
+}
+(function(){
+  const _o=savePedidoFS;
+  savePedidoFS=async function(p){
+    try{const url=p&&(p.ocUrl||p.arq_oc_url);const d=url&&window._ocDecisoes[url];
+      if(d&&p.ocValorConferidoPara!==url){delete window._ocDecisoes[url];
+        if(!d.semBruto){delete p.ocParcial;p.ocComplementares=[];}
+        _ocAplicarDecisao(p,d,null);
+        if(!d.semBruto)setTimeout(()=>{try{toast(_ocMsgDecisao(d,p),d.acao==='ok'?'tok':'twar');}catch(e){}},400);}
+    }catch(e){console.warn('OC decisão (form)',e);}
+    return _o.apply(this,arguments);
+  };
+})();
+// ══ fim OC × valor do pedido ══
 
 // ══ GESTÃO POR SETOR (2026-10-18) — pedidos do usuário ══════════════════════════════════════════
 // (A) Medição técnica, ART e Laudo passam a ter budget × realizado × save no Planejamento.
@@ -55676,6 +55877,41 @@ function _gcDadosRelatorio(){
   });
   return {y,m,lqMes,brMes,ftMes,metaMes,evolucao,porVendedor};
 }
+
+// PDF dos Indicadores comerciais (2026-10-28, "tem 3 vezes botão de exportar, loucura isso"): um botão só,
+// com as 2 opções — o PDF da tela e o Relatório executivo (auto1RelatorioPdf, que antes tinha botão próprio).
+function _gcPdfMenu(btn){
+  const old=document.getElementById('gc-pdf-menu');if(old){old.remove();return;}
+  const r=btn.getBoundingClientRect(),m=document.createElement('div');m.id='gc-pdf-menu';
+  m.style.cssText=`position:fixed;top:${r.bottom+4}px;left:${Math.max(8,r.right-230)}px;width:230px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 30px rgba(15,23,42,.15);padding:6px;z-index:10050`;
+  const op=(ic,t,sub,fn)=>{const b=document.createElement('button');b.type='button';b.style.cssText='display:block;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:8px 10px;cursor:pointer;font-family:inherit';
+    b.innerHTML=`<b style="font-size:.8rem;color:#0f172a">${ic} ${t}</b><br><span style="font-size:.7rem;color:#64748b">${sub}</span>`;b.onmouseover=()=>b.style.background='#f1f5f9';b.onmouseout=()=>b.style.background='none';
+    b.onclick=()=>{m.remove();try{fn();}catch(e){console.error(e);}};m.appendChild(b);};
+  op('📄','PDF desta tela','os indicadores como estão na tela',()=>gerarPDFGraficos());
+  if(typeof auto1RelatorioPdf==='function')op('📑','Relatório executivo','resumo do mês pra diretoria',()=>auto1RelatorioPdf());
+  document.body.appendChild(m);
+  setTimeout(()=>document.addEventListener('mousedown',function f(ev){if(!m.contains(ev.target)&&ev.target!==btn){m.remove();}document.removeEventListener('mousedown',f);}),0);
+}
+
+// Menu de exportação reaproveitável (2026-10-28, "veja se não tá duplicado em outros menus"): um botão com
+// as opções embaixo, em vez de duas barras de exportar na mesma tela. ops = [[ícone, título, subtítulo, fn]].
+function _expMenu(btn,ops){
+  const old=document.getElementById('exp-menu');if(old){old.remove();if(old._btn===btn)return;}
+  const r=btn.getBoundingClientRect(),m=document.createElement('div');m.id='exp-menu';m._btn=btn;
+  m.style.cssText=`position:fixed;top:${r.bottom+4}px;left:${Math.max(8,Math.min(innerWidth-248,r.right-240))}px;width:240px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 30px rgba(15,23,42,.15);padding:6px;z-index:10050`;
+  ops.forEach(([ic,t,sub,fn])=>{const b=document.createElement('button');b.type='button';b.style.cssText='display:block;width:100%;text-align:left;background:none;border:none;border-radius:8px;padding:8px 10px;cursor:pointer;font-family:inherit';
+    b.innerHTML=`<b style="font-size:.8rem;color:#0f172a">${ic} ${t}</b>${sub?`<br><span style="font-size:.7rem;color:#64748b">${sub}</span>`:''}`;b.onmouseover=()=>b.style.background='#f1f5f9';b.onmouseout=()=>b.style.background='none';
+    b.onclick=()=>{m.remove();try{fn();}catch(e){console.error(e);}};m.appendChild(b);});
+  document.body.appendChild(m);
+  setTimeout(()=>document.addEventListener('mousedown',function f(ev){if(!m.contains(ev.target)&&ev.target!==btn)m.remove();document.removeEventListener('mousedown',f);}),0);
+}
+function _dreExpMenu(btn,tipo){
+  const ind=document.getElementById('dre-indicadores'),temInd=ind&&ind.offsetParent!==null&&ind.innerText.trim().length>0;
+  const ops=[[tipo==='pdf'?'📄':'📊','DRE','o demonstrativo do período',()=>tipo==='pdf'?gerarPDFDRE():exportarExcelDRE()]];
+  if(temInd)ops.push([tipo==='pdf'?'📄':'📊','Indicadores por centro de custo','os cartões e tabelas do bloco de indicadores',()=>tipo==='pdf'?_uxExpPdf(ind,'DRE — Indicadores por centro de custo'):_uxExpExcel(ind,'DRE — Indicadores por centro de custo')]);
+  if(ops.length===1){ops[0][3]();return;}
+  _expMenu(btn,ops);
+}
 function exportarExcelGraficos(){
   const d=_gcDadosRelatorio();
   const headers=['Seção','Item','Valor Bruto (R$)','Valor Líquido (R$)','Meta (R$)','% da Meta'];
@@ -63009,7 +63245,9 @@ async function _crmSalvarEmpresaImpl(){
   if(tipoNegocio==='Venda'&&_crmEtapaExigeProposta(etapaAlvo)&&!(propostaBruto>0)){toast('Informe o valor bruto da proposta — obrigatório a partir da etapa ORÇAMENTO APROVADO! Use o botão "💰 Gerenciar Proposta".','terr');return;}
   const e=isNova?{
     id:'pe_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
-    etapa:etapaEscolhida,
+    // Criar já em ORÇAMENTO (2026-10-28): nasce na 1ª etapa e o "O que orçar" abre logo depois
+    // de salvar — só entra na fila quando o checklist for confirmado (ver fim desta função).
+    etapa:(etapaEscolhida==='orcamento'&&etapas[0].key!=='orcamento')?etapas[0].key:etapaEscolhida,
     etapaEntradaEm:new Date().toISOString(),
     timeline:[],
     tarefas:[],
@@ -63081,6 +63319,10 @@ async function _crmSalvarEmpresaImpl(){
   // não achar a empresa recém-criada). Só na criação — mover um card existente pra essa etapa
   // depois (crmMoverEtapa) não entra aqui, o pedido foi específico pra criação.
   if(isNova&&_crmEtapaExigeTarefaProximoPasso(e.etapa))_crmAbrirTarefaObrigatoriaProximoPasso(e);
+  if(isNova&&etapaEscolhida==='orcamento'&&e.etapa!=='orcamento'){
+    toast('Preencha o "O que orçar" pra o card entrar na fila de orçamentos','tinf');
+    let n=0;const go=()=>{if(crmEmpresas.some(x=>x.id===e.id))crmMoverEtapa(e.id,'orcamento');else if(n++<30)setTimeout(go,150);};setTimeout(go,100);
+  }
 }
 // Confirmação de ação irreversível reaproveitável (2026-09-21, a pedido do usuário: "o adm
 // ao excluir ele da esse aviso primeiro pra ele clicar em estou ciente") — troca o confirm()
@@ -65519,7 +65761,7 @@ async function auto1RelatorioPdf(){
   if(typeof gcRenderGeralExtras==='function'){const _o=gcRenderGeralExtras;gcRenderGeralExtras=function(y,m,todos){
     _auto1UltArgs={y,m,todos};const r=_o.apply(this,arguments);
     try{const h=document.querySelector('#gc-exec .gx-ex-h');if(h&&!h.querySelector('.auto1-rel')){h.style.display='flex';h.style.alignItems='center';h.style.gap='10px';
-      h.insertAdjacentHTML('beforeend','<span style="flex:1"></span><button type="button" class="auto1-rel" onclick="auto1RelatorioPdf()" style="background:#1a2b5e;color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:.7rem;font-weight:800;cursor:pointer;white-space:nowrap;text-transform:none;letter-spacing:0">📄 Relatório PDF</button>');}}catch(e){console.error('auto1 botão',e);}
+      if(false)h.insertAdjacentHTML('beforeend','<span style="flex:1"></span><button type="button" class="auto1-rel" onclick="auto1RelatorioPdf()" style="background:#1a2b5e;color:#fff;border:none;border-radius:8px;padding:5px 12px;font-size:.7rem;font-weight:800;cursor:pointer;white-space:nowrap;text-transform:none;letter-spacing:0">📄 Relatório PDF</button>');}}catch(e){console.error('auto1 botão',e);}
     return r;};}
 })();
 
@@ -68268,6 +68510,231 @@ async function _orc9IaGuardarCorrecoes(ia){
 {const _a=orc2IaAdicionar;orc2IaAdicionar=function(){const ia=orc2.ia;const antes=orc2.doc?orc2.doc.produtos.length:0;_a.apply(this,arguments);
   if(ia&&orc2.doc&&orc2.doc.produtos.length>antes)_orc9IaGuardarCorrecoes(ia);};}
 
+// ══ ORÇAMENTOS — IA: PRODUTO RELACIONADO (2026-10-28, pedido do usuário: "refinar essa parte onde ela lê e
+// pede o produto relacionado para que possa pegar os produtos de cálculo novo ou produtos de cadernos já
+// cadastrados") ══
+// - A IA recebe o catálogo AGRUPADO POR CADERNO (código, produto, variação, medidas em m) + os modelos de
+//   cálculo (placas e produtos configurados) e pode responder tipo "config" (receita) e até 3 alternativas.
+//   Preferência: produto do caderno → modelo de cálculo → fachada/letra → avulso.
+// - Conferência: coluna "Produto relacionado" com botão do escolhido + "Talvez seja:" (alternativas da IA +
+//   busca local por nome, caderno do cliente e medida + o que os orçamentistas já escolheram antes pra
+//   descrição parecida). O botão abre um seletor com busca (cadernos, cálculo, avulso).
+// - O que fica ligado é gravado em orcamentosIAExemplos (campo vinculos) e volta como sugestão (★) e como
+//   referência no prompt das próximas leituras.
+(function(){
+  const S=ORC2_IA_SCHEMA.properties.itens.items;
+  S.properties.tipo.enum=['catalogo','config','letra','fachada','manual'];
+  S.properties.config_id={type:'string',description:'id exato do MODELO DE CÁLCULO quando tipo = "config", senão ""'};
+  S.properties.alternativas={type:'array',items:{type:'string'},description:'até 3 outros ids (catálogo ou modelo de cálculo) que também podem ser este item, senão []'};
+  S.required=S.required.concat(['config_id','alternativas']);
+})();
+function _orc11Norm(t){return _orc2BkNorm(t).replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();}
+const _ORC11_STOP=new Set(['DE','DA','DO','DAS','DOS','EM','COM','PARA','PRA','E','A','O','AS','OS','NA','NO','UM','UMA','M','CM','MM','X','TIPO','ITEM']);
+function _orc11Tok(t){return _orc11Norm(t).split(' ').filter(w=>w.length>=2&&!_ORC11_STOP.has(w)&&!/^\d+$/.test(w));}
+function _orc11M(cm){const n=Number(cm);return n>0?n/100:0;}
+function _orc11FmtM(n){return(Math.round(n*100)/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
+function _orc11VarDims(v){const l=_orc11M(v.largura),a=_orc11M(v.altura),p=_orc11M(v.profundidade);return{l,a,p,txt:l&&a?_orc11FmtM(l)+' × '+_orc11FmtM(a)+(p?' × '+_orc11FmtM(p):'')+' m':(v.medida||'')};}
+function _orc11ProdNome(v){let n='';try{n=_prodCatTxt(v.tipoProduto);}catch(e){}return n||v.nome||'Produto';}
+function _orc11VarLabel(v){let vn='';try{vn=_orc2CatVarNome(v);}catch(e){vn=v.variacao||'';}const pn=_orc11ProdNome(v);return pn+(vn&&_orc11Norm(vn)!==_orc11Norm(pn)?' — '+vn:'');}
+function _orc11Ref(tipo,id){return tipo==='config'?'cfg:'+id:tipo==='catalogo'?'cat:'+id:tipo;}
+function _orc11RefDoItem(it){return _orc11Ref(it.tipo,it.tipo==='config'?it.cfgId:it.tipo==='catalogo'?it.catId:'');}
+// todas as opções: catálogo (cadernos) + modelos de cálculo + letra/fachada/avulso
+function _orc11Opcoes(){
+  const out=[];
+  _orc2CatalogoLista().forEach(v=>{const d=_orc11VarDims(v);out.push({ref:'cat:'+v.id,tipo:'catalogo',id:String(v.id),ic:'📚',cod:v.codigo||'',nome:_orc11VarLabel(v),cad:String(v.categoria||'').toUpperCase(),dim:d,preco:Number(v.precoFinal)||0,tab:v.modoPreco==='tabela',
+    txt:_orc11Norm([v.categoria,v.tipoProduto,v.nome,v.variacao,v.codigo,v.medida].join(' '))});});
+  try{_orc8Receitas().forEach(r=>out.push({ref:'cfg:'+r.id,tipo:'config',id:r.id,ic:r.categoria==='placa'?'🪧':'🧮',cod:'',nome:r.nome,cad:r.categoria==='placa'?'PLACA (CÁLCULO)':'PRODUTO CONFIGURADO (CÁLCULO)',dim:null,preco:0,
+    txt:_orc11Norm(r.nome+' '+(r.descricao||'')+(r.categoria==='placa'?' PLACA':''))}));}catch(e){}
+  out.push({ref:'fachada',tipo:'fachada',id:'',ic:'🏢',cod:'',nome:'Fachada / testeira em ACM (cálculo)',cad:'CÁLCULO',txt:'FACHADA TESTEIRA ACM PAINEL REVESTIMENTO'});
+  out.push({ref:'letra',tipo:'letra',id:'',ic:'🔠',cod:'',nome:'Letra caixa (cálculo)',cad:'CÁLCULO',txt:'LETRA CAIXA LETREIRO LETRAS VOLUME HALO ACRILICO PVC'});
+  out.push({ref:'manual',tipo:'manual',id:'',ic:'✍️',cod:'',nome:'Avulso (preço digitado)',cad:'OUTROS',txt:'AVULSO'});
+  return out;
+}
+function _orc11Opcao(ref){return _orc11Opcoes().find(o=>o.ref===ref)||null;}
+function _orc11Aplicar(it,ref){const o=_orc11Opcao(ref);if(!o)return;it.tipo=o.tipo;it.catId=o.tipo==='catalogo'?o.id:'';it.cfgId=o.tipo==='config'?o.id:'';}
+// memória: o que os orçamentistas já ligaram a cada descrição
+function _orc11Vinculos(){try{_orc9IaExWatch();}catch(e){}const out=[];Object.values(orc2.iaEx||{}).sort((a,b)=>String(a&&a.em).localeCompare(String(b&&b.em))).forEach(e=>(e&&e.vinculos||[]).forEach(v=>{if(v&&v.ref&&v.desc)out.push(v);}));return out;}
+function _orc11Sugestoes(it,max){
+  const ia=orc2.ia||{},tk=_orc11Tok((it.descricao||'')+' '+(it.obs||'')),cli=_orc11Tok(ia.cliente||''),L=_orc2Num(it.largura),A=_orc2Num(it.altura);
+  const atual=_orc11RefDoItem(it),sc=new Map(),opc=_orc11Opcoes(),porRef=new Map(opc.map(o=>[o.ref,o]));
+  const add=(ref,v,porque)=>{if(!porRef.has(ref)||ref==='manual')return;const x=sc.get(ref)||{s:0,p:[]};x.s+=v;if(porque&&x.p.indexOf(porque)<0)x.p.push(porque);sc.set(ref,x);};
+  (it.alts||[]).forEach(r=>add(r,2.2,'IA'));
+  const dn=_orc11Norm(it.descricao);
+  if(tk.length)_orc11Vinculos().forEach(v=>{const vt=_orc11Tok(v.desc);if(!vt.length)return;const c=vt.filter(w=>tk.indexOf(w)>=0).length/Math.max(vt.length,tk.length);
+    if(_orc11Norm(v.desc)===dn)add(v.ref,4,'já usado antes');else if(c>=0.6)add(v.ref,2.5*c,'já usado antes');});
+  if(tk.length)opc.forEach(o=>{if(o.ref==='manual')return;const hit=tk.filter(w=>o.txt.indexOf(w)>=0).length;if(!hit)return;let s=2.4*hit/tk.length;
+    if(o.tipo==='catalogo'){if(cli.some(w=>w.length>=3&&o.cad.indexOf(w)>=0))s+=0.8;
+      if(L>0&&A>0&&o.dim&&o.dim.l&&o.dim.a){const r=Math.min(Math.max(Math.max(L,o.dim.l)/Math.min(L,o.dim.l),Math.max(A,o.dim.a)/Math.min(A,o.dim.a)),Math.max(Math.max(L,o.dim.a)/Math.min(L,o.dim.a),Math.max(A,o.dim.l)/Math.min(A,o.dim.l)));
+        if(r<=1.05)s+=1.6;else if(r<=1.2)s+=0.9;else if(r<=1.5)s+=0.3;}}
+    add(o.ref,s,'');});
+  return[...sc.entries()].filter(([r,x])=>r!==atual&&x.s>=0.9).sort((a,b)=>b[1].s-a[1].s).slice(0,max||3).map(([r,x])=>Object.assign({},porRef.get(r),{porque:x.p}));
+}
+// ── prompt ───────────────────────────────────────────────────────────────────────────────────────
+function _orc11CatalogoPrompt(){
+  const g={};_orc2CatalogoLista().forEach(v=>{const c=String(v.categoria||'SEM CADERNO').toUpperCase();(g[c]=g[c]||[]).push(v);});
+  return Object.keys(g).sort().map(c=>'## CADERNO '+c+'\n'+g[c].sort((a,b)=>String(a.codigo||'').localeCompare(String(b.codigo||''),'pt-BR',{numeric:true}))
+    .map(v=>{const d=_orc11VarDims(v);return v.id+' | '+(v.codigo||'-')+' | '+_orc11VarLabel(v)+(d.txt?' | '+d.txt:'');}).join('\n')).join('\n\n');
+}
+function _orc11ConfigPrompt(){try{return _orc8Receitas().map(r=>r.id+' | '+(r.categoria==='placa'?'PLACA':'CONFIGURADO')+' | '+r.nome+(r.descricao?' — '+r.descricao:'')).join('\n');}catch(e){return'';}}
+function _orc11VinculosPrompt(){
+  const vs=_orc11Vinculos().filter(v=>v.ref!=='manual').reverse(),vis=new Set(),l=[];
+  vs.forEach(v=>{const k=_orc11Norm(v.desc)+'|'+v.ref;if(vis.has(k)||l.length>=50)return;vis.add(k);const o=_orc11Opcao(v.ref);if(!o)return;
+    l.push(`- "${v.desc}" → ${o.tipo==='catalogo'?'catalogo_id '+o.id+' ('+(o.cod?o.cod+' ':'')+o.nome+')':o.tipo==='config'?'config_id '+o.id+' ('+o.nome+')':'tipo '+o.tipo}`);});
+  return l.length?`\n\nPRODUTOS QUE OS ORÇAMENTISTAS DA GRANDA JÁ LIGARAM A ITENS PARECIDOS (referência forte — siga o mesmo padrão):\n${l.join('\n')}`:'';
+}
+_orc2IaPrompt=function(){
+  return`Você é orçamentista da GRANDA Comunicação Visual (fábrica de letreiros, fachadas em ACM, totens, placas). Recebe as páginas de um PROJETO (desenhos técnicos, elevações, plantas, quadros de quantidade) e deve listar TODOS os itens de comunicação visual que a Granda vai fabricar/instalar, com medidas, e LIGAR CADA ITEM AO PRODUTO DA GRANDA que será usado no orçamento.
+
+REGRAS DE LEITURA
+- Ignore obra civil e o que não é comunicação visual: piso, pintura de parede, forro, mobiliário, hidráulica, elétrica geral, equipamentos de cozinha, grafite.
+- Use as COTAS do desenho. Cotas costumam estar em centímetros (ex.: 1000 = 10,00 m) ou em metros com vírgula (ex.: 7,22). Responda SEMPRE em metros.
+- Fachada/testeira com trechos: some as cotas parciais da mesma peça e confira com a cota total. Cada peça com nome próprio (ex.: "Fachada A") é UM item.
+- Itens iguais (mesmo produto e mesma medida) = um item com quantidade. Use os quadros/listas de quantidade do projeto quando existirem.
+- NÃO invente medida. Se não estiver no projeto, ponha 0 e confianca "baixa", explicando em observacao. Medida deduzida/estimada = confianca "media".
+- "onde": página e vista onde achou (ex.: "pág. 12, Fachada C"). "observacao": complementos que mudam preço (refletores, adesivo, LED neon, cor, estrutura, reforma etc.).
+
+COMO LIGAR AO PRODUTO (nesta ordem de preferência)
+1) "catalogo": o item é um produto já cadastrado num CADERNO abaixo (Burger King, Bob's etc.). Se o projeto é de um cliente que tem caderno, procure PRIMEIRO no caderno dele. Compare o tipo do produto e escolha a VARIAÇÃO de medida mais próxima. catalogo_id = id exato (1ª coluna). Se a medida do projeto for bem diferente de todas as variações, ligue à mais próxima com confianca "media" e diga na observacao.
+2) "config": placa ou produto que a Granda CALCULA por largura × altura (lista MODELOS DE CÁLCULO abaixo). config_id = id exato.
+3) "fachada": testeira/fachada/painel em ACM com estrutura metálica que não está em caderno. refletores = qtd de refletores de LED (0 se não tiver); cor_acm = cor do ACM do projeto ou vazio.
+4) "letra": letra caixa / letreiro em volume que não está em caderno. modelo_letra: "galv" (sem iluminação), "halo" (LED atrás), "acril" (frente em acrílico iluminada), "pvc10"/"pvc20" (PVC recortado). largura_m/altura_m do conjunto; perimetro_m = soma do contorno (raramente vem: estime ~3 × altura por letra, confianca "media"); profundidade_m padrão 0,10.
+5) "manual": só quando nada acima serve (totem especial, reforma, neon avulso, adesivo solto...).
+- alternativas: até 3 OUTROS ids (do catálogo ou de modelo de cálculo) que também poderiam ser este item — principalmente quando está em dúvida entre variações ou produtos. Senão [].
+- Campos que não se aplicam: 0 nos números, "nenhum" em modelo_letra, "" em catalogo_id, config_id e cor_acm.
+
+CATÁLOGO DOS CADERNOS (id | código | produto — variação | medidas L × A × P)
+${_orc11CatalogoPrompt()||'(vazio)'}
+
+MODELOS DE CÁLCULO (id | tipo | nome)
+${_orc11ConfigPrompt()||'(nenhum)'}`+(function(){try{return _orc9IaPromptExemplos();}catch(e){return'';}})()+_orc11VinculosPrompt();
+};
+// ── normalização (tipo config + alternativas + memória) ─────────────────────────────────────────
+{const _n=_orc2IaNormItem;_orc2IaNormItem=function(raw){const r=_n(raw);delete r._ia;
+  r.cfgId='';if(raw&&raw.tipo==='config'){try{const rc=_orc8Receita(raw.config_id);if(rc){r.tipo='config';r.cfgId=rc.id;}}catch(e){}}
+  const ok=new Set(_orc11Opcoes().map(o=>o.ref));
+  r.alts=(Array.isArray(raw&&raw.alternativas)?raw.alternativas:[]).map(x=>String(x||'').trim()).map(x=>ok.has('cat:'+x)?'cat:'+x:ok.has('cfg:'+x)?'cfg:'+x:'').filter(Boolean).slice(0,3);
+  r._ia=JSON.parse(JSON.stringify(r));
+  // avulso, mas os orçamentistas já ligaram essa mesma descrição a um produto antes → já vem ligado (pra conferir)
+  if(r.tipo==='manual'){const s=_orc11Sugestoes(r,1)[0];if(s&&s.porque.indexOf('já usado antes')>=0){_orc11Aplicar(r,s.ref);r.porMemoria=true;}}
+  return r;};}
+// ── preço da linha ──────────────────────────────────────────────────────────────────────────────
+{const _c=_orc2IaCalc;_orc2IaCalc=function(it){
+  if(it.tipo==='config'){let rc=null;try{rc=_orc8Receita(it.cfgId);}catch(e){}if(!rc)return{ok:false,msg:'escolha o produto'};
+    const r=_orc8AplicarFator(orc8CalcReceita(rc,it.largura,it.altura),'config:'+rc.id);return r.ok?{ok:true,unit:_orc2PrecoFinal(r.totalMat,_orc2Cmv()),r,rc}:{ok:false,msg:'faltam medidas'};}
+  return _c(it);};}
+// ── linha da conferência ────────────────────────────────────────────────────────────────────────
+function _orc11ProdBotao(it,i){
+  const o=_orc11Opcao(_orc11RefDoItem(it));let titulo,sub='',alerta='';
+  const semProd=!o||(it.tipo==='catalogo'&&!it.catId)||(it.tipo==='config'&&!it.cfgId);
+  if(semProd)titulo='Escolha o produto relacionado…';
+  else{titulo=o.ic+' '+(o.cod?o.cod+' · ':'')+o.nome;sub=o.tipo==='catalogo'?[o.cad,o.dim&&o.dim.txt,o.preco?_orcxBRL(o.preco)+(o.tab?' 🔒':''):''].filter(Boolean).join(' · '):o.cad;
+    if(o.tipo==='catalogo'&&o.dim&&o.dim.l&&o.dim.a){const L=_orc2Num(it.largura),A=_orc2Num(it.altura);if(L>0&&A>0){const d1=Math.max(Math.abs(L-o.dim.l)/o.dim.l,Math.abs(A-o.dim.a)/o.dim.a),d2=Math.max(Math.abs(L-o.dim.a)/o.dim.a,Math.abs(A-o.dim.l)/o.dim.l);
+      if(Math.min(d1,d2)>0.15)alerta=`⚠️ projeto ${_orc11FmtM(L)} × ${_orc11FmtM(A)} m ≠ variação ${_orc11FmtM(o.dim.l)} × ${_orc11FmtM(o.dim.a)} m`;}}}
+  const fraco=semProd||it.tipo==='manual';const sug=_orc11Sugestoes(it,3);
+  return`<button type="button" onclick="orc11Seletor(${i})" style="display:block;width:100%;max-width:300px;text-align:left;background:${fraco?'#fffbeb':'#fff'};border:1.5px solid ${fraco?'#f59e0b':'#c7d2fe'};border-radius:8px;padding:5px 8px;cursor:pointer;font-family:inherit">
+    <span style="float:right;font-size:.64rem;color:#4f46e5;font-weight:700;margin-left:6px">trocar ▾</span><b style="font-size:.74rem;color:#0f172a;display:block">${_orcxEsc(titulo)}</b>${sub?`<span style="font-size:.66rem;color:#64748b">${_orcxEsc(sub)}</span>`:''}</button>
+    ${it.porMemoria&&!it._escolhidoManual?`<div style="font-size:.64rem;color:#b45309;margin-top:2px">★ ligado pelo que já foi usado antes — confira</div>`:''}
+    ${alerta?`<div style="font-size:.66rem;color:#b45309;margin-top:2px">${_orcxEsc(alerta)}</div>`:''}
+    ${sug.length?`<div style="margin-top:4px;font-size:.64rem;color:#64748b">Talvez seja: ${sug.map(s=>`<button type="button" onclick="orc11Escolher(${i},'${_orcxEsc(s.ref)}')" title="${_orcxEsc([s.cad,s.dim&&s.dim.txt,s.porque.join(', ')].filter(Boolean).join(' · '))}" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:999px;padding:1px 7px;margin:2px 2px 0 0;font-size:.64rem;cursor:pointer;font-family:inherit;color:#334155">${s.ic} ${_orcxEsc(((s.cod?s.cod+' ':'')+s.nome).slice(0,44))}${s.porque.indexOf('já usado antes')>=0?' ★':''}</button>`).join('')}</div>`:''}`;
+}
+_orc2IaHtmlLinha=function(it,i){
+  const c=_orc2IaCalc(it),cor=it.conf==='alta'?'':it.conf==='media'?'background:#fffbeb':'background:#fef2f2';
+  const inp=(k,w,t)=>`<input class="fc no-upper" style="width:${w}px;padding:5px 6px;font-size:.76rem" ${t==='n'?'type="number" min="0" step="0.01"':''} value="${_orcxEsc(it[k])}" oninput="orc2IaCampo(${i},'${k}',this.value)">`;
+  let det='';
+  if(it.tipo==='letra')det=`<select class="fc" style="width:auto;padding:5px;font-size:.74rem" onchange="orc2IaCampo(${i},'modelo',this.value)">${ORC2_MODELOS.map(m=>`<option value="${m.k}" ${it.modelo===m.k?'selected':''}>${m.l}</option>`).join('')}</select> Perím. ${inp('perimetro',62,'n')} Prof. ${inp('caixa',56,'n')}`;
+  else if(it.tipo==='manual')det=`R$ un. ${inp('preco',90,'n')}`;
+  else if(it.tipo==='fachada')det=`Refl. ${inp('refl',50,'n')} <select class="fc" style="width:150px;padding:5px;font-size:.74rem" onchange="orc2IaCampo(${i},'cor',this.value)">${Object.keys(_orc2AcmCores()).map(c=>`<option value="${_orcxEsc(c)}" ${c===(it.cor||ORC2_ACM_PADRAO)?'selected':''}>ACM ${_orcxEsc(_orc2Cap(c))}</option>`).join('')}</select>`;
+  else if(it.tipo==='config')det=`<span style="font-size:.7rem;color:#64748b">calculado por largura × altura</span>`;
+  else det=`<span style="font-size:.7rem;color:#64748b">preço do caderno</span>`;
+  return`<tr style="${cor}" id="orc2-ia-l-${i}">
+    <td><input type="checkbox" ${it.sel?'checked':''} onchange="orc2IaCampo(${i},'sel',this.checked)"></td>
+    <td style="min-width:190px">${inp('descricao',200)}<div style="font-size:.68rem;color:#64748b;margin-top:3px">${_orcxEsc([it.onde,it.obs].filter(Boolean).join(' · '))}${it.conf!=='alta'?` <b style="color:${it.conf==='media'?'#b45309':'#b91c1c'}">(${it.conf==='media'?'conferir':'medida não achada'})</b>`:''}</div></td>
+    <td style="min-width:230px">${_orc11ProdBotao(it,i)}</td>
+    <td><input class="fc no-upper" style="width:54px;padding:5px 6px;font-size:.76rem" type="number" min="1" step="1" value="${_orcxEsc(it.qtd)}" oninput="orc2IaCampo(${i},'qtd',this.value)"></td>
+    <td>${inp('largura',66,'n')}</td><td>${inp('altura',66,'n')}</td>
+    <td style="white-space:nowrap">${det}</td>
+    <td class="r" id="orc2-ia-v-${i}">${c.ok?`<b>${_orcxBRL(c.unit*Math.max(1,parseInt(it.qtd)||1))}</b>`:`<span style="color:#b91c1c;font-size:.72rem">${c.msg}</span>`}</td></tr>`;
+};
+{const _b=_orc2IaHtmlBox;_orc2IaHtmlBox=function(){return _b().replace('<th>Tipo</th>','<th>Produto relacionado</th>').replace('corrija medida ou tipo e desmarque','confira o <b>produto relacionado</b> de cada item (caderno ou cálculo), corrija medida e desmarque');};}
+// medida/descrição mudou → atualiza sugestões e alerta da linha
+{const _f=orc2IaCampo;orc2IaCampo=function(i,k,v){_f(i,k,v);if(k==='largura'||k==='altura'||k==='descricao'){clearTimeout(window._orc11T);window._orc11T=setTimeout(()=>{const it=orc2.ia&&orc2.ia.itens[i];const tr=document.getElementById('orc2-ia-l-'+i);
+  if(it&&tr&&tr.children[2])tr.children[2].innerHTML=_orc11ProdBotao(it,i);},500);}};}
+function orc11Escolher(i,ref){
+  const it=orc2.ia&&orc2.ia.itens[i];if(!it)return;_orc11Aplicar(it,ref);it._escolhidoManual=true;
+  const m=document.getElementById('orc11-sel');if(m)m.remove();
+  const tr=document.getElementById('orc2-ia-l-'+i);if(tr)tr.outerHTML=_orc2IaHtmlLinha(it,i);
+  const t=document.getElementById('orc2-ia-total');if(t)t.textContent=_orcxBRL(_orc2IaTotal());
+}
+// ── seletor com busca ───────────────────────────────────────────────────────────────────────────
+function orc11Seletor(i){
+  const it=orc2.ia&&orc2.ia.itens[i];if(!it)return;
+  const old=document.getElementById('orc11-sel');if(old)old.remove();
+  const m=document.createElement('div');m.id='orc11-sel';m.dataset.i=i;
+  m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:10060;display:flex;align-items:center;justify-content:center;padding:20px';
+  const L=_orc2Num(it.largura),A=_orc2Num(it.altura);
+  m.innerHTML=`<div style="background:#fff;border-radius:14px;width:100%;max-width:640px;max-height:86vh;display:flex;flex-direction:column;overflow:hidden">
+    <div style="padding:14px 16px 10px;border-bottom:1px solid #e2e8f0;flex-shrink:0">
+      <div style="display:flex;align-items:center;gap:8px"><b style="flex:1;font-size:.92rem;color:#0f172a">Produto relacionado</b><button type="button" onclick="document.getElementById('orc11-sel').remove()" style="border:none;background:none;font-size:1.1rem;cursor:pointer;color:#64748b">✕</button></div>
+      <div style="font-size:.74rem;color:#64748b;margin:2px 0 8px">${_orcxEsc(it.descricao||'item')}${L>0&&A>0?' · projeto '+_orc11FmtM(L)+' × '+_orc11FmtM(A)+' m':''}</div>
+      <input id="orc11-q" class="fc no-upper" placeholder="Buscar por produto, caderno, código ou medida…" oninput="_orc11Lista()" style="width:100%;box-sizing:border-box">
+    </div>
+    <div id="orc11-res" style="overflow-y:auto;padding:6px 10px 12px;flex:1;min-height:0"></div></div>`;
+  m.addEventListener('mousedown',ev=>{if(ev.target===m)m.remove();});
+  document.body.appendChild(m);_orc11Lista();setTimeout(()=>{const q=document.getElementById('orc11-q');if(q)q.focus();},0);
+}
+function _orc11Lista(){
+  const m=document.getElementById('orc11-sel');if(!m)return;const i=+m.dataset.i,it=orc2.ia&&orc2.ia.itens[i];if(!it)return;
+  const q=_orc11Norm((document.getElementById('orc11-q')||{}).value||''),qt=q?q.split(' '):[],atual=_orc11RefDoItem(it);
+  const linha=o=>`<div onclick="orc11Escolher(${i},'${_orcxEsc(o.ref)}')" class="orc11-op" style="display:flex;gap:8px;align-items:center;padding:7px 8px;border-radius:8px;cursor:pointer;${o.ref===atual?'background:#eef2ff;':''}">
+    <span style="font-size:1rem">${o.ic}</span><div style="flex:1;min-width:0"><div style="font-size:.8rem;font-weight:700;color:#0f172a">${o.cod?`<span style="color:#64748b;font-weight:600">${_orcxEsc(o.cod)}</span> · `:''}${_orcxEsc(o.nome)}${o.porque&&o.porque.indexOf('já usado antes')>=0?' <span style="color:#b45309;font-weight:600">★ já usado antes</span>':''}${o.ref===atual?' <span style="color:#4f46e5;font-weight:600">✓ atual</span>':''}</div>
+    <div style="font-size:.68rem;color:#64748b">${_orcxEsc([o.dim&&o.dim.txt,o.cad].filter(Boolean).join(' · '))}</div></div>
+    ${o.preco?`<span style="font-size:.74rem;font-weight:700;color:#0f172a;white-space:nowrap">${_orcxBRL(o.preco)}${o.tab?' 🔒':''}</span>`:''}</div>`;
+  const tit=t=>`<div style="font-size:.66rem;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin:10px 8px 2px">${t}</div>`;
+  let html='';
+  if(!q){const s=_orc11Sugestoes(it,5);if(s.length)html+=tit('Sugestões')+s.map(linha).join('');}
+  const opc=_orc11Opcoes().filter(o=>!qt.length||qt.every(w=>(o.txt+' '+_orc11Norm(o.nome)+' '+(o.dim?_orc11Norm(o.dim.txt):'')).indexOf(w)>=0));
+  const calc=opc.filter(o=>o.tipo!=='catalogo');if(calc.length)html+=tit('🧮 Produtos de cálculo e avulso')+calc.map(linha).join('');
+  const cat=opc.filter(o=>o.tipo==='catalogo');const porCad={};cat.forEach(o=>{const c=o.cad||'SEM CADERNO';(porCad[c]=porCad[c]||[]).push(o);});
+  let n=0;Object.keys(porCad).sort().forEach(c=>{if(n>=150)return;const l=porCad[c].sort((a,b)=>String(a.cod).localeCompare(String(b.cod),'pt-BR',{numeric:true})).slice(0,150-n);n+=l.length;html+=tit('📚 Caderno '+_orcxEsc(c))+l.map(linha).join('');});
+  if(cat.length>n)html+=`<div style="font-size:.7rem;color:#94a3b8;padding:6px 8px">+${cat.length-n} variações — refine a busca</div>`;
+  const r=document.getElementById('orc11-res');if(r)r.innerHTML=html||'<div style="padding:16px;color:#94a3b8;font-size:.8rem">Nada encontrado.</div>';
+}
+(function(){const st=document.createElement('style');st.textContent='.orc11-op:hover{background:#f1f5f9!important}';document.head.appendChild(st);})();
+// ── adicionar (com tipo config) + gravar o que ficou ligado ──────────────────────────────────────
+function _orc11ItemConfig(it,c,agora){const rc=c.rc,r=c.r,nm=String(it.descricao||'').trim();
+  return{id:_orc2Id(),tipo:'config',categoria:rc.categoria,receitaId:rc.id,receitaNome:rc.nome,nomeCurto:nm||rc.nome,nome:(nm?nm+' — ':'')+(rc.descricao||rc.nome),descricao:rc.descricao||rc.nome,largura:it.largura,altura:it.altura,
+    materiais:r.items.map(x=>({icon:x.icon,nome:x.name,detalhe:x.detail,qtd:x.qty,custo:_orcxArred(x.cost,2),q:x.q,u:x.u})),custo:_orcxArred(r.totalMat,2),cmv:_orc2Cmv(),qtd:Math.max(1,parseInt(it.qtd)||1),precosEm:agora,precosBase:(orc3.meta&&orc3.meta.em)||null,origemIA:true};}
+function _orc11GuardarVinculos(ia){
+  try{const vinc=ia.itens.filter(it=>it.sel&&it.descricao&&it.tipo!=='manual'&&(it.tipo!=='catalogo'||it.catId)&&(it.tipo!=='config'||it.cfgId))
+      .map(it=>({desc:String(it.descricao).slice(0,80),ref:_orc11RefDoItem(it),ia:it._ia?_orc11RefDoItem(it._ia):'',trocado:!!it._escolhidoManual}));
+    if(!vinc.length||!window._fbOrcSalvar)return;const id='vx_'+Date.now().toString(36);
+    window._fbOrcSalvar(ORC9_DOC_IAEX,id,{id,em:new Date().toISOString(),arquivo:ia.arquivo||'',por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',correcoes:[],vinculos:vinc});}
+  catch(e){console.warn('orc11 vínculos',e);}
+}
+{const _a=orc2IaAdicionar;orc2IaAdicionar=function(){
+  const ia=orc2.ia;if(!ia||!orc2.doc)return _a.apply(this,arguments);
+  const todos=ia.itens,cfgs=todos.filter(it=>it.sel&&it.tipo==='config'),agora=new Date().toISOString();
+  const falhas=[],prontos=[];cfgs.forEach(it=>{const c=_orc2IaCalc(it);if(c.ok)prontos.push(_orc11ItemConfig(it,c,agora));else falhas.push((it.descricao||'item')+' ('+c.msg+')');});
+  if(!cfgs.length){_a.apply(this,arguments);if(orc2.ia===null)_orc11GuardarVinculos(ia);return;}
+  if(falhas.length){toast('Corrija antes de adicionar: '+falhas[0],'terr');return;}
+  const resto=todos.filter(it=>!(it.sel&&it.tipo==='config'));
+  if(resto.some(it=>it.sel)){
+    ia.itens=resto;try{_a.apply(this,arguments);}finally{ia.itens=todos;}
+    if(orc2.ia!==null)return; // os outros itens falharam — nada entrou, a conferência continua aberta
+    prontos.forEach(p=>orc2.doc.produtos.push(p));_orc2DepoisDeMudarProdutos();
+    toast((todos.filter(it=>it.sel).length)+' itens adicionados ✔ — confira e salve','tok');
+  }else{
+    prontos.forEach(p=>orc2.doc.produtos.push(p));
+    orc2.doc.leituraIA=(orc2.doc.leituraIA||[]).concat([{arquivo:ia.arquivo,em:agora,por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',modelo:ia.modelo,paginas:ia.paginas,uso:ia.uso,sugeridos:ia.bruto&&ia.bruto.itens||[],adicionados:prontos.length}]);
+    try{_orc9IaGuardarCorrecoes({itens:resto,arquivo:ia.arquivo});}catch(e){}
+    orc2.ia=null;_orc2DepoisDeMudarProdutos();toast(prontos.length+' itens adicionados ✔ — confira e salve','tok');
+  }
+  _orc11GuardarVinculos(ia);
+};}
+ORC9_IA_CAMPOS.cfgId='modelo de cálculo';
+{const _f=_orc9IaFmt;_orc9IaFmt=function(k,v){if(k==='cfgId'&&v){try{const r=_orc8Receita(v);if(r)return r.nome;}catch(e){}}return _f(k,v);};}
+// ══ fim IA produto relacionado ══
+
 {const _oL=orc2CalcLetra;orc2CalcLetra=function(p,P,a){return _orc8AplicarFator(_oL(p,P,a),'letra');};}
 {const _oF=orc2CalcFachada;orc2CalcFachada=function(p,P,a){return _orc8AplicarFator(_oF(p,P,a),'fachada');};}
 {const _oB=_cmpBannersHtml;_cmpBannersHtml=function(p,calc){let h='';try{const o=_orc8OrcDoPedido(p);if(o){let num='';try{num=_orc4Numero(o);}catch(e){}h=`<div style="display:flex;align-items:center;gap:10px;padding:9px 12px;background:#eff6ff;border-radius:8px;margin-bottom:10px;font-size:.78rem;color:#1e3a8a"><span style="flex:1">🧮 Este pedido veio do orçamento <b>${_orcxEsc(num)}</b> — a lista de material calculada no orçamento ajuda a conferir as compras.</span><button type="button" onclick="orc8AbrirRm('${o.id}')" style="border:1.5px solid #1d4ed8;background:#fff;color:#1d4ed8;border-radius:8px;padding:5px 10px;font-size:.74rem;font-weight:800;cursor:pointer">📋 Lista de material</button></div>`;}}catch(e){}return h+_oB.apply(this,arguments);};}
@@ -69549,7 +70016,7 @@ function _crmCkAddLinha(it){
   const lista=document.getElementById('crm-ck-lista');if(!lista)return;
   lista.insertAdjacentHTML('beforeend',_crmCkLinhaHtml(it));
   _crmCkContar();
-  if(!it){const ult=lista.lastElementChild;const s=ult&&ult.querySelector('.crm-ck-prod');if(s)setTimeout(()=>s.focus(),0);}
+  if(!it){const ult=lista.lastElementChild;const s=ult&&ult.querySelector('.crm-ck-prod');setTimeout(()=>{try{lista.scrollTop=lista.scrollHeight;}catch(e){}if(s)s.focus({preventScroll:true});},0);}
 }
 function _crmCkContar(){
   const n=document.querySelectorAll('#crm-ck-lista .crm-ck-row').length;
@@ -69562,7 +70029,7 @@ function _crmAbrirChecklistOrc(e,etapaKey,modo){
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10050;display:flex;align-items:center;justify-content:center;padding:20px';
   _dynModalSemFechaClique(modal);
   const cidade=[e.sedeCidade,e.sedeUf].filter(Boolean).join('/');
-  modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:20px 22px;max-width:620px;width:100%;max-height:90vh;display:flex;flex-direction:column">
+  modal.innerHTML=`<style>#crm-ck-modal>div>*{flex-shrink:0}#crm-ck-modal #crm-ck-itens-area{flex:1 1 auto;min-height:0}#crm-ck-modal #crm-ck-lista{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}#crm-ck-modal #crm-ck-lista>*{flex-shrink:0}</style><div style="background:#fff;border-radius:14px;padding:20px 22px;max-width:620px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
     <div style="font-size:1rem;font-weight:800;color:#101B3D">📋 O que orçar — ${_crmCkEsc(e.nome||'')}</div>
     <div style="font-size:.76rem;color:#64748b;margin:4px 0 12px">Adicione cada produto com as medidas. Pode repetir o mesmo produto com medidas diferentes.${cidade?' Cidade da obra: <b>'+_crmCkEsc(cidade)+'</b> (do card).':''}</div>
     <label id="crm-ck-cad-box" style="display:flex;gap:10px;align-items:flex-start;border:1.5px solid ${_crmCkCaderno(e)?'#2563eb':'#e2e8f0'};background:${_crmCkCaderno(e)?'#eff6ff':'#fff'};border-radius:10px;padding:10px 12px;cursor:pointer;margin-bottom:10px">
@@ -70827,6 +71294,90 @@ function _uxMdContainer(){
   return c;
 }
 function _uxMdRefresh(){try{if(currentSection==='cat:MEUDIA')_uxMdRender();}catch(e){}}
+// ── MEU DIA — frase do dia personalizada (2026-10-28) ──────────────────────────────
+// Uma frase por dia por pessoa, conforme a situação: quanto falta da meta (líquido, igual à
+// Visão Comercial), dias úteis que sobram e quanto precisa por dia. Sem meta: fila de
+// orçamento, tarefas atrasadas/de hoje ou "tudo em dia". Frases com fé só pro Guilherme
+// (isClabonde); pro resto da equipe ficam neutras. A escolha da variação é fixa no dia.
+function _uxFraseDia(o){
+  try{
+    const eu=_uxMeuNome()||'',nome=(eu.split(' ')[0]||'').toLowerCase().replace(/^./,c=>c.toUpperCase());
+    const hoje=_uxHoje(),d=new Date(hoje+'T12:00:00'),y=d.getFullYear(),m=d.getMonth()+1,dow=d.getDay();
+    const fe=(()=>{try{return isClabonde(eu);}catch(e){return false;}})();
+    let hs=0;const seed=eu+'|'+hoje;for(let i=0;i<seed.length;i++)hs=(hs*31+seed.charCodeAt(i))>>>0;
+    const pick=a=>a[hs%a.length];
+    const K=v=>{try{return _dirK(v);}catch(e){return fmtR(v);}};
+    let duTot=0,duPass=0,duRest=0;
+    try{const ult=new Date(y,m,0).getDate();for(let i=1;i<=ult;i++){const iso=y+'-'+String(m).padStart(2,'0')+'-'+String(i).padStart(2,'0');if(_isDiaUtil(iso)){duTot++;if(iso<hoje)duPass++;else duRest++;}}}catch(e){}
+    // meta: pessoal; se não tiver e for admin/diretoria, a meta da empresa
+    let meta=0,vend=0,daEquipe=false;
+    try{meta=getMetaMes(y,m,eu)||0;if(meta>0)vend=getVendasMes(y,m,eu)||0;}catch(e){}
+    if(!(meta>0)){try{if(_getUserCat().isAdm){const vs=getVendedores(y,m)||[];meta=vs.reduce((s,v)=>s+(getMetaMes(y,m,v)||0),0);if(meta>0){vend=getVendasMes(y,m,null)||0;daEquipe=true;}}}catch(e){}}
+    const FE=['Deus é contigo, avance!','Deus à frente!','Com fé e trabalho, vai dar certo!','Que Deus abençoe cada passo seu hoje!'];
+    const NE=['Bora pra cima!','Você consegue!','Vamos juntos!','Pra cima!'];
+    const fim=' '+pick(fe?FE:NE);
+    const sua=daEquipe?'a meta da equipe':'sua meta',daSua=daEquipe?'da meta da equipe':'da sua meta',praSua=daEquipe?'pra meta da equipe':'pra sua meta';
+    let txt='',tom='#1d4ed8';
+    if(meta>0){
+      const falta=meta-vend,pc=vend/meta,porDia=duRest?falta/duRest:falta;
+      const dias=duRest===1?'só hoje':`${duRest} dias úteis`;
+      if(falta<=0){
+        tom='#15803d';
+        txt=pick([
+          `Meta batida, ${nome}! 🏆 ${K(vend)} no mês, ${Math.round(pc*100)}% ${daSua}. Agora é superar!`,
+          `${nome}, ${sua} já foi! 🏆 Passou ${K(-falta)} da meta. Cada venda a mais agora é recorde!`,
+          `Que mês, ${nome}! ${Math.round(pc*100)}% ${daSua}. Mantém o ritmo e vamos buscar o recorde!`]);
+      }else if(duRest<=1){
+        tom='#b91c1c';
+        txt=pick([
+          `Último dia útil do mês, ${nome}! Faltam ${K(falta)} ${praSua}. Hoje é dia de fechar!`,
+          `${nome}, é hoje! ${K(falta)} separam você ${daSua}. Liga, cobra a resposta, fecha!`]);
+      }else if(pc>=0.7){
+        tom='#b45309';
+        txt=pick([
+          `${nome}, falta pouco ${praSua}: só ${K(falta)}. Vamos atrás dessa vitória?`,
+          `Reta final, ${nome}! Faltam ${K(falta)} e ${dias}. Dá pra fechar!`,
+          `${nome}, você já está em ${Math.round(pc*100)}% ${daSua}. Faltam ${K(falta)}: um fechamento hoje muda tudo!`]);
+      }else if(duPass<=3){
+        txt=pick([
+          `${nome}, mês começando! ${sua.replace(/^./,c=>c.toUpperCase())} é ${K(meta)}: dá ${K(porDia)} por dia útil. Começa forte!`,
+          `Página em branco, ${nome}! ${K(meta)} de meta em ${dias}. Quem planta cedo colhe no fim do mês.`]);
+      }else if(pc>=0.4){
+        txt=pick([
+          `${nome}, você está em ${Math.round(pc*100)}% ${daSua}. Faltam ${K(falta)} em ${dias}: dá ${K(porDia)} por dia. Bora acelerar!`,
+          `Metade do caminho, ${nome}! Faltam ${K(falta)}. Puxa as propostas abertas e cobra o retorno hoje.`]);
+      }else{
+        tom='#b91c1c';
+        txt=pick([
+          `${nome}, faltam ${K(falta)} ${praSua} e ${dias}. Precisa de ${K(porDia)} por dia: hora de virar o jogo!`,
+          `${nome}, ainda dá! ${K(falta)} em ${dias}. Foco nas propostas quentes e nos follow-ups de hoje.`]);
+      }
+      if(o.atr>0)txt+=` E tem ${o.atr} tarefa${o.atr>1?'s':''} atrasada${o.atr>1?'s':''} esperando você.`;
+    }else if(o.fila>0){
+      txt=pick([
+        `${o.fila} orçamento${o.fila>1?'s':''} na fila, ${nome}. Cada um é uma venda em potencial!`,
+        `${nome}, orçamento rápido é cliente bem atendido. Faltam ${o.fila} na fila!`]);
+    }else if(o.atr>0){
+      tom='#b91c1c';
+      txt=pick([
+        `${nome}, tem ${o.atr} tarefa${o.atr>1?'s':''} atrasada${o.atr>1?'s':''}. Resolve a primeira e o resto anda junto!`,
+        `Hoje é dia de colocar a casa em ordem, ${nome}: ${o.atr} atrasada${o.atr>1?'s':''} e você dá conta. 💪`]);
+    }else if(o.hj>0){
+      txt=pick([
+        `${nome}, ${o.hj} tarefa${o.hj>1?'s':''} pra hoje. Uma de cada vez e o dia rende!`,
+        `Bom trabalho pela frente, ${nome}: ${o.hj} tarefa${o.hj>1?'s':''} pra hoje. Bora!`]);
+    }else{
+      tom='#15803d';
+      txt=pick([
+        `Tudo em dia, ${nome}! Que tal adiantar o que vence nos próximos dias?`,
+        `Nada atrasado por aqui, ${nome}. Belo trabalho!`]);
+    }
+    if(dow===1)txt=`Semana nova, ${nome}! `+txt.replace(new RegExp('^'+nome+', '),'').replace(/^./,c=>c.toUpperCase());
+    else if(dow===5)txt+=' Sexta-feira: fecha a semana com chave de ouro!';
+    txt+=fim;
+    return`<div class="md-frase" style="margin-top:8px;padding:8px 12px;border-left:4px solid ${tom};background:#f8fafc;border-radius:6px;font-size:.9rem;font-weight:600;color:#1e293b">${_uxEsc(txt)}</div>`;
+  }catch(e){console.error('frase do dia',e);return'';}
+}
 function _uxMdRender(){
   const c=_uxMdContainer();if(!c)return;
   try{if(typeof _orcxAcesso==='function'&&_orcxAcesso())_orc2WatchLista();}catch(e){}
@@ -70846,7 +71397,7 @@ function _uxMdRender(){
   const grupo=(tit,cor,l)=>l.length?`<div class="md-g" style="color:${cor}">${tit} (${l.length})</div>`+l.map(t=>linha(t,tfs.indexOf(t))).join(''):'';
   const atalhos=[...document.querySelectorAll('#sb-nav .sb-btn')].filter(b=>b.id&&b.id!=='sb-cat-MEUDIA'&&b.style.display!=='none').map(b=>`<button type="button" onclick="document.getElementById('${b.id}').click()">${_uxEsc((b.querySelector('.sb-btn-label')||b).textContent.trim())}</button>`).join('');
   c.innerHTML=`
-  <div class="dash-card" style="padding:16px 18px;margin-bottom:14px"><div style="font-size:1.15rem;font-weight:800;color:#0f172a">${saud}, ${_uxEsc((eu||'').split(' ')[0]||'')}! 👋</div><div style="font-size:.8rem;color:#64748b;margin-top:2px">${_uxEsc(dt)} — aqui está o que é seu hoje. <a href="javascript:void 0" onclick="_uxBuscaAbrir()" style="color:#1d4ed8;font-weight:700">🔍 Buscar qualquer coisa (Ctrl+K)</a></div></div>
+  <div class="dash-card" style="padding:16px 18px;margin-bottom:14px"><div style="font-size:1.15rem;font-weight:800;color:#0f172a">${saud}, ${_uxEsc((eu||'').split(' ')[0]||'')}! 👋</div>${_uxFraseDia({atr:atr.length,hj:hj.length,fila})}<div style="font-size:.8rem;color:#64748b;margin-top:2px">${_uxEsc(dt)} — aqui está o que é seu hoje. <a href="javascript:void 0" onclick="_uxBuscaAbrir()" style="color:#1d4ed8;font-weight:700">🔍 Buscar qualquer coisa (Ctrl+K)</a></div></div>
   <div class="md-cards">
     ${card('#b91c1c','#fee2e2','⏰ Tarefas atrasadas',atr.length)}
     ${card('#1d4ed8','#dbeafe','📅 Pra hoje',hj.length)}
@@ -71356,9 +71907,9 @@ async function _dirSalvarCfg(){
 // gráfico vai como imagem). Genérico de propósito — vale pros indicadores que já existem e pros
 // que vierem depois, sem precisar de uma exportação escrita à mão pra cada um.
 const UX_EXP_ALVOS=[
-  ['dash-tab-graficos','Visão Comercial — Indicadores'],['crm-sec-indicadores','CRM — Indicadores'],['prosp-sec-indicadores','Prospecção — Indicadores'],
-  ['fin-sec-indicadores','Financeiro — Indicadores'],['dre-indicadores','DRE — Indicadores por centro de custo'],['pl-sec-indicadores','Planejamento — Indicadores'],
-  ['proj-sec-indicadores','Projetos — Indicadores'],['prod-sec-indicadores','Produção — Indicadores'],['rh-sec-pontualidade','RH — Pontualidade e assiduidade'],
+  /* dash-tab-graficos saiu (2026-10-28): a tela já tem Excel/PDF próprios ao lado do filtro de mês */['crm-sec-indicadores','CRM — Indicadores'],['prosp-sec-indicadores','Prospecção — Indicadores'],
+  ['fin-sec-indicadores','Financeiro — Indicadores'],/* dre-indicadores saiu (2026-10-28): exporta pelo PDF ▾/Excel ▾ do topo do DRE */['pl-sec-indicadores','Planejamento — Indicadores'],
+  ['proj-sec-indicadores','Projetos — Indicadores'],/* prod-sec-indicadores saiu (2026-10-28): a tela já tem Excel/PDF próprios */['rh-sec-pontualidade','RH — Pontualidade e assiduidade'],
   ['hp-cards','Histórico de pedidos — Indicadores'],['dir-painel','Painel da diretoria'],['orc8-painel','Orçamentos — Painel']
 ];
 function _uxExpEnsure(){
@@ -72437,7 +72988,7 @@ async function _chEmailAbertura(c){
   let reg;
   try{
     emailjs.init(cfg.k||'wtJbXi3uGODPaFIqc');
-    await emailjs.send(cfg.s||'service_t99xeta',cfg.t||'template_lzow9ef',{html_content:_chEmailHtml(c),to_email:para.join(','),cc:'',to_name:'Supervisão '+setorLbl(c.destino),os_numero:String(c.os||''),subject:`[Chamado] ${numTxt(c)} · ${setorLbl(c.destino)} · ${c.titulo}`,name:'GCORE - Sistema Granda',reply_to:c.criadoPorEmail||'grandacv@gmail.com'});
+    await emailjs.send(cfg.s||'service_t99xeta',cfg.t||'template_lzow9ef',{html_content:_chEmailHtml(c),to_email:para.join(','),cc:'',to_name:'Supervisão '+setorLbl(c.destino),os_numero:String(c.os||''),subject:_assuntoEmail(`[Chamado] ${numTxt(c)} · ${setorLbl(c.destino)} · ${c.titulo}`),name:'GCORE - Sistema Granda',reply_to:c.criadoPorEmail||'grandacv@gmail.com'});
     reg=`E-mail do chamado enviado para ${para.join(', ')}`;
   }catch(e){reg=`Não consegui enviar o e-mail do chamado (${(e&&(e.text||e.message))||e})`;toast(reg,'twar');}
   try{await _chAlterar(c.id,x=>{_chHist(x,'email',reg);},c.mes);}catch(e){console.warn('registro e-mail chamado',e);}
@@ -73659,7 +74210,7 @@ async function _rsEmailRh(s){
   if(_temCopia&&!para.includes(_copia))para.push(_copia);
   try{
     emailjs.init(cfg.k||'wtJbXi3uGODPaFIqc');
-    await emailjs.send(cfg.s||'service_t99xeta',cfg.t||'template_lzow9ef',{html_content:_rsEmailHtml(s),to_email:para.join(','),cc:_temCopia?_copia:'',to_name:'RH',os_numero:'',subject:`[Vaga] ${s.cargo} · ${setorLbl(s.setor)}`,name:'GCORE - Sistema Granda',reply_to:s.criadoPorEmail||'grandacv@gmail.com'});
+    await emailjs.send(cfg.s||'service_t99xeta',cfg.t||'template_lzow9ef',{html_content:_rsEmailHtml(s),to_email:para.join(','),cc:_temCopia?_copia:'',to_name:'RH',os_numero:'',subject:_assuntoEmail(`[Vaga] ${s.cargo} · ${setorLbl(s.setor)}`),name:'GCORE - Sistema Granda',reply_to:s.criadoPorEmail||'grandacv@gmail.com'});
   }catch(e){console.warn('e-mail solicitação de vaga',e);}
 }
 
