@@ -26,7 +26,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-28.20';</script>
+<script>const APP_BUILD_VERSION='2026-10-28.21';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -72107,8 +72107,15 @@ function _portalSnapshot(p){
   return{v:1,token:p.portalToken,os:String(p.os||''),cliente:_pedNome(p),job:String(p.job||''),
     local:[String(p.locCidade||'').toUpperCase(),String(p.locUf||'').toUpperCase()].filter(Boolean).join('/'),
     engenheiros:_portalEmails(p.email_engenheiro),emissao:calc.emissaoIso||'',prazo:calc.prazoIso||'',
-    etapas:grupos,concluido:!!fin,dataFinalizacao:fin?fin.dataFinalizacao:'',diario,docs};
+    etapas:grupos,concluido:!!fin,dataFinalizacao:fin?fin.dataFinalizacao:'',diario,docs,logo:_portalLogoPedido(p)};
 }
+// (2026-10-28, a pedido do usuário) Logo do cliente no portal = a mesma logo do caderno do cliente
+// (CADERNOS_PADRAO/CADERNO_LOGOS_EMB embutidas ou a trocada pelo ✏️). Vai junto na cópia publicada.
+function _portalLogo(nome){
+  try{if(!nome)return null;const c=_cadernoInfo(nome);if(c&&c.logoUrl)return{url:c.logoUrl,larg:c.logoLarg||1};}catch(e){}
+  return null;
+}
+function _portalLogoPedido(p){let g='';try{g=_grupoCliNome(p.cliente,p.job);}catch(e){}return _portalLogo(g)||_portalLogo(p.cliente);}
 function _portalHash(s){let h=5381;for(let i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))|0;return String(h>>>0)+'_'+s.length;}
 // Grava a cópia limpa (só se mudou desde a última gravação feita por este navegador).
 // criarToken=true só nos pontos "oficiais" (e-mails, botão de copiar link, passada do admin) — o
@@ -72244,8 +72251,13 @@ async function _portalPublicarCarteira(chave,cart){
   if(c){for(const p of c.pedidos){const ok=await _portalSync(p,true);if(p.portalToken&&ok!==false)tokens.push(p.portalToken);}}
   // (2026-10-28) Nomes dos engenheiros (cadastrados em Compartilhar obras) pro filtro da lista.
   const engNomes={};if(c){c.pedidos.forEach(p=>_portalEmails(p.email_engenheiro).forEach(em=>{const n=_portalEngNome(em);if(n)engNomes[em]=n;}));}
-  const doc={v:1,tipo:'lista',titulo:c?c.titulo:'',sub:c?c.sub:'',tokens,engNomes,atualizadoEm:new Date().toISOString()};
-  const h=_portalHash(JSON.stringify([doc.titulo,doc.sub,tokens,engNomes]));
+  // Logo da lista: a do cliente (lista de cliente) ou a mais comum entre as obras (lista de engenheiro).
+  let logo=null;
+  if(c){logo=c.tipo==='cli'?_portalLogo(c.nome):null;
+    if(!logo){const cont={};c.pedidos.forEach(p=>{const l=_portalLogoPedido(p);if(l){const k=l.url;cont[k]=cont[k]||{l,n:0};cont[k].n++;}});
+      const top=Object.values(cont).sort((a,b)=>b.n-a.n)[0];if(top)logo=top.l;}}
+  const doc={v:1,tipo:'lista',titulo:c?c.titulo:'',sub:c?c.sub:'',tokens,engNomes,logo,atualizadoEm:new Date().toISOString()};
+  const h=_portalHash(JSON.stringify([doc.titulo,doc.sub,tokens,engNomes,logo]));
   let ant=null;try{ant=localStorage.getItem('gcPortalLista_'+token);}catch(e){}
   if(ant!==h){await window._fbSetDocCol('portalObras',token,doc);try{localStorage.setItem('gcPortalLista_'+token,h);}catch(e){}}
   return _portalLinkLista(token);
@@ -72424,7 +72436,7 @@ function _ptObraHtml(o,voltar){
     </div>`;
   }
   return`${voltar?`<button class="pt-voltar" onclick="${voltar}">← Minhas obras</button>`:''}
-  <div class="pt-card pt-head">
+  <div class="pt-card pt-head">${o.logo?`<div class="pt-head-top">${_ptLogoCli(o.logo,'pt-logo-cli-sm')}</div>`:''}
     <div class="pt-head-os">OS ${_ptE(o.os)}${o.local?' · '+_ptE(o.local):''}</div>
     <h1>${_ptE(o.cliente)}</h1>
     <div class="pt-head-row"><span class="pt-pill ${st.cls}">${st.cls==='ok'?'✓ ':''}${_ptE(st.txt)}</span><span class="pt-head-sub">${_ptE(st.sub)}</span></div>
@@ -72515,6 +72527,13 @@ function _ptMiniEtapas(st){
   }).join('');
   return`<div class="pt-mis" style="--n:${st.gs.length};--r:${Math.ceil(st.gs.length/2)}">${it}</div>`;
 }
+function _ptLogoCli(lg,cls){
+  if(!lg||!lg.url)return'';const larg=Math.min(Math.max(+lg.larg||1,1),3);
+  return`<div class="pt-logo-cli ${cls||''}" style="--lg:${larg}"><img src="${_ptE(lg.url)}" alt=""></div>`;
+}
+const PT_ICO={entrega:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3h15v13H1z"/><path d="M16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>',
+  inicioInst:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>',
+  conclusao:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/></svg>'};
 function _ptFx(v){_pt.fx=_pt.fx===v?'':v;_pt.aba='and';_ptRenderLista();}
 function _ptListaHtml(obras){
   const busca=(_pt.busca||'').toUpperCase();
@@ -72543,11 +72562,12 @@ function _ptListaHtml(obras){
     ${o.concluido?`<div class="pt-ob-r"><span>Concluída em</span><b>${_ptD(o.dataFinalizacao)}</b></div>`:(n?'':`<div class="pt-ob-r"><span>Etapa atual</span><b>${_ptE(st.sub)}</b></div>`)}
     ${o.concluido||!o.prazo||o.prazo<hj?'':`<div class="pt-ob-r"><span>Entrega combinada</span><b>${_ptD(o.prazo)}</b></div>`}
     ${docs?`<div class="pt-ob-docs">${docs}</div>`:''}</div>`;};
-  const cab=_pt.lista?`<div class="pt-ola-row"><div class="pt-ola">Obras ${_ptE(_pt.lista.titulo||'')} com a Granda<small>${_ptE(_pt.lista.sub||'')}</small></div><button class="pt-pdf pt-noprint" onclick="window.print()">⬇ Baixar PDF</button></div>`:`<div class="pt-ola">Olá! Estas são as suas obras com a Granda.<small>${_ptE(_pt.user.email)}</small></div>`;
+  const lg=_pt.lista&&_pt.lista.logo;
+  const cab=_pt.lista?`<div class="pt-ola-row">${_ptLogoCli(lg)}<div class="pt-ola">Obras ${_ptE(_pt.lista.titulo||'')} com a Granda<small>${_ptE(_pt.lista.sub||'')}</small></div><button class="pt-pdf pt-noprint" onclick="window.print()">⬇ Baixar PDF</button></div>`:`<div class="pt-ola">Olá! Estas são as suas obras com a Granda.<small>${_ptE(_pt.user.email)}</small></div>`;
   const nA=base.filter(o=>!o.concluido).length,nC=base.filter(o=>o.concluido).length;
   const selEng=(engs.length>1||(engs.length&&semEng))?`<label class="pt-eng pt-noprint"><span>Engenheiro(a)</span><select onchange="_pt.eng=this.value;_pt.fx='';_ptRenderLista()">
       <option value="">Todos os engenheiros</option>${engs.map(e=>`<option value="${_ptE(e)}"${_pt.eng===e?' selected':''}>${_ptE(_ptEngNome(e))}</option>`).join('')}${semEng?`<option value="__sem"${_pt.eng==='__sem'?' selected':''}>Sem engenheiro informado</option>`:''}</select></label>`:'';
-  const semHtml=semCont.some(x=>x.n)?`<div class="pt-sem"><div class="pt-sem-h">Próximos 7 dias <small>${_ptD(hj).slice(0,5)} a ${_ptD(fim).slice(0,5)}</small></div><div class="pt-sem-g">${semCont.map(x=>`<button class="${_pt.fx==='sem:'+x.k?'on':''}" ${x.n?`onclick="_ptFx('sem:${x.k}')"`:'disabled'}><b>${x.n}</b><span>${x.t}</span></button>`).join('')}</div></div>`:'';
+  const semHtml=semCont.some(x=>x.n)?`<div class="pt-sem"><div class="pt-sem-h">Próximos 7 dias <small>${_ptD(hj).slice(0,5)} a ${_ptD(fim).slice(0,5)}</small></div><div class="pt-sem-g">${semCont.map(x=>`<button class="${_pt.fx==='sem:'+x.k?'on':''}" ${x.n?`onclick="_ptFx('sem:${x.k}')"`:'disabled'}><i>${PT_ICO[x.k]||''}</i><b>${x.n}</b><span>${x.t}</span></button>`).join('')}</div></div>`:'';
   const lista=aba==='and'?and:con;
   const outra=aba==='and'?con.length:f.filter(o=>!o.concluido).length;
   const dica=busca&&outra&&!lista.length?`<button class="pt-dica pt-noprint" onclick="_pt.aba='${aba==='and'?'con':'and'}';_pt.fx='';_ptRenderLista()">${outra} ${aba==='and'?(outra===1?'obra concluída encontrada':'obras concluídas encontradas'):(outra===1?'obra em andamento encontrada':'obras em andamento encontradas')} — ver</button>`:'';
@@ -72579,7 +72599,7 @@ async function _ptAbrirLista(token){
     const l=s.data();
     const docs=await Promise.all((l.tokens||[]).map(t=>F.getDoc(F.doc(db,'portalObras',String(t))).catch(()=>null)));
     const lim=(()=>{const d=new Date(Date.now()-60*86400000);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
-    _pt.lista={titulo:l.titulo||'',sub:l.sub||'',engNomes:l.engNomes||{}};
+    _pt.lista={titulo:l.titulo||'',sub:l.sub||'',engNomes:l.engNomes||{},logo:l.logo||null};
     _pt.obras=docs.filter(d=>d&&d.exists()).map(d=>d.data()).filter(o=>o&&o.tipo!=='lista'&&!o.removido&&(!o.concluido||String(o.dataFinalizacao||'')>=lim));
     document.title='Obras '+(l.titulo||'')+' · Acompanhamento Granda';
     if(!_pt.obras.length){_ptMsg('Nenhuma obra no momento','Não há obras em andamento ou concluídas recentemente neste acompanhamento.');return;}
@@ -72686,6 +72706,24 @@ function _portalBoot(){
 .pt-ob-prog{display:flex;align-items:center;gap:10px;margin:0 0 6px}.pt-ob-prog .pt-prog{flex:1;margin-top:0;height:6px}.pt-ob-prog span{font-size:.72rem;color:#64748b;white-space:nowrap}
 .pt-ob-docs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #f1f5f9}.pt-ob-doc{font-size:.78rem;font-weight:700;color:#be185d;background:#fdf2f8;border-radius:8px;padding:5px 10px;text-decoration:none;white-space:nowrap}span.pt-ob-doc{color:#475569;background:#f1f5f9}
 .pt-impresso{display:none}
+/* (2026-10-28) "deixe ainda mais tesão e põe a logo do cliente" */
+.pt-hero,.pt-head{position:relative;overflow:hidden;background:radial-gradient(circle at 100% 0%,rgba(233,30,99,.38) 0%,rgba(233,30,99,0) 46%),radial-gradient(circle at 0% 100%,rgba(56,189,248,.14) 0%,rgba(56,189,248,0) 40%),linear-gradient(135deg,#0b1224 0%,#1e293b 100%)!important}
+.pt-hero .pt-ola-row{align-items:center;gap:14px}.pt-hero .pt-ola{flex:1;min-width:0;font-size:1.25rem;letter-spacing:-.01em}.pt-hero .pt-ola small{font-size:.8rem;margin-top:2px}
+.pt-logo-cli{flex-shrink:0;background:#fff;border-radius:14px;padding:8px;height:64px;width:calc(48px * var(--lg) + 16px);display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+.pt-logo-cli img{max-width:100%;max-height:100%;object-fit:contain;display:block}
+.pt-logo-cli-sm{height:52px;width:calc(38px * var(--lg) + 14px);border-radius:12px;padding:7px}
+.pt-head-top{margin-bottom:12px}
+.pt-hero .pt-kpis b{font-size:1.9rem;line-height:1.1;letter-spacing:-.02em}
+.pt-sem-g button{position:relative;padding:10px 12px}.pt-sem-g button i{position:absolute;top:9px;right:10px;width:20px;height:20px;opacity:.9}.pt-sem-g button i svg{width:100%;height:100%}
+.pt-sem-g button:nth-child(1) i{color:#2563eb}.pt-sem-g button:nth-child(2) i{color:#d97706}.pt-sem-g button:nth-child(3) i{color:#16a34a}
+.pt-sem-g b{font-size:1.45rem!important;line-height:1.15}
+.pt-ob{transition:box-shadow .15s,transform .15s}.pt-ob:hover{transform:translateY(-1px)}
+.pt-ob-t b{font-size:1rem;letter-spacing:-.005em}
+.pt-mi.atual i{animation:ptPulse 1.8s ease-out infinite}
+@keyframes ptPulse{0%{box-shadow:0 0 0 0 rgba(233,30,99,.45)}70%{box-shadow:0 0 0 8px rgba(233,30,99,0)}100%{box-shadow:0 0 0 0 rgba(233,30,99,0)}}
+@media (prefers-reduced-motion:reduce){.pt-mi.atual i{animation:none}.pt-ob{transition:none}}
+@media (max-width:520px){.pt-logo-cli{height:52px;width:calc(38px * var(--lg) + 14px);border-radius:12px;padding:7px}.pt-hero .pt-ola{font-size:1.08rem}.pt-hero .pt-ola-row{flex-wrap:wrap}.pt-hero .pt-ola{flex:1 1 0}.pt-hero .pt-pdf{order:3;width:100%;text-align:center}.pt-sem-g button i{width:16px;height:16px;top:7px;right:7px}}
+@media print{.pt-mi.atual i{animation:none}}
 /* (2026-10-28, a pedido do usuário: "tá tudo muito branco e pálido") — topo navy com título e abas,
    cartões com faixa de cor por situação, próximos 7 dias com cor por tipo, cabeçalho da obra navy. */
 .pt-hero{background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);color:#fff;border-radius:16px;padding:18px 18px 16px;margin-bottom:14px;box-shadow:0 6px 18px rgba(15,23,42,.18)}
