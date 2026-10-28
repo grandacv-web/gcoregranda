@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-28.15';</script>
+<script>const APP_BUILD_VERSION='2026-10-28.16';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -72130,6 +72130,18 @@ async function _portalBackfill(){
   if(_portalBackfillFeito||window.__GCORE_PORTAL)return;
   try{if(!_getUserCat().isAdm)return;}catch(e){return;}
   _portalBackfillFeito=true;
+  // (2026-10-28) Pedido que tem link mas não entra mais no acompanhamento (ex.: Interno/Garantia,
+  // cancelado) — a página dele vira "removida" (some das listas e o link mostra indisponível).
+  try{
+    for(const p of(Array.isArray(pedidos)?pedidos:[])){
+      if(!p||!p.portalToken||_portalElegivel(p))continue;
+      const ch='gcPortal_'+p.id;let ant=null;try{ant=localStorage.getItem(ch);}catch(e){}
+      if(ant==='removido|'+p.portalToken)continue;
+      await window._fbSetDocCol('portalObras',p.portalToken,{v:1,token:p.portalToken,removido:true,atualizadoEm:new Date().toISOString()});
+      try{localStorage.setItem(ch,'removido|'+p.portalToken);}catch(e){}
+    }
+    await _portalCarteirasBackfill();
+  }catch(e){console.warn('Portal: remover não elegíveis',e);}
   let lista=[];try{lista=_lpPedidosElegiveis().filter(_portalElegivel);}catch(e){return;}
   for(const p of lista){
     // Pedido finalizado há mais de 1 ano não precisa de link novo.
@@ -72430,7 +72442,9 @@ async function _ptAbrirObra(token){
     const{F,db}=await _ptFb();
     const s=await F.getDoc(F.doc(db,'portalObras',token));
     if(!s.exists()){_ptMsg('Link não encontrado','Este link de acompanhamento não existe ou ainda está sendo preparado. Se você recebeu agora, tente de novo em alguns minutos ou fale com a Granda.');return;}
-    const o=s.data();document.title='OS '+o.os+' · Acompanhamento Granda';
+    const o=s.data();
+    if(o.removido){_ptMsg('Acompanhamento indisponível','Esta obra não está mais disponível no acompanhamento. Em caso de dúvida, fale com a Granda.');return;}
+    document.title='OS '+o.os+' · Acompanhamento Granda';
     _ptRoot().innerHTML=_ptShell(_ptObraHtml(o,''));
   }catch(e){
     console.error(e);
@@ -72555,7 +72569,7 @@ async function _ptAbrirLista(token){
     const docs=await Promise.all((l.tokens||[]).map(t=>F.getDoc(F.doc(db,'portalObras',String(t))).catch(()=>null)));
     const lim=(()=>{const d=new Date(Date.now()-60*86400000);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
     _pt.lista={titulo:l.titulo||'',sub:l.sub||'',engNomes:l.engNomes||{}};
-    _pt.obras=docs.filter(d=>d&&d.exists()).map(d=>d.data()).filter(o=>o&&o.tipo!=='lista'&&(!o.concluido||String(o.dataFinalizacao||'')>=lim));
+    _pt.obras=docs.filter(d=>d&&d.exists()).map(d=>d.data()).filter(o=>o&&o.tipo!=='lista'&&!o.removido&&(!o.concluido||String(o.dataFinalizacao||'')>=lim));
     document.title='Obras '+(l.titulo||'')+' · Acompanhamento Granda';
     if(!_pt.obras.length){_ptMsg('Nenhuma obra no momento','Não há obras em andamento ou concluídas recentemente neste acompanhamento.');return;}
     _ptRenderLista();
