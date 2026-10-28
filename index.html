@@ -18,7 +18,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-28.10';</script>
+<script>const APP_BUILD_VERSION='2026-10-28.12';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -72218,8 +72218,10 @@ async function _portalPublicarCarteira(chave,cart){
   const token=_portalCarteiraTokenSync(chave);
   const tokens=[];
   if(c){for(const p of c.pedidos){const ok=await _portalSync(p,true);if(p.portalToken&&ok!==false)tokens.push(p.portalToken);}}
-  const doc={v:1,tipo:'lista',titulo:c?c.titulo:'',sub:c?c.sub:'',tokens,atualizadoEm:new Date().toISOString()};
-  const h=_portalHash(JSON.stringify([doc.titulo,doc.sub,tokens]));
+  // (2026-10-28) Nomes dos engenheiros (cadastrados em Compartilhar obras) pro filtro da lista.
+  const engNomes={};if(c){c.pedidos.forEach(p=>_portalEmails(p.email_engenheiro).forEach(em=>{const n=_portalEngNome(em);if(n)engNomes[em]=n;}));}
+  const doc={v:1,tipo:'lista',titulo:c?c.titulo:'',sub:c?c.sub:'',tokens,engNomes,atualizadoEm:new Date().toISOString()};
+  const h=_portalHash(JSON.stringify([doc.titulo,doc.sub,tokens,engNomes]));
   let ant=null;try{ant=localStorage.getItem('gcPortalLista_'+token);}catch(e){}
   if(ant!==h){await window._fbSetDocCol('portalObras',token,doc);try{localStorage.setItem('gcPortalLista_'+token,h);}catch(e){}}
   return _portalLinkLista(token);
@@ -72356,7 +72358,7 @@ const PT_ROTULO_FIM={medicao:'Finalização da medição técnica',projeto:'Fina
 function _ptEtapas(o){
   const hoje=_ptHoje();
   const feita=pt=>o.concluido||(pt.fim?false:(pt.ok===true||(pt.ok===null&&pt.iso<=hoje)));
-  const gs=(o.etapas||[]).map(g=>{const done=g.partes.every(feita);const iso=g.partes.reduce((m,x)=>x.iso>m?x.iso:m,'');const dt=g.partes.reduce((m,x)=>x.dt>m?x.dt:m,'');return{l:PT_ROTULO_FIM[g.k]||g.l,l0:g.l,done,rec:done&&g.partes.some(x=>x.ok===true),iso,dt};});
+  const gs=(o.etapas||[]).map(g=>{const done=g.partes.every(feita);const iso=g.partes.reduce((m,x)=>x.iso>m?x.iso:m,'');const dt=g.partes.reduce((m,x)=>x.dt>m?x.dt:m,'');return{k:g.k,l:PT_ROTULO_FIM[g.k]||g.l,l0:g.l,done,rec:done&&g.partes.some(x=>x.ok===true),iso,dt};});
   // A linha do tempo só anda pra frente: se uma etapa posterior já tem REGISTRO de feita (baixa do
   // setor), as anteriores também aparecem concluídas pro cliente (ex.: obra já em campo).
   let depois=false;for(let i=gs.length-1;i>=0;i--){if(gs[i].rec)depois=true;else if(depois)gs[i].done=true;}
@@ -72452,27 +72454,80 @@ async function _ptEnviarLink(){
   }catch(e){console.error(e);m.textContent='Não foi possível enviar o link agora ('+(e.code||e.message)+'). Tente de novo em instantes.';m.className='pt-login-msg err';}
 }
 async function _ptSair(){try{const{U,auth}=await _ptFb();await U.signOut(auth);}catch(e){}_pt.user=null;_ptRoot().innerHTML=_ptLoginHtml();}
+// (2026-10-28, a pedido do usuário) Lista geral: filtro por engenheiro (e-mail de "E-mail do
+// Engenheiro da Obra", com o nome cadastrado em Compartilhar obras quando houver) e abas Em
+// andamento / Concluídas — abre só nas em andamento; os dois cartões de contagem viram as abas.
+// Extras pedidos no mesmo dia: resumo dos próximos 7 dias e contagem por etapa (clicáveis, filtram
+// a lista), barra de progresso no card, selo "Novidade" (diário novo, etapa que avançou ou obra
+// concluída desde a última visita deste navegador), documentos direto no card das concluídas e
+// "Baixar PDF" (impressão da lista que está na tela). Nunca mostra data que já passou (atraso).
+function _ptVistoSig(o){const st=_ptStatusObra(o);const d=o.diario||[];return[d.length,d[0]?d[0].data:'',o.concluido?1:0,st.atual].join('|');}
+function _ptVistoMarcar(obras,forcar){
+  let m={};try{m=JSON.parse(localStorage.getItem('gcPtVisto')||'{}')||{};}catch(e){}
+  const novas={};let mud=false;
+  obras.forEach(o=>{const sg=_ptVistoSig(o);if(!(o.token in m)||forcar){if(m[o.token]!==sg){m[o.token]=sg;mud=true;}}else if(m[o.token]!==sg)novas[o.token]=true;});
+  if(mud){try{localStorage.setItem('gcPtVisto',JSON.stringify(m));}catch(e){}}
+  return novas;
+}
+function _ptEngNome(e){const n=_pt.lista&&_pt.lista.engNomes&&_pt.lista.engNomes[e];return n||e;}
+function _ptFx(v){_pt.fx=_pt.fx===v?'':v;_pt.aba='and';_ptRenderLista();}
 function _ptListaHtml(obras){
   const busca=(_pt.busca||'').toUpperCase();
-  const f=obras.filter(o=>!busca||(o.cliente+' '+o.os+' '+o.job+' '+o.local).toUpperCase().includes(busca));
-  const and=f.filter(o=>!o.concluido).sort((a,b)=>String(a.prazo).localeCompare(String(b.prazo)));
+  const engs=[...new Set(obras.flatMap(o=>o.engenheiros||[]))].sort((a,b)=>_ptEngNome(a).localeCompare(_ptEngNome(b)));
+  const semEng=obras.some(o=>!(o.engenheiros||[]).length);
+  if(_pt.eng&&_pt.eng!=='__sem'&&!engs.includes(_pt.eng))_pt.eng='';
+  const base=obras.filter(o=>!_pt.eng||(_pt.eng==='__sem'?!(o.engenheiros||[]).length:(o.engenheiros||[]).includes(_pt.eng)));
+  const aba=_pt.aba==='con'?'con':'and';
+  const info={};base.forEach(o=>{info[o.token]=_ptStatusObra(o);});
+  const novas=_ptVistoMarcar(obras,false);
+  // Próximos 7 dias (só etapas ainda não feitas, com data de hoje em diante).
+  const hj=_ptHoje(),fim=(()=>{const d=new Date(hj+'T00:00:00');d.setDate(d.getDate()+6);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+  const SEM=[['entrega','saída para entrega','saídas para entrega'],['inicioInst','instalação começando','instalações começando'],['conclusao','obra a concluir','obras a concluir']];
+  const naSemana=(o,k)=>{if(o.concluido)return false;const g=info[o.token].gs.find(x=>x.k===k);return!!(g&&!g.done&&g.iso&&g.iso>=hj&&g.iso<=fim);};
+  const semCont=SEM.map(([k,s1,s2])=>{const n=base.filter(o=>naSemana(o,k)).length;return{k,n,t:n===1?s1:s2};});
+  // Contagem por etapa atual (em andamento).
+  const porEt={};base.filter(o=>!o.concluido).forEach(o=>{const e=info[o.token].sub||'Finalizando';porEt[e]=(porEt[e]||0)+1;});
+  const ordemEt=['Medição técnica','Projeto','Preparação dos materiais','Produção','Embalagem','Saída para entrega','Início da instalação','Conclusão da obra'];
+  const ets=Object.keys(porEt).sort((a,b)=>{const ia=ordemEt.indexOf(a),ib=ordemEt.indexOf(b);return(ia<0?99:ia)-(ib<0?99:ib);});
+  if(_pt.fx&&_pt.fx.startsWith('et:')&&!porEt[_pt.fx.slice(3)])_pt.fx='';
+  const passaFx=o=>{const fx=_pt.fx||'';if(!fx)return true;if(fx.startsWith('et:'))return!o.concluido&&(info[o.token].sub||'Finalizando')===fx.slice(3);if(fx.startsWith('sem:'))return naSemana(o,fx.slice(4));return true;};
+  const f=base.filter(o=>!busca||(o.cliente+' '+o.os+' '+o.job+' '+o.local).toUpperCase().includes(busca));
+  const and=f.filter(o=>!o.concluido&&passaFx(o)).sort((a,b)=>String(a.prazo).localeCompare(String(b.prazo)));
   const con=f.filter(o=>o.concluido).sort((a,b)=>String(b.dataFinalizacao).localeCompare(String(a.dataFinalizacao)));
-  const card=o=>{const st=_ptStatusObra(o);return`<button class="pt-ob" onclick="_ptVerObra('${_ptE(o.token)}')"><div class="pt-ob-t"><b>${_ptE(o.cliente)}</b><span class="pt-pill ${st.cls}">${_ptE(st.txt)}</span></div>
+  const card=o=>{const st=info[o.token];const n=st.gs.length,feitas=st.gs.filter(g=>g.done).length,pct=n?Math.round(feitas/n*100):0;
+    const d=o.docs||{},lk=(rot,u)=>u?`<a class="pt-ob-doc" href="${_ptE(_ptDown(u))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">📄 ${rot}</a>`:'';
+    const docs=o.concluido?[d.precisaAssinatura==='Não'?'':lk('Termo de entrega',d.documentoUrl),lk('ART',d.artUrl),lk('Laudo',d.laudoUrl),d.fotos&&d.fotos.length?`<span class="pt-ob-doc">📷 ${d.fotos.length} ${d.fotos.length===1?'foto':'fotos'}</span>`:''].join(''):'';
+    return`<div class="pt-ob" role="button" tabindex="0" onclick="_ptVerObra('${_ptE(o.token)}')" onkeydown="if(event.key==='Enter')this.click()"><div class="pt-ob-t"><b>${_ptE(o.cliente)}</b><span class="pt-ob-pills">${novas[o.token]?'<span class="pt-pill nov">Novidade</span>':''}<span class="pt-pill ${st.cls}">${_ptE(st.txt)}</span></span></div>
     <div class="pt-ob-s">OS ${_ptE(o.os)}${o.local?' · '+_ptE(o.local):''}</div>
+    ${!o.concluido&&n?`<div class="pt-ob-prog"><div class="pt-prog"><div style="width:${pct}%"></div></div><span>${feitas} de ${n} etapas</span></div>`:''}
     <div class="pt-ob-r"><span>${o.concluido?'Concluída em':'Etapa atual'}</span><b>${_ptE(o.concluido?_ptD(o.dataFinalizacao):st.sub)}</b></div>
-    ${o.concluido||!o.prazo||o.prazo<_ptHoje()?'':`<div class="pt-ob-r"><span>Entrega combinada</span><b>${_ptD(o.prazo)}</b></div>`}</button>`;};
-  const cab=_pt.lista?`<div class="pt-ola">Obras ${_ptE(_pt.lista.titulo||'')} com a Granda<small>${_ptE(_pt.lista.sub||'')}</small></div>`:`<div class="pt-ola">Olá! Estas são as suas obras com a Granda.<small>${_ptE(_pt.user.email)}</small></div>`;
+    ${o.concluido||!o.prazo||o.prazo<hj?'':`<div class="pt-ob-r"><span>Entrega combinada</span><b>${_ptD(o.prazo)}</b></div>`}
+    ${docs?`<div class="pt-ob-docs">${docs}</div>`:''}</div>`;};
+  const cab=_pt.lista?`<div class="pt-ola-row"><div class="pt-ola">Obras ${_ptE(_pt.lista.titulo||'')} com a Granda<small>${_ptE(_pt.lista.sub||'')}</small></div><button class="pt-pdf pt-noprint" onclick="window.print()">⬇ Baixar PDF</button></div>`:`<div class="pt-ola">Olá! Estas são as suas obras com a Granda.<small>${_ptE(_pt.user.email)}</small></div>`;
+  const nA=base.filter(o=>!o.concluido).length,nC=base.filter(o=>o.concluido).length;
+  const selEng=(engs.length>1||(engs.length&&semEng))?`<label class="pt-eng pt-noprint"><span>Engenheiro(a)</span><select onchange="_pt.eng=this.value;_pt.fx='';_ptRenderLista()">
+      <option value="">Todos os engenheiros</option>${engs.map(e=>`<option value="${_ptE(e)}"${_pt.eng===e?' selected':''}>${_ptE(_ptEngNome(e))}</option>`).join('')}${semEng?`<option value="__sem"${_pt.eng==='__sem'?' selected':''}>Sem engenheiro informado</option>`:''}</select></label>`:'';
+  const semHtml=semCont.some(x=>x.n)?`<div class="pt-sem"><div class="pt-sem-h">Próximos 7 dias <small>${_ptD(hj).slice(0,5)} a ${_ptD(fim).slice(0,5)}</small></div><div class="pt-sem-g">${semCont.map(x=>`<button class="${_pt.fx==='sem:'+x.k?'on':''}" ${x.n?`onclick="_ptFx('sem:${x.k}')"`:'disabled'}><b>${x.n}</b><span>${x.t}</span></button>`).join('')}</div></div>`:'';
+  const chips=aba==='and'&&ets.length>1?`<div class="pt-chips pt-noprint">${ets.map(e=>`<button class="${_pt.fx==='et:'+e?'on':''}" onclick="_ptFx('et:${_ptE(e).replace(/'/g,'&#39;')}')">${_ptE(e)} <b>${porEt[e]}</b></button>`).join('')}</div>`:'';
+  const lista=aba==='and'?and:con;
+  const outra=aba==='and'?con.length:f.filter(o=>!o.concluido).length;
+  const dica=busca&&outra&&!lista.length?`<button class="pt-dica pt-noprint" onclick="_pt.aba='${aba==='and'?'con':'and'}';_pt.fx='';_ptRenderLista()">${outra} ${aba==='and'?(outra===1?'obra concluída encontrada':'obras concluídas encontradas'):(outra===1?'obra em andamento encontrada':'obras em andamento encontradas')} — ver</button>`:'';
+  const fxNome=_pt.fx&&aba==='and'?(_pt.fx.startsWith('et:')?'Etapa: '+_pt.fx.slice(3):'Próximos 7 dias: '+(semCont.find(x=>'sem:'+x.k===_pt.fx)||{t:''}).t):'';
+  const engNome=_pt.eng?(_pt.eng==='__sem'?'Sem engenheiro informado':'Engenheiro(a): '+_ptEngNome(_pt.eng)):'';
   return _ptShell(`${cab}
-    <div class="pt-kpis"><div><b>${obras.filter(o=>!o.concluido).length}</b><span>em andamento</span></div><div><b>${obras.filter(o=>o.concluido).length}</b><span>concluídas</span></div></div>
-    ${obras.length>4?`<input class="pt-busca" placeholder="Buscar loja, OS ou cidade…" value="${_ptE(_pt.busca||'')}" oninput="_pt.busca=this.value;_ptRenderLista(true)">`:''}
-    <div class="pt-sec">Em andamento (${and.length})</div>${and.length?`<div class="pt-obs">${and.map(card).join('')}</div>`:'<div class="pt-vazio">Nenhuma obra em andamento.</div>'}
-    ${con.length?`<div class="pt-sec">Concluídas (${con.length})</div><div class="pt-obs">${con.map(card).join('')}</div>`:''}`,_pt.lista?'Acompanhamento de obras':'Portal do engenheiro');
+    <div class="pt-kpis"><button class="${aba==='and'?'on':''}" onclick="_pt.aba='and';_ptRenderLista()"><b>${nA}</b><span>em andamento</span></button><button class="${aba==='con'?'on':''}" onclick="_pt.aba='con';_pt.fx='';_ptRenderLista()"><b>${nC}</b><span>concluídas</span></button></div>
+    ${selEng}
+    ${aba==='and'?semHtml:''}${chips}
+    ${obras.length>4?`<input class="pt-busca pt-noprint" placeholder="Buscar loja, OS ou cidade…" value="${_ptE(_pt.busca||'')}" oninput="_pt.busca=this.value;_ptRenderLista(true)">`:''}
+    <div class="pt-sec">${aba==='and'?'Em andamento':'Concluídas'} (${lista.length})${engNome?' · '+_ptE(engNome):''}${fxNome?' · '+_ptE(fxNome)+` <button class="pt-limpar pt-noprint" onclick="_pt.fx='';_ptRenderLista()">limpar</button>`:''}</div>${dica}
+    ${lista.length?`<div class="pt-obs">${lista.map(card).join('')}</div>`:(dica?'':`<div class="pt-vazio">${aba==='and'?'Nenhuma obra em andamento.':'Nenhuma obra concluída nos últimos 60 dias.'}</div>`)}
+    <div class="pt-impresso">Impresso em ${_ptD(hj)} · granda.ind.br</div>`,_pt.lista?'Acompanhamento de obras':'Portal do engenheiro');
 }
 function _ptRenderLista(manterFoco){
   _ptRoot().innerHTML=_ptListaHtml(_pt.obras||[]);
   if(manterFoco){const b=document.querySelector('.pt-busca');if(b){b.focus();b.setSelectionRange(b.value.length,b.value.length);}}
 }
-function _ptVerObra(token){const o=(_pt.obras||[]).find(x=>x.token===token);if(!o)return;_ptRoot().innerHTML=_ptShell(_ptObraHtml(o,'_ptRenderLista()'),_pt.lista?'Acompanhamento de obras':'Portal do engenheiro');window.scrollTo(0,0);}
+function _ptVerObra(token){const o=(_pt.obras||[]).find(x=>x.token===token);if(!o)return;_ptVistoMarcar([o],true);_ptRoot().innerHTML=_ptShell(_ptObraHtml(o,'_ptRenderLista()'),_pt.lista?'Acompanhamento de obras':'Portal do engenheiro');window.scrollTo(0,0);}
 // (2026-10-16) Link com várias obras (de um engenheiro ou de um cliente): ?lista=TOKEN. O documento
 // portalObras/{TOKEN} (tipo 'lista') guarda só os tokens das obras; cada obra é lida do próprio
 // documento dela, então a lista sempre mostra os dados mais recentes. Não precisa de login.
@@ -72485,7 +72540,7 @@ async function _ptAbrirLista(token){
     const l=s.data();
     const docs=await Promise.all((l.tokens||[]).map(t=>F.getDoc(F.doc(db,'portalObras',String(t))).catch(()=>null)));
     const lim=(()=>{const d=new Date(Date.now()-60*86400000);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
-    _pt.lista={titulo:l.titulo||'',sub:l.sub||''};
+    _pt.lista={titulo:l.titulo||'',sub:l.sub||'',engNomes:l.engNomes||{}};
     _pt.obras=docs.filter(d=>d&&d.exists()).map(d=>d.data()).filter(o=>o&&o.tipo!=='lista'&&(!o.concluido||String(o.dataFinalizacao||'')>=lim));
     document.title='Obras '+(l.titulo||'')+' · Acompanhamento Granda';
     if(!_pt.obras.length){_ptMsg('Nenhuma obra no momento','Não há obras em andamento ou concluídas recentemente neste acompanhamento.');return;}
@@ -72572,7 +72627,20 @@ function _portalBoot(){
 .pt-login-msg{font-size:.84rem;color:#64748b;margin-top:12px;line-height:1.5}.pt-login-msg.ok{color:#15803d}.pt-login-msg.err{color:#b91c1c}
 .pt-ola{font-size:1.05rem;font-weight:700;margin-bottom:12px}.pt-ola small{display:block;font-size:.78rem;color:#64748b;font-weight:500}
 .pt-kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-.pt-kpis div{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px}.pt-kpis b{display:block;font-size:1.5rem}.pt-kpis span{font-size:.76rem;color:#64748b}
+.pt-kpis button{background:#fff;border:1.5px solid #e2e8f0;border-radius:12px;padding:12px 14px;text-align:left;font:inherit;color:inherit;cursor:pointer}.pt-kpis button.on{border-color:#0f172a;box-shadow:inset 0 -3px 0 #e91e63}.pt-kpis b{display:block;font-size:1.5rem}.pt-kpis span{font-size:.76rem;color:#64748b}
+.pt-eng{display:flex;align-items:center;gap:10px;margin-bottom:10px}.pt-eng span{font-size:.78rem;font-weight:700;color:#64748b;white-space:nowrap}.pt-eng select{flex:1;min-width:0;padding:10px 12px;border:1.5px solid #cbd5e1;border-radius:10px;font-size:.92rem;font-family:inherit;background:#fff;color:#0f172a}
+.pt-ola-row{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.pt-pdf{flex-shrink:0;background:#fff;border:1.5px solid #cbd5e1;border-radius:10px;padding:8px 12px;font:inherit;font-size:.82rem;font-weight:700;color:#0f172a;cursor:pointer;white-space:nowrap}.pt-pdf:hover{border-color:#e91e63}
+.pt-sem{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px;margin-bottom:10px}.pt-sem-h{font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:#64748b;margin-bottom:8px}.pt-sem-h small{text-transform:none;letter-spacing:0;font-weight:600;margin-left:4px}
+.pt-sem-g{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.pt-sem-g button{background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:10px;padding:8px 10px;text-align:left;font:inherit;color:#0f172a;cursor:pointer}.pt-sem-g button:disabled{cursor:default;opacity:.55}.pt-sem-g button.on{border-color:#e91e63;background:#fdf2f8}.pt-sem-g b{display:block;font-size:1.2rem}.pt-sem-g span{font-size:.74rem;color:#64748b}
+.pt-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.pt-chips button{background:#fff;border:1.5px solid #e2e8f0;border-radius:20px;padding:5px 12px;font:inherit;font-size:.8rem;color:#334155;cursor:pointer;white-space:nowrap}.pt-chips button b{color:#0f172a;margin-left:2px}.pt-chips button.on{border-color:#e91e63;background:#fdf2f8;color:#0f172a}
+.pt-limpar{background:none;border:none;color:#e91e63;font:inherit;font-size:.72rem;font-weight:800;text-transform:uppercase;cursor:pointer;padding:0 0 0 6px}
+.pt-ob-pills{display:flex;gap:6px;flex-shrink:0}.pt-pill.nov{background:#fdf2f8;color:#be185d}
+.pt-ob-prog{display:flex;align-items:center;gap:10px;margin:0 0 6px}.pt-ob-prog .pt-prog{flex:1;margin-top:0;height:6px}.pt-ob-prog span{font-size:.72rem;color:#64748b;white-space:nowrap}
+.pt-ob-docs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #f1f5f9}.pt-ob-doc{font-size:.78rem;font-weight:700;color:#be185d;background:#fdf2f8;border-radius:8px;padding:5px 10px;text-decoration:none;white-space:nowrap}span.pt-ob-doc{color:#475569;background:#f1f5f9}
+.pt-impresso{display:none}
+@media (max-width:520px){.pt-sem-g{gap:6px}.pt-sem-g button{padding:7px 8px}.pt-sem-g span{font-size:.68rem;line-height:1.25;display:block}.pt-ob-t{flex-wrap:wrap}}
+@media print{body>*:not(#portal-root){display:none!important}#portal-root{background:#fff!important;min-height:0}#portal-root *{-webkit-print-color-adjust:exact;print-color-adjust:exact}.pt-noprint,.pt-foot{display:none!important}.pt-ob{break-inside:avoid}.pt-impresso{display:block;text-align:center;font-size:.72rem;color:#64748b;margin-top:10px}.pt-wrap{max-width:none}}
+.pt-dica{display:block;width:100%;text-align:left;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:10px;padding:8px 12px;font:inherit;font-size:.82rem;font-weight:600;cursor:pointer;margin-bottom:8px}
 .pt-busca{margin-bottom:12px}
 .pt-sec{font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;color:#64748b;font-weight:800;margin:6px 0 8px}
 .pt-obs{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
