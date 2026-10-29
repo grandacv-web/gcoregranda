@@ -26,7 +26,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-29.4';</script>
+<script>const APP_BUILD_VERSION='2026-10-29.7';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -11497,6 +11497,7 @@ async function salvarValoresPedido(){
   const gv=id=>{const el=document.getElementById(id);return el?moneyToNum(el.value):0;};
   const br=gv('ev-br'),ft=gv('ev-ft'),mo=gv('ev-mo'),vi=gv('ev-vi'),el2=gv('ev-el'),art=gv('ev-art'),rem=gv('ev-rem'),med=gv('ev-med');
   const liq=br-ft-mo-vi-el2-art-rem-med;
+  if(liq<-0.004&&!(typeof _tipoDispensaValores==='function'&&_tipoDispensaValores(p.tipo))){toast('O valor líquido não pode ficar negativo: os operacionais (instalação, mobilização, frete, elevações, medição, ART, laudo, remoção) somam mais que o valor total do pedido.','terr');return;}
   const fmtV=val=>'R$ '+val.toLocaleString('pt-BR',{minimumFractionDigits:2});
   // Atualiza valores
   if(!p.valores)p.valores={};
@@ -12197,6 +12198,7 @@ function validarAba(id){
   }
   if(id==='valores'&&!_tipoDispensaValores(ed.tipo)){
     if(!ed.vtotal)erros.push('Valor total do pedido não informado');
+    else if(calcLiq()<-0.004)erros.push('O valor líquido não pode ficar negativo: os operacionais (instalação, mobilização, frete, elevações, medição, ART, laudo, remoção) somam mais que o valor total do pedido');
     if(_emPerguntaProducao()&&!ed.temProducao)erros.push('Informe se este pedido tem produção na fábrica');
     if(!ed.i_tipo)erros.push('Instalação não selecionada');
     if(ed.i_tipo==='Por nossa conta'&&!ed.vinst)erros.push('Valor da instalação não informado');
@@ -12593,16 +12595,31 @@ function readInput(id,fallback){
   if(el)return moneyToNum(el.value)||0;
   return moneyToNum(fallback)||0;
 }
+// (2026-10-29) Só desconta o operacional que está valendo. Antes descontava também o valor que
+// ficou escondido no campo: OS 448 (Bob's) veio do orçamento ganho com frete de R$ 23.400, o
+// vendedor marcou "Por conta do cliente", o campo sumiu mas o valor seguiu no cálculo e o
+// pedido saiu com líquido negativo. Mesma regra de _emOpValendo() usada na gravação.
+function _emOpValendo(k){
+  if(k==='inst'||k==='mob')return!ed.i_tipo||ed.i_tipo==='Por nossa conta';
+  if(k==='rem')return ed.remocao==='Sim'&&(!ed.i_tipo||ed.i_tipo==='Por nossa conta');
+  if(k==='frete')return!ed.f_tipo||ed.f_tipo==='Por nossa conta';
+  if(k==='elev')return ed.elev_tipo?ed.elev_tipo==='Por nossa conta':ed.elevacoes==='Sim';
+  if(k==='med')return ed.medicao==='Sim';
+  if(k==='art')return ed.art==='Sim';
+  if(k==='laudo')return ed.laudo==='Sim';
+  return true;
+}
 function calcLiq(){
   const t=readInput('em-vt',ed.vtotal);
-  const i=readInput('em-vi',ed.vinst);
-  const m=readInput('em-vm',ed.vmob);
-  const r=readInput('em-vr',ed.vrem);
-  const f=readInput('em-vf',ed.vfrete);
-  const e=readInput('em-velv',ed.velev);
-  const me=readInput('em-vmed',ed.vmed);
-  const a=readInput('em-vart',ed.vart);
-  const l=readInput('em-vlaudo',ed.vlaudo);
+  const V=(k,id,fb)=>_emOpValendo(k)?readInput(id,fb):0;
+  const i=V('inst','em-vi',ed.vinst);
+  const m=V('mob','em-vm',ed.vmob);
+  const r=V('rem','em-vr',ed.vrem);
+  const f=V('frete','em-vf',ed.vfrete);
+  const e=V('elev','em-velv',ed.velev);
+  const me=V('med','em-vmed',ed.vmed);
+  const a=V('art','em-vart',ed.vart);
+  const l=V('laudo','em-vlaudo',ed.vlaudo);
   return t-i-m-r-f-e-me-a-l;
 }
 function updPagCheck(){
@@ -12714,12 +12731,25 @@ function updParc(){
 function rRC(cls,val,label){const s=ed[{rc_inst:'i_tipo',rc_frt:'f_tipo',rc_ent:'tem_ent',rc_elv:'elev_tipo'}[cls]]===val;
   const cssCls=cls.replace('_','-');
   return`<div class="rc${s?' sel':''} ${cssCls}" data-val="${val}" onclick="selRC(this,'${cls}')"><input type="radio" name="${cssCls}" ${s?'checked':''}><span>${label}</span></div>`}
+// (2026-10-29, pedido do Guilherme) Operacional "por conta do cliente" / "não tem" / "Não" = valor zero
+// na hora, mesmo que tenha vindo um valor do orçamento ganho. Limpa o ed E o campo na tela (saveSt()
+// relê os campos logo depois, então só limpar o ed não bastaria).
+const _EM_ZERAR={rc_inst:[['vinst','em-vi'],['vmob','em-vm'],['vrem','em-vr']],rc_frt:[['vfrete','em-vf'],['vfrete_chumb','em-vfch']],rc_elv:[['velev','em-velv']],
+  tg_med:[['vmed','em-vmed']],tg_art:[['vart','em-vart']],tg_laudo:[['vlaudo','em-vlaudo']],tg_rem:[['vrem','em-vr']],tg_frchumb:[['vfrete_chumb','em-vfch']],tg_pintub:[['vpintub','em-vpintub']]};
+function _emZerarOp(cls,val){
+  const z=_EM_ZERAR[cls];if(!z)return;
+  const zera=cls.indexOf('rc_')===0?val!=='Por nossa conta':val==='Não';if(!zera)return;
+  let tinha=false;z.forEach(([k,id])=>{if(moneyToNum(ed[k]||'0')>0)tinha=true;ed[k]='';const el=document.getElementById(id);if(el)el.value='';});
+  if(tinha&&cls.indexOf('rc_')===0)toast('Valor zerado: '+(cls==='rc_inst'?'instalação':cls==='rc_frt'?'frete':'elevações')+' '+(/cliente/.test(val)?'por conta do cliente':'não tem neste pedido'),'tinf');
+  try{updLiq();}catch(e){}
+}
 function selRC(el,cls){
   const map={rc_inst:'i_tipo',rc_frt:'f_tipo',rc_ent:'tem_ent',rc_elv:'elev_tipo'};
   const cssCls=cls.replace('_','-');
   document.querySelectorAll('.'+cssCls).forEach(e=>{e.classList.remove('sel');const r=e.querySelector('input[type=radio]');if(r)r.checked=false;});
   el.classList.add('sel');const r=el.querySelector('input[type=radio]');if(r)r.checked=true;
   ed[map[cls]]=el.dataset.val;
+  _emZerarOp(cls,el.dataset.val);
   if(cls==='rc_inst'){saveSt();renderEM();}
   else if(cls==='rc_frt'){saveSt();renderEM();}
   else if(cls==='rc_elv'){
@@ -12742,6 +12772,7 @@ function togBtn(el,cls){
   const map={tg_temprod:'temProducao',tg_frchumb:'frete_chumb',tg_oc:'tem_oc',tg_art:'art',tg_elv:'elevacoes',tg_med:'medicao',tg_itg:'iinteg',tg_seg:'iseg',tg_rem:'remocao',tg_chumb:'chumbador',tg_bloqenergia:'ibloqenergia',tg_bloqvia:'elevBloqVia',tg_laudo:'laudo',tg_pintub:'pintubo',tg_cons_escopo:'conselhoEscopo',tg_cons_assin:'conselhoAssin',tg_cons_wpp:'conselhoGrupoWpp'};
   el.closest('.tg-grp').querySelectorAll('button').forEach(b=>b.classList.remove('on'));
   el.classList.add('on');if(map[cls])ed[map[cls]]=el.dataset.val;
+  _emZerarOp(cls,el.dataset.val);
   if(cls==='tg_elv'||cls==='tg_med'){saveSt();renderEM();}else updCond();
   // Botão Sim/Não clicado não dispara input/change nativo — agenda o autosave do rascunho
   // na mão (ver _emAgendarRascunho(), 2026-08-18).
@@ -14849,9 +14880,9 @@ function _buildPedidoBaseDoEd(){
   if(ed.obsfin)pag['Observações Financeiras']=ed.obsfin;
   const inst={};
   if(ed.i_tipo)inst['Tipo de Instalação']=ed.i_tipo;
-  if(ed.vinst)inst['Valor da Instalação']=fmtV(moneyToNum(ed.vinst));
-  if(ed.vmob)inst['Valor da Mobilização']=fmtV(moneyToNum(ed.vmob));
-  if(ed.remocao==='Sim'&&ed.vrem)inst['Valor da Remoção']=fmtV(moneyToNum(ed.vrem));
+  if(ed.vinst&&_emOpValendo('inst'))inst['Valor da Instalação']=fmtV(moneyToNum(ed.vinst));
+  if(ed.vmob&&_emOpValendo('mob'))inst['Valor da Mobilização']=fmtV(moneyToNum(ed.vmob));
+  if(_emOpValendo('rem')&&ed.vrem)inst['Valor da Remoção']=fmtV(moneyToNum(ed.vrem));
   if(ed.medicao)inst['Medição Técnica']=ed.medicao;
   if(ed.medicao==='Sim'&&ed.vmed)inst['Valor da Medição']=fmtV(moneyToNum(ed.vmed));
   if(ed.medicao==='Sim'&&ed.minfo)inst['Informações sobre a Medição']=ed.minfo;
@@ -14870,7 +14901,7 @@ function _buildPedidoBaseDoEd(){
   if(ed.pintubo==='Sim'&&ed.vpintub)inst['Valor Mão de Obra (Pintura de Tubo)']=fmtV(moneyToNum(ed.vpintub));
   const fr={};
   if(ed.f_tipo)fr['Modalidade do Frete']=ed.f_tipo;
-  if(ed.vfrete)fr['Valor do Frete']=fmtV(moneyToNum(ed.vfrete));
+  if(ed.vfrete&&_emOpValendo('frete'))fr['Valor do Frete']=fmtV(moneyToNum(ed.vfrete));
   if(ed.f_tipo==='Por nossa conta'&&ed.frete_chumb){fr['Frete do Chumbador']=ed.frete_chumb;if(ed.frete_chumb==='Sim'&&ed.vfrete_chumb)fr['Valor do Frete do Chumbador']=fmtV(moneyToNum(ed.vfrete_chumb));}
   if(ed.fmod)fr['Modalidade Logística']=ed.fmod;
   const fend=[ed.fcep?'CEP '+ed.fcep:'',ed.flog,ed.fnum_e,ed.fcomp,ed.fbairro,[ed.fcidade,ed.fuf].filter(Boolean).join('/')].filter(Boolean).join(', ');
@@ -15320,6 +15351,7 @@ async function submit(){
   const idxVal=idx('valores');
   if(!_tipoDispensaValores(ed.tipo)){
   if(!ed.vtotal)erros.push({msg:'Valor total do pedido não informado',aba:idxVal,label:'Valores'});
+  else if(calcLiq()<-0.004)erros.push({msg:'O valor líquido não pode ficar negativo: os operacionais (instalação, mobilização, frete, elevações, medição, ART, laudo, remoção) somam mais que o valor total do pedido',aba:idxVal,label:'Valores'});
   if(_emPerguntaProducao()&&!ed.temProducao)erros.push({msg:'Informe se este pedido tem produção na fábrica',aba:idxVal,label:'Valores'});
   if(!ed.i_tipo)erros.push({msg:'Instalação não selecionada',aba:idxVal,label:'Valores'});
   if(ed.i_tipo==='Por nossa conta'&&!ed.vinst)erros.push({msg:'Valor da instalação não informado',aba:idxVal,label:'Valores'});
@@ -55295,7 +55327,12 @@ function _vndFilteredRows(){
   const _buscaMatch=r=>!filBusca||[r.p,r.cl,r.job,r.cidade,r.v,r.cat,r.numOC].some(v=>v&&norm(String(v)).includes(filBusca));
   let rows2=allRowsForFil.filter(r=>_vrAno(r)===_anoRef&&(!filMes||r.mes===filMes)&&(!filVend||r.v===filVend)&&(!filCat||r.cat===filCat)&&_buscaMatch(r));
   rows2=rows2.map(r=>({...r,rem:r.rem||0,med:r.med||0,opAdj:(r.op||0),lqAdj:(r.lq||0)}));
-  rows2.sort((a,b)=>a.m-b.m||a.cl.localeCompare(b.cl));
+  // (2026-10-29, a pedido do Guilherme) dentro de cada mês, ordem pela data da venda (emissão,
+  // com hora quando tem); vendas sem data (planilha antiga) vão pro fim do mês, por cliente.
+  const _pm={};pedidos.forEach(x=>{_pm[x.id]=x;});
+  const _dv=r=>{const x=r._pid&&_pm[r._pid];return x?String(x.emissaoEmHora||x.emissaoEm||x.conselhoData||''):'';};
+  rows2.forEach(r=>{r._dv=_dv(r);});
+  rows2.sort((a,b)=>a.m-b.m||(a._dv&&b._dv?a._dv.localeCompare(b._dv):(a._dv?-1:b._dv?1:0))||String(a.cl||'').localeCompare(String(b.cl||'')));
   return rows2;
 }
 function exportarExcelVendas(){
@@ -55513,6 +55550,7 @@ function renderDashVendas(){
           <a href="javascript:void(0)" onclick="${verDet}" class="dt-cliente-link dtv-cli" title="${clSafe} — clique para ver detalhes">${r.fant||r.cl}</a>
           <span class="dt-cat-pill" style="background:${catCorV.bg};color:${catCorV.fg}">${r.cat}</span>
           <span class="dt-vend-pill" style="background:${vCor.bg};color:${vCor.fg}">${r.v||'—'}</span>
+          ${(r.lq||0)<0?`<span title="Líquido negativo: os operacionais passam do valor bruto. Corrija em Editar Valores." style="background:#fee2e2;color:#b91c1c;border-radius:6px;padding:1px 7px;font-size:.66rem;font-weight:800;white-space:nowrap">⚠️ líquido negativo</span>`:''}
           ${r.mesAjustado?`<span title="Mês da venda ajustado manualmente — diferente do mês real de emissão" style="font-size:.7rem">✏️</span>`:''}
         </div>
         <div class="dtv-l2">
@@ -67830,6 +67868,10 @@ function _orc5PreencherEmissao(e){
     }else if(!ed.i_tipo&&o.tipo==='completo')ed.i_tipo='Por conta do cliente';
     if(fr){const vf=soma(i=>i.categoria==='frete');if(vf>0){set('vfrete',fmt(vf));if(!ed.f_tipo)ed.f_tipo='Por nossa conta';if(!ed.fmod)ed.fmod=(r.itens||[]).some(i=>/fracionado/i.test(i.nome))?'Fracionado':'Dedicado';}}
   }
+  // operacional já marcado por conta do cliente / não tem: não traz valor do orçamento (2026-10-29)
+  if(ed.i_tipo&&ed.i_tipo!=='Por nossa conta'){ed.vinst='';ed.vmob='';ed.vrem='';}
+  if(ed.f_tipo&&ed.f_tipo!=='Por nossa conta'){ed.vfrete='';ed.vfrete_chumb='';}
+  if(ed.elev_tipo&&ed.elev_tipo!=='Por nossa conta')ed.velev='';
   if(t.total>0&&!ed.vtotal)ed.vtotal=fmt(t.total);
   ed.orcamentoId=o.id;ed.orcamentoNumero=(typeof _orc4Numero==='function')?_orc4Numero(o):'';
 }
