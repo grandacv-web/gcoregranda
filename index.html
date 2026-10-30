@@ -26,7 +26,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-30.15';</script>
+<script>const APP_BUILD_VERSION='2026-10-30.20';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -3026,7 +3026,7 @@ select.fc{cursor:pointer}
              fixos sempre sobre "hoje" (mês atual, próximos meses, dias de capacidade). A
              tela que já existia (relatório detalhado navegável por mês/período) virou a
              sub-aba "Lista Geral" logo abaixo, sem nenhuma mudança de lógica interna. -->
-        <div class="gc-vend-tabs" id="prod-ind-subtabs">
+        <div class="gc-vend-tabs" id="prod-ind-subtabs" style="display:none">
           <button class="gc-vend-tab active prod-ind-subtab" onclick="prodIndSubTab('geral',this)">📊 Visão Geral</button>
           <button class="gc-vend-tab prod-ind-subtab" onclick="prodIndSubTab('lista',this)">📋 Lista Geral</button>
         </div>
@@ -3035,7 +3035,7 @@ select.fc{cursor:pointer}
           <div id="prod-heatmap" style="margin-top:16px"></div>
           <div id="prod-antecip" style="margin-top:16px"></div>
         </div>
-        <div id="prod-ind-sub-lista" style="display:none;margin-top:14px">
+        <div id="prod-ind-sub-lista" style="margin-top:14px">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px">
             <div id="prod-ind-nav-mes" class="dash-mes-nav" style="margin:0;flex:1;min-width:220px">
               <button onclick="prodIndNav(-1)" type="button">◀</button>
@@ -25004,6 +25004,10 @@ function _prodConfBannerHtml(){
     <span style="color:${cor};font-size:.74rem;font-weight:700;white-space:nowrap">Ver detalhes ›</span></button>`;
 }
 function _prodConfBanner(){
+  // (2026-10-30, a pedido do Guilherme: "em produção tire essa conferência de números") — a faixa saiu da tela
+  // de Produção → Indicadores. A conta (_prodConferir) continua existindo para quem mais usa.
+  try{const b=document.getElementById('prod-conf-banner');if(b)b.remove();}catch(e){}
+  return;
   try{const tabs=document.getElementById('prod-ind-subtabs');if(!tabs)return;
     let b=document.getElementById('prod-conf-banner');if(!b){b=document.createElement('div');b.id='prod-conf-banner';tabs.parentNode.insertBefore(b,tabs);}
     b.innerHTML=_isSetorUser('PRODUÇÃO')?_prodConfBannerHtml():'';}catch(e){console.warn('banner conferência',e);}
@@ -25844,6 +25848,9 @@ async function _setorMetaSalvar(setor){
   try{await window._fbUpdateCfgField(['metasSetor',setor],obj);cfg.metasSetor=Object.assign({},cfg.metasSetor||{},{[setor]:obj});toast('Meta salva','tok');_setorMetaRender(setor);}catch(e){toast('Não consegui salvar a meta: '+(e.message||e),'terr');}
 }
 function _setorMetaRender(setor){
+  // (2026-10-30, a pedido do Guilherme: "esse ranking pode tirar também") — a faixa de meta/ranking da semana
+  // saiu da tela de Produção. Projetos e Planejamento continuam com a deles.
+  if(setor==='PRODUCAO'){try{const w=document.getElementById('meta-sem-PRODUCAO');if(w)w.remove();}catch(e){}return;}
   try{const def=SETOR_META_DEF[setor];const sec=document.getElementById(def.sec);if(!sec)return;
     let w=document.getElementById('meta-sem-'+setor);
     const aberto=!!(document.getElementById('meta-sem-det-'+setor)||{}).open;
@@ -38632,7 +38639,14 @@ function prodRenderAtivo(){
 // despacha pra sub-aba ativa, mesmo padrão já usado em outros pontos do sistema (ver
 // _crmRenderContatosSubtab()).
 function renderProdIndicadoresAtivo(){
-  if(_prodIndSubTab==='lista')renderProdIndicadores();
+  // (2026-10-30) uma tela só: números do mês + produtividade/atrasos/agenda + listas
+  if(true){
+    try{renderProdIndicadores();}catch(e){console.error('indicadores produção',e);}
+    try{renderProdVisaoGeral();}catch(e){console.error('visão geral produção',e);}
+    try{const el=document.getElementById('prod-antecip');if(el)el.innerHTML=_prodAntecipacoesHtml();}catch(e){console.error('antecipações',e);}
+    try{const g=document.getElementById('prod-ind-sub-geral'),ph=document.getElementById('prod-ind-extra');if(g&&ph&&g.parentNode!==ph)ph.appendChild(g);if(g)g.style.display='';}catch(e){}
+  }
+  else if(_prodIndSubTab==='lista')renderProdIndicadores();
   else{
     renderProdVisaoGeral();
     try{const el=document.getElementById('prod-antecip');if(el)el.innerHTML=_prodAntecipacoesHtml();}catch(e){console.error('antecipações',e);}
@@ -39160,7 +39174,7 @@ async function prodIndExportarListaPDF_antigo(){
 // meses" navegar pra outro mês). Reaproveita só dados que já existiam em outras telas do
 // sistema (_lpMapaProducaoPorDia/_lpCapProducaoDia/_lpPedidosElegiveis/_prodInfo/
 // calcDiasUteisMes) — nenhum conceito novo de capacidade foi inventado.
-let _prodIndSubTab='geral';
+let _prodIndSubTab='lista'; // (2026-10-30) Visão Geral e Lista Geral viraram uma tela só
 function prodIndSubTab(tab,btn){
   _prodIndSubTab=tab;
   document.querySelectorAll('#prod-ind-subtabs .prod-ind-subtab').forEach(b=>b.classList.remove('active'));
@@ -39363,6 +39377,8 @@ function prodIndAbrirTile_antigo(key){
   _prodVGAbrirListaPedidos(labelMap[key]||'Pedidos',lista);
 }
 function renderProdVisaoGeral(){
+  // (2026-10-30) tela única: o bloco de capacidade segue o mês/período escolhido lá em cima (sem 2º seletor)
+  try{Object.assign(_prodVGView,{modo:_prodIndView.modo,refIso:_prodIndView.refIso,de:_prodIndView.de,ate:_prodIndView.ate});}catch(e){}
   try{_simRenderHeatmap('prod-heatmap');}catch(e){console.error('heatmap produção',e);}
   const wrap=document.getElementById('prod-ind-geral-body');
   if(!wrap)return;
@@ -39375,15 +39391,20 @@ function renderProdVisaoGeral(){
   const corProdutividade=d.produtividadePct==null?'#64748b':d.produtividadePct>=95?'#16a34a':d.produtividadePct>=80?'#d97706':'#dc2626';
   const corOcupacao=d.taxaOcupacaoPct>100?'#dc2626':d.taxaOcupacaoPct>=85?'#d97706':'#16a34a';
   const rangeCap=_prodVGRange();
+  // (2026-10-30, a pedido do Guilherme: "pq esses valores não batem?") — "Realizado" aqui era o já produzido dos
+  // pedidos com PRAZO de produção no mês (inclusive o que foi feito no mês anterior), enquanto Indicadores mostra
+  // as BAIXAS dadas no mês. Os dois ficam visíveis, com nome que não confunde, e o 2º é o mesmo número dos Indicadores.
+  let _prodNoMes=null;try{const _hd=new Date(_hojeIso()+'T12:00:00');const _g=_prodVMesRange(_hd.getFullYear(),_hd.getMonth()+1);const _c=_prodVCalc(_prodVBase(),_g.ini,_g.fim);_prodNoMes={valor:_c.produzido,qtd:(_c.prods||[]).length,mes:String(MESES_PT[_hd.getMonth()+1]||'').toLowerCase()};}catch(e){}
   const htmlMes=`<div class="dash-card" onclick="prodVGAbrirMes()" style="cursor:pointer" title="Clique para ver os pedidos deste mês">
     <div class="dash-sec-title">🏭 Produção deste mês</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px">
       <div><div style="font-size:.62rem;font-weight:700;color:#64748b;text-transform:uppercase">Projetado</div><div style="font-size:1.15rem;font-weight:800;color:#1e40af">${fmtR(d.projetadoMes)}</div></div>
-      <div><div style="font-size:.62rem;font-weight:700;color:#64748b;text-transform:uppercase">Realizado</div><div style="font-size:1.15rem;font-weight:800;color:#166534">${fmtR(d.realizadoMes)}</div></div>
+      <div title="Do que tem prazo de produção neste mês, quanto já está pronto — inclui o que foi produzido em meses anteriores"><div style="font-size:.62rem;font-weight:700;color:#64748b;text-transform:uppercase">Já pronto desses pedidos</div><div style="font-size:1.15rem;font-weight:800;color:#166534">${fmtR(d.realizadoMes)}</div></div>
       <div><div style="font-size:.62rem;font-weight:700;color:#64748b;text-transform:uppercase">Pedidos</div><div style="font-size:1.15rem;font-weight:800;color:#475569">${d.qtdMes}</div></div>
     </div>
     <div style="height:10px;border-radius:20px;background:#e5e7eb;overflow:hidden"><div style="height:100%;width:${pctMes}%;background:#16a34a;border-radius:20px"></div></div>
-    <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">${pctMes.toFixed(0)}% do projetado do mês já produzido · conta os pedidos com <b>prazo de produção</b> neste mês</div>
+    <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">${pctMes.toFixed(0)}% dos pedidos com <b>prazo de produção</b> neste mês já está pronto (conta também o que foi feito antes deste mês)</div>
+    ${_prodNoMes?`<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:.74rem;color:#166534" title="Mesmo número de Produção → Indicadores (Produzido)">✅ <b>Produzido em ${_prodNoMes.mes}</b> (baixas dadas no mês, qualquer pedido): <b>${fmtR(_prodNoMes.valor)}</b> · ${_prodNoMes.qtd} ${_plural(_prodNoMes.qtd,'pedido','pedidos')}</div>`:''}
     ${d.anterioresInfos.length?`<div onclick="event.stopPropagation();prodVGAbrirAnteriores()" style="margin-top:8px;padding:7px 10px;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:.74rem;font-weight:700;cursor:pointer">＋ ${fmtR(d.anterioresValor)} ainda a produzir de ${d.anterioresInfos.length} ${_plural(d.anterioresInfos.length,'pedido','pedidos')} com prazo em meses anteriores — também precisam sair agora</div>`:''}
     ${d.semCalc.length?`<div onclick="event.stopPropagation();prodVGAbrirSemCalc()" style="margin-top:6px;padding:7px 10px;border-radius:8px;background:#fef3c7;color:#92400e;font-size:.74rem;font-weight:700;cursor:pointer">⚠️ ${d.semCalc.length} ${_plural(d.semCalc.length,'pedido','pedidos')} (${fmtR(d.semCalc.reduce((s,o)=>s+o.valor,0))}) fora de todas as contas: falta dado pra calcular o prazo de produção</div>`:''}
   </div>`;
@@ -39433,10 +39454,10 @@ function renderProdVisaoGeral(){
   </div>`;
   // Barra de filtro da seção "Capacidade Diária" (2026-09-21, a pedido do usuário) — mesmo
   // padrão visual "Por mês / Período personalizado / Todos os Meses" da sub-aba Lista Geral.
-  const navHtml=`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:18px 0 4px">
+  const navHtml=`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:18px 0 4px" data-nav-vg="1">
     <div style="font-size:.86rem;font-weight:800;color:var(--ink)">📅 Capacidade Diária (${fmtR(d.cap)}/dia útil)</div>
   </div>
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+  <div style="display:none">
     <div id="prod-vg-nav-mes" class="dash-mes-nav" style="margin:0;flex:1;min-width:220px${_prodVGView.modo==='mes'?'':';display:none'}">
       <button onclick="prodVGNav(-1)" type="button">◀</button>
       <div class="dash-mes-label" id="prod-vg-lbl" style="flex:1;min-width:130px">${rangeCap.label}</div>
@@ -39457,10 +39478,7 @@ function renderProdVisaoGeral(){
     </select>
   </div>`;
   wrap.innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;align-items:start">
-    ${htmlMes}${htmlProdutividade}${htmlOcupacao}${htmlAtrasados}
-  </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;align-items:start;margin-top:14px">
-    ${htmlProximos}
+    ${htmlProdutividade}${htmlAtrasados}
   </div>
   ${navHtml}
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;align-items:start">
@@ -67114,14 +67132,17 @@ function renderProdIndicadores(){
   // ── mês/período selecionado ──
   const c=_prodVCalc(base,r.ini,r.fim);
   const occ=c.cap>0?Math.round(c.aProduzir/c.cap*100):null;
+  // (2026-10-30) Projetado = pedidos com PRAZO de produção no período (mesma conta da antiga Visão Geral)
+  const _projL=base.filter(x=>x.etapa&&x.etapa.iso&&x.etapa.iso>=r.ini&&x.etapa.iso<=r.fim);
+  const _projV=_projL.reduce((s,x)=>s+(x.valorLiquidoTotal||0),0),_projN=_projL.length;
   const T=[
-    {key:'produzido',icon:'✅',label:'Produzido'+(c.inclHoje?' até agora':''),val:fmtR(c.produzido),sub:c.prods.length+' pedido'+(c.prods.length===1?'':'s'),bg:'#dcfce7',fg:'#166534',alerta:(()=>{try{const lt=_prodLotesSuspeitos(base,r.ini,r.fim);if(!lt.length)return'';const v=lt.reduce((s,o)=>s+o.valor,0);return'⚠ '+_crmFmtCurto(v)+' de baixas em lote — conferir datas';}catch(e){return'';}})()},
+    {key:'produzido',icon:'🎯',label:'Projetado',val:fmtR(_projV),sub:_projN+' '+_plural(_projN,'pedido','pedidos')+' com prazo de produção em '+r.label.toLowerCase(),bg:'#dbeafe',fg:'#1e40af',extra:`<div style="margin-top:8px;padding-top:8px;border-top:1px solid #bfdbfe"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:#166534">✅ Realizado — baixado em ${r.label.toLowerCase()}${c.inclHoje?' até agora':''}</div><div style="font-size:1.1rem;font-weight:800;color:#166534;white-space:nowrap">${fmtR(c.produzido)}</div><div style="font-size:.64rem;color:#166534;opacity:.85">${c.prods.length} ${_plural(c.prods.length,'pedido','pedidos')}${_projV>0.005?' · '+Math.round(c.produzido/_projV*100)+'% do projetado':''}</div>${_projV>0.005?`<div style="height:6px;border-radius:20px;background:#bfdbfe;overflow:hidden;margin-top:5px"><div style="height:100%;width:${Math.min(100,c.produzido/_projV*100)}%;background:#16a34a"></div></div>`:''}</div>`,alerta:(()=>{try{const lt=_prodLotesSuspeitos(base,r.ini,r.fim);if(!lt.length)return'';const v=lt.reduce((s,o)=>s+o.valor,0);return'⚠ '+_crmFmtCurto(v)+' de baixas em lote — conferir datas';}catch(e){return'';}})()},
     {key:'aproduzir',icon:'📋',label:'A produzir',val:c.passado?'—':fmtR(c.aProduzir),sub:c.passado?'mês encerrado':(c.atrasados>0.005?'dos quais '+_crmFmtCurto(c.atrasados)+' atrasados':'saldo programado'),bg:'#fef3c7',fg:'#92400e'},
-    {key:'ocupacao',icon:'📊',label:'Ocupação',val:occ==null?'—':occ+'%',sub:c.cap>0?fmtR(c.cap)+' de capacidade em '+c.diasCap+' dias úteis':'—',bg:occ!=null&&occ>=100?'#fee2e2':'#f1f5f9',fg:occ!=null&&occ>=100?'#b91c1c':'#475569'}
+    {key:'ocupacao',icon:'📊',label:c.inclHoje?'Ocupação dos dias que faltam':'Ocupação',val:occ==null?'—':occ+'%',sub:c.cap>0?'a produzir ÷ '+fmtR(c.cap)+' de capacidade ('+c.diasCap+' '+_plural(c.diasCap,'dia útil','dias úteis')+(c.inclHoje?' até o fim do mês':'')+')':'—',bg:occ!=null&&occ>=100?'#fee2e2':'#f1f5f9',fg:occ!=null&&occ>=100?'#b91c1c':'#475569'}
   ];
   const tiles=`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">${T.map(t=>`<div ${t.key!=='ocupacao'?`onclick="prodIndAbrirTile('${t.key}')" `:''}style="${t.key!=='ocupacao'?'cursor:pointer;':''}flex:1 1 220px;min-width:0;display:flex;align-items:center;gap:10px;background:${t.bg};border-radius:10px;padding:12px;box-sizing:border-box">
     <div style="flex-shrink:0;width:34px;height:34px;border-radius:999px;background:rgba(255,255,255,.6);display:flex;align-items:center;justify-content:center;font-size:1rem">${t.icon}</div>
-    <div style="min-width:0;flex:1"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${t.fg}">${t.label}</div><div style="font-size:1.1rem;font-weight:800;color:${t.fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.val}</div><div style="font-size:.64rem;color:${t.fg};opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.sub}</div>${t.alerta?`<div onclick="event.stopPropagation();_prodConfAbrir()" title="Abrir a Conferência dos números" style="margin-top:3px;font-size:.66rem;font-weight:800;color:#b91c1c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer">${t.alerta}</div>`:''}</div></div>`).join('')}</div>`;
+    <div style="min-width:0;flex:1"><div style="font-size:.6rem;font-weight:700;text-transform:uppercase;color:${t.fg}">${t.label}</div><div style="font-size:1.1rem;font-weight:800;color:${t.fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.val}</div><div style="font-size:.64rem;color:${t.fg};opacity:.8;white-space:normal;line-height:1.35">${t.sub}</div>${t.extra||''}${(false&&t.alerta)?`<div onclick="event.stopPropagation();_prodConfAbrir()" title="Abrir a Conferência dos números" style="margin-top:3px;font-size:.66rem;font-weight:800;color:#b91c1c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer">${t.alerta}</div>`:''}</div></div>`).join('')}</div>`;
   const th='padding:8px 10px',tag=(txt,fg,bg)=>` <span style="font-size:.6rem;font-weight:800;color:${fg};background:${bg};border-radius:20px;padding:1px 7px;white-space:nowrap">${txt}</span>`;
   const secProd=`<div class="dash-sec-title" style="margin:6px 0 8px">✅ Produzido em ${r.label} <span style="font-weight:600;color:#166534">· ${fmtR(c.produzido)}</span></div>
     ${c.prods.length?`<div style="overflow-x:auto;margin-bottom:20px"><table style="width:100%;border-collapse:collapse;font-size:.82rem"><thead><tr style="background:#f0fdf4;text-align:left">
@@ -67146,7 +67167,7 @@ function renderProdIndicadores(){
         <td style="${th};white-space:nowrap;${o.atrasado?'color:#b91c1c;font-weight:700':''}">${fmtD(x.etapa.iso)}</td>
         <td style="${th};white-space:nowrap">${x.calc.prazoIso?fmtD(x.calc.prazoIso):'—'}</td></tr>`;}).join('')}
       </tbody></table></div>`:`<div style="color:var(--ink4);font-size:.8rem;padding:6px 0">Nada a produzir programado neste período.</div>`}`;
-  wrap.innerHTML=tlHtml+tiles+secProd+secA;
+  wrap.innerHTML=tlHtml+tiles+'<div id="prod-ind-extra"></div>'+secProd+secA;
 }
 function prodIndAbrirTile(key){
   const r=_prodIndRange();const c=_prodVCalc(_prodVBase(),r.ini,r.fim);
@@ -72211,6 +72232,21 @@ function _orcavPainelHtml(orcNome){
       };
     }
   }catch(err){console.error('orcav ganchos',err);}
+})();
+
+// ── PRODUÇÃO → INDICADORES NUMA TELA SÓ (2026-10-30) ──
+// Antes de redesenhar a parte de cima (troca de mês), devolve o bloco de produtividade/atrasos/agenda pro lugar
+// de origem (senão o innerHTML novo apagaria), e depois recoloca entre os números e as listas.
+(function(){
+  const _ri=renderProdIndicadores;
+  renderProdIndicadores=function(){
+    const g=document.getElementById('prod-ind-sub-geral'),lista=document.getElementById('prod-ind-sub-lista');
+    try{if(g&&lista&&g.parentNode!==lista.parentNode)lista.parentNode.appendChild(g);}catch(e){}
+    const r=_ri.apply(this,arguments);
+    try{renderProdVisaoGeral();}catch(e){}
+    try{const ph=document.getElementById('prod-ind-extra');if(g&&ph){ph.appendChild(g);g.style.display='';g.style.margin='0 0 18px';}}catch(e){}
+    return r;
+  };
 })();
 // ═══ RH — PACOTE DE MELHORIAS (2026-10-30) ═══════════════════════════════════════════════════════
 // Pedido do Guilherme: "pode aplicar tudo isso e torne bem visual e fácil de mexer, evitar informações
