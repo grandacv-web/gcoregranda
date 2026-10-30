@@ -26,7 +26,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-10-30.6';</script>
+<script>const APP_BUILD_VERSION='2026-10-30.10';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -1484,9 +1484,8 @@ select.fc{cursor:pointer}
     </div>
     <div class="toolbar">
       <input id="srch" placeholder="Buscar cliente, job, OS..." oninput="renderAll()">
-      <select id="f-tipo" onchange="renderAll()">
+      <select id="f-tipo" onchange="renderAll()" title="Filtrar por categoria do pedido">
         <option value="">Todas as categorias</option>
-        <option>Venda</option><option>Garantia / Retrabalho</option><option>Amostra</option><option>Interno</option><option>Brinde</option>
       </select>
       <select id="f-mes" onchange="renderAll()">
         <option value="">Todos os meses</option>
@@ -8037,7 +8036,7 @@ function filt(){
     const em=p.emissaoEm||'';
     const emMes=em?String(parseInt(em.slice(5,7),10)):'';
     return (!q||p.cliente.toLowerCase().includes(q)||String(p.os||'').includes(q)||(p.job||'').toLowerCase().includes(q))
-      &&(!ft||p.tipo===ft)
+      &&(!ft||_pedTipoTxt(p)===ft)
       &&(!fm||emMes===fm)
       &&(!di||(em&&em>=di))
       &&(!df||(em&&em<=df));
@@ -8089,7 +8088,26 @@ function _renderAlertaEmailFalhou(){
     <button onclick="limparFiltrosLista()" style="margin-left:auto;background:#dc2626;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:.75rem;font-weight:700;cursor:pointer">Ver todos os pedidos</button>
   </div>`;
 }
+// Filtro de categoria da Lista de Emissão (2026-10-30, a pedido do Guilherme: "quero poder filtrar o que é
+// venda, o que é garantia, permuta etc."). Antes as opções eram fixas (sem Permuta/Chumbador) e comparavam o
+// texto exato do tipo — "Garantia/Retrabalho" sem espaço não aparecia. Agora usa a mesma categoria das etiquetas
+// (_pedTipoTxt) e as opções saem dos pedidos de verdade, com a quantidade de cada uma no período/busca atuais.
+const _EMIS_CAT_ORDEM=['VENDA','PERMUTA','GARANTIA','AMOSTRA','INTERNO','BRINDE','CHUMBADOR'];
+const _EMIS_CAT_ROT={VENDA:'Venda',PERMUTA:'Permuta',GARANTIA:'Garantia / Retrabalho',AMOSTRA:'Amostra',INTERNO:'Interno',BRINDE:'Brinde',CHUMBADOR:'Chumbador'};
+function _emisTipoOpcoes(){
+  const sel=document.getElementById('f-tipo');if(!sel)return;
+  const atual=sel.value;
+  const el=document.getElementById('f-tipo');const guard=el.value;el.value='';
+  let base=[];try{base=filt();}catch(e){}
+  el.value=guard;
+  const cont={};base.forEach(p=>{const t=_pedTipoTxt(p)||'SEM CATEGORIA';cont[t]=(cont[t]||0)+1;});
+  const chaves=_EMIS_CAT_ORDEM.concat(Object.keys(cont).filter(k=>!_EMIS_CAT_ORDEM.includes(k)).sort());
+  if(atual&&!chaves.includes(atual))chaves.push(atual);
+  const rot=k=>_EMIS_CAT_ROT[k]||(k.charAt(0)+k.slice(1).toLowerCase());
+  sel.innerHTML=`<option value="">Todas as categorias (${base.length})</option>`+chaves.map(k=>`<option value="${k.replace(/"/g,'&quot;')}"${k===atual?' selected':''}>${rot(k)} (${cont[k]||0})</option>`).join('');
+}
 function renderList(){
+  try{_emisTipoOpcoes();}catch(e){console.warn('filtro categoria',e);}
   const sorted=[...filt()].sort(_cmpListaEmissao);
   _renderAlertaEmailFalhou();
   if(!sorted.length){
@@ -8137,7 +8155,7 @@ async function gerarPDFEmissao(){
   const df=(document.getElementById('f-data-fim')||{}).value||'';
   const filtrosAtivos=[];
   if(q)filtrosAtivos.push('Busca: "'+q+'"');
-  if(ft)filtrosAtivos.push('Categoria: '+ft);
+  if(ft)filtrosAtivos.push('Categoria: '+((typeof _EMIS_CAT_ROT!=='undefined'&&_EMIS_CAT_ROT[ft])||ft));
   if(fm)filtrosAtivos.push('Mês: '+(MESES_PT[+fm]||fm));
   if(di)filtrosAtivos.push('Emissão de: '+fmtD(di));
   if(df)filtrosAtivos.push('Emissão até: '+fmtD(df));
@@ -11031,7 +11049,14 @@ async function delP(){
   const {isAdm}=_getUserCat();
   if(!isAdm){toast('Apenas administradores podem excluir pedidos','terr');return;}
   const p=pedidos.find(x=>x.id===vid);
-  if(!confirm(`⚠️ Excluir o pedido OS ${p?.os||'—'} (${p?.cliente||''})? Ele será removido da Lista de Vendas.\n\nEsta ação não poderá mais ser desfeita. Deseja mesmo continuar?`))return;
+  // (2026-10-30, a pedido do Guilherme) mensagem fiel ao tipo: Garantia/Retrabalho e outros pedidos que não são
+  // venda nunca estiveram na Lista de Vendas; e o pedido vai para a Lixeira (dá pra restaurar), não some de vez.
+  const _naoVenda=(()=>{try{return _lpEhNaoVenda(p);}catch(e){return false;}})();
+  const _tipoTxt=String((p&&(p.tipoPedido||p.tipo))||'').trim();
+  const _ondeSai=_naoVenda
+    ?`Ele sai do Pipeline de Pedidos, Planejamento, Projetos, Compras, Produção e Qualidade.\n(${_tipoTxt||'Este pedido'} não é venda, por isso não está na Lista de Vendas nem conta em vendas, metas ou comissões.)`
+    :'Ele sai da Lista de Vendas (vendas, metas e comissões) e de todas as telas de pedidos.';
+  if(!confirm(`⚠️ Excluir o pedido OS ${p?.os||'—'} (${p?.cliente||''})${_naoVenda&&_tipoTxt?' — '+_tipoTxt:''}?\n\n${_ondeSai}\n\nUma cópia vai para a Lixeira (Configurações → Backup & Lixeira), de onde dá para restaurar. Deseja continuar?`))return;
   const senha=await pedirSenhaAdmin('Confirmar exclusão','Digite sua senha de administrador para confirmar a exclusão:');
   if(!senha){toast('Exclusão cancelada','tinf');return;}
   if(senha!==_PIN_OK){toast('Senha incorreta','terr');return;}
@@ -18536,6 +18561,7 @@ function _mpbRender(){
   const r=_mpb.imp;
   const imp=r?`<div class="dash-card" style="border:2px solid #e91e63;margin-bottom:14px"><div class="dash-sec-title">📥 Conferir antes de gravar — ${_ptE(r.arquivo)}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.78rem;font-weight:700"><span style="color:#166534">＋ ${r.novos.length} ${_plural(r.novos.length,'nova','novas')}</span><span style="color:#b45309">✎ ${r.alterados.length} com preço alterado</span><span style="color:#64748b">= ${r.iguais} iguais</span>${r.sairam.length?`<span style="color:#991b1b">− ${r.sairam.length} ${_plural(r.sairam.length,'saiu','saíram')} da planilha</span>`:''}</div>
+    ${_mpAvisoRegressaoHtml(r,"_mpb.imp.forcar=true;_mpbConfirmar()")}
     ${r.alterados.length?`<div style="max-height:220px;overflow:auto;border:1px solid #f1f5f9;border-radius:8px"><table class="dash-table"><thead><tr><th>Cód.</th><th>Matéria-prima</th><th style="text-align:right">Preço</th></tr></thead><tbody>${r.alterados.slice(0,300).map(c=>{const x=r.itens[c];return`<tr><td>${c}</td><td>${_ptE(x.n)}</td><td style="text-align:right"><span style="color:#94a3b8;text-decoration:line-through">${fmtR(x.va||0)}</span> → <b>${fmtR(x.v)}</b></td></tr>`;}).join('')}</tbody></table></div>`:''}
     <div style="font-size:.72rem;color:var(--ink4);margin-top:6px">A planilha é a lista completa: o que saiu dela deixa de existir na lista padrão. Essa lista é a mesma usada pelos orçamentos.</div>
     <div style="display:flex;gap:8px;margin-top:10px"><button onclick="_mpbConfirmar()" style="background:#1a2b5e;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:.8rem;font-weight:700;cursor:pointer">✔ Gravar na lista padrão</button><button onclick="_mpb.imp=null;_mpbRender()" style="background:#fff;border:1.5px solid var(--border);border-radius:8px;padding:8px 14px;font-size:.8rem;font-weight:700;cursor:pointer">Cancelar</button></div></div>`:'';
@@ -18559,6 +18585,39 @@ function _mpbListaHtml(){
   if(!l.length)return'<div style="font-size:.78rem;color:var(--ink4)">Nenhuma matéria-prima com essa busca.</div>';
   return`<div style="max-height:420px;overflow:auto;border:1px solid var(--border);border-radius:10px"><table class="dash-table"><thead><tr><th>Cód.</th><th>Matéria-prima</th><th>Grupo</th><th>Unidade</th><th style="text-align:right">Valor</th><th>Data</th></tr></thead><tbody>${l.slice(0,300).map(([c,x])=>`<tr><td style="color:#64748b">${_ptE(c)}</td><td style="font-weight:600">${_ptE(x.n)}</td><td style="font-size:.72rem;color:#64748b">${_ptE(x.g||'')}</td>${(()=>{const u=_mpUnRef(x.n,x.u);return`<td>${_mpUnTag(u)}${u.emb?`<div style="font-size:.64rem;color:#94a3b8">${_ptE(u.emb)}</div>`:''}</td><td style="text-align:right;font-weight:700">${x.v>0?fmtR(x.v/u.f)+`<span style="font-size:.64rem;color:#94a3b8;font-weight:400">/${_ptE(u.un)}</span>`:'—'}</td>`;})()}<td style="font-size:.72rem;color:#64748b">${_ptE(x.d||'')}</td></tr>`).join('')}</tbody></table></div>${l.length>300?`<div style="font-size:.72rem;color:var(--ink4);margin-top:4px">Mostrando 300 de ${l.length} — refine a busca.</div>`:''}`;
 }
+// ── LISTA DE MATÉRIAS-PRIMAS ÚNICA, NUNCA MAIS ANTIGA (2026-10-30) ──────────────────────────────────
+// Pedido do Guilherme: "a planilha importada de matérias-primas em Orçamentos ou em Projetos tem que ser usada
+// entre ambos; não permitir uma desatualizada em um e atualizada em outro". As duas telas já gravam e leem a
+// MESMA base (sistema/orcamentosMaterias, ao vivo) — não existe cópia por menu. O risco que sobrava: importar
+// por qualquer uma delas uma exportação MAIS ANTIGA do Mubsys por cima de uma mais nova, voltando preços nos
+// dois lugares. Agora, ao ler a planilha, compara a "Data referência" de cada código com a da base atual: se
+// algum preço voltaria para uma data anterior, a gravação fica bloqueada (admin pode forçar, com confirmação).
+function _mpIsoRef(d){const m=String(d||'').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);return m?m[3]+'-'+m[2]+'-'+m[1]:'';}
+function _mpMarcarRegressao(res,atual){
+  try{
+    res.regressoes=[];let maxNovo='',maxAtual='';
+    Object.entries(res.itens||{}).forEach(([c,m])=>{const dn=_mpIsoRef(m&&m.d);if(dn>maxNovo)maxNovo=dn;const a=atual&&atual[c];const da=_mpIsoRef(a&&a.d);
+      if(dn&&da&&dn<da)res.regressoes.push({c,n:(m&&m.n)||(a&&a.n)||'',dn,da});});
+    Object.values(atual||{}).forEach(a=>{const da=_mpIsoRef(a&&a.d);if(da>maxAtual)maxAtual=da;});
+    res.maxNovo=maxNovo;res.maxAtual=maxAtual;
+  }catch(e){res.regressoes=[];}
+}
+function _mpAvisoRegressaoHtml(r,fnConfirmar){
+  const dBR=iso=>iso?iso.split('-').reverse().join('/'):'—';
+  const uni=`<div style="font-size:.72rem;color:#1e40af;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:6px 10px;margin:0 0 10px">📌 Lista única: esta base vale ao mesmo tempo para <b>Orçamentos</b> e para <b>Projetos → Produtos</b>. Planilha mais recente: ${dBR(r.maxNovo)} · base atual: ${dBR(r.maxAtual)}.</div>`;
+  const g=r.regressoes||[];if(!g.length)return uni;
+  const adm=(()=>{try{return _getUserCat().isAdm;}catch(e){return false;}})();
+  const ex=g.slice(0,6).map(x=>`<li>${_ptE?_ptE(x.n):x.n} (cód. ${x.c}): ${dBR(x.dn)} na planilha × ${dBR(x.da)} na base</li>`).join('');
+  return uni+`<div style="background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:10px 12px;margin:0 0 10px;font-size:.78rem;color:#7f1d1d">
+    <b>⛔ Esta planilha é mais antiga que a lista atual.</b> ${g.length} ${_plural(g.length,'preço voltaria','preços voltariam')} para uma data de referência anterior — Orçamentos e Projetos ficariam desatualizados. Exporte de novo a lista do Mubsys (a mais recente) e importe essa.
+    <ul style="margin:6px 0 0 18px;padding:0">${ex}${g.length>6?`<li>… e mais ${g.length-6}</li>`:''}</ul>
+    ${adm?`<button type="button" onclick="if(confirm('Gravar mesmo assim? ${g.length} preços vão voltar para uma data de referência anterior, em Orçamentos e em Projetos.')){${fnConfirmar.replace(/'/g,'')}}" style="margin-top:8px;background:#fff;border:1px solid #dc2626;color:#dc2626;border-radius:8px;padding:5px 12px;font-size:.74rem;font-weight:700;cursor:pointer">Admin: gravar mesmo assim</button>`:''}
+  </div>`;
+}
+function _mpBloqueiaRegressao(r){
+  if(r&&r.regressoes&&r.regressoes.length&&!r.forcar){toast(`Planilha mais antiga que a lista atual (${r.regressoes.length} ${_plural(r.regressoes.length,'preço voltaria','preços voltariam')}). Exporte a lista mais recente do Mubsys.`,'terr');return true;}
+  return false;
+}
 async function _mpbLer(inp){
   const f=inp&&inp.files&&inp.files[0];if(!f)return;
   if(!window.XLSX){toast('Biblioteca de Excel ainda carregando — tente de novo em alguns segundos','terr');return;}
@@ -18570,11 +18629,12 @@ async function _mpbLer(inp){
     const atual=_mpbBase();const res={arquivo:f.name,itens:novos,novos:[],alterados:[],iguais:0,sairam:[]};
     Object.entries(novos).forEach(([c,m])=>{const a=atual[c];if(!a)res.novos.push(c);else if(Math.abs((a.v||0)-(m.v||0))>0.00001){res.alterados.push(c);m.va=a.v;m.da=a.d||'';}else{res.iguais++;if(a.va!=null){m.va=a.va;m.da=a.da;}}});
     Object.keys(atual).forEach(c=>{if(!novos[c])res.sairam.push(c);});
-    _mpb.imp=res;_mpbRender();
+    _mpMarcarRegressao(res,atual);_mpb.imp=res;_mpbRender();
   }catch(e){console.error('lista de matérias-primas',e);toast('Não consegui ler a planilha: '+(e.message||e),'terr');}
 }
 async function _mpbConfirmar(){
   const r=_mpb.imp;if(!r)return;
+  if(_mpBloqueiaRegressao(r))return;
   if(!_prodPodeEditar()){toast('Apenas Projetos e administradores importam a lista','terr');return;}
   const itens=Object.assign({},r.itens);
   itens._meta={arquivo:r.arquivo,em:new Date().toISOString(),por:_pfQuem()||'—',total:Object.keys(r.itens).length,novos:r.novos.length,alterados:r.alterados.length};
@@ -45349,6 +45409,30 @@ function _rhDescreverEscala(horario){
 // .diagnostico anexado) pra nunca mais falhar calado — se um upload não gerar indicador
 // nenhum, dá pra abrir o resumo detalhado (ver processarArquivosRhPonto) e ver exatamente o
 // que o parser achou ou não achou nesse arquivo específico (2026-07-29).
+// ── PLANILHA ÚNICA DO PONTO (2026-10-30) ─────────────────────────────────────────────────────────
+// Pedido do Guilherme: a "NOVA PLANILHA PONTO" do Hponto traz TODOS os colaboradores num arquivo só (os
+// cartões ponto um embaixo do outro, cada um começando por "Hponto - Emissão do Cartão Ponto"). Antes o
+// sistema lia só o primeiro cartão do arquivo. Agora separa o arquivo em um cartão por colaborador e passa
+// cada um pelo MESMO leitor de sempre (_rhParseArquivo) — atraso, falta, atestado, horário personalizado,
+// feriados etc. continuam com as regras que já existiam. Arquivo de 1 colaborador só continua igual.
+// Colaborador que não existe no RH é cadastrado sozinho (_rhGarantirFuncionario), como já era.
+function _rhSepararCartoes(texto){
+  const re=/Hponto\s*-\s*Emiss/gi;const inicios=[];let m;
+  while((m=re.exec(texto))){const t=texto.lastIndexOf('<table',m.index);inicios.push(t>=0?t:m.index);}
+  if(inicios.length<=1)return[texto];
+  return inicios.map((ini,i)=>texto.slice(ini,i+1<inicios.length?inicios[i+1]:texto.length));
+}
+async function _rhParseArquivoTodos(file){
+  let texto;try{texto=await file.text();}catch(e){return[{erro:new Error('não consegui ler o conteúdo do arquivo ('+(e.message||e)+')')}];}
+  const partes=_rhSepararCartoes(texto);
+  const out=[];
+  for(let i=0;i<partes.length;i++){
+    try{out.push(await _rhParseArquivo({name:file.name,text:async()=>partes[i]}));}
+    catch(e){out.push({erro:e,indice:i+1});}
+  }
+  out.total=partes.length;
+  return out;
+}
 async function _rhParseArquivo(file){
   const diag=[];
   let texto;
@@ -45507,45 +45591,67 @@ async function processarArquivosRhPonto(fileList){
   // Agora cada arquivo mostra exatamente o que o parser achou.
   const detalhes=[];
   let cfgMudou=false;
+  // (2026-10-30) um arquivo pode trazer vários cartões (planilha única do Hponto) — cada colaborador é
+  // processado e contado separado; "ok"/"erros" passam a contar cartões (= colaboradores).
+  let totalCartoes=0;const nomesLidos=new Set();const novosNomes=[];
   for(const file of arquivos){
-    try{
-      const dados=await _rhParseArquivo(file);
-      if(!dados.dias.length){
-        erros.push(file.name+': nenhum dia concluído encontrado (só tinha hoje/dias futuros?).');
-        detalhes.push({arquivo:file.name,sucesso:false,linhas:dados.diagnostico});
-        continue;
+    let lista;
+    try{lista=await _rhParseArquivoTodos(file);}catch(e){lista=[{erro:e}];}
+    const multi=(lista.total||lista.length)>1;
+    for(const dados of lista){
+      totalCartoes++;
+      const rot=multi?`${file.name} → ${dados.nome||('cartão '+(dados.indice||'?'))}`:file.name;
+      try{
+        if(dados.erro)throw dados.erro;
+        nomesLidos.add(dados.nome);
+        if(!dados.dias.length){
+          erros.push(rot+': nenhum dia concluído encontrado (só tinha hoje/dias futuros?).');
+          detalhes.push({arquivo:rot,sucesso:false,linhas:dados.diagnostico});
+          continue;
+        }
+        const existiaAntes=!!_rhFuncionarioPorNome(dados.nome);
+        const f=_rhGarantirFuncionario(dados.nome,dados.funcao,dados.departamento);
+        cfgMudou=true;
+        if(existiaAntes)atualizados++;else{novos++;novosNomes.push(dados.nome);}
+        await _rhSalvarRegistrosFuncionario(f.id,dados.dias,file.name);
+        ok++;
+        detalhes.push({arquivo:rot,sucesso:true,linhas:dados.diagnostico,nome:dados.nome,nDias:dados.dias.length});
+      }catch(e){
+        console.error('Erro ao processar cartão de ponto: '+rot,e);
+        erros.push(rot+': '+(e.message||'erro ao ler o arquivo'));
+        detalhes.push({arquivo:rot,sucesso:false,linhas:e.diagnostico||['⚠️ '+(e.message||'erro ao ler o arquivo')]});
       }
-      const existiaAntes=!!_rhFuncionarioPorNome(dados.nome);
-      const f=_rhGarantirFuncionario(dados.nome,dados.funcao,dados.departamento);
-      cfgMudou=true;
-      if(existiaAntes)atualizados++;else novos++;
-      await _rhSalvarRegistrosFuncionario(f.id,dados.dias,file.name);
-      ok++;
-      detalhes.push({arquivo:file.name,sucesso:true,linhas:dados.diagnostico});
-    }catch(e){
-      console.error('Erro ao processar arquivo de ponto: '+file.name,e);
-      erros.push(file.name+': '+(e.message||'erro ao ler o arquivo'));
-      detalhes.push({arquivo:file.name,sucesso:false,linhas:e.diagnostico||['⚠️ '+(e.message||'erro ao ler o arquivo')]});
     }
   }
+  // colaboradores ativos do RH que não vieram em nenhum cartão deste upload (só aviso, nada é apagado)
+  let ausentes=[];
+  try{if(totalCartoes>1)ausentes=(cfg.rhFuncionarios||[]).filter(f=>!nomesLidos.has(f.nome)&&f.status!=='demitido').map(f=>f.nome).sort();}catch(e){}
   if(cfgMudou)await _rhSalvarCfg();
   // alert() bloqueante (2026-07-30) — o banner fixo e o toast (abaixo) já existiam desde
   // 2026-07-29 mas continuavam passando despercebidos (usuário relatou repetidamente "não
   // aparece nada" mesmo depois de subir o arquivo). alert() força o usuário a ver e fechar
   // antes de continuar, então ou aparece o diagnóstico real aqui, ou o problema não está em
   // processarArquivosRhPonto (e sim em algo depois, na leitura/render).
+  // (2026-10-30) com a planilha única (muitos cartões), o alerta vira um resumo por colaborador — o
+  // diagnóstico completo de cada um continua no quadro abaixo do botão de upload.
+  const _resumoCurto=totalCartoes>3;
+  const _extras=(novosNomes.length?`\n\n🆕 ${novosNomes.length} ${_plural(novosNomes.length,'colaborador novo cadastrado','colaboradores novos cadastrados')}: ${novosNomes.join(', ')}`:'')
+    +(ausentes.length?`\n\nℹ️ ${ausentes.length} ${_plural(ausentes.length,'colaborador do RH não veio','colaboradores do RH não vieram')} nesta planilha (nada foi apagado): ${ausentes.join(', ')}`:'');
   if(erros.length){
-    alert('❌ RH — problema ao processar:\n\n'+erros.join('\n\n'));
+    alert('❌ RH — problema ao processar:\n\n'+erros.join('\n\n')+(ok>0?`\n\n✅ ${ok} ${_plural(ok,'colaborador processado','colaboradores processados')} normalmente.`:'')+_extras);
   }else if(ok>0){
-    const diagOk=detalhes.filter(d=>d.sucesso).map(d=>d.arquivo+':\n'+d.linhas.join('\n')).join('\n\n');
-    alert('✅ RH — upload processado, isto foi lido do arquivo:\n\n'+diagOk);
+    const diagOk=_resumoCurto
+      ?detalhes.filter(d=>d.sucesso).map(d=>`• ${d.nome}: ${d.nDias} ${_plural(d.nDias,'dia','dias')}`).join('\n')
+      :detalhes.filter(d=>d.sucesso).map(d=>d.arquivo+':\n'+d.linhas.join('\n')).join('\n\n');
+    alert(`✅ RH — upload processado${_resumoCurto?` (${ok} ${_plural(ok,'colaborador','colaboradores')})`:''}, isto foi lido do arquivo:\n\n`+diagOk+_extras);
   }
   // Banner de resultado GRANDE e impossível de passar despercebido (2026-07-29 — usuário
   // relatou não perceber o resultado do upload) + toast (notificação flutuante que aparece
   // não importa onde a tela estiver rolada) além do banner fixo na tela.
   const tudoOk=ok>0&&!erros.length;
-  const msgToast=tudoOk?`✅ ${ok} ${_plural(ok,'arquivo','arquivos')} ${_plural(ok,'processado','processados')} — ${novos} ${_plural(novos,'novo','novos')}, ${atualizados} ${_plural(atualizados,'atualizado','atualizados')}`
-    :ok>0?`⚠️ ${ok} de ${arquivos.length} ${_plural(arquivos.length,'arquivo','arquivos')} ${_plural(arquivos.length,'processado','processados')}, ${erros.length} com problema`
+  const _multi=totalCartoes>arquivos.length,_N=_multi?totalCartoes:arquivos.length,_U=_multi?['colaborador','colaboradores']:['arquivo','arquivos'];
+  const msgToast=tudoOk?`✅ ${ok} ${_plural(ok,..._U)} ${_plural(ok,'processado','processados')} — ${novos} ${_plural(novos,'novo','novos')}, ${atualizados} ${_plural(atualizados,'atualizado','atualizados')}`
+    :ok>0?`⚠️ ${ok} de ${_N} ${_plural(_N,..._U)} ${_plural(_N,'processado','processados')}, ${erros.length} com problema`
     :`❌ Nenhum arquivo foi processado — ${erros.length} com problema`;
   toast(msgToast,tudoOk?'tok':(ok>0?'tinf':'terr'));
   if(resumoEl){
@@ -45554,8 +45660,8 @@ async function processarArquivosRhPonto(fileList){
       <div style="padding:6px 0 2px 16px;color:var(--ink3);font-size:.78rem">${d.linhas.map(l=>'• '+l).join('<br>')}</div>
     </details>`).join('');
     resumoEl.innerHTML=`<div style="padding:16px;border-radius:10px;border:2px solid ${erros.length?(ok>0?'#f59e0b':'#dc2626'):'#16a34a'};background:${erros.length?(ok>0?'#fffbeb':'#fef2f2'):'#f0fdf4'}">
-      <div style="font-size:1rem;font-weight:800;color:${erros.length?(ok>0?'#92400e':'#991b1b'):'#166534'}">${tudoOk?'✅':(ok>0?'⚠️':'❌')} ${ok} de ${arquivos.length} ${_plural(arquivos.length,'arquivo','arquivos')} ${_plural(arquivos.length,'processado','processados')} com sucesso</div>
-      <div style="font-size:.85rem;margin-top:4px;color:var(--ink2)"><b>${novos}</b> ${_plural(novos,'colaborador','colaboradores')} ${_plural(novos,'novo','novos')} ${_plural(novos,'cadastrado','cadastrados')} · <b>${atualizados}</b> ${_plural(atualizados,'atualizado','atualizados')}${erros.length?` · <b style="color:#dc2626">${erros.length}</b> ${_plural(erros.length,'arquivo','arquivos')} com problema (veja abaixo)`:''}</div>
+      <div style="font-size:1rem;font-weight:800;color:${erros.length?(ok>0?'#92400e':'#991b1b'):'#166534'}">${tudoOk?'✅':(ok>0?'⚠️':'❌')} ${ok} de ${_N} ${_plural(_N,..._U)} ${_plural(_N,'processado','processados')} com sucesso</div>
+      <div style="font-size:.85rem;margin-top:4px;color:var(--ink2)"><b>${novos}</b> ${_plural(novos,'colaborador','colaboradores')} ${_plural(novos,'novo','novos')} ${_plural(novos,'cadastrado','cadastrados')} · <b>${atualizados}</b> ${_plural(atualizados,'atualizado','atualizados')}${erros.length?` · <b style="color:#dc2626">${erros.length}</b> ${_plural(erros.length,..._U)} com problema (veja abaixo)`:''}</div>
       ${detalhesHtml}
     </div>`;
   }
@@ -70358,11 +70464,12 @@ async function orc3LerArquivo(inp){
     const atual=orc3.base||{};const res={arquivo:f.name,itens:novos,novos:[],alterados:[],iguais:0,sairam:[]};
     Object.entries(novos).forEach(([c,m])=>{const a=atual[c];if(!a)res.novos.push(c);else if(Math.abs((a.v||0)-(m.v||0))>0.00001){res.alterados.push(c);m.va=a.v;m.da=a.d||'';}else{res.iguais++;if(a.va!=null){m.va=a.va;m.da=a.da;}}});
     Object.keys(atual).forEach(c=>{if(!novos[c])res.sairam.push(c);});
-    orc3.imp=res;orc2Render();
+    _mpMarcarRegressao(res,atual);orc3.imp=res;orc2Render();
   }catch(e){console.error('orc3 importar',e);toast('Não consegui ler a planilha: '+(e.message||e),'terr');}
 }
 async function orc3ConfirmarImportacao(){
   const r=orc3.imp;if(!r)return;
+  if(_mpBloqueiaRegressao(r))return;
   if(!_getUserCat().isAdm){toast('Só administrador importa a base de matérias-primas','terr');return;}
   if(!window._fbOrcSubstituir){toast('Não foi possível salvar agora (conexão)','terr');return;}
   const itens=Object.assign({},r.itens);
@@ -70384,6 +70491,7 @@ function _orc3HtmlImportacao(){
       <span class="orc2-tag t1">= ${r.iguais} iguais</span>
       ${r.sairam.length?`<span class="orc2-tag" style="background:#fee2e2;color:#991b1b">− ${r.sairam.length} ${r.sairam.length===1?'saiu':'saíram'} da planilha</span>`:''}
     </div>
+    ${_mpAvisoRegressaoHtml(r,"orc3.imp.forcar=true;orc3ConfirmarImportacao()")}
     ${r.alterados.length?`<div style="max-height:260px;overflow:auto;border:1px solid #f1f5f9;border-radius:10px"><table class="orc2-res-tab" style="width:100%;border-collapse:collapse"><thead><tr><th>Cód.</th><th>Matéria-prima com preço alterado</th><th class="r">Preço</th></tr></thead><tbody>${r.alterados.slice(0,300).map(c=>linha(c,r.itens[c].va)).join('')}</tbody></table></div>`:''}
     ${r.novos.length&&_orc3Tem()?`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:.76rem;font-weight:700;color:#166534">Ver os ${r.novos.length} novos</summary><table class="orc2-res-tab" style="width:100%;border-collapse:collapse">${r.novos.slice(0,300).map(c=>linha(c)).join('')}</table></details>`:''}
     ${r.sairam.length?`<div class="orcx-hint" style="margin-top:8px">Os que saíram da planilha deixam de existir na base (a exportação é a lista completa).</div>`:''}
