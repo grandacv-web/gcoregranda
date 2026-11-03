@@ -26,7 +26,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-03.6';</script>
+<script>const APP_BUILD_VERSION='2026-11-03.8';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -12133,10 +12133,13 @@ function _rascunhoTemConteudo(){
 // (ver salvarRascunhoConselho()/submit()). Editar um pedido JÁ emitido (origemComercial:true,
 // vindo de editP()/"Completar" pendências/etc.) não é mais rascunho — o botão final volta a
 // ser "Salvar ✓" e fechar a janela não salva nada sozinho, igual sempre foi.
+// (2026-11-03) "Já emitido" não depende só de origemComercial: pedido antigo/importado/emitido por outro
+// caminho também é edição — editar nunca reenvia o e-mail de emissão (pra reenviar: botão 🔁 Reenviar E-mail).
+function _pedJaEmitido(p){return!!(p&&(p.origemComercial||p.importadoPlanilha||p.conselhoStatus==='emitido'||p.emailStatus||p.emailEnviadoEm||(p.conselhoStatus!=='rascunho'&&p.os)));}
 function _emIsRascunhoConselho(){
   if(!editing)return true;
   const p=pedidos.find(x=>x.id===editing);
-  return !(p&&p.origemComercial);
+  return !_pedJaEmitido(p);
 }
 function renderEM(){
   const tabs=getTabs(),cur=tabs[step];
@@ -12148,10 +12151,15 @@ function renderEM(){
   const _rascunho=_emIsRascunhoConselho();
   nx.className=last?'btn-emit':'btn-next';
   nx.textContent=last?(_rascunho?'Emitir Este Pedido ✓':'Salvar ✓'):'Próximo →';
+  {let sv=document.getElementById('btn-sv-ed');
+    if(!sv&&nx.parentElement){nx.insertAdjacentHTML('beforebegin','<button type="button" class="btn-emit" id="btn-sv-ed" onclick="emSalvarEdicao()" title="Salva as alterações sem precisar ir até a última etapa — não reenvia o e-mail de emissão" style="margin-left:auto;margin-right:8px">💾 Salvar alterações</button>');sv=document.getElementById('btn-sv-ed');}
+    if(sv)sv.style.display=(!_rascunho&&!last)?'':'none';}
   renderStep(cur.id);
 }
 
 function goStep(i){saveSt();step=i;renderEM()}
+// (2026-11-03) salvar a edição de um pedido já emitido de qualquer etapa (mesmas validações do Salvar ✓ final)
+function emSalvarEdicao(){if(_emIsRascunhoConselho()){toast('Este pedido ainda não foi emitido — vá até a última etapa para emitir.','tinf');return;}saveSt();submit();}
 function _tipoDispensaValores(tipo){
   // Tipos que não geram cobrança nenhuma ao cliente (2026-09-08, a pedido do usuário:
   // "Quando o pedido se tratar de Retrabalho/Garantia, interno, Amostra, brinde, não é
@@ -15351,7 +15359,7 @@ async function submit(){
   // sem trava — completar o próprio rascunho não é "editar uma venda já emitida".
   if(editing){
     const pChk=pedidos.find(x=>x.id===editing);
-    const isDraftEmAndamento=pChk&&pChk.conselhoStatus==='rascunho'&&!pChk.origemComercial;
+    const isDraftEmAndamento=pChk&&!_pedJaEmitido(pChk);
     if(pChk&&!isDraftEmAndamento){
       const {isAdm}=_getUserCat();
       if(!isAdm){toast('Apenas administradores podem alterar uma venda/emissão já emitida','terr');return;}
@@ -15612,7 +15620,7 @@ async function submit(){
   // mesmo sendo a 1ª vez que o pedido está sendo EMITIDO de fato. O que importa é se o
   // registro ANTERIOR já tinha origemComercial:true (ou seja, já tinha passado por aqui
   // antes) — só nesse caso é uma edição de verdade (sem reenviar e-mail nem recriar tarefas).
-  const _jaEmitidoAntes=!!(_pedidoExistente&&_pedidoExistente.origemComercial);
+  const _jaEmitidoAntes=_pedJaEmitido(_pedidoExistente);
   // Confirmação da Data do Conselho (2026-09-08) — ver comentário completo em
   // _confirmarDataConselho(). Só pergunta na 1ª emissão de verdade.
   if(!_jaEmitidoAntes){
@@ -73489,6 +73497,32 @@ function _cadExportar(cad){
   let n=0;const t=setInterval(async()=>{n++;
     try{const r=await corrigir();if(r==='ok'||r==='feito'||r==='ambiguo'||n>40)clearInterval(t);}catch(e){console.warn('Correção OS 290',e);if(n>40)clearInterval(t);}
   },6000);
+})();
+// ── PEDIDO FORA DO PLANEJAMENTO + OS 290 (2026-11-03) ──────────────────────────────────────────────
+// A correção financeira da OS 290 (ARCELOR) gravou "Valor da Instalação" e o pedido passou a cumprir o critério
+// do Planejamento (tem instalação) — mas a obra já foi finalizada e o Guilherme só queria o financeiro certo:
+// "não é pra ir pro planejamento, era só pra alterar o financeiro". p.foraPlanejamento tira o pedido do
+// Planejamento (obras, tarefas, Hoje, avisos) sem mexer em valores, comissão ou Contas a Receber.
+(function(){
+  try{const _pe=_plPedidosElegiveis;_plPedidosElegiveis=function(){return _pe.apply(this,arguments).filter(p=>!(p&&p.foraPlanejamento));};}catch(e){console.warn('fora do planejamento',e);}
+  const FLAG='os290ForaPlan20261103';
+  async function marcar(){
+    if(!(typeof _getUserCat==='function'&&_getUserCat().isAdm))return'sem-adm';
+    if(typeof pedidos==='undefined'||!Array.isArray(pedidos)||!pedidos.length)return'sem-pedidos';
+    const l=pedidos.filter(p=>p&&String(p.os||'').trim()==='290'&&/ARCELOR/i.test(String(p.cliente||'')+' '+String(p.nomeFantasia||'')));
+    if(l.length!==1)return'ambiguo';
+    const p=l[0];if(p.foraPlanejamento||p[FLAG])return'feito';
+    p.foraPlanejamento={em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'admin',motivo:'Obra já finalizada — a correção de 03/11 foi só do financeiro (valores conforme a OS 290)'};
+    p[FLAG]=true;
+    await savePedidoFS(p);
+    try{renderAll();}catch(e){}
+    try{if(typeof renderPlanejamentoObras==='function')renderPlanejamentoObras();}catch(e){}
+    try{if(typeof _plHojeVisivel==='function'&&_plHojeVisivel())renderPlHoje();}catch(e){}
+    toast('OS 290 ARCELOR saiu do Planejamento (obra já finalizada) — financeiro mantido','tok');
+    return'ok';
+  }
+  window._os290ForaPlan=marcar;
+  let n=0;const t=setInterval(async()=>{n++;try{const r=await marcar();if(r==='ok'||r==='feito'||r==='ambiguo'||n>40)clearInterval(t);}catch(e){if(n>40)clearInterval(t);}},6000);
 })();
 </script>
 <script>
