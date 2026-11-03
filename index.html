@@ -26,7 +26,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-03.10';</script>
+<script>const APP_BUILD_VERSION='2026-11-03.15';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -6116,6 +6116,12 @@ window._fbDeleteCfgField=(parts)=>updateDoc(doc(db,'sistema','config'),new Field
 // nela, e o fallback (geralmente _fbSaveCfg(cfg) tentando de novo com o cfg inteiro) nunca era
 // chamado do jeito que o código pretendia. Agora sempre devolve uma promise de verdade, então
 // todo .catch(...) já escrito nos ~15 lugares que usam isso passa a funcionar como pretendido.
+// (2026-11-03) várias chaves do config numa gravação só (updateDoc aceita vários pares campo/valor)
+window._fbUpdateCfgFieldsMulti=(pairs)=>{
+  try{const args=[];pairs.forEach(([parts,val])=>{args.push(new FieldPath(...parts),val);});
+    return updateDoc(doc(db,'sistema','config'),...args);}
+  catch(e){console.error('_fbUpdateCfgFieldsMulti',e);return Promise.reject(e);}
+};
 window._fbUpdateCfgField=(parts,value)=>{
   try{
     return updateDoc(doc(db,'sistema','config'),new FieldPath(...parts),value);
@@ -11580,6 +11586,7 @@ async function salvarValoresPedido(){
   const parcValsRaw=[...document.querySelectorAll('#ev-parc-c .ev-pd-val')].map(i=>moneyToNum(i.value));
   const parcLiqValsRaw=[...document.querySelectorAll('#ev-parc-c .ev-pd-liq')].map(i=>moneyToNum(i.value));
   const parcDatasRaw=[...document.querySelectorAll('#ev-parc-c .ev-pd-date')].map(i=>i.value);
+  if(veVal>0&&!veDataRaw){toast('Informe a data da entrada — sem data ela não aparece certo no Contas a Receber','terr');return;}
   const temPagamentoNovo=(veVal>0&&veDataRaw)||parcValsRaw.some((v,i)=>v>0&&parcDatasRaw[i]);
   if(temPagamentoNovo){
     const isImp=!!p.importadoPlanilha;
@@ -12296,6 +12303,7 @@ function validarAba(id){
     if(!ed.tem_oc)erros.push('Informe se tem Ordem de Compra');
     if(ed.tem_oc==='Sim'&&!ed.arq_oc)erros.push('Faça upload do arquivo da Ordem de Compra');
     if(!ed.tem_ent)erros.push('Informe se o pedido tem entrada');
+    if(ed.tem_ent==='Tem entrada'){if(!(moneyToNum(ed.vent||'0')>0))erros.push('Informe o valor da entrada');if(!ed.dent)erros.push('Informe a data da entrada');}
     if(!ed.nf)erros.push('Informe a Emissão de Nota Fiscal');
   }
   if(id==='projetos'){
@@ -27108,8 +27116,13 @@ function getParcelas(p){
     const liqV=liqExplicito>0?liqExplicito:estimarLiq(raw);
     res.push({pedidoId:p.id,pedido:p,label,valor:liqV,valorBruto:raw,liqEstimado:liqEstimadoFlag,valorBrutoEstimado:false,dataStr,confKey});
   }
-  if(pag['Valor de Entrada']&&pag['Data da Entrada']){
+  if(pag['Valor de Entrada']&&pag['Data da Entrada']&&/^\d{2}\/\d{2}\/\d{4}$/.test(String(pag['Data da Entrada']).trim())){
     pushItem('Entrada',pag['Valor de Entrada'],'Valor de Entrada (Líquido)',(pag['Data da Entrada']||'').trim(),`${p.id}::entrada`);
+  }else if(pag['Valor de Entrada']&&$mDash(pag['Valor de Entrada'])>0&&p.emissaoEm){
+    // (2026-11-03) entrada sem data (ou data inválida): antes sumia ou aparecia sem data — agora entra com a
+    // data de emissão como marcador e o aviso "⚠️ sem data" pra corrigir em Editar Valores.
+    pushItem('Entrada',pag['Valor de Entrada'],'Valor de Entrada (Líquido)',p.emissaoEm.split('-').reverse().join('/'),`${p.id}::entrada`);
+    const last=res[res.length-1];if(last)last.dataIndefinida=true;
   }
   Object.entries(pag).forEach(([k,v])=>{
     const mt=k.match(/^Parcela\s+(\d+)\s+·\s+(.+)$/);
@@ -28813,6 +28826,24 @@ async function _setComissaoQuitada(confKey,marcar,por){
 // marcado (data-dia escopa pra 5=1ªQuinzena/15=2ªQuinzena, então marcar tudo numa quinzena
 // nunca afeta a outra). O que não for marcado fica exatamente onde está, em "⏳ A confirmar
 // pagamento" — não entra nessa confirmação, óbvio, já que não foi selecionado.
+// (2026-11-03, "confirmar comissões tá demorando demais") — antes era 1 gravação no servidor + 1 cópia do cfg
+// inteiro no cache local POR comissão, uma depois da outra. Agora: atualiza a tela na hora e grava tudo
+// numa gravação só (se falhar, tenta campo a campo e, por último, o cfg completo).
+async function _comissaoQuitarLote(campo,confKeys,por){
+  cfg[campo]=cfg[campo]||{};
+  const data={em:new Date().toISOString(),por:por||usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—'};
+  confKeys.forEach(k=>{cfg[campo][k]=Object.assign({},data);});
+  try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
+  const pares=confKeys.map(k=>[[campo,k],Object.assign({},data)]);
+  try{
+    if(window._fbUpdateCfgFieldsMulti){for(let i=0;i<pares.length;i+=200)await window._fbUpdateCfgFieldsMulti(pares.slice(i,i+200));}
+    else throw new Error('sem multi');
+  }catch(e){
+    console.warn('gravação em lote falhou, tentando uma a uma',e);
+    try{await Promise.all(pares.map(([pt,v])=>window._fbUpdateCfgField(pt,v)));}
+    catch(e2){console.error('fallback completo',e2);if(window._fbSaveCfg)window._fbSaveCfg(cfg);}
+  }
+}
 async function confirmarComissaoQuitadaSelecionados(dia){
   if(!_getUserCat().isAdm){toast('Apenas administradores podem confirmar pagamento de comissão','terr');return;}
   const chks=[...document.querySelectorAll(`.com-quitar-chk[data-dia="${dia}"]:checked`)];
@@ -28820,11 +28851,11 @@ async function confirmarComissaoQuitadaSelecionados(dia){
   const quinzTxt=dia===5?'1ª Quinzena (dia 5)':'2ª Quinzena (dia 15)';
   if(!confirm(`Confirmar que ${chks.length} ${chks.length>1?'comissões foram':'comissão foi'} paga${chks.length>1?'s':''} (${quinzTxt})?\n\nFica registrado com a data de hoje pra você consultar depois quanto foi pago pra cada pessoa.`))return;
   const por=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
-  for(const chk of chks){
-    await _setComissaoQuitada(chk.dataset.ck,true,por);
-  }
+  const btn=document.getElementById('com-btn-confirmar-'+dia);if(btn){btn.disabled=true;btn.textContent='⏳ Confirmando...';}
+  const grava=_comissaoQuitarLote('comissaoQuitada',chks.map(c=>c.dataset.ck),por);
   toast(`${chks.length} ${chks.length>1?'comissões':'comissão'} marcada${chks.length>1?'s':''} como paga${chks.length>1?'s':''} ✅`,'tok');
   if(typeof renderDashComissoes==='function')try{renderDashComissoes();}catch(e){}
+  try{await grava;}catch(e){toast('Erro ao gravar no servidor — confira a conexão','terr');}
 }
 async function desfazerComissaoQuitada(confKey){
   if(!_getUserCat().isAdm){toast('Apenas administradores podem desfazer isso','terr');return;}
@@ -28877,11 +28908,11 @@ async function confirmarComissaoQuitadaGerenteSelecionados(dia){
   const quinzTxt=dia===5?'1ª Quinzena (dia 5)':'2ª Quinzena (dia 15)';
   if(!confirm(`Confirmar que ${chks.length} ${chks.length>1?'comissões foram':'comissão foi'} do GERENTE paga${chks.length>1?'s':''} (${quinzTxt})?\n\nFica registrado com a data de hoje pra você consultar depois quanto foi pago pra Guilherme Clabonde.`))return;
   const por=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
-  for(const chk of chks){
-    await _setComissaoQuitadaGerente(chk.dataset.ck,true,por);
-  }
+  const btnG=document.getElementById('com-btn-confirmar-gerente-'+dia);if(btnG){btnG.disabled=true;btnG.textContent='⏳ Confirmando...';}
+  const gravaG=_comissaoQuitarLote('comissaoQuitadaGerente',chks.map(c=>c.dataset.ck),por);
   toast(`${chks.length} ${chks.length>1?'comissões':'comissão'} do gerente marcada${chks.length>1?'s':''} como paga${chks.length>1?'s':''} ✅`,'tok');
   if(typeof renderDashComissoes==='function')try{renderDashComissoes();}catch(e){}
+  try{await gravaG;}catch(e){toast('Erro ao gravar no servidor — confira a conexão','terr');}
 }
 async function desfazerComissaoQuitadaGerente(confKey){
   if(!_getUserCat().isAdm){toast('Apenas administradores podem desfazer isso','terr');return;}
@@ -29432,7 +29463,8 @@ function renderDashMetas(){
     <div>${metaEmp>0&&totalEmp>=metaEmp?'<span class="dash-badge ok">✅ Meta atingida</span>':'<span class="dash-badge no">❌ Abaixo da meta</span>'}</div>`;
   const prospecSection=document.getElementById('dash-prospec-section');
   if(prospecSection){
-    const prospects=getProspectores();
+    // (2026-11-03) usuário desligado não aparece nos meses a partir do desligamento (histórico com valor lançado continua)
+    const prospects=getProspectores().filter(n=>{try{return _vdAtivoNoMes(n,y,m)||(gcGetExtra(n,y,m).orc||0)>0;}catch(e){return true;}});
     if(!prospects.length){
       prospecSection.innerHTML='';
     }else{
@@ -38763,9 +38795,10 @@ function renderProdLista(){
   const infos=_prodListaFiltrada();
   if(!infos.length){body.innerHTML='<div style="text-align:center;padding:40px;color:var(--ink4);font-size:.85rem">Nenhum pedido encontrado.</div>';return;}
   const hojeIso=_hojeIso(),agora=new Date();
+  const _kpisHtml=(()=>{try{return _prodKpisPipelineHtml(infos,hojeIso);}catch(e){console.warn('kpis produção',e);return'';}})();
   const th='padding:9px 12px;font-size:.66rem;font-weight:700;color:var(--ink4);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap';
   const td='padding:10px 12px;vertical-align:middle';
-  body.innerHTML=`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
+  body.innerHTML=_kpisHtml+`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem">
     <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
       <th style="${th}">Pedido</th><th style="${th}">Prazos</th><th style="${th}">Andamento</th><th style="${th}">Situação</th><th style="${th}"></th>
     </tr></thead><tbody>
@@ -38786,7 +38819,7 @@ function renderProdLista(){
       return `<tr onclick="prodIniciarOuAbrirChecklist('${p.id}')" style="border-bottom:1px solid var(--border-lt);cursor:pointer${atrasado?';background:#fffafa':''}">
         <td style="${td};min-width:200px">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-weight:800;color:var(--ink);white-space:nowrap">OS ${p.os||'—'}</span>${_pedTipoTag(p)}</div>
-          <div style="font-size:.74rem;color:var(--ink3);margin-top:2px;max-width:340px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical" title="${nome.replace(/"/g,'&quot;')}">${nome}</div>
+          <div style="font-size:.74rem;color:var(--ink3);margin-top:2px;max-width:440px;line-height:1.35;white-space:normal;word-break:break-word">${nome}</div>
         </td>
         <td style="${td};white-space:nowrap">
           <div style="font-weight:700;color:${atrasado?'#dc2626':'var(--ink)'}">Produção ${fmtD(etapa.iso)}</div>
@@ -38802,7 +38835,7 @@ function renderProdLista(){
           <span style="display:inline-block;background:${bgDias};color:${corDias};font-weight:800;font-size:.74rem;border-radius:999px;padding:3px 10px">${atrasado?'Atrasado':diasUteis+' dia'+(diasUteis===1?'':'s')+' úteis'}</span>
           ${atrasado?'':`<div style="font-size:.68rem;color:var(--ink4);margin-top:3px">${horasUteis.toFixed(1).replace(/\.0$/,'').replace('.',',')}h úteis · <span style="color:${_projStatusCor(statusPedido)};font-weight:600">${_projStatusLabel(statusPedido).replace(/^\S+\s/,'')}</span></div>`}
         </td>
-        <td style="${td};text-align:right;width:1%"><button onclick="event.stopPropagation();prodIniciarOuAbrirChecklist('${p.id}')" style="${_acaoBtnSt(statusPedido==='concluido'?'ver':feitos>0?'continuar':'iniciar')};border-radius:8px;padding:7px 14px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap">${acaoLbl}</button></td>
+        <td style="${td};text-align:right;width:1%"><button onclick="event.stopPropagation();prodIniciarOuAbrirChecklist('${p.id}')" style="${_acaoBtnSt(statusPedido==='concluido'?'ver':feitos>0?'continuar':'iniciar')};border-radius:8px;padding:7px 14px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap">${acaoLbl}</button>${p.arq_os_url?`<a href="${String(p.arq_os_url).replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir / baixar a Ordem de Serviço (PDF) do pedido" style="${_acaoBtnSt('ver')};display:inline-block;text-decoration:none;border-radius:8px;padding:7px 12px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;margin-left:6px">📄 Pedido (PDF)</a>`:`<span title="Este pedido não tem a Ordem de Serviço em PDF anexada" style="display:inline-block;margin-left:6px;font-size:.7rem;color:#94a3b8;white-space:nowrap">sem PDF</span>`}</td>
       </tr>`;
     }).join('')}
     </tbody></table></div>`;
@@ -40531,7 +40564,7 @@ function _lpCompactaHtmlV2(infos,hoje){
       corpo+=`<tr class="lpx-tr lpx-tr2${ultCls}" style="box-shadow:inset 3px 0 0 ${borda}" onclick="lpToggleLinha('${p.id}')" title="${_plEsc((p.cliente||'')+(vend?' · vendedor: '+vend:''))}">
         <td class="lpx-c-seta">${abertoP?'▾':'▸'}</td>
         <td class="lpx-c-os">${_plEsc(p.os||'—')}</td>
-        <td class="lpx-c-cli"><div class="lpx-1l">${_lpTipoBadge(p)}${_plEsc(_pedNomeCliJob(p))}</div></td>
+        <td class="lpx-c-cli"><div style="white-space:normal;word-break:break-word;line-height:1.35">${_lpTipoBadge(p)}${_plEsc(_pedNomeCliJob(p))}</div></td>
         <td class="lpx-c-onde"><div class="lpx-1l">${onde}</div></td>
         <td class="lpx-c-pz">${prazoIso?fmtD(prazoIso):'—'}${prev}</td>
         <td class="lpx-c-st">${s.pill||'<span class="lpx-st" style="color:#b45309">⚠️ Incompleto</span>'}${aten}</td>
@@ -52429,15 +52462,15 @@ function renderContasUnificado(){
     // Receber, venha de pedido real, planilha ou saldo devedor, sempre carrega os dois campos).
     const dataOriginalRec=i.dataStr||i.dataAtiva||'—';
     const foiAdiadaRec=!!(i.dataStr&&i.dataAtiva&&i.dataStr!==i.dataAtiva);
-    const dataLabelRec=foiAdiadaRec
+    const dataLabelRec=(foiAdiadaRec
       ?`${dataOriginalRec}<div style="font-size:.66rem;color:#d97706;font-weight:600;margin-top:2px">↪ Nova previsão: ${i.dataAtiva}</div>`
-      :dataOriginalRec;
+      :dataOriginalRec)+(i.dataIndefinida?`<div style="font-size:.66rem;color:#dc2626;font-weight:700;margin-top:2px" title="A data não foi informada na emissão — aqui aparece a data de emissão como marcador. Corrija em Editar Valores.">⚠️ sem data — corrigir</div>`:'');
     return{
       iso,dataLabel:dataLabelRec,
       tipoBadge:'<span style="background:#dbeafe;color:#1e40af;border-radius:20px;padding:2px 10px;font-size:.68rem;font-weight:700;white-space:nowrap">📥 Receber</span>',
       quem:quemHtml,quemSub:[pedidoDisplay(i.pedidoOs)||i.mesPedido||'',i.job?'JOB: '+i.job:''].filter(Boolean).join(' · '),
       prazoObra,prazoObraOrig,
-      detalhe:(i.nomeVend||'—')+(i.label?' · '+i.label:''),
+      detalhe:(i.nomeVend||'—')+(i.label?' · '+i.label+(i.label==='Entrada'&&i.dataStr?' · '+i.dataStr:''):''),
       // Contas a Receber não tem conceito de categoria (isso é só de Contas a Pagar,
       // ver plano de contas em getPlanoContasDespesas()) — fica vazio de propósito.
       categoria:'<span style="color:#94a3b8">—</span>',
@@ -73359,6 +73392,20 @@ async function _reajPdf(cad){
 })();
 // cores dos botões de ação das listas de setor (2026-11-03): Iniciar = verde, Continuar = azul, Ver = neutro
 function _acaoBtnSt(k){return k==='iniciar'?'background:#16a34a;color:#fff;border:1px solid #16a34a':k==='continuar'?'background:#0891b2;color:#fff;border:1px solid #0891b2':'background:#fff;color:#334155;border:1px solid #cbd5e1';}
+// (2026-11-03) Produção → Lista: os mesmos números do Pipeline de Pedidos, sobre os pedidos filtrados
+function _prodKpisPipelineHtml(infos,hoje){
+  const c={atrasado:0,risco:0,emdia:0,passou:0,vai:0,concluido:0,incompleto:0};
+  infos.forEach(x=>{let i=null;try{i=_lpInfo(x.p,hoje);}catch(e){}if(!i){c.incompleto++;return;}const g=_lpGrupoDe(i,hoje);c[g.g]=(c[g.g]||0)+1;if(g.passou)c.passou++;if(g.vai)c.vai++;});
+  const ativos=c.atrasado+c.risco+c.emdia;
+  const kpi=(lbl,n,sub,cor)=>`<div class="lpx-kpi" style="cursor:default"><span style="display:block;font-size:.66rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.03em">${lbl}</span><b style="display:block;font-size:1.6rem;line-height:1.15;color:${cor}">${n}</b><small style="display:block;font-size:.7rem;color:#94a3b8">${sub}</small></div>`;
+  const tit=c.passou&&!c.vai?'🔴 Atrasados':!c.passou&&c.vai?'🔴 Vão atrasar':'🔴 Atrasados ou vão atrasar';
+  const subA=c.atrasado?[c.passou?`${c.passou} já ${c.passou===1?'venceu':'venceram'}`:'',c.vai?`${c.vai} com entrega ${c.passou?'':'prevista '}após o prazo`:''].filter(Boolean).join(' · '):'nenhum';
+  return`<div class="lpx-kpis" style="margin-bottom:12px">`
+    +kpi('Pedidos em andamento',ativos,c.concluido?c.concluido+' '+(c.concluido===1?'concluído':'concluídos')+' na lista':'na lista filtrada','#0f172a')
+    +kpi(tit,c.atrasado,subA,c.atrasado?'#dc2626':'#0f172a')
+    +kpi('🟠 Em risco',c.risco,c.risco?'cabem no prazo, mas a etapa atual atrasou':'nenhum',c.risco?'#ea580c':'#0f172a')
+    +kpi('Em dia',c.emdia,'sem problema à vista','#16a34a')+`</div>`;
+}
 // ── EXPORTAR CADERNO (EXCEL) + HISTÓRICO DO VALOR TABELADO POR VIGÊNCIA (2026-11-03) ─────────────────
 // Pedido do Guilherme: "exportar caderno" (a LPU que vai pro cliente) e guardar o valor tabelado de cada
 // vigência ("2026: R$ 5.600 → 2027: R$ 6.100"), sem pesar a tela.
