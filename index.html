@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-04.33';</script>
+<script>const APP_BUILD_VERSION='2026-11-04.35';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -7213,10 +7213,13 @@ async function devolverTarefaGeral(tarefaId,novoPrazo,motivo,novaHora){
   toast('Tarefa devolvida com novo prazo — voltou pra Pendentes.','twar');
 }
 
+// (2026-11-04) OS Granda obrigatória de verdade: só vale o link do PDF já na nuvem — o nome do arquivo sozinho não conta.
+function _emOsFalta(){if(window._emOsEnviando)return 'Aguarde terminar o envio do PDF da Ordem de Serviço Granda';return /^https?:\/\//i.test(String(ed&&ed.arq_os_url||''))?'':'Anexe a Ordem de Serviço Granda (PDF)';}
 async function setUpload(zoneId,nameId,input,edKey){
   const z=document.getElementById(zoneId);
   let f=input.files[0];
   if(!f||!z)return;
+  if(edKey==='arq_os')window._emOsEnviando=true;
   z.classList.add('has-file');
   const icon=z.querySelector('.uz-icon');if(icon)icon.textContent='⏳';
   const title=z.querySelector('.uz-title');if(title)title.textContent='Enviando para a nuvem...';
@@ -7238,6 +7241,7 @@ async function setUpload(zoneId,nameId,input,edKey){
     }catch(e){console.error('Cloudinary upload error',e);}
   }
   if(edKey)ed[edKey+'_url']=url;
+  if(edKey==='arq_os'){window._emOsEnviando=false;if(!url){delete ed.arq_os;try{input.value='';}catch(e){}if(icon)icon.textContent='⚠️';if(title)title.textContent='O envio do PDF falhou — anexe a Ordem de Serviço de novo';z.classList.remove('has-file');toast('O PDF da Ordem de Serviço não foi enviado. Anexe de novo antes de emitir.','terr');return '';}}
   if(edKey==='arq_oc'&&url&&window._ocDecPend){window._ocDecisoes[url]=window._ocDecPend;window._ocDecPend=null;}
   if(icon)icon.textContent=url?'✅':'📄';
   if(title)title.textContent=url?'Arquivo enviado com sucesso':'Arquivo selecionado (sem Cloudinary)';
@@ -12285,7 +12289,7 @@ function validarAba(id){
     // obrigatória (ver _tipoDispensaValores()), por isso virou a 1a pergunta daqui, não mais da
     // aba Dados.
     // (2026-10-19) Rascunho que já estava na fila de emissão não é barrado aqui — a OS continua obrigatória para emitir.
-    if(!ed.arq_os&&!ed.arq_os_url&&!(typeof editing!=='undefined'&&editing))erros.push('Anexe a Ordem de Serviço Granda (PDF) — é o primeiro passo');
+    if(_emOsFalta()&&!(typeof editing!=='undefined'&&editing))erros.push(_emOsFalta()+' — é o primeiro passo');
     if(!ed.tipo)erros.push('Tipo do pedido não selecionado');
     // Nome do Cliente provisório (2026-08-08, a pedido do usuário) — vira o Cliente definitivo
     // do pedido inteiro (ed.cli, ver saveSt()) e o JOB (aba Dados) — some da lista sozinho
@@ -12322,7 +12326,7 @@ function validarAba(id){
     // Pedido em PDF obrigatório (2026-08-28, a pedido do usuário: "sem ele não é
     // possível emitir um pedido") — aceita tanto um arquivo já anexado antes (edição de
     // rascunho salvo, ed.arq_os_url) quanto um recém-selecionado nesta aba (ed.arq_os).
-    if(!ed.arq_os&&!ed.arq_os_url)erros.push('Anexe a Ordem de Serviço Granda (PDF) — fica na aba Conselho (a primeira)');
+    if(_emOsFalta())erros.push(_emOsFalta()+' — fica na aba Conselho (a primeira)');
     // Campo 8 (Categoria de Pedido, ex.: LETRAS CAIXA/LOJA/MANUTENÇÃO — ver getTiposPedido())
     // NÃO é o mesmo que o campo 1 (Tipo do Pedido: Venda/Permuta/Garantia/etc, controla
     // comissão — ver ed.tipo acima). Categoria já tinha o "*" visual desde sempre mas nunca
@@ -13036,11 +13040,11 @@ function _renderStepBase(id){
             ${ed.os_travado?'<div id="em-os-lock-note" style="font-size:.68rem;color:var(--ink4);margin-top:4px">🔒 Preenchido automaticamente a partir do PDF da Ordem de Serviço.</div>':''}
           </div>
           <div class="fg"><label>Ordem de Serviço Granda (PDF) <span class="r">*</span></label>
-            <div class="upload-zone${(ed.arq_os||ed.arq_os_url)?' has-file':''}" id="uz-os" onclick="document.getElementById('em-pdf').click()">
-              <span class="uz-icon">${(ed.arq_os||ed.arq_os_url)?'✅':'📄'}</span>
-              <div class="uz-title">${(ed.arq_os||ed.arq_os_url)?'Arquivo enviado':'Clique para selecionar ou arraste aqui'}</div>
+            <div class="upload-zone${(ed.arq_os_url||window._emOsEnviando)?' has-file':''}" id="uz-os" onclick="document.getElementById('em-pdf').click()">
+              <span class="uz-icon">${(ed.arq_os_url||window._emOsEnviando)?'✅':'📄'}</span>
+              <div class="uz-title">${(ed.arq_os_url||window._emOsEnviando)?'Arquivo enviado':'Clique para selecionar ou arraste aqui'}</div>
               <div class="uz-sub">PDF · Máx. 10MB</div>
-              <div class="uz-file" id="uz-os-name" style="${(ed.arq_os||ed.arq_os_url)?'display:flex':'display:none'}">${(ed.arq_os||ed.arq_os_url)?`✓ ${ed.arq_os||'Arquivo já enviado'}`:''}${ed.arq_os_url?` &nbsp;<a href="${ed.arq_os_url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--brand);font-size:.7rem">[abrir]</a>`:''}</div>
+              <div class="uz-file" id="uz-os-name" style="${(ed.arq_os_url||window._emOsEnviando)?'display:flex':'display:none'}">${(ed.arq_os_url||window._emOsEnviando)?`✓ ${ed.arq_os||'Arquivo já enviado'}`:''}${ed.arq_os_url?` &nbsp;<a href="${ed.arq_os_url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--brand);font-size:.7rem">[abrir]</a>`:''}</div>
               <input type="file" accept=".pdf" id="em-pdf" style="display:none" onchange="emOsPdfSelecionado(this)">
             </div>
           </div>
@@ -15504,7 +15508,7 @@ async function submit(){
   if(!ed.os)erros.push({msg:'Nº da Ordem de Serviço não informado',aba:(idxConselho>=0?idxConselho:idxDados),label:(idxConselho>=0?'Conselho':'Dados Gerais')});
   // Pedido em PDF obrigatório (2026-08-28, a pedido do usuário) — segunda camada de
   // defesa, caso submit() seja chamado sem passar por validarAba('dados') antes.
-  if(!ed.arq_os&&!ed.arq_os_url)erros.push({msg:'Anexe a Ordem de Serviço Granda (PDF)',aba:(typeof idxConselho!=='undefined'&&idxConselho>=0?idxConselho:idxDados),label:(typeof idxConselho!=='undefined'&&idxConselho>=0?'Conselho':'Dados Gerais')});
+  if(_emOsFalta())erros.push({msg:_emOsFalta(),aba:(typeof idxConselho!=='undefined'&&idxConselho>=0?idxConselho:idxDados),label:(typeof idxConselho!=='undefined'&&idxConselho>=0?'Conselho':'Dados Gerais')});
   // Categoria de Pedido (campo 8, ed.tipoPedido) ≠ Tipo do Pedido (campo 1, ed.tipo, já
   // validado acima) — ver mesma nota em validarAba().
   if(!ed.tipoPedido)erros.push({msg:'Categoria de Pedido não selecionada',aba:idxDados,label:'Dados Gerais'});
@@ -15710,6 +15714,7 @@ async function submit(){
     p.conselhoData=_dataConselhoConfirmada;
     ed.conselhoData=_dataConselhoConfirmada;
   }
+  if(!/^https?:\/\//i.test(String(p.arq_os_url||''))){toast('Pedido não emitido: falta a Ordem de Serviço Granda (PDF). Anexe o arquivo na aba Conselho.','terr');try{const _tC=getTabs().findIndex(t=>t.id==='conselho');if(_tC>=0){step=_tC;renderEM();}}catch(e){}return;}
   p.origemComercial=true;
   // Só carimba a data/hora REAL de emissão na 1ª emissão de verdade — nunca numa edição
   // de pedido já emitido antes (_jaEmitidoAntes), senão reabrir/salvar um pedido antigo
@@ -26445,7 +26450,7 @@ setTimeout(()=>{try{_projTopbarMontar();}catch(e){}},0);
 //    (Nº da OS lido, razão/fantasia e valores preenchidos pela leitura, se ninguém mudou depois).
 //  · Emitir sem OS continua bloqueado (validação já existente), agora apontando para a aba Conselho.
 function _emOsZonaHtml(){
-  const tem=!!(ed.arq_os||ed.arq_os_url);
+  const tem=!!(ed.arq_os_url||window._emOsEnviando);
   return`<div class="upload-zone${tem?' has-file':''}" id="uz-os" onclick="document.getElementById('em-pdf').click()">
     <span class="uz-icon">${tem?'✅':'📄'}</span>
     <div class="uz-title">${tem?'Arquivo enviado':'Clique para selecionar ou arraste aqui'}</div>
@@ -26457,7 +26462,7 @@ function _emOsZonaHtml(){
 function _emOsRemoverBtn(){
   const z=document.getElementById('uz-os');if(!z)return;
   let b=document.getElementById('uz-os-rm');
-  const tem=!!(ed.arq_os||ed.arq_os_url);
+  const tem=!!(ed.arq_os_url||window._emOsEnviando);
   if(!tem){if(b)b.remove();return;}
   if(!b){z.insertAdjacentHTML('afterend',`<button type="button" id="uz-os-rm" onclick="_emOsRemover(event)" style="margin-top:6px;background:none;border:none;color:#dc2626;font-size:.74rem;font-weight:700;cursor:pointer;padding:2px 0;font-family:inherit">🗑 Remover arquivo (anexei o errado)</button>`);}
 }
@@ -26794,7 +26799,7 @@ ${_getUserCat().isAdm?`<div class="dash-card"><div style="font-size:.68rem;color
   const linhas=(busca?linhasTodas.filter(l=>{
     const alvo=_normNomeProduto([l.p.nome,l.p.categoria,l.p.tipoProduto,l.p.medida,l.p.variacao,l.p.codigo].filter(Boolean).join(' '));
     return alvo.includes(busca);
-  }):linhasTodas).filter(_cadOk).filter(l=>_prodMostrarInativos||!l.p.inativo).filter(l=>!_prodSoIncompletos||(!l.p.inativo&&_prodFaltam(l.p).length));
+  }):linhasTodas).filter(_cadOk).filter(l=>!window._prodModoOk||window._prodModoOk(l.p,!!busca)).filter(l=>_prodMostrarInativos||!l.p.inativo).filter(l=>!_prodSoIncompletos||(!l.p.inativo&&_prodFaltam(l.p).length));
   const _barCad=_prodCadernosBarHtml(produtos);
 
   if(!produtos.length){
@@ -26804,7 +26809,7 @@ ${_getUserCat().isAdm?`<div class="dash-card"><div style="font-size:.68rem;color
   }
   if(!linhas.length){
     if(elCards)elCards.innerHTML='';
-    el.innerHTML=_barCad+`<div class="dash-card" style="text-align:center;color:var(--ink4);padding:30px;font-size:.8rem">Nenhum produto encontrado${buscaRaw?` pra "${buscaRaw.replace(/</g,'&lt;')}"`:''}${_prodCadernoFiltro?' neste caderno':''}.</div>`+_comprodImportBlock();
+    el.innerHTML=_barCad+`<div class="dash-card" style="text-align:center;color:var(--ink4);padding:30px;font-size:.8rem">${(!buscaRaw&&window._prodModoVazioTxt)?window._prodModoVazioTxt():`Nenhum produto encontrado${buscaRaw?` pra "${buscaRaw.replace(/</g,'&lt;')}"`:''}${_prodCadernoFiltro?' neste caderno':''}.`}</div>`+_comprodImportBlock();
     return;
   }
 
@@ -81355,6 +81360,9 @@ _pfSalvarEtapas=function(){
   // ── 5) Produtos: duas listas (Componentes | Produtos finais) + criar produto final ──
   let MODO='comp';
   window._prodModo=m=>{MODO=m;try{renderComercialProdutos();}catch(e){}};
+  window._prodModoOk=(p,busca)=>busca||(MODO==='kit'?isKit(p):!isKit(p));
+  const _cadDoFiltro=p=>{try{const f=_prodCadernoFiltro;if(!f)return true;return f==='__sem__'?!_cadNorm(p.categoria):_cadNorm(p.categoria)===f;}catch(e){return true;}};
+  window._prodModoVazioTxt=()=>{let c='';try{c=_prodCadernoFiltro&&_prodCadernoFiltro!=='__sem__'?' no caderno '+_prodCadernoFiltro:(_prodCadernoFiltro?' sem caderno':'');}catch(e){}return MODO==='kit'?'Nenhum produto final (kit)'+c+' ainda. Use ＋ Novo produto final (kit) pra agrupar componentes.':'Nenhum componente'+c+'.';};
   {const o=_prodListaProdutosHtml;_prodListaProdutosHtml=function(linhas){
     let ls=linhas||[];
     const busca=((document.getElementById('comprod-fil-busca')||{}).value||'').trim();
@@ -81371,10 +81379,10 @@ _pfSalvarEtapas=function(){
     const r=o.apply(this,arguments);
     try{
       const body=document.getElementById('comprod-body');if(!body)return r;
-      body.querySelectorAll('.dash-card').forEach(c=>{if(!c.querySelector('tr[onclick^="abrirFichaProduto("]'))c.style.display='none';});
-      const L=getProdutos().filter(p=>p&&!p.inativo),nK=L.filter(isKit).length,nC=L.length-nK;
-      let bar=document.getElementById('prod-modo-bar');
-      if(!bar){bar=document.createElement('div');bar.id='prod-modo-bar';body.parentNode.insertBefore(bar,document.getElementById('comprod-cards')||body);}
+      body.querySelectorAll('.dash-card').forEach(c=>{if(c.querySelector('table')&&!c.querySelector('tr[onclick^="abrirFichaProduto("]'))c.style.display='none';});
+      const L=getProdutos().filter(p=>p&&!p.inativo&&_cadDoFiltro(p)),nK=L.filter(isKit).length,nC=L.length-nK;
+      let bar=document.getElementById('prod-modo-bar');if(bar)bar.remove();
+      bar=document.createElement('div');bar.id='prod-modo-bar';const _cb=body.firstElementChild;if(_cb)_cb.insertAdjacentElement('afterend',bar);else body.prepend(bar);
       const b=(k,t,n,sub)=>`<button type="button" onclick="_prodModo('${k}')" style="flex:1;min-width:200px;text-align:left;border:1.5px solid ${MODO===k?'#1a2b5e':'#e2e8f0'};background:${MODO===k?'#1a2b5e':'#fff'};color:${MODO===k?'#fff':'#0f172a'};border-radius:12px;padding:9px 14px;cursor:pointer;font-family:inherit"><div style="font-size:.86rem;font-weight:800">${t} <span style="opacity:.75">(${n})</span></div><div style="font-size:.7rem;opacity:.8;margin-top:1px">${sub}</div></button>`;
       bar.innerHTML=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px">${b('comp','🧱 Componentes',nC,'cada peça com composição, instalação, embalagem e setores próprios')}${b('kit','🧩 Produtos finais (kits)',nK,'agrupamento de componentes — puxa tudo das peças')}
         ${_prodPodeEditar()?`<button type="button" onclick="kitNovoAbrir()" style="align-self:stretch;border:1.5px dashed #6d28d9;background:#faf5ff;color:#6d28d9;border-radius:12px;padding:9px 14px;cursor:pointer;font-family:inherit;font-size:.8rem;font-weight:800;white-space:nowrap">＋ Novo produto final (kit)</button>`:''}</div>`;
