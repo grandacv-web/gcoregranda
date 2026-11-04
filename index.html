@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-04.18';</script>
+<script>const APP_BUILD_VERSION='2026-11-04.21';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -74815,7 +74815,176 @@ function _cadExportar(cad){
   window._projRegraCorrigir20261104=corrigir;
   let n=0;const t=setInterval(async()=>{n++;try{const r=await corrigir();if(r==='ok'||n>40)clearInterval(t);}catch(e){if(n>40)clearInterval(t);}},9500);
 })();
-// ── VISUALIZADOR 3D DO PRODUTO (build 2026-11-04.7; ajustes na .12) ─────────────────────────────────────────────────
+// ── FINANCEIRO: BUSCA RÁPIDA E EM TODOS OS CAMPOS (build 2026-11-04.20) ─────────────────────────────────
+// Pedido do Guilherme: "o Financeiro está travando demais ao pesquisar … deixe ele rodando liso" + "quando
+// pesquiso algo que está no JOB ele não puxa; quero que digitando qualquer coisa puxe da razão social, do
+// fantasia, do job etc."
+// Por que travava: a cada letra digitada a tela unificada (Contas a Pagar/Receber) redesenhava TRÊS telas
+// inteiras — a dela e as duas telas antigas que ficam escondidas por baixo (só pra calcular a lista).
+// Agora: (1) a busca espera a pessoa parar de digitar (~0,3 s) antes de filtrar; (2) as telas antigas
+// escondidas só calculam a lista, sem desenhar nada. A conta e os números continuam exatamente os mesmos.
+// Busca: procura em todos os campos de texto do lançamento e do pedido ligado (cliente, razão social,
+// fantasia, JOB, OS, vendedor, CNPJ, cidade, fornecedor, descrição, NF, centro de custo, valor…), sem
+// diferenciar acento/maiúscula, e com várias palavras ("bk goiania") cada uma precisa aparecer.
+(function(){
+  const N=s=>String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+  const termosDe=id=>N((document.getElementById(id)||{}).value||'').trim().split(/\s+/).filter(Boolean);
+  const raso=o=>{if(!o||typeof o!=='object')return'';const out=[];for(const k in o){const v=o[k];if(typeof v==='string'||typeof v==='number')out.push(v);}return out.join(' ');};
+  const cacheP=new WeakMap();
+  const txtPedido=p=>{if(!p||typeof p!=='object')return'';let t=cacheP.get(p);if(t==null){t=N(raso(p));cacheP.set(p,t);}return t;};
+  // índice dos pedidos por id e por OS (refeito no máximo a cada 2 s ou quando a lista muda)
+  let _ix=null,_ixEm=0,_ixRef=null,_ixLen=-1;
+  function ix(){const t=Date.now();let arr=[];try{arr=pedidos;}catch(e){}
+    if(!_ix||arr!==_ixRef||arr.length!==_ixLen||t-_ixEm>2000){_ix={id:new Map(),os:new Map()};
+      for(const x of arr){if(!x)continue;if(x.id)_ix.id.set(x.id,x);const o=String(x.os||'').trim();if(o&&!_ix.os.has(o))_ix.os.set(o,x);}
+      _ixRef=arr;_ixLen=arr.length;_ixEm=t;}
+    return _ix;}
+  const pedPorId=id=>id?ix().id.get(id)||null:null;
+  const pedPorOs=os=>{if(!os)return null;return ix().os.get(String(os).trim())||null;};
+  const valorTxt=v=>{const n=Number(v);return isFinite(n)&&n?n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';};
+  function txtReceber(i){
+    let t=N(raso(i)+' '+valorTxt(i.valorBruto)+' '+valorTxt(i.valor));
+    const p=i.pedido||pedPorId(i._pid)||pedPorOs(i.pedidoOs);t+=' '+txtPedido(p);
+    try{const xr=(typeof XLSX_VENDAS_BY_OS!=='undefined')?XLSX_VENDAS_BY_OS[String(i.pedidoOs)]:null;if(xr)t+=' '+N(raso(xr));}catch(e){}
+    return t;
+  }
+  function txtPagar(c){
+    let t=N(raso(c)+' '+valorTxt(c.valor));
+    try{if(c.empresa&&typeof _capLabel==='function')t+=' '+N(_capLabel(c.empresa));}catch(e){}
+    t+=' '+txtPedido(pedPorId(c.pedidoId)||pedPorOs(c.pedidoOs));
+    return t;
+  }
+  function txtManual(c){
+    let t=N(raso(c)+' '+valorTxt(c.valor));
+    try{if(c.empresa&&typeof _capLabel==='function')t+=' '+N(_capLabel(c.empresa));}catch(e){}
+    t+=' '+txtPedido(pedPorId(c.pedidoId)||pedPorOs(c.pedidoOs));
+    return t;
+  }
+  const cacheCp=new WeakMap();let cacheCpEm=0;
+  function txtPagarCache(c){const t=Date.now();if(t-cacheCpEm>3000){cacheCpEm=t;}
+    const h=cacheCp.get(c);if(h&&h.em===cacheCpEm)return h.t;const x=txtPagar(c);cacheCp.set(c,{t:x,em:cacheCpEm});return x;}
+  const bate=(txt,termos)=>{for(const w of termos)if(txt.indexOf(w)<0)return false;return true;};
+  window._finBuscaTexto={txtReceber,txtPagar,txtManual,bate};
+
+  // ── os mesmos filtros de sempre; só a parte da busca mudou ──
+  _finFilteredItems=function(){
+    let items=getContasReceber();
+    const tq=termosDe('fin-fil-busca'),q=tq.length>0;
+    const fv=document.getElementById('fin-fil-vend')?.value||'';
+    const fs=document.getElementById('fin-fil-status')?.value||'';
+    const tipoData=document.getElementById('fin-fil-tipo-data')?.value||'venc';
+    const di=document.getElementById('fin-fil-data-ini')?.value||'';
+    const df=document.getElementById('fin-fil-data-fim')?.value||'';
+    items=items.filter(i=>{
+      const statusOk=!fs||(fs==='aberto'?(i.statusCalc==='pendente'||i.statusCalc==='atrasado'):i.statusCalc===fs);
+      if(!statusOk)return false;
+      if(fv&&!vendedorMatch(i.nomeVend,fv))return false;
+      if(q)return bate(txtReceber(i),tq);
+      return _finPeriodoOk(i,tipoData,di,df);
+    });
+    items.sort(_cmpMesVenda);
+    return items;
+  };
+  _finItemsEmAberto=function(){
+    let items=getContasReceber().filter(i=>i.statusCalc==='pendente'||i.statusCalc==='atrasado');
+    const tq=termosDe('fin-fil-busca');
+    const fv=document.getElementById('fin-fil-vend')?.value||'';
+    const di=document.getElementById('fin-fil-data-ini')?.value||'';
+    const df=document.getElementById('fin-fil-data-fim')?.value||'';
+    items=items.filter(i=>{
+      const iso=_finToIso(i.dataAtiva);
+      return(!tq.length||bate(txtReceber(i),tq))&&(!fv||vendedorMatch(i.nomeVend,fv))&&(!di||(iso&&iso>=di))&&(!df||(iso&&iso<=df));
+    });
+    items.sort((a,b)=>{const da=parseDataBR(a.dataAtiva),db=parseDataBR(b.dataAtiva);return(da&&db)?da-db:0;});
+    return items;
+  };
+  _finItemsTodosStatus=function(){
+    let items=getContasReceber();
+    const tq=termosDe('fin-fil-busca'),q=tq.length>0;
+    const fv=document.getElementById('fin-fil-vend')?.value||'';
+    const tipoData=document.getElementById('fin-fil-tipo-data')?.value||'venc';
+    const di=document.getElementById('fin-fil-data-ini')?.value||'';
+    const df=document.getElementById('fin-fil-data-fim')?.value||'';
+    items=items.filter(i=>(!fv||vendedorMatch(i.nomeVend,fv))&&(q?bate(txtReceber(i),tq):_finPeriodoOk(i,tipoData,di,df)));
+    items.sort((a,b)=>{const da=parseDataBR(a.dataAtiva),db=parseDataBR(b.dataAtiva);return(da&&db)?da-db:0;});
+    return items;
+  };
+  const cpFiltro=(comStatus)=>{
+    const tq=termosDe('cp-fil-busca'),q=tq.length>0;
+    let items=contasPagar.map(c=>{const o={...c,statusCalc:c.status==='pago'?'pago':(_cpAtrasada(c)?'atrasado':'pendente')};if(q)o.__txt=txtPagarCache(c);return o;});
+    const femp=document.getElementById('cp-fil-empresa')?.value||'';
+    const fcat=document.getElementById('cp-fil-categoria')?.value||'';
+    const fstat=comStatus?(document.getElementById('cp-fil-status')?.value||''):'';
+    const di=document.getElementById('cp-fil-data-ini')?.value||'';
+    const df=document.getElementById('cp-fil-data-fim')?.value||'';
+    return items.filter(c=>{
+      if(femp&&c.empresa!==femp)return false;
+      if(fcat&&c.centroCusto!==fcat)return false;
+      if(fstat&&!(fstat==='aberto'?(c.statusCalc==='pendente'||c.statusCalc==='atrasado'):c.statusCalc===fstat))return false;
+      if(q){const ok=bate(c.__txt,tq);delete c.__txt;return ok;}
+      const d=_cpDataRefIso(c);
+      return(!di||(d&&d>=di))&&(!df||(d&&d<=df));
+    });
+  };
+  _cpFilteredItems=function(){const items=cpFiltro(true);items.sort((a,b)=>_cpDataRefIso(a).localeCompare(_cpDataRefIso(b)));return items;};
+  _cpItemsTodosStatus=function(){return cpFiltro(false);};
+
+  // ── as telas antigas escondidas só calculam a lista (não desenham) quando a tela unificada pede ──
+  let silencio=false;
+  // sem offsetParent (forçava o navegador a recalcular a tela inteira — era isso que congelava ~2 s)
+  const visivel=id=>{let e=document.getElementById(id);if(!e)return false;while(e&&e!==document.body){if(e.hidden||(e.style&&e.style.display==='none'))return false;e=e.parentElement;}return true;};
+  const _rf=renderFinanceiro;
+  renderFinanceiro=function(){
+    if(silencio&&!visivel('fin-body')&&!(typeof finView!=='undefined'&&finView==='fluxo')){
+      if(!_isFinanceiroUser())return;_finItemsAtuais=_finFilteredItems();return;}
+    return _rf.apply(this,arguments);
+  };
+  const _rp=renderContasPagar;
+  renderContasPagar=function(){
+    if(silencio&&!visivel('cp-body')){if(!_isFinanceiroUser())return;_cpItemsAtuais=_cpFilteredItems();return;}
+    return _rp.apply(this,arguments);
+  };
+  const _ru=renderContasUnificado;
+  renderContasUnificado=function(){
+    const tq=termosDe('fc-fil-busca');let orig=null;
+    // receitas manuais também respeitam a busca
+    if(tq.length&&Array.isArray(contasReceberManual)){orig=contasReceberManual;contasReceberManual=orig.filter(c=>bate(txtManual(c),tq));}
+    silencio=true;
+    try{return _ru.apply(this,arguments);}
+    finally{silencio=false;if(orig)contasReceberManual=orig;}
+  };
+
+  // ── espera parar de digitar antes de filtrar ──
+  function ligarBusca(){
+    const el=document.getElementById('fc-fil-busca');if(!el||el.dataset.rapida)return!!el;
+    el.dataset.rapida='1';el.removeAttribute('oninput');
+    el.setAttribute('placeholder','Buscar por cliente, razão social, fantasia, JOB, OS, fornecedor, descrição, NF, valor…');
+    let t=null;
+    el.addEventListener('input',()=>{clearTimeout(t);t=setTimeout(()=>{try{fcAplicarFiltros();}catch(e){console.error(e);}},300);});
+    el.addEventListener('keydown',e=>{if(e.key==='Enter'){clearTimeout(t);try{fcAplicarFiltros();}catch(err){}}});
+    return true;
+  }
+  if(!ligarBusca()){let n=0;const iv=setInterval(()=>{n++;if(ligarBusca()||n>60)clearInterval(iv);},1000);}
+})();
+
+// ── PROJETOS: INDICADORES SEMPRE ATUALIZADOS COM OS DADOS (build 2026-11-04.21) ─────────────────────────
+// Guilherme (04/11, 15:27): "indicadores de projetos ainda sem funcionar… é a quinta vez que peço". Achado:
+// quando os pedidos chegam do servidor (ou mudam), o sistema atualizava Gráficos, Vendas e Financeiro, mas
+// NÃO a tela de Projetos — quem abria Projetos/Indicadores antes de os pedidos terminarem de carregar ficava
+// com a tela calculada sem pedidos (tudo zerado) até trocar de aba. Agora a aba aberta de Projetos (Lista,
+// Kanban, Calendário ou Indicadores) se recalcula sozinha quando os pedidos ou a configuração chegam/mudam.
+(function(){
+  let t=null,ultSig='';
+  const sig=()=>{let n=0,u=0;try{n=(pedidos||[]).length;}catch(e){}try{u=Object.keys((cfg&&cfg.usuarioNomes)||{}).length;}catch(e){}return n+'|'+u;};
+  const aberta=()=>{const s=document.getElementById('sec-cat-PROJETOS');if(!s)return false;let e=s;while(e&&e!==document.body){if(e.hidden||(e.style&&e.style.display==='none'))return false;e=e.parentElement;}return true;};
+  function agendar(){clearTimeout(t);t=setTimeout(()=>{try{if(aberta())projRenderAtivo();}catch(e){console.warn('Projetos: atualizar',e);}},400);}
+  // 1) toda chegada de pedidos (o pedidos é trocado inteiro a cada atualização do servidor)
+  try{const _ra=renderAll;renderAll=function(){const r=_ra.apply(this,arguments);agendar();return r;};}catch(e){}
+  // 2) segurança: se a quantidade de pedidos/usuários mudou e a tela está aberta, recalcula
+  setInterval(()=>{const s=sig();if(s!==ultSig){ultSig=s;agendar();}},3000);
+})();
+
+// ── VISUALIZADOR 3D DO PRODUTO (build 2026-11-04.7; ajustes na .12, .16 e .19) ─────────────────────────────────────────────────
 // Pedido do Guilherme: cada produto do caderno com a opção VISUALIZADOR 3D. O modelo 3D fica dentro do
 // sistema; clicar numa parte mostra do que ela é feita; dá pra "abrir" o produto (vista explodida,
 // raio-X, ocultar/isolar peça e corte) e ver a estrutura por dentro.
@@ -74833,6 +75002,9 @@ function _cadExportar(cad){
 //   cores sem o "lavado" (sem tone mapping).
 // - .16: arquivo acima do limite do Cloudinary (~10 MB) sobe sozinho em partes de 9 MB (p.modelo3dPartes) e o
 //   visualizador/baixar juntam as partes — o .dae do SketchUp entra do jeito que é exportado.
+// - .19: peça = cada grupo/componente do SketchUp; ligar peça → matéria-prima (da composição ou da base); medida
+//   lida do 3D; "Gerar lista de matéria-prima" com chapas/barras inteiras e aproveitamento (prévia, grava só ao
+//   confirmar). Tamanho de chapa/barra vem do nome da matéria-prima; o que faltar é perguntado e fica em cfg.mpMedidas.
 (function(){
   const LIB='https://cdn.jsdelivr.net/npm/three@0.147.0/';
   const FMTS=['glb','gltf','dae','obj','fbx','stl'];
@@ -75068,6 +75240,8 @@ function _cadExportar(cad){
 @keyframes g3spin{to{transform:rotate(360deg)}}
 #gc3d .g3-form label{display:block;font-size:.68rem;color:#64748b;margin:8px 0 3px;font-weight:600}
 #gc3d .g3-form input,#gc3d .g3-form select{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:.78rem;text-transform:none}
+#g3-previa input[type=number]{padding:5px 7px;border:1px solid #cbd5e1;border-radius:7px;font-family:inherit;font-size:.78rem;box-sizing:border-box}
+#g3-previa td{vertical-align:middle}
 @media (max-width:760px){
   #gc3d .g3-corpo{flex-direction:column}
   #gc3d .g3-cena{flex:none;height:55vh}
@@ -75268,8 +75442,20 @@ function _cadExportar(cad){
     let poucosNomes=false;
     if(cands.length===1&&!cands[0].isMesh){const f=cands[0].children.filter(temMalha);if(f.length>1)poucosNomes=f.filter(nomeNo).length<f.length*0.5;}
     else if(cands.length>1)poucosNomes=cands.filter(nomeNo).length<cands.length*0.5;
-    S.porMaterial=cands.length>250||poucosNomes;
-    if(S.porMaterial){
+    // (.19) grupos sem nome: cada GRUPO/COMPONENTE do SketchUp vira uma peça (pedido do Guilherme: "o grupo do SketchUp")
+    const nosMalha=[];model.traverse(x=>{if(x.isMesh&&nosMalha.indexOf(x.parent)<0)nosMalha.push(x.parent);});
+    S.porGrupo=(cands.length>250||poucosNomes)&&nosMalha.length<=800;
+    S.porMaterial=!S.porGrupo&&(cands.length>250||poucosNomes);
+    const caminho=o=>{const ix=[];let x=o;while(x&&x!==model&&x.parent){ix.unshift(x.parent.children.indexOf(x));x=x.parent;}return'g'+ix.join('.');};
+    if(S.porGrupo){
+      nosMalha.forEach((no,ix)=>{
+        const ms=no.children.filter(c=>c.isMesh);
+        const cont={};ms.forEach(x=>matsDe(x).forEach(m=>{const k=util(m&&m.name)||'';if(k)cont[k]=(cont[k]||0)+1;}));
+        const mat=Object.keys(cont).sort((a,b)=>cont[b]-cont[a])[0]||'';
+        const nm=util(no.name)||(ms.map(m=>util(m.name)).find(Boolean))||'';
+        pecas.push({nome:nm||('Peça '+(ix+1)),semNome:!nm,objs:ms,no,def:String(no.name||''),mat,cor:corDe(ms[0]),keyFixa:caminho(no)});
+      });
+    }else if(S.porMaterial){
       const g=new Map();
       model.traverse(x=>{if(!x.isMesh)return;
         const ms=matsDe(x);let mi=0;
@@ -75288,8 +75474,8 @@ function _cadExportar(cad){
       }else pecas.push({nome:nomeDe(um,1),objs:[um],mat:matPrincipal(um),cor:corDe(um)});
     }else cands.forEach(o=>pecas.push({nome:nomeDe(o,pecas.length+1),objs:[o],mat:matPrincipal(o),cor:corDe(o)}));
     // chave estável (nome; repetido ganha #2, #3…)
-    const vistos={};pecas.forEach(pc=>{const b=chave(pc.nome);vistos[b]=(vistos[b]||0)+1;pc.key=vistos[b]>1?b+' #'+vistos[b]:b;if(vistos[b]>1)pc.nomeTela=pc.nome+' ('+vistos[b]+')';});
-    pecas.forEach(pc=>{if(!pc.nomeTela&&vistos[chave(pc.nome)]>1)pc.nomeTela=pc.nome+' (1)';pc.nomeTela=pc.nomeTela||pc.nome;});
+    const vistos={};pecas.forEach(pc=>{if(pc.keyFixa){pc.key=pc.keyFixa;return;}const b=chave(pc.nome);vistos[b]=(vistos[b]||0)+1;pc.key=vistos[b]>1?b+' #'+vistos[b]:b;if(vistos[b]>1)pc.nomeTela=pc.nome+' ('+vistos[b]+')';});
+    pecas.forEach(pc=>{if(!pc.keyFixa&&!pc.nomeTela&&vistos[chave(pc.nome)]>1)pc.nomeTela=pc.nome+' (1)';pc.nomeTela=pc.nomeTela||pc.nome;});
     // mapa malha → peça (para o clique) e direção da vista explodida
     S.mapa=new Map();
     const C=S.centro,raio=Math.max(S.size.x,S.size.y,S.size.z)||1;
@@ -75320,8 +75506,9 @@ function _cadExportar(cad){
   function matsPeca(pc){if(pc.sub)return[matsDe(pc.sub.mesh)[pc.sub.idx]];const r=[];pc.objs.forEach(o=>o.traverse(x=>{if(x.isMesh)matsDe(x).forEach(m=>r.push(m));}));return r;}
   function aplicar(){
     const pink=new THREE.Color(0xe91e63);
+    const multi=S.multi&&S.multi.size?S.multi:null;
     S.pecas.forEach(pc=>{
-      const sel=pc===S.sel;
+      const sel=pc===S.sel||(!!multi&&multi.has(pc));
       const vis=pc.vis&&(!S.isolar||!S.sel||sel);
       if(pc.sub)matsPeca(pc).forEach(m=>m.visible=vis);else pc.objs.forEach(o=>o.visible=vis);
       const fant=S.raiox&&(S.sel?!sel:true);
@@ -75338,7 +75525,7 @@ function _cadExportar(cad){
   function contorno(){
     if(S.helper){S.scene.remove(S.helper);S.helper.geometry.dispose();S.helper.material.dispose();S.helper=null;}
     const pc=S.sel;if(!pc||!pc.objs.length||!pc.vis)return;
-    const bx=new THREE.Box3();pc.objs.forEach(o=>bx.expandByObject(o));if(bx.isEmpty())return;
+    const bx=new THREE.Box3();(S.multi&&S.multi.size?[...S.multi]:[pc]).forEach(q=>q.objs.forEach(o=>bx.expandByObject(o)));if(bx.isEmpty())return;
     S.helper=new THREE.Box3Helper(bx,0xe91e63);S.helper.material.depthTest=false;S.helper.material.transparent=true;S.helper.material.opacity=.9;S.helper.renderOrder=999;S.scene.add(S.helper);
   }
   function explodir(t){
@@ -75368,7 +75555,7 @@ function _cadExportar(cad){
     selecionar(pc,{obj:h.object,local:h.object.worldToLocal(h.point.clone())});
   }
   function selecionar(pc,pino){
-    S.sel=pc;S.editando=false;
+    S.sel=pc;S.editando=false;S.ligando=false;S.multi=new Set(pc?[pc]:[]);
     S.pino=pc?(pino||null):null;
     aplicar();painel();
     const pn=document.getElementById('g3-painel');
@@ -75386,18 +75573,22 @@ function _cadExportar(cad){
     const r=S.ren.domElement.getBoundingClientRect();
     el.style.left=((v.x+1)/2*r.width)+'px';el.style.top=((1-v.y)/2*r.height)+'px';
     const inf=infoPeca(pc);
-    const html=`<b>${esc(pc.nomeTela)}</b>${inf.material?`<small>${esc(inf.material)}</small>`:''}`;
+    const nSel=S.multi&&S.multi.size>1?` <span style="opacity:.7">+${S.multi.size-1}</span>`:'';
+    const html=`<b>${esc(nomePeca(pc))}</b>${nSel}${inf.material?`<small>${esc(inf.material)}</small>`:''}`;
     if(el._h!==html){el.innerHTML=html;el._h=html;}
     el.style.display='block';
   }
 
   // ── o que a peça é: descrição salva > material do arquivo ──
   function mpsDe(p){return Array.isArray(p&&p.materiasPrimas)?p.materiasPrimas:[];}
+  function mpNome(d){return d&&d.mp?(typeof d.mp==='object'?d.mp.n:d.mp):'';}
   function infoPeca(pc){
     const d=S.desc[pc.key]||{};
-    let mp=null;if(d.mp){mp=mpsDe(S.p).find(r=>chave(r.nome)===chave(d.mp))||mpsDe(S.dono).find(r=>chave(r.nome)===chave(d.mp))||{nome:d.mp};}
-    return{material:d.mat||(mp&&mp.nome)||pc.mat||'',mp,obs:d.obs||'',descrita:!!(d.mat||d.mp||d.obs),em:d.em,por:d.por};
+    let mp=null;const mn=mpNome(d);
+    if(mn){mp=mpsDe(S.p).find(r=>chave(r.nome)===chave(mn))||mpsDe(S.dono).find(r=>chave(r.nome)===chave(mn))||{nome:mn};}
+    return{material:mn||d.mat||pc.mat||'',mp,obs:d.obs||'',descrita:!!(d.mat||mn||d.obs),ligada:!!mn,em:d.em,por:d.por,nome:d.nome||''};
   }
+  const nomePeca=pc=>{const d=S.desc[pc.key];return(d&&d.nome)||pc.nomeTela;};
   const num=v=>{try{return _prodNum(v);}catch(e){const n=Number(v);return isFinite(n)?n:0;}};
   const qtdTxt=r=>r&&num(r.qtd)>0?`${num(r.qtd).toLocaleString('pt-BR',{maximumFractionDigits:3})} ${r.unidade||''}`.trim():'';
 
@@ -75405,43 +75596,60 @@ function _cadExportar(cad){
     const el=document.getElementById('g3-painel');if(!el||!S)return;
     const sc=el.scrollTop;
     const pc=S.sel,ed=pode();
+    const multi=S.multi&&S.multi.size>1?[...S.multi]:null;
     let h='<div class="g3-sec">';
     if(!pc){
       h+=`<div class="g3-h">Peça selecionada</div><div style="font-size:.78rem;color:#64748b;line-height:1.5">Clique numa parte do produto, ou escolha na lista abaixo, para ver do que ela é feita.</div>`;
+    }else if(S.ligando&&ed){
+      h+=ligarHtml(pc,multi);
     }else if(S.editando&&ed){
       const d=S.desc[pc.key]||{};
-      const nomes=[...new Set([...mpsDe(S.dono),...mpsDe(S.p)].map(r=>r&&r.nome).filter(Boolean))];
-      h+=`<div class="g3-h">Descrever peça</div><div style="font-size:.84rem;font-weight:700;color:#0f172a">${esc(pc.nomeTela)}</div>
+      h+=`<div class="g3-h">Descrever peça</div><div style="font-size:.84rem;font-weight:700;color:#0f172a">${esc(nomePeca(pc))}</div>
         <div class="g3-form">
           <label for="g3-f-mat">Material / acabamento</label><input id="g3-f-mat" class="no-upper" value="${esc(d.mat||pc.mat||'')}" placeholder="Ex.: ACM 3 mm branco brilho">
-          <label for="g3-f-mp">Matéria-prima da composição</label><select id="g3-f-mp"><option value="">— nenhuma —</option>${nomes.map(n=>`<option ${chave(n)===chave(d.mp)?'selected':''}>${esc(n)}</option>`).join('')}</select>
-          ${nomes.length?'':'<div style="font-size:.66rem;color:#94a3b8;margin-top:3px">Este produto ainda não tem matérias-primas na composição.</div>'}
           <label for="g3-f-obs">Observação</label><input id="g3-f-obs" class="no-upper" value="${esc(d.obs||'')}" placeholder="Ex.: soldado na base; pintura eletrostática preta">
         </div>
-        <div class="g3-linha" style="margin-top:12px"><button type="button" class="g3-b on" onclick="_gc3dSalvarPeca()">Salvar</button><button type="button" class="g3-b" onclick="_gc3dEditar(false)">Cancelar</button></div>
-        <div style="font-size:.66rem;color:#94a3b8;margin-top:8px">A descrição vale para todas as variações que usam este modelo.</div>`;
+        <div class="g3-linha" style="margin-top:12px"><button type="button" class="g3-b on" onclick="_gc3dSalvarPeca()">Salvar</button><button type="button" class="g3-b" onclick="_gc3dEditar(false)">Cancelar</button></div>`;
     }else{
       const inf=infoPeca(pc);
-      h+=`<div class="g3-h">Peça selecionada</div>
-        <div style="display:flex;align-items:center;gap:8px"><span class="g3-cor" style="background:${pc.cor}"></span><div style="font-size:.9rem;font-weight:800;color:#0f172a;overflow-wrap:anywhere">${esc(pc.nomeTela)}</div></div>
+      const iguais=S.porGrupo&&pc.def?S.pecas.filter(q=>q.def&&q.def===pc.def).length:0;
+      const mesmoMat=pc.mat?S.pecas.filter(q=>q.mat===pc.mat).length:0;
+      h+=`<div class="g3-h">${multi?multi.length+' peças selecionadas':'Peça selecionada'}</div>
+        <div style="display:flex;align-items:center;gap:8px"><span class="g3-cor" style="background:${pc.cor}"></span><div style="font-size:.9rem;font-weight:800;color:#0f172a;overflow-wrap:anywhere">${esc(nomePeca(pc))}${multi?` <span style="font-weight:600;color:#64748b">+${multi.length-1}</span>`:''}</div></div>
         <dl class="g3-info">
-          <dt>Material</dt><dd>${inf.material?esc(inf.material):'<span style="color:#94a3b8;font-weight:500">não informado</span>'}</dd>
-          ${inf.mp?`<dt>Matéria-prima</dt><dd>${esc(inf.mp.nome)}${qtdTxt(inf.mp)?`<div style="font-weight:500;color:#64748b;font-size:.7rem">${esc(qtdTxt(inf.mp))} na composição</div>`:''}</dd>`:''}
+          <dt>Matéria-prima</dt><dd>${inf.ligada?esc(inf.material):'<span style="color:#94a3b8;font-weight:500">não ligada</span>'}${inf.mp&&qtdTxt(inf.mp)?`<div style="font-weight:500;color:#64748b;font-size:.7rem">${esc(qtdTxt(inf.mp))} na composição</div>`:''}</dd>
+          ${!inf.ligada&&pc.mat?`<dt>No arquivo</dt><dd style="font-weight:500;color:#64748b">${esc(pc.mat)}</dd>`:''}
+          ${(()=>{try{const m=medidasPeca(pc);return m.txt?`<dt>Medida</dt><dd style="font-weight:500">${esc(m.txt)}</dd>`:'';}catch(e){return'';}})()}
           ${inf.obs?`<dt>Observação</dt><dd style="font-weight:500">${esc(inf.obs)}</dd>`:''}
         </dl>
-        ${!inf.descrita&&inf.material?'<div style="font-size:.66rem;color:#94a3b8;margin-top:6px">Material conforme o nome no arquivo 3D.</div>':''}
-        <div class="g3-linha" style="margin-top:12px">
+        ${ed?`<div class="g3-linha" style="margin-top:12px"><button type="button" class="g3-b on" onclick="_gc3dLigar(true)">🔗 ${inf.ligada?'Trocar matéria-prima':'Ligar matéria-prima'}</button>
+          ${iguais>1?`<button type="button" class="g3-b" onclick="_gc3dSelIguais('def')" title="Mesmo componente do SketchUp">Selecionar iguais (${iguais})</button>`:''}
+          ${mesmoMat>1?`<button type="button" class="g3-b" onclick="_gc3dSelIguais('mat')">Mesmo material (${mesmoMat})</button>`:''}</div>`:''}
+        <div class="g3-linha" style="margin-top:8px">
           <button type="button" class="g3-b" onclick="_gc3dOcultar()">Ocultar</button>
           <button type="button" class="g3-b ${S.isolar?'on':''}" onclick="_gc3dIsolar()">${S.isolar?'Mostrar as outras':'Ver só esta'}</button>
-          ${ed?`<button type="button" class="g3-b" onclick="_gc3dEditar(true)">✏️ ${inf.descrita?'Editar descrição':'Descrever peça'}</button>`:''}
+          ${ed?`<button type="button" class="g3-b" onclick="_gc3dEditar(true)">✏️ Observação</button>`:''}
         </div>`;
     }
     h+='</div>';
+    // matéria-prima do produto (Projetos/admin)
+    if(ed){
+      const lig=S.pecas.filter(q=>infoPeca(q).ligada).length;
+      const comp=mpsDe(S.p);
+      const usadas=new Set(S.pecas.map(q=>chave(mpNome(S.desc[q.key]))).filter(Boolean));
+      const falta=comp.filter(r=>!usadas.has(chave(r.nome)));
+      h+=`<div class="g3-sec"><div class="g3-h">Matéria-prima do produto</div>
+        <div style="font-size:.76rem;color:#334155"><b>${lig}</b> de ${S.pecas.length} ${_plural(S.pecas.length,'peça ligada','peças ligadas').replace(/^peças? /,'')}</div>
+        <div style="height:6px;border-radius:3px;background:#f1f5f9;margin:6px 0 8px;overflow:hidden"><div style="height:100%;width:${S.pecas.length?Math.round(lig/S.pecas.length*100):0}%;background:#16a34a"></div></div>
+        ${comp.length?(falta.length?`<div style="font-size:.7rem;color:#92400e;margin-bottom:8px">Da composição, ainda sem peça: ${falta.slice(0,6).map(r=>esc(r.nome)).join(' · ')}${falta.length>6?' +'+(falta.length-6):''}</div>`:'<div style="font-size:.7rem;color:#15803d;margin-bottom:8px">✅ Toda a composição está ligada a peças.</div>'):''}
+        <button type="button" class="g3-b on" onclick="_gc3dGerarLista()" ${lig?'':'disabled'} style="width:100%">📋 Gerar lista de matéria-prima</button>
+        ${lig?'':'<div style="font-size:.66rem;color:#94a3b8;margin-top:6px">Ligue as peças às matérias-primas para gerar a lista com o aproveitamento.</div>'}</div>`;
+    }
     // ferramentas
     const c=S.corte;
     const eixos=[['x','Largura'],['y','Altura'],['z','Profundidade']];
     h+=`<div class="g3-sec"><div class="g3-h">Abrir o produto</div>
-      <div style="display:flex;justify-content:space-between;font-size:.74rem;color:#334155;font-weight:600"><span>Vista explodida</span><span style="color:#94a3b8">${Math.round(S.exp*100)}%</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:.74rem;color:#334155;font-weight:600"><span>Vista explodida</span><span id="g3-exp-pct" style="color:#94a3b8">${Math.round(S.exp*100)}%</span></div>
       <input type="range" min="0" max="100" value="${Math.round(S.exp*100)}" oninput="_gc3dExplodir(this.value)" ${S.pecas.some(p=>p.mov&&p.mov.length)&&S.pecas.length>1?'':'disabled'} aria-label="Vista explodida">
       <div class="g3-linha" style="margin-top:10px">
         <button type="button" class="g3-b ${S.raiox?'on':''}" onclick="_gc3dRaioX()" title="Deixa as outras peças transparentes para ver por dentro">Raio-X</button>
@@ -75455,23 +75663,274 @@ function _cadExportar(cad){
         <button type="button" class="g3-b" onclick="_gc3dCorteInv()" style="margin-top:4px">Inverter lado</button></div>`:''}
     </div>`;
     // lista
-    h+=`<div class="g3-sec" style="border-bottom:none"><div class="g3-h">Peças (${S.pecas.length})</div>${S.pecas.map((p,ix)=>{const inf=infoPeca(p);
-      return`<div class="g3-peca ${p===S.sel?'sel':''}" data-k="${esc(p.key)}" onclick="_gc3dSel(${ix})" style="${p.vis?'':'opacity:.45'}">
+    const fl=chave(S.filtroLista||'');
+    const lista=S.pecas.map((p,ix)=>({p,ix})).filter(({p})=>!fl||chave(nomePeca(p)+' '+(p.mat||'')+' '+mpNome(S.desc[p.key])).indexOf(fl)>=0);
+    h+=`<div class="g3-sec" style="border-bottom:none"><div class="g3-h">Peças (${S.pecas.length})</div>
+      ${S.pecas.length>12?`<input class="no-upper" placeholder="Buscar peça ou material" value="${esc(S.filtroLista||'')}" oninput="_gc3dFiltroLista(this.value)" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:.76rem;margin-bottom:6px">`:''}
+      ${lista.slice(0,300).map(({p,ix})=>{const inf=infoPeca(p);const on=p===S.sel||(S.multi&&S.multi.has(p));
+      return`<div class="g3-peca ${on?'sel':''}" data-k="${esc(p.key)}" onclick="_gc3dSel(${ix},event)" style="${p.vis?'':'opacity:.45'}">
         <span class="g3-cor" style="background:${p.cor}"></span>
-        <div class="nm"><b>${esc(p.nomeTela)}</b>${inf.material?`<small>${esc(inf.material)}</small>`:''}</div>
-        <button type="button" class="g3-olho" title="${p.vis?'Ocultar':'Mostrar'}" onclick="event.stopPropagation();_gc3dVis(${ix})">${p.vis?'👁':'🚫'}</button></div>`;}).join('')}</div>`;
+        <div class="nm"><b>${esc(nomePeca(p))}</b>${inf.material?`<small>${inf.ligada?'🔗 ':''}${esc(inf.material)}</small>`:''}</div>
+        <button type="button" class="g3-olho" title="${p.vis?'Ocultar':'Mostrar'}" onclick="event.stopPropagation();_gc3dVis(${ix})">${p.vis?'👁':'🚫'}</button></div>`;}).join('')}
+      ${lista.length>300?`<div style="font-size:.7rem;color:#94a3b8;padding:6px">+${lista.length-300} peças — use a busca</div>`:''}</div>`;
     el.innerHTML=h;el.scrollTop=sc;
+    if(S.ligando){const b=document.getElementById('g3-mp-busca');if(b&&!S._focou){b.focus();S._focou=true;}}
   }
 
+  // ═════ MATÉRIA-PRIMA POR PEÇA (.19) ═════
+  // Caminho A: o produto tem composição → escolhe a matéria-prima da lista do produto.
+  // Caminho B: busca na base de matérias-primas do GCore (a mesma do orçamento).
+  // A medida de cada peça é lida do 3D; o "Gerar lista" calcula chapas/barras inteiras com o aproveitamento.
+  function ligarHtml(pc,multi){
+    const comp=mpsDe(S.p);
+    const q=S.buscaMp||'';
+    let sug=[];try{sug=q.trim().length>=2?_mpbSugestoes(q):[];}catch(e){}
+    S._sug=sug;
+    const d=S.desc[pc.key]||{};
+    return`<div class="g3-h">Ligar matéria-prima${multi?' · '+multi.length+' peças':''}</div>
+      <div style="font-size:.84rem;font-weight:700;color:#0f172a;margin-bottom:8px">${esc(nomePeca(pc))}${multi?` <span style="color:#64748b;font-weight:600">+${multi.length-1}</span>`:''}</div>
+      <div class="g3-form">
+        <label for="g3-f-nome">Nome da peça (opcional)</label><input id="g3-f-nome" class="no-upper" value="${esc(d.nome||(pc.semNome?'':pc.nomeTela))}" placeholder="Ex.: Coluna, Face frontal, Base">
+      </div>
+      ${comp.length?`<div style="font-size:.68rem;color:#64748b;font-weight:600;margin:10px 0 4px">Da composição do produto</div>
+        <div style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto">${comp.map((r,ix)=>`<button type="button" class="g3-b" style="justify-content:flex-start;text-align:left;white-space:normal" onclick="_gc3dEscolherMp('comp',${ix})">${esc(r.nome)}</button>`).join('')}</div>`:''}
+      <div style="font-size:.68rem;color:#64748b;font-weight:600;margin:10px 0 4px">${comp.length?'Ou busque na base de matérias-primas':'Busque na base de matérias-primas'}</div>
+      <input id="g3-mp-busca" class="no-upper" value="${esc(q)}" oninput="_gc3dBuscaMp(this.value)" placeholder="Ex.: ACM 3MM VERMELHO, METALON 30X30" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:.78rem;text-transform:none">
+      <div id="g3-mp-sug" style="display:flex;flex-direction:column;gap:4px;margin-top:6px;max-height:220px;overflow:auto">${sugHtml(sug,q)}</div>
+      <div class="g3-linha" style="margin-top:10px">${mpNome(d)?`<button type="button" class="g3-b" style="color:#dc2626;border-color:#fecaca" onclick="_gc3dEscolherMp('nenhuma')">Desligar</button>`:''}<button type="button" class="g3-b" onclick="_gc3dLigar(false)">Cancelar</button></div>`;
+  }
+  function sugHtml(sug,q){
+    if(!q||q.trim().length<2)return'<div style="font-size:.7rem;color:#94a3b8">Digite pelo menos 2 letras.</div>';
+    if(!sug.length)return`<div style="font-size:.7rem;color:#94a3b8">${Object.keys((()=>{try{return _mpbBase();}catch(e){return{};}})()).length?'Nada encontrado.':'Carregando a base de matérias-primas…'}</div>`;
+    return sug.map((x,ix)=>`<button type="button" class="g3-b" style="justify-content:space-between;text-align:left;white-space:normal;gap:8px" onclick="_gc3dEscolherMp('base',${ix})"><span>${esc(x.n)}${x.tipo==='base'?` <span style="color:#94a3b8;font-weight:500">· ${esc(x.cod)}</span>`:''}</span><span style="color:#64748b;font-weight:500;white-space:nowrap">${esc(x.u||'')}</span></button>`).join('');
+  }
+  window._gc3dFiltroLista=v=>{if(!S)return;S.filtroLista=v;const a=document.activeElement;painel();try{const i=document.querySelector('#g3-painel input[placeholder="Buscar peça ou material"]');if(i){i.focus();i.setSelectionRange(v.length,v.length);}}catch(e){}};
+  window._gc3dLigar=on=>{if(!S||!S.sel)return;if(on&&!pode()){toast('Só Projetos e administradores ligam matéria-prima.','terr');return;}S.ligando=!!on;S.editando=false;S._focou=false;if(on){try{_mpbIniciar();}catch(e){}}painel();};
+  window._gc3dBuscaMp=v=>{if(!S)return;S.buscaMp=v;let sug=[];try{sug=v.trim().length>=2?_mpbSugestoes(v):[];}catch(e){}S._sug=sug;const el=document.getElementById('g3-mp-sug');if(el)el.innerHTML=sugHtml(sug,v);};
+  window._gc3dSelIguais=tipo=>{if(!S||!S.sel)return;const pc=S.sel;const l=S.pecas.filter(q=>tipo==='def'?(q.def&&q.def===pc.def):(q.mat&&q.mat===pc.mat));S.multi=new Set(l);aplicar();painel();};
+  window._gc3dEscolherMp=async(tipo,ix)=>{
+    if(!S||!S.sel||!pode())return;
+    let mp=null;
+    if(tipo==='comp'){const r=mpsDe(S.p)[ix];if(!r)return;mp={tipo:'comp',n:r.nome,cod:r.cod||'',u:r.unidade||'',v:Number(r.precoUnit)||0,extraId:r.extraId||''};}
+    else if(tipo==='base'){const x=(S._sug||[])[ix];if(!x)return;mp={tipo:x.tipo,n:x.n,cod:x.cod||'',u:x.u||'',v:Number(x.v)||0,extraId:x.id||''};}
+    const nome=String((document.getElementById('g3-f-nome')||{}).value||'').replace(/\s+/g,' ').trim();
+    const alvo=S.multi&&S.multi.size?[...S.multi]:[S.sel];
+    const Sx=S,dn=S.dono,agora=new Date().toISOString(),q=quem();
+    try{
+      const n=await window._fbProdFichaTx(dn.id,x=>{x.m3dPecas=x.m3dPecas||{};
+        alvo.forEach((pc,k)=>{const at=Object.assign({},x.m3dPecas[pc.key]||{});
+          if(mp)at.mp=mp;else delete at.mp;
+          if(nome)at.nome=alvo.length>1?nome+' '+(k+1):nome;
+          at.em=agora;at.por=q;
+          if(!at.mp&&!at.mat&&!at.obs&&!at.nome)delete x.m3dPecas[pc.key];else x.m3dPecas[pc.key]=at;});
+        x.historico=Array.isArray(x.historico)?x.historico:[];
+        x.historico.push({em:agora,por:q,acao:'Ligou matéria-prima a peças do modelo 3D',det:`${alvo.length} ${alvo.length===1?'peça':'peças'} → ${mp?mp.n:'desligada'}`});
+        if(x.historico.length>300)x.historico=x.historico.slice(-300);return x;});
+      try{_pfFicha[dn.id]=n;}catch(e){}
+      if(S!==Sx)return;
+      S.desc=(n&&n.m3dPecas)||{};S.ligando=false;S.buscaMp='';painel();rotulo();
+      toast(mp?`🔗 ${alvo.length} ${alvo.length===1?'peça ligada':'peças ligadas'} a ${mp.n}`:'Matéria-prima desligada','tok');
+    }catch(e){console.error(e);toast('Não foi possível salvar: '+e.message,'terr');}
+  };
+
+  // ── medida da peça, lida do 3D ──
+  // cada parte conectada da malha vira uma chapa (L×A), uma barra (comprimento) ou, se for um volume, as faces da caixa
+  function medidasPeca(pc){
+    if(pc._med)return pc._med;
+    const pos=new THREE.Vector3(),esc3=new THREE.Vector3();
+    const comps=[];
+    pc.objs.forEach(mesh=>{
+      const g=mesh.geometry;if(!g||!g.attributes||!g.attributes.position)return;
+      mesh.updateMatrixWorld(true);
+      // sistema do grupo (sem a rotação do mundo) e com a escala do mundo
+      const no=mesh.parent||mesh;no.updateMatrixWorld(true);no.matrixWorld.decompose(new THREE.Vector3(),new THREE.Quaternion(),esc3);
+      const at=g.attributes.position,n=at.count,idx=g.index?g.index.array:null;
+      const Q=v=>Math.round(v*1000);   // 1 mm
+      const pai=new Int32Array(n);for(let i=0;i<n;i++)pai[i]=i;
+      const raiz=i=>{while(pai[i]!==i){pai[i]=pai[pai[i]];i=pai[i];}return i;};
+      const une=(a,b)=>{a=raiz(a);b=raiz(b);if(a!==b)pai[a]=b;};
+      const mapa=new Map();const P=new Float32Array(n*3);
+      for(let i=0;i<n;i++){pos.fromBufferAttribute(at,i).applyMatrix4(mesh.matrix).multiply(esc3);P[i*3]=pos.x;P[i*3+1]=pos.y;P[i*3+2]=pos.z;
+        const k=Q(pos.x)+','+Q(pos.y)+','+Q(pos.z);const j=mapa.get(k);if(j==null)mapa.set(k,i);else une(i,j);}
+      const nt=idx?idx.length/3:n/3;
+      for(let t=0;t<nt;t++){const a=idx?idx[t*3]:t*3,b=idx?idx[t*3+1]:t*3+1,c=idx?idx[t*3+2]:t*3+2;une(a,b);une(b,c);}
+      const bx=new Map();
+      for(let i=0;i<n;i++){const r=raiz(i);let B=bx.get(r);if(!B){B=[Infinity,Infinity,Infinity,-Infinity,-Infinity,-Infinity];bx.set(r,B);}
+        for(let k=0;k<3;k++){const v=P[i*3+k];if(v<B[k])B[k]=v;if(v>B[k+3])B[k+3]=v;}}
+      bx.forEach(B=>{if(B[3]-B[0]>0.003||B[4]-B[1]>0.003||B[5]-B[2]>0.003)comps.push(B);});
+    });
+    // parte que fica DENTRO de outra (parede interna do tubo, verso da chapa, tampa) não conta de novo
+    const tol=0.003,vol=B=>(B[3]-B[0]+tol)*(B[4]-B[1]+tol)*(B[5]-B[2]+tol);
+    comps.sort((x,y)=>vol(y)-vol(x));
+    const fica=[];comps.forEach(B=>{if(!fica.some(K=>B[0]>=K[0]-tol&&B[1]>=K[1]-tol&&B[2]>=K[2]-tol&&B[3]<=K[3]+tol&&B[4]<=K[4]+tol&&B[5]<=K[5]+tol))fica.push(B);});
+    const ret=[],barras=[];let area=0,compr=0;
+    fica.forEach(B=>{const [a,b,c]=[B[3]-B[0],B[4]-B[1],B[5]-B[2]].sort((x,y)=>y-x);
+      if(b<=0.12&&a>=3*b&&c>=0.5*b){barras.push(a);compr+=a;area+=2*(a*b+a*c);}          // perfil/tubo
+      else if(c<=0.03){ret.push([a,b]);area+=a*b;compr+=a;}                              // chapa
+      else{[[a,b],[a,b],[a,c],[a,c],[b,c],[b,c]].forEach(r=>{if(r[1]>0.02){ret.push(r);area+=r[0]*r[1];}});compr+=a;}   // volume: faces da caixa
+    });
+    const comps2=fica;
+    const f=v=>v.toLocaleString('pt-BR',{maximumFractionDigits:2});
+    let txt='';
+    if(ret.length===1&&!barras.length)txt=`chapa ${f(ret[0][0])} × ${f(ret[0][1])} m`;
+    else if(barras.length&&!ret.length)txt=barras.length===1?`barra de ${f(barras[0])} m`:`${barras.length} barras · ${f(compr)} m no total`;
+    else if(ret.length||barras.length)txt=`${f(area)} m² · ${comps2.length} ${comps2.length===1?'parte':'partes'}`;
+    pc._med={ret,barras,area,compr,partes:comps2.length,txt};
+    return pc._med;
+  }
+
+  // ── aproveitamento ──
+  const SP=0.005,KERF=0.003;
+  function encaixarChapas(rets,W,H){
+    // prateleiras (FFDH) com rotação; peça maior que a chapa é dividida (emenda)
+    const pecas=[];let emenda=false;
+    rets.forEach(([a,b])=>{let w=Math.max(a,b),h=Math.min(a,b);
+      const cabe=(x,y)=>(x<=W&&y<=H)||(x<=H&&y<=W);
+      if(cabe(w,h)){pecas.push([w,h]);return;}
+      emenda=true;const nx=Math.ceil(w/W),ny=Math.ceil(h/H);for(let i=0;i<nx;i++)for(let j=0;j<ny;j++)pecas.push([Math.min(W,w-i*W),Math.min(H,h-j*H)]);});
+    pecas.sort((p,q)=>Math.max(q[0],q[1])-Math.max(p[0],p[1])||q[0]*q[1]-p[0]*p[1]);
+    const chapas=[];
+    pecas.forEach(([w,h])=>{
+      let ok=false;
+      for(const ch of chapas){
+        for(const pr of ch.prat){for(const[x,y]of[[w,h],[h,w]]){if(y<=pr.h&&pr.x+x<=W){pr.x+=x+SP;ok=true;break;}}if(ok)break;}
+        if(ok)break;
+        for(const[x,y]of[[w,h],[h,w]]){if(x<=W&&ch.y+y<=H){ch.prat.push({h:y,x:x+SP});ch.y+=y+SP;ok=true;break;}}
+        if(ok)break;
+      }
+      if(!ok){const [x,y]=(w<=W&&h<=H)?[w,h]:[h,w];chapas.push({y:y+SP,prat:[{h:y,x:x+SP}]});}
+    });
+    const areaP=rets.reduce((s,[a,b])=>s+a*b,0);
+    return{n:chapas.length,aprov:chapas.length?areaP/(chapas.length*W*H):0,areaP,emenda};
+  }
+  function encaixarBarras(lens,L){
+    const pecas=[];let emenda=false;
+    lens.forEach(c=>{if(c<=L){pecas.push(c);return;}emenda=true;let r=c;while(r>L){pecas.push(L);r-=L;}if(r>0.01)pecas.push(r);});
+    pecas.sort((a,b)=>b-a);const sobra=[];
+    pecas.forEach(c=>{const i=sobra.findIndex(s=>s>=c-1e-9);if(i>=0)sobra[i]-=c+KERF;else sobra.push(L-c-KERF);});
+    const tot=lens.reduce((s,c)=>s+c,0);
+    return{n:sobra.length,aprov:sobra.length?tot/(sobra.length*L):0,tot,emenda};
+  }
+  function medidaEstoque(mp,tipo){
+    const reg=((cfg.mpMedidas||{})[mp.cod||mp.n])||{};
+    const N=(()=>{try{return _paN(mp.n);}catch(e){return String(mp.n||'').toUpperCase();}})();
+    if(tipo==='chapa'){if(reg.chapa)return reg.chapa;try{const d=_paChapa(N);if(d)return d;}catch(e){}return null;}
+    if(tipo==='barra'){if(reg.barra)return reg.barra;try{const c=_paCompr(N);if(c&&c.lido)return c.m;}catch(e){}return null;}
+    if(tipo==='rolo'){if(reg.largura)return reg.largura;try{const l=_paLarguraM(N,null);if(l)return l;}catch(e){}return null;}
+    return null;
+  }
+  function tipoMp(mp){
+    let u={un:'un',f:1};try{u=_mpUnRef(mp.n,mp.u);}catch(e){}
+    const N=(()=>{try{return _paN(mp.n);}catch(e){return String(mp.n||'').toUpperCase();}})();
+    if(u.un==='chapa')return{t:'chapa',u};
+    if(u.un==='barra')return{t:'barra',u};
+    if(u.un==='m²')return{t:'m2',u};
+    if(u.un==='m')return{t:/ADESIV|VINIL|LONA|FILME|PELICULA|TECIDO/.test(N)?'rolo':'m',u};
+    return{t:'un',u};
+  }
+  let G=null;   // estado da prévia
+  function calcLinha(l){
+    const T=l.tipo.t;let r={qtd:l.pecas.length,txt:'',falta:false};
+    if(T==='chapa'){const d=l.estoque;if(!d){r.falta=true;r.txt='informe o tamanho da chapa';r.qtd=0;}
+      else{const e=encaixarChapas(l.ret,d[0],d[1]);{const cons=Math.round(e.areaP/(d[0]*d[1])*100)/100;r={qtd:e.n,txt:`${e.n} ${e.n===1?'chapa':'chapas'} de ${fm(d[0])} × ${fm(d[1])} m · aproveitamento ${Math.round(e.aprov*100)}% · consumo real ${fm(cons)} chapa${e.emenda?' · tem peça maior que a chapa (emenda)':''}`,aprov:e.aprov,consumo:cons};}}}
+    else if(T==='barra'){const L=l.estoque;if(!L){r.falta=true;r.txt='informe o comprimento da barra';r.qtd=0;}
+      else{const e=encaixarBarras(l.lens,L);{const cons=Math.round(e.tot/L*100)/100;r={qtd:e.n,txt:`${e.n} ${e.n===1?'barra':'barras'} de ${fm(L)} m · aproveitamento ${Math.round(e.aprov*100)}% · consumo real ${fm(cons)} barra${e.emenda?' · tem peça maior que a barra (emenda)':''}`,aprov:e.aprov,consumo:cons};}}}
+    else if(T==='m2'){r={qtd:Math.round(l.area*100)/100,txt:`${fm(l.area)} m² de peças`};}
+    else if(T==='rolo'){const w=l.estoque;if(!w){r.falta=true;r.txt='informe a largura do rolo';r.qtd=0;}else{const m=Math.round(l.area/w*100)/100;r={qtd:m,txt:`${fm(l.area)} m² ÷ rolo de ${fm(w)} m = ${fm(m)} m`};}}
+    else if(T==='m'){r={qtd:Math.round(l.compr*100)/100,txt:`${fm(l.compr)} m de peças`};}
+    else r={qtd:l.pecas.length,txt:`${l.pecas.length} ${l.pecas.length===1?'peça':'peças'}`};
+    return r;
+  }
+  const fm=v=>Number(v).toLocaleString('pt-BR',{maximumFractionDigits:2});
+  window._gc3dGerarLista=function(){
+    if(!S||!pode())return;
+    try{_mpbIniciar();}catch(e){}
+    const grupos=new Map();
+    S.pecas.forEach(pc=>{const d=S.desc[pc.key];if(!d||!d.mp||typeof d.mp!=='object')return;const k=d.mp.cod||chave(d.mp.n);if(!grupos.has(k))grupos.set(k,{mp:d.mp,pecas:[]});grupos.get(k).pecas.push(pc);});
+    if(!grupos.size){toast('Ligue as peças às matérias-primas primeiro (botão 🔗 Ligar matéria-prima).','terr');return;}
+    const linhas=[...grupos.values()].map(g=>{
+      const ret=[],lens=[];let area=0,compr=0;
+      g.pecas.forEach(pc=>{const m=medidasPeca(pc);m.ret.forEach(r=>ret.push(r));m.barras.forEach(c=>lens.push(c));if(!m.barras.length)m.ret.forEach(r=>lens.push(r[0]));area+=m.area;compr+=m.compr;});
+      const tipo=tipoMp(g.mp);
+      return{mp:g.mp,pecas:g.pecas,ret,lens,area,compr,tipo,estoque:medidaEstoque(g.mp,tipo.t)};
+    });
+    linhas.forEach(l=>{l.r=calcLinha(l);l.qtd=l.r.qtd;});
+    const comp=mpsDe(S.p);const usadas=new Set(linhas.map(l=>chave(l.mp.n)));
+    G={linhas,manter:true,sobra:comp.filter(r=>!usadas.has(chave(r.nome)))};
+    renderPrevia();
+  };
+  function renderPrevia(){
+    let m=document.getElementById('g3-previa');
+    if(!m){m=document.createElement('div');m.id='g3-previa';m.style.cssText='position:fixed;inset:0;z-index:100010;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:14px';document.body.appendChild(m);}
+    const preco=l=>{const b=(()=>{try{return _mpbBase();}catch(e){return{};}})()[l.mp.cod];return Number(b&&b.v)||Number(l.mp.v)||0;};
+    let tot=0;
+    const linhasH=G.linhas.map((l,ix)=>{
+      const pu=preco(l);const custo=Math.round((Number(l.qtd)||0)*pu*100)/100;tot+=custo;
+      const T=l.tipo.t;
+      const medida=T==='chapa'?`<div style="display:flex;gap:4px;align-items:center;margin-top:4px"><input type="number" step="0.01" min="0.1" value="${l.estoque?l.estoque[0]:''}" placeholder="larg." oninput="_gc3dPrevMed(${ix},0,this.value)" style="width:62px"> × <input type="number" step="0.01" min="0.1" value="${l.estoque?l.estoque[1]:''}" placeholder="comp." oninput="_gc3dPrevMed(${ix},1,this.value)" style="width:62px"> m</div>`
+        :T==='barra'?`<div style="display:flex;gap:4px;align-items:center;margin-top:4px">barra de <input type="number" step="0.01" min="0.5" value="${l.estoque||''}" oninput="_gc3dPrevMed(${ix},0,this.value)" style="width:62px"> m</div>`
+        :T==='rolo'?`<div style="display:flex;gap:4px;align-items:center;margin-top:4px">rolo de <input type="number" step="0.01" min="0.1" value="${l.estoque||''}" oninput="_gc3dPrevMed(${ix},0,this.value)" style="width:62px"> m de largura</div>`:'';
+      return`<tr><td><b>${esc(l.mp.n)}</b>${l.mp.cod?`<div style="font-size:.66rem;color:#94a3b8">cód. ${esc(l.mp.cod)}</div>`:''}</td>
+        <td style="text-align:center">${l.pecas.length}</td>
+        <td style="font-size:.74rem;color:${l.r.falta?'#b45309':'#334155'}">${esc(l.r.txt)}${medida}</td>
+        <td style="text-align:right"><input type="number" step="0.001" min="0" value="${l.qtd}" oninput="_gc3dPrevQtd(${ix},this.value)" style="width:80px;text-align:right"></td>
+        <td>${esc(l.mp.u||l.tipo.u.un)}</td><td style="text-align:right;white-space:nowrap">${pu?fmtR(pu):'—'}</td><td style="text-align:right;white-space:nowrap;font-weight:700">${fmtR(custo)}</td></tr>`;}).join('');
+    const sobraTot=G.sobra.reduce((s,r)=>s+(Number(r.custoLinha)||0),0);
+    if(G.manter)tot+=sobraTot;
+    const falta=G.linhas.some(l=>l.r.falta);
+    const atual=mpsDe(S.p).length;
+    m.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:980px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:inherit">
+      <div style="padding:14px 18px;border-bottom:1px solid #eef2f7;display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div><div style="font-weight:800;color:#0f172a">📋 Lista de matéria-prima pelo modelo 3D</div><div style="font-size:.72rem;color:#64748b">Medidas lidas das peças do 3D. Confira e ajuste a quantidade antes de gravar.</div></div>
+        <button type="button" onclick="_gc3dPrevFechar()" style="border:none;background:none;font-size:1.2rem;cursor:pointer;color:#64748b">✕</button></div>
+      <div style="overflow:auto;padding:10px 18px">
+        <table class="dash-table" style="width:100%"><thead><tr><th>Matéria-prima</th><th style="text-align:center">Peças</th><th>Aproveitamento</th><th style="text-align:right">Quantidade</th><th>Unid.</th><th style="text-align:right">Preço</th><th style="text-align:right">Custo</th></tr></thead><tbody>${linhasH}</tbody></table>
+        ${G.sobra.length?`<label style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;font-size:.78rem;color:#334155;cursor:pointer"><input type="checkbox" ${G.manter?'checked':''} onchange="_gc3dPrevManter(this.checked)"> <span>Manter ${G.sobra.length} ${G.sobra.length===1?'item da composição atual que não está':'itens da composição atual que não estão'} em nenhuma peça (${fmtR(sobraTot)}): ${G.sobra.slice(0,5).map(r=>esc(r.nome)).join(' · ')}${G.sobra.length>5?' …':''}</span></label>`:''}
+      </div>
+      <div style="padding:12px 18px;border-top:1px solid #eef2f7;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="font-size:.8rem;color:#334155">CMV: <b style="font-size:1rem;color:#0f172a">${fmtR(tot)}</b>${atual?`<span style="color:#64748b"> · substitui a composição atual (${atual} ${atual===1?'item':'itens'}, fica no histórico)</span>`:''}</div>
+        <div style="display:flex;gap:8px"><button type="button" class="dash-btn-conf" style="background:#94a3b8" onclick="_gc3dPrevFechar()">Cancelar</button>
+        <button type="button" class="dash-btn-conf" style="background:${falta?'#cbd5e1':'#16a34a'}" ${falta?'disabled title="Informe as medidas que faltam"':''} onclick="_gc3dPrevGravar()">✅ Gravar composição do produto</button></div></div></div>`;
+  }
+  window._gc3dPrevFechar=()=>{const m=document.getElementById('g3-previa');if(m)m.remove();G=null;};
+  window._gc3dPrevManter=v=>{if(!G)return;G.manter=!!v;renderPrevia();};
+  window._gc3dPrevQtd=(ix,v)=>{if(!G)return;const l=G.linhas[ix];l.qtd=Number(String(v).replace(',','.'))||0;l.qtdManual=true;clearTimeout(G._t);G._t=setTimeout(renderPrevia,600);};
+  window._gc3dPrevMed=(ix,k,v)=>{if(!G)return;const l=G.linhas[ix];const n=Number(String(v).replace(',','.'))||0;
+    if(l.tipo.t==='chapa'){const d=l.estoque?l.estoque.slice():[0,0];d[k]=n;l.estoque=d[0]>0&&d[1]>0?d:(d[0]||d[1]?d:null);if(l.estoque&&!(l.estoque[0]>0&&l.estoque[1]>0)){l.r={falta:true,txt:'informe o tamanho da chapa',qtd:0};l.qtd=0;}else{l.r=calcLinha(l);l.qtd=l.r.qtd;}}
+    else{l.estoque=n>0?n:null;l.r=calcLinha(l);l.qtd=l.r.qtd;}
+    l.medNova=true;clearTimeout(G._t);G._t=setTimeout(renderPrevia,700);};
+  window._gc3dPrevGravar=async()=>{
+    if(!G||!S||!pode())return;
+    if(G.linhas.some(l=>l.r.falta)){toast('Informe as medidas que faltam','terr');return;}
+    const p=S.p;
+    // medidas informadas ficam registradas pra usar sempre
+    for(const l of G.linhas){if(!l.medNova||!l.estoque)continue;const k=l.mp.cod||l.mp.n;const reg=l.tipo.t==='chapa'?{chapa:l.estoque}:l.tipo.t==='barra'?{barra:l.estoque}:{largura:l.estoque};
+      cfg.mpMedidas=cfg.mpMedidas||{};cfg.mpMedidas[k]=Object.assign({},cfg.mpMedidas[k]||{},reg);
+      try{if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['mpMedidas',k],cfg.mpMedidas[k]);}catch(e){console.warn('medida mp',e);}}
+    const base=(()=>{try{return _mpbBase();}catch(e){return{};}})();
+    const rows=G.linhas.filter(l=>Number(l.qtd)>0).map(l=>{const b=base[l.mp.cod];const row={nome:l.mp.n,qtd:Math.round((Number(l.qtd)||0)/((l.tipo.u&&l.tipo.u.f)||1)*100000)/100000,unidade:l.mp.u||'',precoUnit:Number(b&&b.v)||Number(l.mp.v)||0,origem3d:true};
+      if(l.mp.cod)row.cod=l.mp.cod;else if(l.mp.extraId)row.extraId=l.mp.extraId;
+      if(l.r&&l.r.aprov!=null)row.aproveitamento3d=Math.round(l.r.aprov*1000)/10;return row;});
+    const final=G.manter?[...G.sobra,...rows]:rows;
+    if(!final.length){toast('Nenhuma quantidade para gravar','terr');return;}
+    try{
+      await _pfMpSalvar(p,final,'Gerou a composição pelo modelo 3D',`${rows.length} ${rows.length===1?'matéria-prima':'matérias-primas'} pelas peças do 3D${G.manter&&G.sobra.length?' + '+G.sobra.length+' mantidas':''}`);
+      toast('✅ Composição do produto gravada pelo 3D','tok');
+      _gc3dPrevFechar();painel();
+    }catch(e){console.error(e);toast('Não foi possível gravar: '+e.message,'terr');}
+  };
+
   // ações do painel
-  window._gc3dSel=ix=>{const pc=S&&S.pecas[ix];if(!pc)return;selecionar(S.sel===pc?null:pc,null);};
+  window._gc3dSel=(ix,ev)=>{const pc=S&&S.pecas[ix];if(!pc)return;
+    if(ev&&(ev.ctrlKey||ev.metaKey||ev.shiftKey)&&S.sel){S.multi=S.multi||new Set([S.sel]);if(S.multi.has(pc)&&S.multi.size>1)S.multi.delete(pc);else S.multi.add(pc);aplicar();painel();return;}
+    selecionar(S.sel===pc?null:pc,null);};
   window._gc3dVis=ix=>{const pc=S&&S.pecas[ix];if(!pc)return;pc.vis=!pc.vis;if(!pc.vis&&S.sel===pc){S.sel=null;S.isolar=false;}aplicar();painel();};
   window._gc3dOcultar=()=>{if(!S||!S.sel)return;S.sel.vis=false;S.sel=null;S.isolar=false;aplicar();painel();};
   window._gc3dIsolar=()=>{if(!S||!S.sel)return;S.isolar=!S.isolar;aplicar();painel();};
   window._gc3dMostrarTudo=()=>{if(!S)return;S.pecas.forEach(p=>p.vis=true);S.isolar=false;S.raiox=false;S.corte.on=false;corte();explodir(0);aplicar();painel();};
   window._gc3dVista=()=>{if(S)vistaInicial();};
   window._gc3dRaioX=()=>{if(!S)return;S.raiox=!S.raiox;aplicar();painel();};
-  window._gc3dExplodir=v=>{if(!S)return;explodir(Number(v)/100);const t=document.querySelector('#g3-painel .g3-sec:nth-child(2) span:last-child');if(t)t.textContent=Math.round(S.exp*100)+'%';};
+  window._gc3dExplodir=v=>{if(!S)return;explodir(Number(v)/100);const t=document.getElementById('g3-exp-pct');if(t)t.textContent=Math.round(S.exp*100)+'%';};
   window._gc3dCorte=()=>{if(!S)return;S.corte.on=!S.corte.on;corte();painel();};
   window._gc3dCorteEixo=k=>{if(!S)return;S.corte.eixo=k;corte();painel();};
   window._gc3dCorteV=v=>{if(!S)return;S.corte.v=Number(v);corte();};
@@ -75480,17 +75939,18 @@ function _cadExportar(cad){
   window._gc3dSalvarPeca=async()=>{
     if(!S||!S.sel)return;if(!pode()){toast('Só Projetos e administradores descrevem as peças.','terr');return;}
     const v=id=>String((document.getElementById(id)||{}).value||'').replace(/\s+/g,' ').trim();
-    const reg={mat:v('g3-f-mat'),mp:v('g3-f-mp'),obs:v('g3-f-obs'),em:new Date().toISOString(),por:quem(),nome:S.sel.nomeTela};
+    const reg={mat:v('g3-f-mat'),obs:v('g3-f-obs'),em:new Date().toISOString(),por:quem()};
     const pc=S.sel,Sx=S,dn=S.dono;
     try{
       const n=await window._fbProdFichaTx(dn.id,x=>{x.m3dPecas=x.m3dPecas||{};
-        if(!reg.mat&&!reg.mp&&!reg.obs)delete x.m3dPecas[pc.key];else x.m3dPecas[pc.key]=reg;
+        const at=Object.assign({},x.m3dPecas[pc.key]||{},reg);if(!at.mat)delete at.mat;if(!at.obs)delete at.obs;
+        if(!at.mat&&!at.obs&&!at.mp&&!at.nome)delete x.m3dPecas[pc.key];else x.m3dPecas[pc.key]=at;
         x.historico=Array.isArray(x.historico)?x.historico:[];
-        x.historico.push({em:reg.em,por:reg.por,acao:'Descreveu uma peça do modelo 3D',det:`${pc.nomeTela}: ${[reg.mat,reg.mp,reg.obs].filter(Boolean).join(' · ')||'descrição apagada'}`});
+        x.historico.push({em:reg.em,por:reg.por,acao:'Descreveu uma peça do modelo 3D',det:`${pc.nomeTela}: ${[reg.mat,reg.obs].filter(Boolean).join(' · ')||'descrição apagada'}`});
         if(x.historico.length>300)x.historico=x.historico.slice(-300);return x;});
       try{_pfFicha[dn.id]=n;}catch(e){}
       if(S!==Sx)return;
-      S.desc=(n&&n.m3dPecas)||{};S.editando=false;painel();toast('Peça descrita ✅','tok');
+      S.desc=(n&&n.m3dPecas)||{};S.editando=false;painel();toast('Observação salva ✅','tok');
     }catch(e){console.error(e);toast('Não foi possível salvar: '+e.message,'terr');}
   };
 })();
