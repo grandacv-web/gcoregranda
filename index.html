@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-04.12';</script>
+<script>const APP_BUILD_VERSION='2026-11-04.16';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -74318,6 +74318,7 @@ function _cadExportar(cad){
     if(!p||p.projDevolvidoLote20261104)return false;
     if(p.os&&typeof isVendaCancelada==='function'&&isVendaCancelada(p.os))return false;
     if(_lpObraFinalizada(p))return false;
+    if(window._projPrazoAberto&&!window._projPrazoAberto(p))return false;   // prazo final já passou: não volta
     const b=p.lpBaixas&&p.lpBaixas.projeto;
     if(b&&b.na)return false;
     const lote=itensLote(p).length>0||!!(b&&b.viaLimpezaLote);
@@ -74447,6 +74448,7 @@ function _cadExportar(cad){
   function deLote(p){
     const b=p&&p.lpBaixas&&p.lpBaixas.projeto;
     if(b&&(b.viaLimpezaLote||b.na))return true;
+    if(window._projDeLote&&window._projDeLote(p))return true;   // detecção ampliada (mesmo horário exato) — revisão de 04/11
     const it=p&&p.projChecklist&&p.projChecklist.itens;if(!it)return false;
     return Object.keys(it).some(k=>it[k]&&it[k].feito&&LOTE.test(String(it[k].obs||'')));
   }
@@ -74703,6 +74705,127 @@ function _cadExportar(cad){
   }catch(e){console.warn('todos os meses Projetos',e);}
   try{_mesxAgendar();}catch(e){}
 })();
+// ── PROJETOS: DEVOLUÇÃO AMPLIADA DOS PROJETOS CONCLUÍDOS PELO SISTEMA (build 2026-11-04.15) ─────────────────────────
+// Relato do Guilherme (04/11, depois de publicar a .12): "você não arrumou projetos… os pedidos que você deu
+// baixa automática não estão lá, por exemplo FANCAR OMODA não foi feito pelo usuário… revise isso de uma vez
+// por todas". O que faltava:
+//  • A limpeza em lote de agosto só escrevia "Marcado em lote" no item VAZIO; item que já tinha observação do
+//    projetista ficava marcado SEM o aviso — parecia feito por ele. Rastro que não falha: o lote marcava todos
+//    os itens com o MESMO horário (até o milésimo); pessoa clicando nunca consegue isso (≥3 itens iguais).
+//  • A devolução de lote deixava de fora obra finalizada — diferente da regra de 03/11 (pedido emitido desde
+//    31/07: projeto só conclui pelo projetista, mesmo com a obra finalizada). Agora segue a mesma regra.
+//  • (04/11, 12:06) Guilherme: projeto concluído pelo projetista está concluído — não criar tela de revisão/
+//    aprovação. Só volta pra fila o que o SISTEMA concluiu. Nada novo sem perguntar antes.
+//  • (04/11, 12:07) Só volta se o PRAZO FINAL de entrega do pedido ainda não passou. As devoluções de 03/11 e
+//    04/11 que pegaram pedido com o prazo final vencido são desfeitas (baixa e itens voltam como estavam).
+(function(){
+  const LOTE=/^Marcado em lote/i;
+  const DESDE=(typeof PROJ_CHECKLIST_DESDE!=='undefined'&&PROJ_CHECKLIST_DESDE)||'2026-07-31';
+  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const emiss=p=>{try{return _normPrazoIso(p.emissaoEm)||String(p.emissaoEm||'').slice(0,10);}catch(e){return String(p.emissaoEm||'').slice(0,10);}};
+  const novo=p=>{const e=emiss(p);return!!e&&e>=DESDE;};
+  const quem=()=>(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—';
+  // prazo final de entrega do pedido ainda não passou (12:07 — Guilherme: "se já passou a data, já foi instalado, não volta")
+  const prazoFinal=p=>{try{return _normPrazoIso(p.prazo)||'';}catch(e){return'';}};
+  const prazoAberto=p=>{const pf=prazoFinal(p);return!!pf&&pf>=_hojeIso();};
+  window._projPrazoAberto=prazoAberto;
+  const fmt=d=>{try{return fmtD(String(d).slice(0,10));}catch(e){return d;}};
+
+  // itens do checklist marcados pelo sistema (lote): aviso no texto OU 3+ itens com o mesmo horário exato
+  function itensLote(p){
+    const it=p&&p.projChecklist&&p.projChecklist.itens;if(!it)return[];
+    const cont={};Object.keys(it).forEach(k=>{const x=it[k];if(x&&x.feito&&x.quando)cont[x.quando]=(cont[x.quando]||0)+1;});
+    return Object.keys(it).filter(k=>{const x=it[k];if(!x||!x.feito)return false;return LOTE.test(String(x.obs||''))||(x.quando&&cont[x.quando]>=3);});
+  }
+  function deLote(p){const b=p&&p.lpBaixas&&p.lpBaixas.projeto;return!!(b&&b.viaLimpezaLote)||itensLote(p).length>0;}
+  try{const _bs=_projBaixaSemChecklist;_projBaixaSemChecklist=function(p){const b=_bs.apply(this,arguments);return b&&prazoAberto(p)?b:null;};}catch(e){}
+  window._projItensLote=itensLote;window._projDeLote=deLote;
+  // os indicadores (proj_ind_v2) também passam a usar a detecção nova
+
+  function checklistHumanoCompleto(p){
+    let ok=false;try{ok=_projChecklistCompleto(p);}catch(e){}
+    return ok&&itensLote(p).length===0;
+  }
+  // como o projeto foi dado como concluído
+  function comoConcluido(p){
+    const b=p.lpBaixas&&p.lpBaixas.projeto;
+    let feitos=0,tot=PROJ_CHECKLIST_ITENS.length;try{feitos=_projChecklistFeitos(p);}catch(e){}
+    const lote=itensLote(p);
+    if(b&&b.na)return{t:'na',txt:'N.A. (não se aplica)',cor:'#64748b',b,feitos,tot};
+    if(b&&b.viaLimpezaLote)return{t:'lote',txt:'Automático — limpeza em lote',cor:'#dc2626',b,feitos,tot};
+    if(lote.length)return{t:'lote',txt:`Automático — ${lote.length} ${lote.length===1?'item marcado':'itens marcados'} em lote`,cor:'#dc2626',b,feitos,tot};
+    if(b&&!checklistHumanoCompleto(p))return{t:'semck',txt:'Baixa sem o checklist do projetista',cor:'#dc2626',b,feitos,tot};
+    if(b)return{t:'ok',txt:'Projetista — checklist completo',cor:'#15803d',b,feitos,tot};
+    if(checklistHumanoCompleto(p))return{t:'ok',txt:'Projetista — checklist completo',cor:'#15803d',b:null,feitos,tot};
+    if(_lpObraFinalizada(p))return{t:'obra',txt:novo(p)?'Obra finalizada (projeto não feito)':'Obra finalizada (pedido antigo, antes do checklist)',cor:novo(p)?'#dc2626':'#64748b',b:null,feitos,tot};
+    return null;
+  }
+  window._projComoConcluido=comoConcluido;
+  const errado=c=>c&&(c.t==='lote'||c.t==='semck'||(c.t==='obra'&&c.txt.indexOf('não feito')>=0));
+
+  async function devolverUm(p,motivo){
+    const agora=new Date().toISOString(),q=quem();
+    const ks=itensLote(p);
+    if(ks.length){p.projChecklistLoteDesfeito=p.projChecklistLoteDesfeito||{em:agora,por:q,itens:{}};ks.forEach(k=>{p.projChecklistLoteDesfeito.itens[k]=p.projChecklist.itens[k];delete p.projChecklist.itens[k];});}
+    const b=p.lpBaixas&&p.lpBaixas.projeto;
+    if(b&&!b.na){
+      p.lpBaixasDesfeitas=p.lpBaixasDesfeitas||[];
+      p.lpBaixasDesfeitas.push({etapaKey:'projeto',baixaOriginal:b,desfeitaEm:agora,desfeitaPor:q,motivo:motivo+(ks.length?' · '+ks.length+' '+(ks.length===1?'item do checklist reaberto':'itens do checklist reabertos'):'')});
+      delete p.lpBaixas.projeto;
+    }
+    p.projDevolvido20261104b=true;
+    await savePedidoFS(p);
+  }
+
+  // devolução automática ampliada (uma vez por pedido, navegador de admin)
+  async function devolverAuto(){
+    if(!(typeof _getUserCat==='function'&&_getUserCat().isAdm))return'sem-adm';
+    if(typeof pedidos==='undefined'||!Array.isArray(pedidos)||!pedidos.length)return'sem-pedidos';
+    let base=[];try{base=_lpPedidosElegiveis()||[];}catch(e){return'erro';}
+    const lista=base.filter(p=>{
+      if(!p||p.projDevolvido20261104b)return false;
+      if(!novo(p)&&_lpObraFinalizada(p))return false;   // pedido antigo (antes do checklist) com a obra entregue fica como está
+      if(!prazoAberto(p))return false;   // prazo final já passou: obra entregue, não volta
+      if(p.os&&typeof isVendaCancelada==='function'&&isVendaCancelada(p.os))return false;
+      const b=p.lpBaixas&&p.lpBaixas.projeto;if(b&&b.na)return false;
+      if(!deLote(p))return false;
+      return !!b||(function(){try{return _projChecklistCompleto(p);}catch(e){return false;}})();
+    });
+    const os=[];
+    for(const p of lista){try{await devolverUm(p,'Projeto tinha sido concluído automaticamente em lote (sem o projetista) — devolvido à fila (04/11/2026)');os.push(p.os||p.id);}catch(e){console.error('devolver (lote ampliado)',p&&p.os,e);}}
+    try{projRenderAtivo();}catch(e){}try{renderAll();}catch(e){}
+    if(os.length)toast(`↩️ ${os.length} ${os.length===1?'projeto voltou':'projetos voltaram'} pra fila do projetista (concluídos automaticamente em lote): OS ${os.slice(0,15).join(', ')}${os.length>15?'…':''}`,'twar');
+    return'ok';
+  }
+  window._projDevolverAuto20261104b=devolverAuto;
+  const MOT=/devolvido à fila \((03|04)\/11\/2026\)/;
+  async function restaurarVencidos(){
+    if(!(typeof _getUserCat==='function'&&_getUserCat().isAdm))return'sem-adm';
+    if(typeof pedidos==='undefined'||!Array.isArray(pedidos)||!pedidos.length)return'sem-pedidos';
+    const hoje=_hojeIso(),q=quem(),os=[];
+    for(const p of pedidos){
+      try{
+        if(!p||p.projRestauradoPrazo20261104)continue;
+        if(p.lpBaixas&&p.lpBaixas.projeto)continue;
+        const pf=prazoFinal(p);if(!pf||pf>=hoje)continue;
+        const des=(p.lpBaixasDesfeitas||[]).filter(d=>d&&d.etapaKey==='projeto'&&MOT.test(String(d.motivo||'')));
+        const loteIt=p.projChecklistLoteDesfeito&&p.projChecklistLoteDesfeito.itens;
+        if(!des.length&&!loteIt)continue;
+        if(loteIt){p.projChecklist=p.projChecklist||{itens:{}};p.projChecklist.itens=p.projChecklist.itens||{};
+          Object.keys(loteIt).forEach(k=>{const at=p.projChecklist.itens[k];if(!(at&&at.feito))p.projChecklist.itens[k]=loteIt[k];});}
+        if(des.length){p.lpBaixas=p.lpBaixas||{};p.lpBaixas.projeto=des[des.length-1].baixaOriginal;}
+        p.projRestauradoPrazo20261104={em:new Date().toISOString(),por:q,motivo:'Prazo final de entrega já tinha passado — conclusão anterior restaurada'};
+        await savePedidoFS(p);os.push(p.os||p.id);
+      }catch(e){console.error('restaurar projeto vencido',p&&p.os,e);}
+    }
+    try{projRenderAtivo();}catch(e){}
+    return'ok';
+  }
+  window._projRestaurarVencidos20261104=restaurarVencidos;
+  let n2=0;const t2=setInterval(async()=>{n2++;try{const r=await restaurarVencidos();if(r==='ok'||n2>40)clearInterval(t2);}catch(e){if(n2>40)clearInterval(t2);}},8500);
+  let n=0;const t=setInterval(async()=>{n++;try{const r=await devolverAuto();if(r==='ok'||n>40)clearInterval(t);}catch(e){if(n>40)clearInterval(t);}},9000);
+
+})();
 // ── VISUALIZADOR 3D DO PRODUTO (build 2026-11-04.7; ajustes na .12) ─────────────────────────────────────────────────
 // Pedido do Guilherme: cada produto do caderno com a opção VISUALIZADOR 3D. O modelo 3D fica dentro do
 // sistema; clicar numa parte mostra do que ela é feita; dá pra "abrir" o produto (vista explodida,
@@ -74719,6 +74842,8 @@ function _cadExportar(cad){
 //   "ACM bold vermelho brilho"); cor tirada do nome do material quando a imagem da textura ficou fora do arquivo
 //   (.dae); frente/verso das faces do SketchUp respeitados (antes o verso cinza aparecia por cima da cor);
 //   cores sem o "lavado" (sem tone mapping).
+// - .16: arquivo acima do limite do Cloudinary (~10 MB) sobe sozinho em partes de 9 MB (p.modelo3dPartes) e o
+//   visualizador/baixar juntam as partes — o .dae do SketchUp entra do jeito que é exportado.
 (function(){
   const LIB='https://cdn.jsdelivr.net/npm/three@0.147.0/';
   const FMTS=['glb','gltf','dae','obj','fbx','stl'];
@@ -74779,10 +74904,17 @@ function _cadExportar(cad){
     if(troca&&!_motivo){toast('Para trocar o modelo 3D, use "Trocar" e escreva o motivo.','terr');input.value='';return;}
     const st=document.getElementById('pf-3d-status');
     try{
-      const url=await enviar(f,pct=>{if(st)st.textContent=`⏳ Enviando o modelo 3D… ${pct}%`;});
-      if(troca)await _pfGuardarVersao(p.id,'m3d',{url:p.modelo3dUrl,nome:p.modelo3dNome||'',em:p.modelo3dEm||'',por:p.modelo3dPor||'',motivoTroca:_motivo});
+      // (.13) arquivo maior que o limite do Cloudinary: vai em partes de 9 MB e o visualizador junta na hora de abrir
+      const PARTE=9*1024*1024;const nP=Math.ceil(f.size/PARTE);const partes=[];
+      for(let k=0;k<nP;k++){
+        const pedaco=nP>1?new File([f.slice(k*PARTE,Math.min(f.size,(k+1)*PARTE))],f.name+'.parte'+(k+1)):f;
+        partes.push(await enviar(pedaco,pct=>{if(st)st.textContent=`⏳ Enviando o modelo 3D… ${Math.round((k*100+pct)/nP)}%`;}));
+      }
+      const url=partes[0];
+      if(troca)await _pfGuardarVersao(p.id,'m3d',{url:p.modelo3dUrl,partes:p.modelo3dPartes||null,nome:p.modelo3dNome||'',em:p.modelo3dEm||'',por:p.modelo3dPor||'',motivoTroca:_motivo});
       const ant=p.modelo3dNome||'';
       Object.assign(p,{modelo3dUrl:url,modelo3dNome:f.name,modelo3dEm:new Date().toISOString(),modelo3dPor:quem(),modelo3dTam:f.size});
+      if(partes.length>1)p.modelo3dPartes=partes;else delete p.modelo3dPartes;
       _prodHist(p.id,troca?'Trocou o modelo 3D':'Anexou o modelo 3D',troca?`${ant||'arquivo anterior'} → ${f.name} · Motivo: ${_motivo}`:f.name);
       await salvarCfgProd();
       if(st)st.textContent='';
@@ -74795,9 +74927,9 @@ function _cadExportar(cad){
     if(!pode()){toast('Só administradores e o setor de Projetos podem mudar o modelo 3D.','terr');return;}
     const p=getProdutos()[_pfIdx];if(!p||!p.modelo3dUrl)return;
     if(!_motivo){_pfProjAcao('m3d','remover');return;}
-    await _pfGuardarVersao(p.id,'m3d',{url:p.modelo3dUrl,nome:p.modelo3dNome||'',em:p.modelo3dEm||'',por:p.modelo3dPor||'',motivoTroca:_motivo});
+    await _pfGuardarVersao(p.id,'m3d',{url:p.modelo3dUrl,partes:p.modelo3dPartes||null,nome:p.modelo3dNome||'',em:p.modelo3dEm||'',por:p.modelo3dPor||'',motivoTroca:_motivo});
     _prodHist(p.id,'Removeu o modelo 3D',`${p.modelo3dNome||''} · Motivo: ${_motivo}`);
-    ['modelo3dUrl','modelo3dNome','modelo3dEm','modelo3dPor','modelo3dTam'].forEach(k=>delete p[k]);
+    ['modelo3dUrl','modelo3dNome','modelo3dEm','modelo3dPor','modelo3dTam','modelo3dPartes'].forEach(k=>delete p[k]);
     await salvarCfgProd();
     toast('Modelo 3D removido — motivo registrado no histórico.','tok');
     renderAba(p);
@@ -74841,7 +74973,7 @@ function _cadExportar(cad){
           <button type="button" onclick="_gc3dAbrir(${i})" style="${BTN()};background:#0f172a;color:#fff;border-color:#0f172a;padding:9px 16px;font-size:.8rem">${ICONE_CUBO.replace(/18/g,'15')} Abrir Visualizador 3D</button>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid #f1f5f9">
-          <a href="${esc(cldDownload(d.modelo3dUrl))}" target="_blank" style="${BTN()};text-decoration:none;color:#e91e63;border-color:#fbcfe8">⬇ Baixar arquivo</a>
+          ${Array.isArray(d.modelo3dPartes)&&d.modelo3dPartes.length>1?`<button type="button" onclick="_gc3dBaixar(${i})" style="${BTN()};color:#e91e63;border-color:#fbcfe8">⬇ Baixar arquivo</button>`:`<a href="${esc(cldDownload(d.modelo3dUrl))}" target="_blank" style="${BTN()};text-decoration:none;color:#e91e63;border-color:#fbcfe8">⬇ Baixar arquivo</a>`}
           ${ed&&!herd?`<button type="button" onclick="_pfProjAcao('m3d','trocar')" style="${BTN()}">Trocar</button><button type="button" onclick="_pfProjAcao('m3d','remover')" style="${BTN()};color:#dc2626;border-color:#fecaca">Remover</button>`:''}
           ${ed&&herd?`<label style="${BTN()}">Anexar um modelo só desta variação<input type="file" accept="${ACCEPT}" style="display:none" onchange="_gc3dUpload(this)"></label>`:''}
         </div>
@@ -74995,7 +75127,10 @@ function _cadExportar(cad){
     try{
       await libs(fmt);
       if(S!==Sx)return;
-      const obj=await carregar(d.modelo3dUrl,fmt,pct=>{const t=document.getElementById('g3-load-txt');if(t)t.textContent=`Carregando o modelo 3D… ${pct}%`;});
+      const txt=pct=>{const t=document.getElementById('g3-load-txt');if(t)t.textContent=`Carregando o modelo 3D… ${pct}%`;};
+      let url=d.modelo3dUrl,tmp=null;
+      if(Array.isArray(d.modelo3dPartes)&&d.modelo3dPartes.length>1){tmp=URL.createObjectURL(await juntarPartes(d.modelo3dPartes,txt));url=tmp;}
+      let obj;try{obj=await carregar(url,fmt,tmp?()=>{}:txt);}finally{if(tmp)setTimeout(()=>URL.revokeObjectURL(tmp),60000);}
       if(S!==Sx)return;
       montar(obj);
     }catch(e){
@@ -75007,6 +75142,21 @@ function _cadExportar(cad){
   }
   window._gc3dAbrir=abrir;
 
+  async function juntarPartes(urls,onPct){
+    const bufs=[];
+    for(let k=0;k<urls.length;k++){
+      const r=await fetch(urls[k]);if(!r.ok)throw new Error('parte '+(k+1)+' do arquivo não foi encontrada');
+      bufs.push(await r.arrayBuffer());if(onPct)onPct(Math.round((k+1)/urls.length*100));
+    }
+    return new Blob(bufs);
+  }
+  window._gc3dBaixar=async function(i){
+    const p=getProdutos()[i];const d=dono(p);if(!d)return;
+    try{toast('⏳ Juntando o arquivo…','tinf');const b=await juntarPartes(d.modelo3dPartes);
+      const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=d.modelo3dNome||'modelo3d';document.body.appendChild(a);a.click();
+      setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},30000);}
+    catch(e){toast('Não foi possível baixar: '+e.message,'terr');}
+  };
   function carregar(url,fmt,onPct){
     return new Promise((ok,er)=>{
       const prog=e=>{if(e&&e.lengthComputable&&e.total)onPct(Math.round(e.loaded/e.total*100));};
