@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-04.16';</script>
+<script>const APP_BUILD_VERSION='2026-11-04.18';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -74705,126 +74705,115 @@ function _cadExportar(cad){
   }catch(e){console.warn('todos os meses Projetos',e);}
   try{_mesxAgendar();}catch(e){}
 })();
-// ── PROJETOS: DEVOLUÇÃO AMPLIADA DOS PROJETOS CONCLUÍDOS PELO SISTEMA (build 2026-11-04.15) ─────────────────────────
-// Relato do Guilherme (04/11, depois de publicar a .12): "você não arrumou projetos… os pedidos que você deu
-// baixa automática não estão lá, por exemplo FANCAR OMODA não foi feito pelo usuário… revise isso de uma vez
-// por todas". O que faltava:
-//  • A limpeza em lote de agosto só escrevia "Marcado em lote" no item VAZIO; item que já tinha observação do
-//    projetista ficava marcado SEM o aviso — parecia feito por ele. Rastro que não falha: o lote marcava todos
-//    os itens com o MESMO horário (até o milésimo); pessoa clicando nunca consegue isso (≥3 itens iguais).
-//  • A devolução de lote deixava de fora obra finalizada — diferente da regra de 03/11 (pedido emitido desde
-//    31/07: projeto só conclui pelo projetista, mesmo com a obra finalizada). Agora segue a mesma regra.
-//  • (04/11, 12:06) Guilherme: projeto concluído pelo projetista está concluído — não criar tela de revisão/
-//    aprovação. Só volta pra fila o que o SISTEMA concluiu. Nada novo sem perguntar antes.
-//  • (04/11, 12:07) Só volta se o PRAZO FINAL de entrega do pedido ainda não passou. As devoluções de 03/11 e
-//    04/11 que pegaram pedido com o prazo final vencido são desfeitas (baixa e itens voltam como estavam).
+// ── PROJETOS: REGRA DEFINITIVA DE CONCLUSÃO (build 2026-11-04.18) ──────────────────────────────────────
+// Guilherme (04/11, 14:16): "pedidos que o prazo final de instalação já passou não quero abertos em
+// Projetos" + "só reabra aquilo que ainda não passou a data de instalação e não foi um usuário que deu
+// baixa" + "quero uma solução definitiva". As tentativas anteriores (03/11 e 04/11) consertavam pedido a
+// pedido, adivinhando qual baixa foi automática — sempre escapava um caso. Agora é REGRA FIXA, calculada
+// toda vez que Projetos/Pipeline/Indicadores olham o pedido (vale pra todos os usuários, sem depender de rodar):
+//  1) Prazo final de instalação (p.prazo) ANTES de 04/11/2026 → o Projeto NÃO fica aberto (só pra limpar o passado;
+//     daqui pra frente atrasado fica atrasado até o usuário dar baixa).
+//  2) Prazo ainda não passou → o Projeto só está concluído se foi o PROJETISTA que concluiu:
+//     • baixa dada por um usuário do setor PROJETOS; ou
+//     • checklist completo marcado por pessoa (nenhum item da limpeza em lote de agosto); ou
+//     • N.A.
+//     Baixa de lote, do sistema ou de quem não é de Projetos → o projeto fica ABERTO pro projetista.
+// As devoluções automáticas antigas (que mexiam nos dados) ficam desligadas. Uma correção única de dados
+// acompanha a regra: (a) itens marcados em lote saem do checklist dos projetos que voltam a ficar abertos
+// (o projetista vê o que falta de verdade); (b) projetos que eu tinha devolvido mas que tinham sido
+// concluídos por projetista voltam a ficar concluídos como estavam.
 (function(){
   const LOTE=/^Marcado em lote/i;
-  const DESDE=(typeof PROJ_CHECKLIST_DESDE!=='undefined'&&PROJ_CHECKLIST_DESDE)||'2026-07-31';
-  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const emiss=p=>{try{return _normPrazoIso(p.emissaoEm)||String(p.emissaoEm||'').slice(0,10);}catch(e){return String(p.emissaoEm||'').slice(0,10);}};
-  const novo=p=>{const e=emiss(p);return!!e&&e>=DESDE;};
-  const quem=()=>(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—';
-  // prazo final de entrega do pedido ainda não passou (12:07 — Guilherme: "se já passou a data, já foi instalado, não volta")
+  const ini='2026-07-31',fim='2026-08-27';   // período em que as limpezas em lote rodaram
+  const norm=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+  let _pj=null,_pjEm=0;
+  function projetistas(){const t=Date.now();if(!_pj||t-_pjEm>60000){try{_pj=new Set((_projxProjetistas()||[]).map(norm));}catch(e){_pj=new Set();}_pjEm=t;}return _pj;}
+  const ehProjetista=n=>!!n&&projetistas().has(norm(n));
   const prazoFinal=p=>{try{return _normPrazoIso(p.prazo)||'';}catch(e){return'';}};
-  const prazoAberto=p=>{const pf=prazoFinal(p);return!!pf&&pf>=_hojeIso();};
-  window._projPrazoAberto=prazoAberto;
-  const fmt=d=>{try{return fmtD(String(d).slice(0,10));}catch(e){return d;}};
-
-  // itens do checklist marcados pelo sistema (lote): aviso no texto OU 3+ itens com o mesmo horário exato
+  // (14:21) Guilherme: "essa regra é só agora" — vale só pros pedidos com prazo final ANTES de 04/11/2026. Daqui pra
+  // frente, projeto atrasado fica atrasado em Projetos até um usuário dar baixa, mesmo com o prazo final vencido.
+  const CORTE='2026-11-04';
+  const prazoPassou=p=>{const pf=prazoFinal(p);return!!pf&&pf<CORTE;};
   function itensLote(p){
     const it=p&&p.projChecklist&&p.projChecklist.itens;if(!it)return[];
     const cont={};Object.keys(it).forEach(k=>{const x=it[k];if(x&&x.feito&&x.quando)cont[x.quando]=(cont[x.quando]||0)+1;});
-    return Object.keys(it).filter(k=>{const x=it[k];if(!x||!x.feito)return false;return LOTE.test(String(x.obs||''))||(x.quando&&cont[x.quando]>=3);});
+    return Object.keys(it).filter(k=>{const x=it[k];if(!x||!x.feito)return false;if(LOTE.test(String(x.obs||'')))return true;
+      const d=String(x.quando||'').slice(0,10);return cont[x.quando]>=3&&d>=ini&&d<=fim;});
   }
-  function deLote(p){const b=p&&p.lpBaixas&&p.lpBaixas.projeto;return!!(b&&b.viaLimpezaLote)||itensLote(p).length>0;}
-  try{const _bs=_projBaixaSemChecklist;_projBaixaSemChecklist=function(p){const b=_bs.apply(this,arguments);return b&&prazoAberto(p)?b:null;};}catch(e){}
-  window._projItensLote=itensLote;window._projDeLote=deLote;
-  // os indicadores (proj_ind_v2) também passam a usar a detecção nova
+  function checklistHumano(p){let ok=false;try{ok=_projChecklistCompleto(p);}catch(e){}return ok&&!itensLote(p).length;}
+  // concluído pelo projetista?
+  function porUsuario(p){
+    const b=p&&p.lpBaixas&&p.lpBaixas.projeto;
+    if(b&&b.na)return true;
+    if(b&&!b.viaLimpezaLote&&ehProjetista(b.por))return true;
+    return checklistHumano(p);
+  }
+  window._projPorUsuario=porUsuario;window._projPrazoPassou=prazoPassou;window._projItensLote=itensLote;
+  window._projDeLote=p=>!porUsuario(p);   // indicadores: só conta conclusão feita pelo projetista
 
-  function checklistHumanoCompleto(p){
-    let ok=false;try{ok=_projChecklistCompleto(p);}catch(e){}
-    return ok&&itensLote(p).length===0;
-  }
-  // como o projeto foi dado como concluído
-  function comoConcluido(p){
-    const b=p.lpBaixas&&p.lpBaixas.projeto;
-    let feitos=0,tot=PROJ_CHECKLIST_ITENS.length;try{feitos=_projChecklistFeitos(p);}catch(e){}
-    const lote=itensLote(p);
-    if(b&&b.na)return{t:'na',txt:'N.A. (não se aplica)',cor:'#64748b',b,feitos,tot};
-    if(b&&b.viaLimpezaLote)return{t:'lote',txt:'Automático — limpeza em lote',cor:'#dc2626',b,feitos,tot};
-    if(lote.length)return{t:'lote',txt:`Automático — ${lote.length} ${lote.length===1?'item marcado':'itens marcados'} em lote`,cor:'#dc2626',b,feitos,tot};
-    if(b&&!checklistHumanoCompleto(p))return{t:'semck',txt:'Baixa sem o checklist do projetista',cor:'#dc2626',b,feitos,tot};
-    if(b)return{t:'ok',txt:'Projetista — checklist completo',cor:'#15803d',b,feitos,tot};
-    if(checklistHumanoCompleto(p))return{t:'ok',txt:'Projetista — checklist completo',cor:'#15803d',b:null,feitos,tot};
-    if(_lpObraFinalizada(p))return{t:'obra',txt:novo(p)?'Obra finalizada (projeto não feito)':'Obra finalizada (pedido antigo, antes do checklist)',cor:novo(p)?'#dc2626':'#64748b',b:null,feitos,tot};
-    return null;
-  }
-  window._projComoConcluido=comoConcluido;
-  const errado=c=>c&&(c.t==='lote'||c.t==='semck'||(c.t==='obra'&&c.txt.indexOf('não feito')>=0));
+  // ── a regra ──
+  const _ec=_lpEtapaConcluida;
+  _lpEtapaConcluida=function(p,key){
+    if(key!=='projeto')return _ec.apply(this,arguments);
+    try{if(prazoPassou(p))return true;return porUsuario(p);}catch(e){return _ec.apply(this,arguments);}
+  };
+  const humanos=p=>{const it=p&&p.projChecklist&&p.projChecklist.itens;if(!it)return 0;const l=new Set(itensLote(p));
+    return PROJ_CHECKLIST_ITENS.filter(k=>!l.has(k.key)&&(()=>{try{return _projItemOkPed(p,k.key);}catch(e){return _projItemOk(it[k.key]);}})()).length;};
+  _projStatusPedido=function(p,etapa,hojeIso,itensFeitos){
+    if(_lpEtapaConcluida(p,'projeto'))return'concluido';
+    if(etapa.iso<hojeIso)return'atrasado';
+    if(itensFeitos>0)return'andamento';
+    return'nao_iniciado';
+  };
+  const _pi=_projInfo;
+  _projInfo=function(p,hojeIso){
+    const r=_pi.apply(this,arguments);
+    try{if(r&&r.ok){r.itensFeitos=humanos(p);r.statusPedido=_projStatusPedido(p,r.etapa,hojeIso||_hojeIso(),r.itensFeitos);}}catch(e){}
+    return r;
+  };
+  // desliga as devoluções automáticas antigas (mexiam nos dados) e a etiqueta "concluído sem checklist"
+  try{_projBaixaSemChecklist=function(){return null;};}catch(e){}
+  window._projPrazoAberto=()=>false;
 
-  async function devolverUm(p,motivo){
-    const agora=new Date().toISOString(),q=quem();
-    const ks=itensLote(p);
-    if(ks.length){p.projChecklistLoteDesfeito=p.projChecklistLoteDesfeito||{em:agora,por:q,itens:{}};ks.forEach(k=>{p.projChecklistLoteDesfeito.itens[k]=p.projChecklist.itens[k];delete p.projChecklist.itens[k];});}
-    const b=p.lpBaixas&&p.lpBaixas.projeto;
-    if(b&&!b.na){
-      p.lpBaixasDesfeitas=p.lpBaixasDesfeitas||[];
-      p.lpBaixasDesfeitas.push({etapaKey:'projeto',baixaOriginal:b,desfeitaEm:agora,desfeitaPor:q,motivo:motivo+(ks.length?' · '+ks.length+' '+(ks.length===1?'item do checklist reaberto':'itens do checklist reabertos'):'')});
-      delete p.lpBaixas.projeto;
-    }
-    p.projDevolvido20261104b=true;
-    await savePedidoFS(p);
-  }
-
-  // devolução automática ampliada (uma vez por pedido, navegador de admin)
-  async function devolverAuto(){
-    if(!(typeof _getUserCat==='function'&&_getUserCat().isAdm))return'sem-adm';
-    if(typeof pedidos==='undefined'||!Array.isArray(pedidos)||!pedidos.length)return'sem-pedidos';
-    let base=[];try{base=_lpPedidosElegiveis()||[];}catch(e){return'erro';}
-    const lista=base.filter(p=>{
-      if(!p||p.projDevolvido20261104b)return false;
-      if(!novo(p)&&_lpObraFinalizada(p))return false;   // pedido antigo (antes do checklist) com a obra entregue fica como está
-      if(!prazoAberto(p))return false;   // prazo final já passou: obra entregue, não volta
-      if(p.os&&typeof isVendaCancelada==='function'&&isVendaCancelada(p.os))return false;
-      const b=p.lpBaixas&&p.lpBaixas.projeto;if(b&&b.na)return false;
-      if(!deLote(p))return false;
-      return !!b||(function(){try{return _projChecklistCompleto(p);}catch(e){return false;}})();
-    });
-    const os=[];
-    for(const p of lista){try{await devolverUm(p,'Projeto tinha sido concluído automaticamente em lote (sem o projetista) — devolvido à fila (04/11/2026)');os.push(p.os||p.id);}catch(e){console.error('devolver (lote ampliado)',p&&p.os,e);}}
-    try{projRenderAtivo();}catch(e){}try{renderAll();}catch(e){}
-    if(os.length)toast(`↩️ ${os.length} ${os.length===1?'projeto voltou':'projetos voltaram'} pra fila do projetista (concluídos automaticamente em lote): OS ${os.slice(0,15).join(', ')}${os.length>15?'…':''}`,'twar');
-    return'ok';
-  }
-  window._projDevolverAuto20261104b=devolverAuto;
+  // ── correção única de dados (navegador de admin) ──
   const MOT=/devolvido à fila \((03|04)\/11\/2026\)/;
-  async function restaurarVencidos(){
+  async function corrigir(){
     if(!(typeof _getUserCat==='function'&&_getUserCat().isAdm))return'sem-adm';
     if(typeof pedidos==='undefined'||!Array.isArray(pedidos)||!pedidos.length)return'sem-pedidos';
-    const hoje=_hojeIso(),q=quem(),os=[];
+    if(!projetistas().size)return'sem-projetistas';
+    const q=(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—',agora=new Date().toISOString();
+    let abertos=0,restaurados=0;
     for(const p of pedidos){
+      if(!p||p.projRegra20261104)continue;
       try{
-        if(!p||p.projRestauradoPrazo20261104)continue;
-        if(p.lpBaixas&&p.lpBaixas.projeto)continue;
-        const pf=prazoFinal(p);if(!pf||pf>=hoje)continue;
+        let mudou=false;
+        // (b) devolvido por mim, mas a baixa original era do projetista → volta como estava
+        const b=p.lpBaixas&&p.lpBaixas.projeto;
         const des=(p.lpBaixasDesfeitas||[]).filter(d=>d&&d.etapaKey==='projeto'&&MOT.test(String(d.motivo||'')));
-        const loteIt=p.projChecklistLoteDesfeito&&p.projChecklistLoteDesfeito.itens;
-        if(!des.length&&!loteIt)continue;
-        if(loteIt){p.projChecklist=p.projChecklist||{itens:{}};p.projChecklist.itens=p.projChecklist.itens||{};
-          Object.keys(loteIt).forEach(k=>{const at=p.projChecklist.itens[k];if(!(at&&at.feito))p.projChecklist.itens[k]=loteIt[k];});}
-        if(des.length){p.lpBaixas=p.lpBaixas||{};p.lpBaixas.projeto=des[des.length-1].baixaOriginal;}
-        p.projRestauradoPrazo20261104={em:new Date().toISOString(),por:q,motivo:'Prazo final de entrega já tinha passado — conclusão anterior restaurada'};
-        await savePedidoFS(p);os.push(p.os||p.id);
-      }catch(e){console.error('restaurar projeto vencido',p&&p.os,e);}
+        const ult=des[des.length-1];
+        if(!b&&ult&&ult.baixaOriginal&&ehProjetista(ult.baixaOriginal.por)){
+          p.lpBaixas=p.lpBaixas||{};p.lpBaixas.projeto=ult.baixaOriginal;
+          const li=p.projChecklistLoteDesfeito&&p.projChecklistLoteDesfeito.itens;
+          if(li){p.projChecklist=p.projChecklist||{itens:{}};p.projChecklist.itens=p.projChecklist.itens||{};Object.keys(li).forEach(k=>{const at=p.projChecklist.itens[k];if(!(at&&at.feito))p.projChecklist.itens[k]=li[k];});}
+          p.projRestauradoProjetista20261104={em:agora,por:q,motivo:'Baixa era do projetista — devolução desfeita'};
+          mudou=true;restaurados++;
+        }
+        // (a) projeto que volta a ficar aberto: sai o que foi marcado em lote e a baixa que não é do projetista
+        else if(!prazoPassou(p)&&!porUsuario(p)){
+          const ks=itensLote(p);
+          if(ks.length){p.projChecklistLoteDesfeito=p.projChecklistLoteDesfeito||{em:agora,por:q,itens:{}};ks.forEach(k=>{p.projChecklistLoteDesfeito.itens[k]=p.projChecklist.itens[k];delete p.projChecklist.itens[k];});mudou=true;}
+          if(b&&!b.na){p.lpBaixasDesfeitas=p.lpBaixasDesfeitas||[];p.lpBaixasDesfeitas.push({etapaKey:'projeto',baixaOriginal:b,desfeitaEm:agora,desfeitaPor:q,motivo:'Projeto não tinha sido concluído pelo projetista e o prazo final ainda não passou — aberto de novo (04/11/2026)'});delete p.lpBaixas.projeto;mudou=true;}
+          if(mudou)abertos++;
+        }
+        if(mudou){p.projRegra20261104=true;await savePedidoFS(p);}
+      }catch(e){console.error('regra projetos',p&&p.os,e);}
     }
-    try{projRenderAtivo();}catch(e){}
+    try{projRenderAtivo();}catch(e){}try{renderAll();}catch(e){}
+    if(abertos||restaurados)toast(`Projetos: ${abertos} ${abertos===1?'aberto de novo pro projetista':'abertos de novo pro projetista'}${restaurados?` · ${restaurados} ${restaurados===1?'conclusão do projetista restaurada':'conclusões do projetista restauradas'}`:''}`,'twar');
     return'ok';
   }
-  window._projRestaurarVencidos20261104=restaurarVencidos;
-  let n2=0;const t2=setInterval(async()=>{n2++;try{const r=await restaurarVencidos();if(r==='ok'||n2>40)clearInterval(t2);}catch(e){if(n2>40)clearInterval(t2);}},8500);
-  let n=0;const t=setInterval(async()=>{n++;try{const r=await devolverAuto();if(r==='ok'||n>40)clearInterval(t);}catch(e){if(n>40)clearInterval(t);}},9000);
-
+  window._projRegraCorrigir20261104=corrigir;
+  let n=0;const t=setInterval(async()=>{n++;try{const r=await corrigir();if(r==='ok'||n>40)clearInterval(t);}catch(e){if(n>40)clearInterval(t);}},9500);
 })();
 // ── VISUALIZADOR 3D DO PRODUTO (build 2026-11-04.7; ajustes na .12) ─────────────────────────────────────────────────
 // Pedido do Guilherme: cada produto do caderno com a opção VISUALIZADOR 3D. O modelo 3D fica dentro do
