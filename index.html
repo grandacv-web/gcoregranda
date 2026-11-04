@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-04.30';</script>
+<script>const APP_BUILD_VERSION='2026-11-04.33';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -73793,10 +73793,35 @@ function _cadExportar(cad){
     {k:'acm',n:'ACM',c:'#ef6c00'},{k:'letraCaixa',n:'LETRA CAIXA',c:'#ff4fd8'},{k:'adesivoP1',n:'ADESIVO/P1',c:'#f7a541'},{k:'pintura',n:'PINTURA',c:'#5cc8c0'},
     {k:'eletrica',n:'ELÉTRICA',c:'#f2df00'},{k:'acabamento',n:'ACABAMENTO',c:'#3ba3f0'},{k:'montagem',n:'MONTAGEM',c:'#f04a3e'},{k:'terceirizados',n:'TERCEIRIZADOS',c:'#a0522d'},
     {k:'expedicao',n:'EXPEDIÇÃO',c:'#38b89a'},{k:'instalacao',n:'INSTALAÇÃO',c:'#3fa34d'}];
-  const CAMPOS_PADRAO={router:['Material','Lote','Espessura','Cor e marca','Textura'],laser:['Material','Espessura','Cor'],plasma:['Material','Espessura','Acabamento'],
-    solda:['Material','Perfil','Acabamento'],acm:['Material','Cor','Acabamento'],letraCaixa:['Material','Modelo','Altura lateral','Fundo'],adesivoP1:['Mídia','Acabamento'],
-    pintura:['Tinta','Cor','Acabamento'],eletrica:['Iluminação','Tom LED','Potência total','Quantidade','Fonte (potência +20%)'],instalacao:['Método de fixação'],
+  // (2026-11-04) O MATERIAL de cada setor vem da composição do produto (tabela "Materiais deste setor", vários por
+  // setor, com os atributos de cada um). Os campos gerais ficam só com o que é do setor inteiro.
+  const CAMPOS_PADRAO={router:[],laser:[],plasma:[],solda:[],acm:[],letraCaixa:['Modelo','Altura lateral','Fundo'],adesivoP1:[],
+    pintura:[],eletrica:['Iluminação','Potência total','Fonte (potência +20%)'],instalacao:['Método de fixação'],acabamento:[],montagem:[],terceirizados:[],expedicao:[],
     impressao:['Mídia','Acabamento'],serralheria:['Material','Perfil','Acabamento'],letras:['Material','Modelo','Altura lateral','Fundo']};
+  const ATRIB_MAT={router:['Lote','Espessura','Cor e marca','Textura'],laser:['Espessura','Cor'],plasma:['Espessura','Acabamento'],solda:['Perfil','Comprimento','Acabamento'],
+    acm:['Cor','Acabamento'],letraCaixa:['Modelo','Altura lateral'],adesivoP1:['Acabamento'],pintura:['Cor','Acabamento'],eletrica:['Tom LED','Potência'],
+    acabamento:['Observação'],montagem:['Observação'],terceirizados:['Fornecedor','Observação'],expedicao:['Observação'],instalacao:['Observação']};
+  const atribDe=k=>ATRIB_MAT[LEG()[k]||k]||['Observação'];
+  const mpKey=r=>r&&r.cod?'c'+String(r.cod):'n'+normTxt(r&&r.nome);
+  const mpQtdTxt=r=>{let q='',u='';try{const x=_mpQtdRef(r);q=x.q;u=x.u&&x.u.un||'';}catch(e){q=r.qtd||'';}return q===''||q==null?'':String(q).replace('.',',')+(u?' '+u:'');};
+  // sugestão automática do setor de cada matéria-prima, pelo nome (só quando o produto ainda não tem materiais por setor)
+  const SUG_MP=[[/METALON|TUBO|CANTONEIRA|BARRA CHATA|VERGALH|PERFIL U|PERFIL L|ELETRODO|ARAME MIG|CHAPA (DE )?A[CÇ]O|CHAPA GALV|CHAPA PRETA/,['solda','plasma','montagem']],
+    [/\bACM\b|ALUMINIO COMPOSTO/,['acm','router','montagem']],
+    [/ACRIL|PVC|MDF|POLICARB|\bPS\b|PETG|COMPENSADO|POLIESTIRENO/,['router','laser','montagem']],
+    [/ADESIVO|VINIL|LONA|IMPRESS|LAMINA[CÇ]|BANNER|TECIDO/,['adesivoP1','acabamento']],
+    [/TINTA|PRIMER|THINNER|CATALIS|VERNIZ|ESMALTE|FUNDO PREP|MASSA/,['pintura','acabamento']],
+    [/\bLED\b|MODULO|FONTE|REATOR|\bFIO\b|CABO|LAMPADA|DISJUNTOR|CONECTOR|DRIVER|FITA DE LED|ILUMINA/,['eletrica']],
+    [/PARAFUSO|BUCHA|CHUMBADOR|REBITE|PORCA|ARRUELA|FITA DUPLA|SILICONE|ABRACADEIRA|BARRA ROSCADA/,['instalacao','montagem','acabamento']]];
+  function sugerirSetor(nome,ks){const t=normTxt(nome);for(const[re,alvos]of SUG_MP){if(re.test(t)){const k=alvos.find(a=>ks.includes(a));if(k)return k;}}return null;}
+  // materiais por setor do modelo (ou a sugestão, se o produto ainda não tem)
+  function matsModelo(prod,m){
+    const rows=(prod&&prod.materiasPrimas)||[],ks=m.setores,temAlgum=ks.some(k=>m.dados[k]&&Array.isArray(m.dados[k].mats));
+    const out={};ks.forEach(k=>out[k]=[]);
+    if(temAlgum){ks.forEach(k=>{((m.dados[k]&&m.dados[k].mats)||[]).forEach(x=>{const r=rows.find(r=>mpKey(r)===x.key);out[k].push({key:x.key,nome:r?r.nome:x.nome,qtd:r?mpQtdTxt(r):'',attrs:Object.assign({},x.attrs||{}),semMp:!r});});});return{mats:out,sugerido:false};}
+    rows.forEach(r=>{const k=sugerirSetor(r.nome,ks);if(k)out[k].push({key:mpKey(r),nome:r.nome,qtd:mpQtdTxt(r),attrs:{}});});
+    return{mats:out,sugerido:rows.length>0};
+  }
+  window._fpMatsSetor=(prod)=>{const m=modeloDe(prod);return matsModelo(prod,m);};
   const ETAPA_P_FP={'ROUTER (CORTE)':'router',ROUTER:'router',PLASMA:'serralheria',SOLDA:'serralheria',ACM:'montagem','LETRA CAIXA':'letras','ADESIVO/P1':'impressao',ACABAMENTO:'acabamento','ELÉTRICA':'eletrica',PINTURA:'pintura'};
   const LEG=()=>window._prodSetorFpLegado||{impressao:'adesivoP1',serralheria:'solda',letras:'letraCaixa'};
   function setores(){return FP_SETORES_PADRAO;}
@@ -73854,10 +73879,24 @@ function _cadExportar(cad){
     if(!_pfFp||_pfFp.pid!==p.id)_pfFp={pid:p.id,m:clone(base)};
     const m=_pfFp.m;m.setores=base.setores.slice();m.dados=m.dados||{};
     const pode=podeEditarProd();
+    if(!_pfFp.matsOk){const mm=matsModelo(p,m);m.setores.forEach(k=>{m.dados[k]=m.dados[k]||{};m.dados[k].mats=mm.mats[k].map(x=>({key:x.key,nome:x.nome,attrs:x.attrs}));});_pfFp.sugerido=mm.sugerido;_pfFp.matsOk=true;}
+    const rowsP=p.materiasPrimas||[];
+    const usadas=new Set();m.setores.forEach(k=>((m.dados[k]||{}).mats||[]).forEach(x=>usadas.add(x.key)));
+    const semSetor=rowsP.filter(r=>!usadas.has(mpKey(r)));
+    const matsCard=k=>{const d=m.dados[k]||{},ms=d.mats||[],at=atribDe(k);
+      return`<div style="margin:2px 0 8px"><div style="font-size:.68rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px">Materiais deste setor <span style="font-weight:600;color:#94a3b8;text-transform:none">— da composição do produto</span></div>
+        ${ms.length?`<table style="width:100%;border-collapse:collapse;font-size:.74rem"><thead><tr style="color:#64748b;text-align:left"><th style="padding:2px 4px;width:30%;min-width:200px">Material</th><th style="padding:2px 4px;width:90px">Qtd</th>${at.map(a=>`<th style="padding:2px 4px">${esc(a)}</th>`).join('')}<th></th></tr></thead><tbody>
+          ${ms.map((x,i)=>{const r=rowsP.find(r=>mpKey(r)===x.key);return`<tr><td style="padding:3px 4px;font-weight:700;color:${r?'#0f172a':'#b91c1c'}">${esc(r?r.nome:x.nome)}${r?'':' <span style="font-weight:600">(saiu da composição)</span>'}</td><td style="padding:3px 4px;color:#64748b;white-space:nowrap">${r?esc(mpQtdTxt(r)):'—'}</td>
+            ${at.map(a=>`<td style="padding:2px 4px"><input class="fc no-upper" ${pode?'':'disabled'} value="${esc((x.attrs||{})[a]||'')}" onchange="_fpProdMatAttr('${k}',${i},${esc(JSON.stringify(a))},this.value)" style="width:100%;padding:3px 5px;font-size:.74rem"></td>`).join('')}
+            <td>${pode?`<button type="button" onclick="_fpProdMatDel('${k}',${i})" title="Tirar deste setor" style="border:none;background:none;color:#b91c1c;cursor:pointer">✕</button>`:''}</td></tr>`;}).join('')}</tbody></table>`
+          :`<div style="font-size:.72rem;color:#b45309">Nenhum material neste setor ainda.</div>`}
+        ${pode&&rowsP.length?`<select class="fc" onchange="if(this.value){_fpProdMatAdd('${k}',this.value);}" style="margin-top:5px;font-size:.74rem;padding:4px 6px;max-width:100%"><option value="">＋ adicionar matéria-prima da composição…</option>${rowsP.filter(r=>!ms.some(x=>x.key===mpKey(r))).map(r=>`<option value="${esc(mpKey(r))}">${esc(r.nome)}${usadas.has(mpKey(r))?' (já está em outro setor)':''}</option>`).join('')}</select>`:''}
+      </div>`;};
     const chips=m.setores.map(k=>{const s=setor(k);return`<span style="border:1.5px solid ${s.c};background:${s.c};color:${claroCor(s.c)?'#1f2937':'#fff'};border-radius:999px;padding:4px 10px;font-size:.72rem;font-weight:700">${esc(s.n)}</span>`;}).join('');
     const cards=m.setores.map(k=>{const s=setor(k),d=m.dados[k]||{},cs=camposDe(k,d);
       return`<div style="border:1px solid #e2e8f0;border-left:4px solid ${s.c};border-radius:10px;padding:10px 12px;margin-top:10px">
         <div style="font-weight:800;font-size:.8rem;color:#0f172a;margin-bottom:6px">${esc(s.n)}</div>
+        ${matsCard(k)}
         <div style="display:grid;grid-template-columns:150px 1fr auto;gap:4px 8px;align-items:center">${cs.map((c,i)=>`<input class="fc no-upper" ${pode?'':'disabled'} value="${esc(c[0])}" onchange="_fpProdCampo('${k}',${i},0,this.value)" style="font-weight:700;font-size:.74rem;padding:4px 6px"><input class="fc no-upper" ${pode?'':'disabled'} value="${esc(c[1])}" placeholder="padrão do produto" onchange="_fpProdCampo('${k}',${i},1,this.value)" style="font-size:.76rem;padding:4px 6px">${pode?`<button type="button" onclick="_fpProdCampoDel('${k}',${i})" title="Tirar campo" style="border:none;background:none;color:#b91c1c;cursor:pointer">✕</button>`:'<span></span>'}`).join('')}</div>
         ${pode?`<button type="button" onclick="_fpProdCampoAdd('${k}')" style="margin-top:4px;border:none;background:none;color:#1a2b5e;font-size:.72rem;cursor:pointer;text-decoration:underline">＋ campo</button>`:''}
         <textarea class="fc no-upper" ${pode?'':'disabled'} rows="2" placeholder="Instrução padrão deste setor (ex.: método de instalação, cuidados)" onchange="_fpProdObs('${k}',this.value)" style="width:100%;margin-top:6px;font-size:.76rem">${esc(d.obs||'')}</textarea>
@@ -73865,7 +73904,10 @@ function _cadExportar(cad){
           ${pode?`<label style="height:70px;min-width:90px;border:1.5px dashed #cbd5e1;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:.68rem;color:#64748b;cursor:pointer;padding:0 8px;text-align:center">＋ imagem padrão<input type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="_fpProdImgAdd('${k}',this)"></label>`:''}</div>
       </div>`;}).join('');
     el.innerHTML=`<div style="font-size:.68rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Ficha de produção (FP)</div>
-      <div style="font-size:.76rem;color:#64748b;margin-bottom:8px">Quando este produto entra numa FP, as páginas de cada setor saem daqui. Os setores são os do cadastro do produto (aba Produção).</div>
+      <div style="font-size:.76rem;color:#64748b;margin-bottom:8px">Quando este produto entra numa FP, as páginas de cada setor saem daqui. Os setores são os do cadastro do produto (aba Produção) e os materiais de cada setor vêm da composição.</div>
+      ${!rowsP.length?`<div style="padding:9px 12px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:.76rem;margin-bottom:8px">⚠️ Este produto ainda não tem composição — cadastre as matérias-primas pra elas aparecerem nos setores.</div>`:''}
+      ${_pfFp.sugerido?`<div style="padding:9px 12px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-size:.76rem;margin-bottom:8px">💡 <b>Sugestão automática</b> do setor de cada matéria-prima, pelo nome — confira e clique em Salvar ficha de produção.</div>`:''}
+      ${semSetor.length&&m.setores.length?`<div style="padding:9px 12px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:.76rem;margin-bottom:8px">⚠️ <b>${semSetor.length} ${_plural(semSetor.length,'matéria-prima ainda sem setor','matérias-primas ainda sem setor')}:</b> ${semSetor.map(r=>esc(r.nome)).join(' · ')}</div>`:''}
       ${m.setores.length?`<div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">${chips}${pode?`<button type="button" onclick="_fpProdIrSetores()" style="border:none;background:none;color:#4338ca;font-size:.72rem;font-weight:700;cursor:pointer;text-decoration:underline">✏️ editar setores</button>`:''}</div>${cards}
       ${pode?`<div style="margin-top:12px;display:flex;gap:8px"><button type="button" class="dash-btn-conf" onclick="_fpProdSalvar()">💾 Salvar ficha de produção</button></div>`:''}`
       :`<div style="padding:12px 14px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;font-size:.8rem;color:#92400e"><b>⚠️ Este produto ainda não tem os setores da produção.</b> Sem eles ele não entra em nenhuma Ficha de Produção.${pode?` <button type="button" onclick="_fpProdIrSetores()" class="dash-btn-conf" style="background:#1a2b5e;padding:5px 12px;font-size:.74rem;margin-left:6px">Definir setores</button>`:''}</div>`}`;
@@ -73875,8 +73917,11 @@ function _cadExportar(cad){
   window._fpProdRender=prodFpRender;
   const curP=()=>{try{return getProdutos()[_pfIdx];}catch(e){return null;}};
   window._fpProdToggle=k=>{const m=_pfFp.m;const i=m.setores.indexOf(k);if(i>=0)m.setores.splice(i,1);else{m.setores.push(k);const ord=setores().map(s=>s.k);m.setores.sort((a,b)=>ord.indexOf(a)-ord.indexOf(b));}prodFpRender(curP());};
-  const dd=k=>{const m=_pfFp.m;m.dados[k]=m.dados[k]||{};if(!m.dados[k].campos)m.dados[k].campos=camposDe(k,null);return m.dados[k];};
+  const dd=k=>{const m=_pfFp.m;m.dados[k]=m.dados[k]||{};if(!m.dados[k].campos)m.dados[k].campos=camposDe(k,null);if(!m.dados[k].mats)m.dados[k].mats=[];return m.dados[k];};
   window._fpProdCampo=(k,i,j,v)=>{dd(k).campos[i][j]=v;};
+  window._fpProdMatAttr=(k,i,a,v)=>{const d=dd(k);d.mats=d.mats||[];if(d.mats[i]){d.mats[i].attrs=d.mats[i].attrs||{};d.mats[i].attrs[a]=v;}};
+  window._fpProdMatDel=(k,i)=>{const d=dd(k);(d.mats||[]).splice(i,1);prodFpRender(curP());};
+  window._fpProdMatAdd=(k,key)=>{const p=curP();const r=(p&&p.materiasPrimas||[]).find(r=>mpKey(r)===key);if(!r)return;const d=dd(k);d.mats=d.mats||[];if(!d.mats.some(x=>x.key===key))d.mats.push({key,nome:r.nome,attrs:{}});prodFpRender(p);};
   window._fpProdCampoDel=(k,i)=>{dd(k).campos.splice(i,1);prodFpRender(curP());};
   window._fpProdCampoAdd=k=>{dd(k).campos.push(['','']);prodFpRender(curP());};
   window._fpProdObs=(k,v)=>{dd(k).obs=v;};
@@ -73889,8 +73934,8 @@ function _cadExportar(cad){
     const ks=modeloDe(p).setores;
     if(!ks.length){toast('Defina primeiro os setores da produção do produto (aba Produção)','terr');return;}
     const m={setores:ks.slice(),dados:{}};
-    ks.forEach(k=>{dd(k);m.dados[k]=clone(_pfFp.m.dados[k]);});
-    p.fpModelo=m;p.fpModeloEm=new Date().toISOString();p.fpModeloPor=quem();
+    ks.forEach(k=>{dd(k);m.dados[k]=clone(_pfFp.m.dados[k]);(m.dados[k].mats||[]).forEach(x=>{const r=(p.materiasPrimas||[]).find(r=>mpKey(r)===x.key);if(r)x.nome=r.nome;});});
+    p.fpModelo=m;_pfFp.sugerido=false;p.fpModeloEm=new Date().toISOString();p.fpModeloPor=quem();
     try{_prodHist(p.id,'Atualizou a ficha de produção',ks.map(k=>setor(k).n).join(' → '));}catch(e){}
     _pfFp.m=clone(m);await salvarCfg();prodFpRender(p);toast('Ficha de produção do produto salva ✅','tok');
   };
@@ -73923,11 +73968,12 @@ function _cadExportar(cad){
   // (quantidade, medidas, local e layout aplicado, observações). Sem produto do caderno não entra na FP.
   function itemDoProduto(prod,base){
     const m=prod?modeloDe(prod):{setores:[],dados:{}};const dados={};
-    m.setores.forEach(k=>{const d=m.dados[k]||{};dados[k]={campos:clone(camposDe(k,d)),obs:d.obs||'',imgs:clone(d.imgs||[])};});
+    const mm=prod?matsModelo(prod,m):{mats:{},sugerido:false};
+    m.setores.forEach(k=>{const d=m.dados[k]||{};dados[k]={campos:clone(camposDe(k,d)),obs:d.obs||'',imgs:clone(d.imgs||[]),mats:clone((mm.mats[k]||[]).map(x=>({key:x.key,nome:x.nome,qtd:x.qtd,attrs:x.attrs||{}})))};});
     const mats=(prod&&prod.materiasPrimas||[]).map(r=>{let q='',u='';try{const x=_mpQtdRef(r);q=x.q;u=x.u&&x.u.un||'';}catch(e){q=r.qtd||'';}return{material:r.nome||'',medida:'',qtd:q===''?'':String(q).replace('.',',')+(u?' '+u:''),obs:''};});
     const b=Object.assign({},base||{});if(prod){b.titulo=prod.nome;if(!b.medidas)b.medidas=prod.medida||'';}
     return Object.assign({id:'fpi'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),produtoId:prod?prod.id:null,produtoNome:prod?prod.nome:'',produtoCodigo:prod?(prod.codigo||''):'',caderno:prod?prod.categoria||'':'',produtoFoto:prod?(prod.fotoUrl||''):'',
-      titulo:'',medidas:'',qtd:'1',setores:m.setores.slice(),dados,base:clone(dados),baseSetores:m.setores.slice(),geral:{imgs:[],obs:'',local:''},mats,matsBase:clone(mats)},b);
+      titulo:'',medidas:'',qtd:'1',matsSugeridos:!!mm.sugerido,setores:m.setores.slice(),dados,base:clone(dados),baseSetores:m.setores.slice(),geral:{imgs:[],obs:'',local:''},mats,matsBase:clone(mats)},b);
   }
   function fpNova(p){
     const itens=(p.itensProducao||[]).filter(i=>!i.foraEscopo).map((it,ix)=>{const prod=acharProduto(p,it.nome);
@@ -73949,7 +73995,8 @@ function _cadExportar(cad){
     const bs=it.baseSetores||[];it.setores.filter(k=>!bs.includes(k)).forEach(k=>l.push('setor incluído: '+setor(k).n));bs.filter(k=>!it.setores.includes(k)).forEach(k=>l.push('setor retirado: '+setor(k).n));
     it.setores.forEach(k=>{const d=it.dados[k];if(!d)return;const b=it.base&&it.base[k];if(!b)return;
       d.campos.forEach((c,i)=>{if(alterado(it,k,i))l.push(setor(k).n+' · '+(c[0]||'campo')+': '+((b.campos[i]||[])[1]||'—')+' → '+(c[1]||'—'));});
-      if(String(d.obs||'')!==String(b.obs||''))l.push(setor(k).n+' · instrução alterada');});
+      if(String(d.obs||'')!==String(b.obs||''))l.push(setor(k).n+' · instrução alterada');
+      (d.mats||[]).forEach((x,i)=>{const bx=(b.mats||[])[i];if(!bx)return;Object.keys(Object.assign({},bx.attrs||{},x.attrs||{})).forEach(a=>{const v1=String((bx.attrs||{})[a]||''),v2=String((x.attrs||{})[a]||'');if(v1!==v2)l.push(setor(k).n+' · '+x.nome+' · '+a+': '+(v1||'—')+' → '+(v2||'—'));});});});
     if(JSON.stringify(it.mats)!==JSON.stringify(it.matsBase))l.push('materiais de compras ajustados');
     return l;
   }
@@ -74005,7 +74052,15 @@ function _cadExportar(cad){
     const setorCards=it.setores.map(k=>{const s=setor(k),d=it.dados[k]||(it.dados[k]={campos:camposDe(k,null),obs:'',imgs:[]});
       const campos=d.campos.map((c,i)=>{const alt=alterado(it,k,i);const bv=((it.base&&it.base[k]&&it.base[k].campos[i])||[])[1];
         return`<div style="font-weight:700;font-size:.74rem;color:#334155;padding:4px 0">${esc(c[0]||'—')}</div><div><input class="fc no-upper" ${ed?'':'disabled'} value="${esc(c[1])}" onchange="_fpCampo('${k}',${i},1,this.value)" style="width:100%;font-size:.76rem;padding:4px 6px;${alt?'background:#fffbeb;border-color:#f59e0b':''}">${alt?`<div style="font-size:.64rem;color:#b45309">⚠ alterado neste pedido · caderno: ${esc(bv||'—')}</div>`:''}</div>`;}).join('');
+      const at=atribDe(k),ms=d.mats||[];
+      const matsT=`<div style="font-size:.68rem;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.04em;margin:6px 0 4px">Materiais <span style="font-weight:600;color:#94a3b8;text-transform:none">— da composição do produto no caderno</span></div>`
+        +(ms.length?`<table style="width:100%;border-collapse:collapse;font-size:.74rem"><thead><tr style="color:#64748b;text-align:left"><th style="padding:2px 4px;width:30%;min-width:200px">Material</th><th style="padding:2px 4px;width:90px">Qtd</th>${at.map(a=>`<th style="padding:2px 4px">${esc(a)}</th>`).join('')}</tr></thead><tbody>
+          ${ms.map((x,i)=>{const bx=((it.base&&it.base[k]&&it.base[k].mats)||[])[i]||{};return`<tr><td style="padding:3px 4px;font-weight:700;color:#0f172a">${esc(x.nome)}</td><td style="padding:3px 4px;color:#64748b;white-space:nowrap">${esc(x.qtd||'—')}</td>
+            ${at.map(a=>{const v=(x.attrs||{})[a]||'',bv=(bx.attrs||{})[a]||'',alt=String(v)!==String(bv);return`<td style="padding:2px 4px"><input class="fc no-upper" ${ed?'':'disabled'} value="${esc(v)}" onchange="_fpMatAttr('${k}',${i},${esc(JSON.stringify(a))},this.value)" style="width:100%;padding:3px 5px;font-size:.74rem;${alt?'background:#fffbeb;border-color:#f59e0b':''}" title="${alt?'alterado neste pedido · caderno: '+esc(bv||'—'):''}"></td>`;}).join('')}</tr>`;}).join('')}</tbody></table>`
+          :(d.mats===undefined?`<div style="font-size:.72rem;color:#1e40af">Este item foi montado antes dos materiais por setor — clique em ↺ Trocar produto e escolha o mesmo produto pra puxar os materiais do caderno.</div>`:`<div style="font-size:.72rem;color:#b45309">⚠ O cadastro do produto ainda não diz os materiais deste setor.</div>`))
+        +(it.matsSugeridos&&ms.length?`<div style="font-size:.66rem;color:#1e40af;margin-top:3px">💡 setor sugerido pelo nome da matéria-prima — confirme no cadastro do produto (aba Ficha de produção).</div>`:'');
       return sec(s.c,esc(s.n),'página do setor na FP',`
+        ${matsT}
         ${campos?`<div style="display:grid;grid-template-columns:150px 1fr;gap:4px 8px;align-items:center;margin-top:6px">${campos}</div>`:''}
         <textarea class="fc no-upper" ${ed?'':'disabled'} rows="2" placeholder="Instruções pra este setor (cada linha vira um tópico)" onchange="_fpObs('${k}',this.value)" style="width:100%;margin-top:6px;font-size:.76rem">${esc(d.obs||'')}</textarea>
         ${imgsHtml(d.imgs,ed,`_fpImgAdd.bind(null,'${k}')`,`_fpImgDel.bind(null,'${k}')`)}`);}).join('');
@@ -74040,6 +74095,7 @@ function _cadExportar(cad){
   window._fpToggleSetor=k=>{};window._fpToggleSetorAntigo=k=>mexe(()=>{const x=it();const i=x.setores.indexOf(k);if(i>=0)x.setores.splice(i,1);else{x.setores.push(k);const ord=setores().map(s=>s.k);x.setores.sort((a,b)=>ord.indexOf(a)-ord.indexOf(b));if(!x.dados[k])x.dados[k]={campos:camposDe(k,null),obs:'',imgs:[]};}});
   window._fpCampo=(k,i,j,v)=>{if(j!==1)return;mexe(()=>{it().dados[k].campos[i][j]=v;});};
   window._fpGeralLocal=v=>mexe(()=>{it().geral.local=v;},false);
+  window._fpMatAttr=(k,i,a,v)=>mexe(()=>{const x=((it().dados[k]||{}).mats||[])[i];if(!x)return;x.attrs=x.attrs||{};x.attrs[a]=v;});
   window._fpCampoDel=(k,i)=>mexe(()=>{it().dados[k].campos.splice(i,1);});
   window._fpCampoAdd=k=>mexe(()=>{it().dados[k].campos.push(['','']);});
   window._fpObs=(k,v)=>mexe(()=>{it().dados[k].obs=v;});
@@ -74244,9 +74300,13 @@ function _cadExportar(cad){
         for(const k of x.setores){const s=setor(k),d=x.dados[k]||{campos:[],obs:'',imgs:[]};
           nova();aba(doc,s.n,s.c);doc.setTextColor(20,20,20);doc.setFont('helvetica','bold');doc.setFontSize(10);doc.text(s.n+' '+tit,10,14);doc.setFont('helvetica','normal');
           const temObs=!!String(d.obs||'').trim();
-          await colocarImagens(doc,(d.imgs&&d.imgs.length)?d.imgs:(k==='instalacao'?x.geral.imgs:[]),10,20,temObs?185:277,(d.campos||[]).some(c=>c[0]||c[1])?118:150,cache);
+          const blocos=(d.mats||[]).map(mt=>[['Material',mt.nome],['Quantidade',mt.qtd||'—']].concat(atribDe(k).filter(a=>String((mt.attrs||{})[a]||'').trim()).map(a=>[a,mt.attrs[a]])));
+          const cg=(d.campos||[]).filter(c=>c[0]&&String(c[1]||'').trim());if(cg.length)blocos.push(cg);
+          const linhasB=[];for(let i=0;i<blocos.length;i+=3)linhasB.push(blocos.slice(i,i+3));
+          const altB=linhasB.reduce((s,l)=>s+Math.max(...l.map(b=>b.length))*4.6+3,0);
+          await colocarImagens(doc,(d.imgs&&d.imgs.length)?d.imgs:(k==='instalacao'?x.geral.imgs:[]),10,20,temObs?185:277,Math.max(40,150-altB),cache);
           if(temObs)topicos(doc,d.obs,200,26,88,k==='instalacao'?[200,30,30]:null);
-          tabelaCampos(doc,d.campos,10,172);}
+          let yb=172;for(const l of linhasB){l.forEach((b,j)=>tabelaCampos(doc,b,10+j*82,yb));yb-=Math.max(...l.map(b=>b.length))*4.6+3;}}
         // materiais compras
         if((x.mats||[]).some(r=>r.material)){nova();aba(doc,'MATERIAIS COMPRAS','#d1d5db');doc.setTextColor(20,20,20);doc.setFont('helvetica','bold');doc.setFontSize(10);doc.text('MATERIAIS COMPRAS '+tit,10,14);doc.setFont('helvetica','normal');
           doc.autoTable({startY:19,margin:{left:10,right:10,bottom:36},head:[['ITEM','MATERIAL','MEDIDA','QUANTIDADE','OBSERVAÇÃO']],body:x.mats.filter(r=>r.material).map((r,i)=>[(i+1)+'-',String(r.material).toUpperCase(),r.medida||'-',r.qtd||'',String(r.obs||'').toUpperCase()]),
@@ -81420,6 +81480,122 @@ _pfSalvarEtapas=function(){
     if(!modoAdd)window._fpPkFechar&&window._fpPkFechar();
     toast('✓ '+k.nome+': '+cs.length+' '+_plural(cs.length,'componente adicionado','componentes adicionados')+' à FP','tok');
   };}
+})();
+
+</script>
+<script>
+// ── FP: CORREÇÃO "Nested arrays are not supported" (2026-11-04) ──────────────────────────────────────
+// Erro relatado pelo Guilherme ao salvar a FP: o Firestore NÃO aceita lista dentro de lista, e os campos de
+// cada setor da FP ficam como [["Material","ACM"],["Espessura","3mm"]] (item.dados[setor].campos e
+// produto.fpModelo.dados[setor].campos). Agora, só na hora de GRAVAR, cada lista interna vira {__a:[…]}
+// (formato aceito); na hora de LER volta a ser lista. Vale pra FP do pedido, FP sem pedido e ficha de produção
+// do produto (cfg). Nada muda na tela nem no PDF.
+(function(){
+  const enc=x=>{if(Array.isArray(x))return x.map(e=>Array.isArray(e)?{__a:enc(e)}:enc(e));if(x&&typeof x==='object'){const o={};for(const k in x)o[k]=enc(x[k]);return o;}return x;};
+  const dec=x=>{if(Array.isArray(x))return x.map(dec);if(x&&typeof x==='object'){const ks=Object.keys(x);if(ks.length===1&&ks[0]==='__a'&&Array.isArray(x.__a))return dec(x.__a);const o={};for(const k in x)o[k]=dec(x[k]);return o;}return x;};
+  window._fsEncAninhado=enc;window._fsDecAninhado=dec;
+  const temAninhado=x=>{if(Array.isArray(x))return x.some(e=>Array.isArray(e)||temAninhado(e));if(x&&typeof x==='object'){for(const k in x)if(temAninhado(x[k]))return true;}return false;};
+  // gravação — as funções do Firebase são criadas pelo módulo (async), então instala quando elas existirem
+  function instalar(){
+    let ok=0;
+    const w=(nome,fn)=>{const o=window[nome];if(!o)return;if(o._encAn){ok++;return;}const n=fn(o);n._encAn=true;window[nome]=n;ok++;};
+    w('_fbSavePedido',o=>function(p){if(p&&p.fp&&temAninhado(p.fp))return o.call(this,Object.assign({},p,{fp:enc(p.fp)}));return o.apply(this,arguments);});
+    w('_fbFpAvulsaSet',o=>function(d){if(d&&d.fp&&temAninhado(d.fp))return o.call(this,Object.assign({},d,{fp:enc(d.fp)}));return o.apply(this,arguments);});
+    w('_fbSaveCfg',o=>function(data){
+      try{if(data&&Array.isArray(data.produtos)&&data.produtos.some(p=>p&&p.fpModelo&&temAninhado(p.fpModelo)))
+        return o.call(this,Object.assign({},data,{produtos:data.produtos.map(p=>p&&p.fpModelo&&temAninhado(p.fpModelo)?Object.assign({},p,{fpModelo:enc(p.fpModelo)}):p)}));}catch(e){console.warn('fp enc cfg',e);}
+      return o.apply(this,arguments);});
+    return ok===3;
+  }
+  if(!instalar()){let n=0;const t=setInterval(()=>{n++;if(instalar()||n>600)clearInterval(t);},200);}
+  // leitura: volta pro formato de lista antes de usar
+  function decProdutos(){try{(cfg.produtos||[]).forEach(p=>{if(p&&p.fpModelo&&JSON.stringify(p.fpModelo).indexOf('"__a"')>=0)p.fpModelo=dec(p.fpModelo);});}catch(e){}}
+  function decFp(p){try{if(p&&p.fp&&JSON.stringify(p.fp).indexOf('"__a"')>=0)p.fp=dec(p.fp);}catch(e){}}
+  window._fpDecTudo=()=>{decProdutos();(window.pedidos||[]).forEach(decFp);(window._fpAvulsas||[]).forEach(decFp);};
+  {const o=window.fpAbrir;if(o)window.fpAbrir=function(pid){decProdutos();const p=(pedidos||[]).find(x=>x.id===pid)||(window._fpAvulsas||[]).find(x=>x.id===pid);decFp(p);return o.apply(this,arguments);};}
+  {const o=abrirFichaProduto;abrirFichaProduto=function(){decProdutos();return o.apply(this,arguments);};}
+  {const o=window._fpPicker;if(o)window._fpPicker=function(){decProdutos();return o.apply(this,arguments);};}
+  {const o=window._fpDifs;if(o)window._fpDifs=function(x){return o.call(this,dec(x));};}
+  {const o=window.renderFps;if(o)window.renderFps=function(){try{window._fpDecTudo();}catch(e){}return o.apply(this,arguments);};}
+})();
+
+</script>
+<script>
+// ── COMPONENTE COM SETORES OBRIGATÓRIOS + SETORES DO PRODUTO FINAL AUTOMÁTICOS (2026-11-04) ─────────────
+// Pedido do Guilherme: "cada componente cadastrado precisa ter os setores de produção obrigatoriamente
+// cadastrados e isso gera no produto final os setores automaticamente".
+//  • "＋ Criar componente novo aqui" (dentro do produto final) passa a pedir os setores do componente (obrigatório)
+//    — antes ele copiava os do conjunto.
+//  • O produto final grava sempre a união dos setores dos componentes (p.etapasProducao / p.setoresFp), atualizada
+//    sozinha ao abrir a ficha e quando muda a lista de componentes.
+// + EXCLUSÃO ÚNICA a pedido do Guilherme (04/11 19:09): a variação "1,12X0,90M" (R$ 2.188,55) do COMA COMO UM REI,
+//   cadastrada como variação por engano. Roda uma vez (cfg.prodExclusoes), só com Projetos/admin logado, manda o
+//   produto pra Lixeira e avisa no sino. Se estiver dentro de algum produto final, NÃO apaga e avisa.
+(function(){
+  const N=s=>String(s==null?'':s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/×/g,'X').replace(/\s+/g,'').trim();
+  const isKit=p=>window._prodEhKit?window._prodEhKit(p):!!(p&&(p.componentes||[]).length);
+  const salvar=()=>{if(window._fbSaveCfg)window._fbSaveCfg(cfg);try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}};
+  // 1) setores do produto final = união dos componentes (gravado)
+  function sincKit(p){
+    if(!isKit(p))return false;
+    const cs=(window._kitComps?window._kitComps(p):[]);if(!cs.length)return false;
+    const et=new Set(),fx=new Set();cs.forEach(c=>{(c.p.etapasProducao||[]).forEach(k=>et.add(k));(c.p.setoresFp||[]).forEach(k=>fx.add(k));});
+    const novoEt=PROD_SETORES_ITEM.map(e=>e.key).filter(k=>et.has(k)),novoFx=(window._prodSetoresFpExtras||[]).map(e=>e.key).filter(k=>fx.has(k));
+    if(JSON.stringify(novoEt)===JSON.stringify(p.etapasProducao||[])&&JSON.stringify(novoFx)===JSON.stringify(p.setoresFp||[]))return false;
+    p.etapasProducao=novoEt;p.setoresFp=novoFx;return true;
+  }
+  window._kitSincSetores=sincKit;
+  {const o=abrirFichaProduto;abrirFichaProduto=function(i){try{const p=getProdutos()[i];if(sincKit(p))salvar();}catch(e){}return o.apply(this,arguments);};}
+  {const o=_compSalvar;_compSalvar=function(p,lista){try{if(p){const ant=p.componentes;p.componentes=lista&&lista.length?lista:ant;sincKit(p);p.componentes=ant;}}catch(e){}return o.apply(this,arguments);};}
+  // 2) criar componente: setores obrigatórios
+  {const o=_compRender;_compRender=function(p){
+    const r=o.apply(this,arguments);
+    try{if(window._compNovoAberto&&!document.getElementById('cpn-setores-wrap')){const alvo=document.getElementById('cpn-mp-lista');
+      if(alvo)alvo.insertAdjacentHTML('afterend',`<div id="cpn-setores-wrap" style="margin-top:12px"><div style="font-size:.7rem;font-weight:700;color:#475569;margin-bottom:4px">Setores da produção deste componente *</div><div id="cpn-setores">${_prodEtapaChipsHtml([],[])}</div></div>`);}}catch(e){console.warn('setores do componente',e);}
+    return r;};}
+  {const o=_compCriarPeca;_compCriarPeca=async function(){
+    const box=document.getElementById('cpn-setores');
+    const et=box?_prodEtapasLidas('cpn-setores'):[],fx=box&&window._prodSetoresFpLidos?window._prodSetoresFpLidos('cpn-setores'):[];
+    if(box&&!et.length&&!fx.length){toast('Marque os setores da produção deste componente','terr');box.scrollIntoView({behavior:'smooth',block:'center'});return;}
+    const n0=getProdutos().length;
+    const r=await o.apply(this,arguments);
+    try{const L=getProdutos();if(box&&L.length>n0){const pc=L[L.length-1];pc.etapasProducao=PROD_SETORES_ITEM.map(e=>e.key).filter(k=>et.includes(k));pc.setoresFp=(window._prodSetoresFpExtras||[]).map(e=>e.key).filter(k=>fx.includes(k));
+      L.forEach(k=>{if(isKit(k)&&(k.componentes||[]).some(c=>String(c.id)===String(pc.id)))sincKit(k);});salvar();}}catch(e){console.warn('setores do componente novo',e);}
+    return r;};}
+  // 3) exclusão única pedida pelo Guilherme
+  const EXCLUSOES=[{id:'coma_112x090_20261104',desc:'COMA COMO UM REI — variação 1,12X0,90M (R$ 2.188,55)',
+    acha:p=>(N(p.tipoProduto).includes('COMACOMOUMREI')||N(p.nome).includes('COMACOMOUMREI'))&&(N(p.variacao).includes('1,12X0,90')||N(p.nome).includes('1,12X0,90')),
+    preco:2188.55}];
+  async function rodarExclusoes(){
+    cfg.prodExclusoes=cfg.prodExclusoes||{};
+    const pend=EXCLUSOES.filter(x=>!cfg.prodExclusoes[x.id]);if(!pend.length)return true;
+    for(const x of pend){
+      const L=getProdutos();let achados=L.filter(p=>p&&x.acha(p));
+      if(achados.length>1&&x.preco)achados=achados.filter(p=>Math.abs((Number(p.precoFinal)||0)-x.preco)<0.02);
+      const reg={em:new Date().toISOString(),por:(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—',desc:x.desc};
+      if(achados.length!==1){reg.resultado=achados.length?'não apagado — '+achados.length+' produtos parecidos, precisa confirmar':'nada a apagar — produto não encontrado';reg.nomes=achados.map(p=>p.codigo+' '+p.nome);}
+      else{const p=achados[0];const kits=L.filter(k=>k&&(k.componentes||[]).some(c=>String(c.id)===String(p.id)));
+        if(isKit(p)||(p.componentes||[]).length){reg.resultado='não apagado — é um produto final (kit), precisa confirmar';reg.nomes=[p.codigo+' '+p.nome];}
+        else if(kits.length){reg.resultado='não apagado — está dentro de '+kits.map(k=>k.nome).join(', ');reg.nomes=[p.codigo+' '+p.nome];}
+        else{try{await _lixeiraAdicionar('produto',{produto:p},{resumo:(p.codigo||'')+' '+p.nome+' — exclusão pedida pelo Guilherme'});}catch(e){console.warn('lixeira',e);}
+          cfg.produtos=L.filter(q=>q!==p);reg.resultado='apagado (foi pra Lixeira)';reg.nomes=[p.codigo+' '+p.nome];
+          try{_prodHist(p.id,'Produto apagado',x.desc);}catch(e){}}}
+      cfg.prodExclusoes[x.id]=reg;
+    }
+    salvar();try{renderComercialProdutos();}catch(e){}
+    try{const r=Object.values(cfg.prodExclusoes).slice(-1)[0];toast('🗑️ '+r.desc+': '+r.resultado,'tinf');}catch(e){}
+    return true;
+  }
+  let n=0;const t=setInterval(()=>{n++;
+    try{if(typeof usuarioLogado!=='undefined'&&usuarioLogado&&window._fbSaveCfg&&typeof cfg!=='undefined'&&(cfg.produtos||[]).length>0&&_prodPodeEditar()){if(n>=6){clearInterval(t);rodarExclusoes();}}}catch(e){}
+    if(n>200)clearInterval(t);},2000);
+  // aviso no sino (3 dias) pra admin/Projetos
+  try{const _oA=_avisosAutomaticos;_avisosAutomaticos=function(){const out=_oA.apply(this,arguments);try{
+    if(!_prodPodeEditar())return out;
+    Object.entries(cfg.prodExclusoes||{}).forEach(([id,r])=>{if(!r||!r.em||Date.now()-new Date(r.em)>3*86400000)return;
+      out.push({id:'prod_excl_'+id,automatico:true,tipoAuto:'prod_exclusao',assunto:'🗑️ Exclusão de produto',texto:r.desc+'\n'+r.resultado+(r.nomes&&r.nomes.length?'\n'+r.nomes.map(x=>'• '+x).join('\n'):''),destinatarioTipo:'setor',destinatarioValor:'ADMIN'});});
+  }catch(e){}return out;};}catch(e){}
+  try{const _oP=_avisoAplicavelPara;_avisoAplicavelPara=function(av){if(av&&av.tipoAuto==='prod_exclusao'){try{return _prodPodeEditar();}catch(e){return false;}}return _oP.apply(this,arguments);};}catch(e){}
 })();
 
 </script>
