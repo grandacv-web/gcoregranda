@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-04.21';</script>
+<script>const APP_BUILD_VERSION='2026-11-04.22';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -5836,6 +5836,8 @@ window._fbPesosMpSet=(k,v)=>v?setDoc(doc(db,'sistema','pesosMp'),{itens:{[k]:v}}
 // Pesagens na balança (2026-10-17) — coleção própria: qualquer usuário cadastrado registra; só Projetos/admin apagam.
 window._fbPesagemSet=(d)=>setDoc(doc(db,'pesagens',String(d.id)),d,{merge:true});
 window._fbPesagensWatch=(cb,errCb)=>onSnapshot(collection(db,'pesagens'),cb,errCb||(e=>console.warn('pesagens watch',e)));
+window._fbFpAvulsaSet=(d)=>setDoc(doc(db,'fpAvulsas',String(d.id)),d);
+window._fbFpAvulsasGet=()=>getDocs(collection(db,'fpAvulsas')).then(s=>s.docs.map(d=>d.data()));
 window._fbProdFichaGet=(id)=>getDoc(doc(db,'produtosFicha',String(id))).then(s=>s.exists()?s.data():{});
 window._fbProdFichaTx=(id,fn)=>runTransaction(db,async(tx)=>{const ref=doc(db,'produtosFicha',String(id));const snap=await tx.get(ref);const d=snap.exists()?JSON.parse(JSON.stringify(snap.data())):{};const n=fn(d)||d;tx.set(ref,n);return n;});
 // Espera todas as gravações pendentes chegarem no servidor (usado antes de recarregar a página sozinho).
@@ -73927,15 +73929,15 @@ function _cadExportar(cad){
   function fpNova(p){
     const itens=(p.itensProducao||[]).filter(i=>!i.foraEscopo).map((it,ix)=>{const prod=acharProduto(p,it.nome);
       return itemDoProduto(prod,{numero:it.numero||ix+1,titulo:tituloDe(it.nome),descricao:it.nome||'',medidas:medidasDe(it.nome),qtd:it.qtd||'1',itpId:it.id||null});});
-    return{status:'rascunho',projetista:quem(),criadoEm:new Date().toISOString(),criadoPor:quem(),itens,hist:[{em:new Date().toISOString(),por:quem(),acao:'FP criada a partir do pedido'+(itens.some(i=>i.produtoId)?' e do caderno':'')}]};
+    return{status:'rascunho',projetista:quem(),criadoEm:new Date().toISOString(),criadoPor:quem(),itens,hist:[{em:new Date().toISOString(),por:quem(),acao:(p.avulsa?'FP criada sem pedido de venda':'FP criada a partir do pedido')+(itens.some(i=>i.produtoId)?' e do caderno':'')}]};
   }
   let FP={pid:null,fp:null,sel:0,sujo:false};
-  const pedAtual=()=>pedidos.find(x=>x.id===FP.pid);
+  const pedAtual=()=>pedidos.find(x=>x.id===FP.pid)||(window._fpAvulsas||[]).find(x=>x.id===FP.pid);
   const travada=()=>FP.fp&&(FP.fp.status==='aguardando'||FP.fp.status==='aprovada');
   const STATUS={rascunho:['Rascunho','#64748b','#f1f5f9'],aguardando:['Aguardando aprovação','#92400e','#fef3c7'],aprovada:['Aprovada','#047857','#ecfdf5'],devolvida:['Devolvida pra ajuste','#b91c1c','#fef2f2']};
   window._fpStatusChip=p=>{const f=p&&p.fp;if(!f)return'';const s=STATUS[f.status]||STATUS.rascunho;return`<span style="background:${s[2]};color:${s[1]};border-radius:999px;padding:1px 8px;font-size:.64rem;font-weight:800;white-space:nowrap">FP: ${s[0]}</span>`;};
   window.fpAbrir=function(pid){
-    const p=pedidos.find(x=>x.id===pid);if(!p){toast('Pedido não encontrado','terr');return;}
+    const p=pedidos.find(x=>x.id===pid)||(window._fpAvulsas||[]).find(x=>x.id===pid);if(!p){toast('Pedido não encontrado','terr');return;}
     FP={pid,fp:p.fp?clone(p.fp):fpNova(p),sel:0,sujo:!p.fp};render();
   };
   function alterado(it,k,i){const b=it.base&&it.base[k];if(!b)return!!(it.produtoId);const bc=b.campos&&b.campos[i],c=it.dados[k].campos[i];if(!bc)return true;return String(bc[1]||'')!==String(c[1]||'')||String(bc[0]||'')!==String(c[0]||'');}
@@ -73962,7 +73964,7 @@ function _cadExportar(cad){
     acoes.push(`<button type="button" class="orc2-btn sec" style="padding:6px 10px;font-size:.76rem" onclick="_fpPdf()">📄 Gerar PDF</button>`);
     m.innerHTML=`<div style="background:#fff;border-radius:16px;width:min(1180px,100%);max-height:94vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.25)">
       <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #e2e8f0;flex-wrap:wrap">
-        <div style="flex:1;min-width:220px"><div style="font-weight:800;color:#1a2b5e;font-size:1rem">📋 Ficha de Produção — OS ${esc(p.os||'—')}</div>
+        <div style="flex:1;min-width:220px"><div style="font-weight:800;color:#1a2b5e;font-size:1rem">📋 Ficha de Produção — ${p.avulsa?esc(p.os)+' (sem pedido de venda)':'OS '+esc(p.os||'—')}</div>
         <div style="font-size:.74rem;color:#64748b">${esc(p.cliente||'')} · entrega ${p.prazo?fmtD(p.prazo):'—'} · vendedor ${esc(p.responsavel||'—')} · projetista <input class="fc no-upper" ${ed?'':'disabled'} value="${esc(f.projetista||'')}" onchange="_fpSet('projetista',this.value)" style="display:inline-block;width:180px;padding:2px 6px;font-size:.74rem"></div></div>
         <span style="background:${st[2]};color:${st[1]};border-radius:999px;padding:3px 10px;font-size:.72rem;font-weight:800">${st[0]}${f.aprov&&f.status==='aprovada'?' por '+esc(f.aprov.por):''}</span>
         <div style="display:flex;gap:6px;flex-wrap:wrap">${acoes.join('')}</div>
@@ -74045,7 +74047,7 @@ function _cadExportar(cad){
   async function gravar(acao){
     const p=pedAtual();if(!p)return false;FP.fp.hist=FP.fp.hist||[];if(acao)FP.fp.hist.push({em:new Date().toISOString(),por:quem(),acao});
     FP.fp.atualizadoEm=new Date().toISOString();p.fp=clone(FP.fp);
-    try{await savePedidoFS(p);FP.sujo=false;return true;}catch(e){toast('Erro ao salvar a FP: '+e.message,'terr');return false;}
+    try{if(p.avulsa)await window._fpAvSalvar(p);else await savePedidoFS(p);FP.sujo=false;return true;}catch(e){toast('Erro ao salvar a FP: '+e.message,'terr');return false;}
   }
   window._fpSalvar=async()=>{if(!podeEditarFP())return;if(await gravar(FP.sujo?'Salvou':null)){toast('FP salva ✅','tok');render();}};
   window._fpEnviar=async()=>{
@@ -74146,7 +74148,7 @@ function _cadExportar(cad){
       if(box&&p&&!box.querySelector('.fp-barra'))box.insertAdjacentHTML('afterbegin',`<div class="fp-barra" style="display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:8px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0"><span style="font-size:.8rem;font-weight:800;color:#1a2b5e">📋 Ficha de Produção</span>${p.fp?window._fpStatusChip(p):'<span style="font-size:.7rem;color:#94a3b8">ainda não criada</span>'}<span style="flex:1"></span><button type="button" class="dash-btn-conf" style="background:#1a2b5e;padding:5px 12px;font-size:.74rem" onclick="fpAbrir('${pid}')">${p.fp?'Abrir FP':'＋ Gerar FP'}</button></div>`);}catch(e){console.warn('FP barra',e);}
     return r;};}catch(e){console.warn('FP checklist',e);}
   function filaHtml(){
-    if(!podeAprovar())return'';const l=(pedidos||[]).filter(p=>p&&p.fp&&p.fp.status==='aguardando');if(!l.length)return'';
+    if(!podeAprovar())return'';const l=(pedidos||[]).concat(window._fpAvulsas||[]).filter(p=>p&&p.fp&&p.fp.status==='aguardando');if(!l.length)return'';
     return`<div id="fp-fila" style="margin-bottom:12px;padding:10px 14px;border-radius:12px;background:#fffbeb;border:1px solid #fde68a"><div style="font-size:.8rem;font-weight:800;color:#92400e;margin-bottom:6px">📋 ${l.length} ${l.length===1?'FP aguardando':'FPs aguardando'} sua aprovação</div>
       ${l.map(p=>{const nd=p.fp.itens.reduce((s,x)=>s+(x.produtoId?difsItem(x).length:1),0);return`<button type="button" onclick="fpAbrir('${p.id}')" style="display:inline-flex;gap:6px;align-items:center;margin:0 6px 6px 0;border:1px solid #fcd34d;background:#fff;border-radius:999px;padding:4px 10px;font-size:.74rem;cursor:pointer">OS ${esc(p.os||'—')} · ${esc(String(p.cliente||'').slice(0,28))}${nd?` <b style="color:#b45309">⚠ ${nd}</b>`:''}</button>`;}).join('')}</div>`;
   }
@@ -74982,6 +74984,101 @@ function _cadExportar(cad){
   try{const _ra=renderAll;renderAll=function(){const r=_ra.apply(this,arguments);agendar();return r;};}catch(e){}
   // 2) segurança: se a quantidade de pedidos/usuários mudou e a tela está aberta, recalcula
   setInterval(()=>{const s=sig();if(s!==ultSig){ultSig=s;agendar();}},3000);
+})();
+
+// ── FP: BOTÃO "GERAR FP" EM PROJETOS (com pedido de venda ou sem pedido) (build 2026-11-04.22) ─────────────
+// Guilherme (04/11, 15:35): cópia do botão "+ Gerar FP" ao lado do menu Produtos, dentro de Projetos — dá pra
+// relacionar a FP a um pedido de venda, ou fazer uma FP que não está ligada a nada vendido.
+//  • Com pedido: escolhe o pedido (busca por OS, cliente, fantasia, JOB) e abre a mesma FP do checklist.
+//  • Sem pedido: nome/cliente, descrição, entrega e endereço (opcionais) → FP numerada "FP 001", "FP 002"…,
+//    gravada na coleção própria fpAvulsas (não aparece em vendas, comissão, produção nem em nenhum número).
+//    Mesmo fluxo da FP do pedido: itens do caderno, aprovação, PDF.
+(function(){
+  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const N=s=>String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+  const quem=()=>(usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—';
+  window._fpAvulsas=window._fpAvulsas||[];
+  let carregou=false;
+  async function carregar(){
+    if(typeof window._fbFpAvulsasGet!=='function'||!usuarioLogado)return false;
+    try{const l=await window._fbFpAvulsasGet();window._fpAvulsas.length=0;l.forEach(x=>window._fpAvulsas.push(x));carregou=true;try{projRenderAtivo();}catch(e){}return true;}
+    catch(e){console.warn('FPs sem pedido',e);return false;}
+  }
+  {let n=0;const t=setInterval(async()=>{n++;if(await carregar()||n>60)clearInterval(t);},5000);}
+  window._fpAvSalvar=async function(p){
+    await window._fbFpAvulsaSet(JSON.parse(JSON.stringify(p)));
+    const a=window._fpAvulsas,i=a.findIndex(x=>x.id===p.id);if(i<0)a.push(p);else a[i]=p;
+  };
+
+  // ── botão ao lado de Produtos ──
+  function botao(){
+    const tabs=document.getElementById('proj-main-tabs');if(!tabs||tabs.querySelector('.fp-av-bt'))return!!tabs;
+    const b=document.createElement('button');b.type='button';b.className='fp-av-bt';b.textContent='+ Gerar FP';b.title='Gerar uma Ficha de Produção (ligada a um pedido de venda ou sem pedido)';
+    b.style.cssText='flex:0 0 auto;margin-left:8px;background:#1a2b5e;color:#fff;border:none;border-radius:9px;padding:7px 16px;font-size:.78rem;font-weight:800;cursor:pointer;font-family:inherit;white-space:nowrap';
+    b.onclick=()=>window.fpGerarAbrir();
+    const prod=[...tabs.querySelectorAll('.proj-main-tab')].find(x=>/Produtos/.test(x.textContent));
+    if(prod)prod.insertAdjacentElement('afterend',b);else tabs.appendChild(b);return true;
+  }
+  if(!botao()){let n=0;const t=setInterval(()=>{n++;if(botao()||n>60)clearInterval(t);},1000);}
+
+  // ── janela ──
+  const chip=p=>{try{return window._fpStatusChip(p)||'';}catch(e){return'';}};
+  function lista(q){
+    const tq=N(q).trim().split(/\s+/).filter(Boolean);if(!tq.length)return'<div style="color:#94a3b8;font-size:.76rem;padding:6px 2px">Digite a OS, o cliente, o fantasia ou o JOB.</div>';
+    let base=[];try{base=_lpPedidosElegiveis()||[];}catch(e){}
+    const l=base.filter(p=>{const t=N([p.os,p.cliente,p.nomeFantasia,p.razaoSocial,p.job,p.responsavel].join(' '));return tq.every(w=>t.indexOf(w)>=0);})
+      .sort((a,b)=>String(b.emissaoEm||'').localeCompare(String(a.emissaoEm||''))).slice(0,10);
+    if(!l.length)return'<div style="color:#94a3b8;font-size:.76rem;padding:6px 2px">Nenhum pedido encontrado.</div>';
+    return l.map(p=>`<button type="button" onclick="document.getElementById('fp-gerar-md').remove();fpAbrir('${p.id}')" style="display:flex;width:100%;gap:8px;align-items:center;text-align:left;border:1px solid #e2e8f0;background:#fff;border-radius:9px;padding:7px 10px;margin-bottom:5px;cursor:pointer;font-family:inherit;font-size:.78rem">
+      <b style="min-width:44px">OS ${esc(p.os||'—')}</b><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((typeof _pedNome==='function'?_pedNome(p):p.cliente)||'—')}${p.job?' · '+esc(p.job):''}</span>${p.fp?chip(p):'<span style="color:#94a3b8;font-size:.68rem">sem FP</span>'}</button>`).join('');
+  }
+  window._fpGerarBusca=v=>{const el=document.getElementById('fp-gerar-res');if(el)el.innerHTML=lista(v);};
+  function avulsasHtml(){
+    const a=(window._fpAvulsas||[]).slice().sort((x,y)=>(y.fpAvNum||0)-(x.fpAvNum||0));
+    if(!a.length)return'<div style="color:#94a3b8;font-size:.76rem;padding:4px 2px">Nenhuma FP sem pedido ainda.</div>';
+    return a.map(p=>`<button type="button" onclick="document.getElementById('fp-gerar-md').remove();fpAbrir('${p.id}')" style="display:flex;width:100%;gap:8px;align-items:center;text-align:left;border:1px solid #e2e8f0;background:#fff;border-radius:9px;padding:7px 10px;margin-bottom:5px;cursor:pointer;font-family:inherit;font-size:.78rem">
+      <b style="min-width:52px">${esc(p.os)}</b><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.cliente||'—')}${p.job?' · '+esc(p.job):''}</span>${chip(p)}</button>`).join('');
+  }
+  window.fpGerarAbrir=async function(){
+    if(typeof _isSetorUser==='function'&&!_isSetorUser('PROJETOS')){toast('Só Projetos ou administrador geram FP','terr');return;}
+    const old=document.getElementById('fp-gerar-md');if(old)old.remove();
+    const m=document.createElement('div');m.id='fp-gerar-md';
+    m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9998;display:flex;align-items:center;justify-content:center;padding:16px';
+    const inp='width:100%;box-sizing:border-box;padding:8px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:.8rem;font-family:inherit';
+    const tit='font-size:.74rem;font-weight:800;color:#1a2b5e;text-transform:uppercase;letter-spacing:.03em;margin:0 0 8px';
+    m.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:620px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid #eef2f7"><div style="font-weight:800;color:#0f172a">📋 Gerar Ficha de Produção</div>
+        <button type="button" onclick="document.getElementById('fp-gerar-md').remove()" style="border:none;background:none;font-size:1.2rem;cursor:pointer;color:#64748b">✕</button></div>
+      <div style="overflow:auto;padding:14px 18px;display:flex;flex-direction:column;gap:16px">
+        <div><div style="${tit}">🔗 Relacionar com um pedido de venda</div>
+          <input id="fp-gerar-q" class="no-upper" placeholder="Buscar por OS, cliente, fantasia ou JOB…" oninput="_fpGerarBusca(this.value)" style="${inp};margin-bottom:8px">
+          <div id="fp-gerar-res">${lista('')}</div></div>
+        <div style="border-top:1px solid #eef2f7;padding-top:14px"><div style="${tit}">📄 FP sem pedido de venda</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <input id="fp-av-cli" placeholder="Nome / cliente *" style="${inp};grid-column:1/-1">
+            <input id="fp-av-job" placeholder="Descrição (ex.: amostra, peça interna)" style="${inp};grid-column:1/-1">
+            <div><div style="font-size:.68rem;color:#64748b;margin-bottom:3px">Data de entrega (opcional)</div><input id="fp-av-prazo" type="date" style="${inp}"></div>
+            <div><div style="font-size:.68rem;color:#64748b;margin-bottom:3px">Endereço (opcional)</div><input id="fp-av-end" style="${inp}"></div>
+          </div>
+          <button type="button" onclick="_fpAvCriar()" style="margin-top:10px;background:#1a2b5e;color:#fff;border:none;border-radius:9px;padding:8px 16px;font-size:.78rem;font-weight:800;cursor:pointer;font-family:inherit">+ Criar FP sem pedido</button></div>
+        <div style="border-top:1px solid #eef2f7;padding-top:14px"><div style="${tit}">FPs sem pedido já criadas</div><div id="fp-av-lista">${avulsasHtml()}</div></div>
+      </div></div>`;
+    document.body.appendChild(m);setTimeout(()=>{try{document.getElementById('fp-gerar-q').focus();}catch(e){}},50);
+    if(!carregou&&await carregar()){const el=document.getElementById('fp-av-lista');if(el)el.innerHTML=avulsasHtml();}
+  };
+  window._fpAvCriar=async function(){
+    const v=id=>(document.getElementById(id)||{}).value||'';
+    const cli=v('fp-av-cli').trim();if(!cli){toast('Informe o nome / cliente da FP','terr');return;}
+    if(!carregou)await carregar();
+    const num=Math.max(0,...(window._fpAvulsas||[]).map(x=>x.fpAvNum||0))+1;
+    const agora=new Date().toISOString(),end=v('fp-av-end').trim();
+    const p={id:'fpav_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),avulsa:true,fpAvNum:num,os:'FP '+String(num).padStart(3,'0'),
+      cliente:cli.toUpperCase(),job:v('fp-av-job').trim().toUpperCase(),prazo:v('fp-av-prazo')||'',responsavel:'—',itensProducao:[],
+      instalacao:end?{'Endereço de Instalação':end}:{},criadoEm:agora,criadoPor:quem()};
+    try{await window._fpAvSalvar(p);}catch(e){toast('Erro ao criar a FP: '+e.message,'terr');return;}
+    const md=document.getElementById('fp-gerar-md');if(md)md.remove();
+    toast(p.os+' criada — adicione os itens','tok');fpAbrir(p.id);
+  };
 })();
 
 // ── VISUALIZADOR 3D DO PRODUTO (build 2026-11-04.7; ajustes na .12, .16 e .19) ─────────────────────────────────────────────────
