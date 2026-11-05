@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-05.5';</script>
+<script>const APP_BUILD_VERSION='2026-11-05.6';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -81858,6 +81858,111 @@ _pfSalvarEtapas=function(){
       toast(`Copiado de outro caderno — revise TODOS os itens marcados em vermelho antes de usar`,'twar');
     }catch(e){console.warn('revisão da cópia',e);}
     return r;};}
+})();
+
+</script>
+<script>
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// LEITOR DE ARQUIVOS — TODO ARQUIVO ABRE NO LEITOR ANTES DE BAIXAR (2026-11-05, pedido do Guilherme)
+// "Tudo que tiver arquivos no sistema eu quero que ele abra o leitor primeiro e não baixe automático, seja
+// ordem de serviço, fotos de finalização de obra, parte de projetos… o usuário escolhe se quer baixar."
+// • Qualquer link de arquivo do sistema (Cloudinary, Firebase Storage, anexo embutido data:) abre aqui:
+//   PDF (pdf.js, funciona também no celular), imagem, vídeo, Word/Excel/PowerPoint (visualizador do Office);
+//   outros tipos mostram o nome e o botão Baixar.
+// • "⬇ Baixar" baixa com o NOME ORIGINAL do arquivo. "Abrir em nova aba" abre sem baixar.
+// • Ctrl/Cmd+clique continua abrindo direto (atalho de quem quer).
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+(function(){
+  const E=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const ehArquivo=u=>/^data:/i.test(u)||/(^|\.)res\.cloudinary\.com\//i.test(u.replace(/^https?:\/\//,''))||/firebasestorage\.(googleapis\.com|app)/i.test(u);
+  const semAnexo=u=>{try{return String(u).replace(/\/upload\/fl_attachment(:[^/]*)?\//,'/upload/');}catch(e){return u;}};
+  function nomeDe(u,sug){
+    if(sug)return String(sug);
+    if(/^data:/i.test(u))return'arquivo';
+    try{const p=new URL(u).pathname;let n=decodeURIComponent(p.split('/').pop()||'arquivo');
+      if(/firebasestorage/.test(u)){const m=p.match(/\/o\/(.+)$/);if(m)n=decodeURIComponent(m[1]).split('/').pop();}
+      return n||'arquivo';}catch(e){return'arquivo';}
+  }
+  function extDe(u,nome){
+    if(/^data:/i.test(u)){const m=u.match(/^data:([^;,]+)/i);const t=m?m[1].toLowerCase():'';if(t.includes('pdf'))return'pdf';if(t.startsWith('image/'))return'img';if(t.startsWith('video/'))return'mp4';}
+    const m=String(nome||'').toLowerCase().match(/\.([a-z0-9]{2,5})$/);return m?m[1]:'';
+  }
+  const IMG=['jpg','jpeg','png','gif','webp','bmp','svg','avif','img'],VID=['mp4','webm','mov','m4v'],OFF=['doc','docx','xls','xlsx','ppt','pptx'];
+  let _abrirOrig=window.open.bind(window),_url='',_nome='',_blobs=[];
+  function raiz(){return(document.documentElement.classList.contains('portal-mode')&&document.getElementById('portal-root'))||document.body;}
+  function fechar(){const o=document.getElementById('gc-leitor');if(o)o.remove();_blobs.forEach(b=>{try{URL.revokeObjectURL(b);}catch(e){}});_blobs=[];document.removeEventListener('keydown',esc,true);}
+  function esc(ev){if(ev.key==='Escape'){ev.stopPropagation();fechar();}}
+  window._gcLeitorFechar=fechar;
+  window._gcLeitorBaixar=async function(){
+    const b=document.getElementById('gc-leitor-baixar');if(b){b.disabled=true;b.textContent='Baixando…';}
+    try{
+      const r=await fetch(/^data:/i.test(_url)?_url:semAnexo(_url));if(!r.ok)throw new Error(r.status);
+      const bl=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download=_nome||'arquivo';a.setAttribute('data-gc-direto','1');
+      document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},3000);
+    }catch(e){try{_abrirOrig(typeof cldDownload==='function'?cldDownload(semAnexo(_url)):_url,'_blank','noopener');}catch(e2){}}
+    if(b){b.disabled=false;b.textContent='⬇ Baixar';}
+  };
+  window._gcLeitorNovaAba=function(){
+    if(/^data:/i.test(_url)){fetch(_url).then(r=>r.blob()).then(b=>{const u=URL.createObjectURL(b);_abrirOrig(u,'_blank');}).catch(()=>{});return;}
+    _abrirOrig(semAnexo(_url),'_blank','noopener');
+  };
+  async function pdf(corpo,u){
+    const lib=window.pdfjsLib;if(!lib)throw new Error('sem pdf.js');
+    let worker=null;try{worker=_pdfWorkerCompartilhado();}catch(e){}
+    const doc=await lib.getDocument(Object.assign({url:u},worker?{worker}:{})).promise;
+    corpo.innerHTML='';
+    const larg=Math.min(corpo.clientWidth-24,1000),max=Math.min(doc.numPages,60);
+    for(let i=1;i<=max;i++){
+      if(!document.getElementById('gc-leitor'))return;
+      const pg=await doc.getPage(i);const v0=pg.getViewport({scale:1});const esc=larg/v0.width;const dpr=Math.min(window.devicePixelRatio||1,2);
+      const vp=pg.getViewport({scale:esc*dpr});const c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;
+      c.style.cssText=`width:${Math.round(vp.width/dpr)}px;max-width:100%;height:auto;display:block;margin:0 auto 12px;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.25)`;
+      corpo.appendChild(c);await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+    }
+    if(doc.numPages>max)corpo.insertAdjacentHTML('beforeend',`<div style="color:#cbd5e1;text-align:center;font-size:.8rem;padding:10px">Mostrando ${max} de ${doc.numPages} páginas — abra em nova aba ou baixe para ver o resto.</div>`);
+  }
+  window._gcVerArquivo=async function(url,nomeSug){
+    if(!url)return;fechar();
+    _url=String(url);_nome=nomeDe(semAnexo(_url),nomeSug);
+    const ext=extDe(_url,_nome);
+    let ver=/^data:/i.test(_url)?_url:semAnexo(_url);
+    if(/^data:/i.test(_url)){try{const b=await (await fetch(_url)).blob();ver=URL.createObjectURL(b);_blobs.push(ver);}catch(e){}}
+    const o=document.createElement('div');o.id='gc-leitor';
+    o.style.cssText='position:fixed;inset:0;z-index:100050;background:rgba(15,23,42,.92);display:flex;flex-direction:column;font-family:inherit';
+    const BT='border:1px solid rgba(255,255,255,.25);background:rgba(255,255,255,.08);color:#fff;border-radius:8px;padding:7px 12px;font-family:inherit;font-size:.78rem;font-weight:700;cursor:pointer;white-space:nowrap';
+    o.innerHTML=`<div style="display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.12);flex-wrap:wrap">
+        <div style="flex:1;min-width:160px;color:#fff;font-size:.86rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${E(_nome)}">📄 ${E(_nome)}</div>
+        <button type="button" onclick="_gcLeitorNovaAba()" style="${BT}">Abrir em nova aba</button>
+        <button type="button" id="gc-leitor-baixar" onclick="_gcLeitorBaixar()" style="${BT};background:#e91e63;border-color:#e91e63">⬇ Baixar</button>
+        <button type="button" onclick="_gcLeitorFechar()" title="Fechar (Esc)" style="${BT};padding:7px 11px">✕</button></div>
+      <div id="gc-leitor-corpo" style="flex:1;overflow:auto;padding:12px;display:flex;flex-direction:column;align-items:center"></div>`;
+    o.addEventListener('click',ev=>{if(ev.target===o)fechar();});
+    raiz().appendChild(o);document.addEventListener('keydown',esc,true);
+    const corpo=document.getElementById('gc-leitor-corpo');
+    const nada=msg=>{corpo.style.justifyContent='center';corpo.innerHTML=`<div style="color:#e2e8f0;text-align:center;font-size:.86rem;line-height:1.6;max-width:420px">${msg}<div style="margin-top:14px"><button type="button" onclick="_gcLeitorBaixar()" style="${BT};background:#e91e63;border-color:#e91e63;padding:10px 18px">⬇ Baixar ${E(_nome)}</button></div></div>`;};
+    if(ext==='pdf'){
+      corpo.innerHTML='<div style="color:#cbd5e1;font-size:.86rem;margin-top:30px">Carregando o PDF…</div>';
+      try{await pdf(corpo,ver);}catch(e){console.warn('leitor pdf',e);corpo.style.padding='0';corpo.innerHTML=`<iframe src="${E(ver)}" style="border:none;width:100%;height:100%;background:#fff"></iframe>`;}
+    }else if(IMG.includes(ext)||(!ext&&/\/image\/upload\//.test(ver))){
+      corpo.style.justifyContent='center';corpo.innerHTML=`<img src="${E(ver)}" alt="${E(_nome)}" style="max-width:100%;max-height:100%;object-fit:contain;background:#fff;border-radius:4px" onerror="this.outerHTML='<div style=&quot;color:#e2e8f0&quot;>Não foi possível mostrar a imagem.</div>'">`;
+    }else if(VID.includes(ext)){
+      corpo.style.justifyContent='center';corpo.innerHTML=`<video src="${E(ver)}" controls style="max-width:100%;max-height:100%"></video>`;
+    }else if(OFF.includes(ext)&&/^https:/i.test(ver)){
+      corpo.style.padding='0';corpo.innerHTML=`<iframe src="https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(ver)}" style="border:none;width:100%;height:100%;background:#fff"></iframe>`;
+    }else nada(`Este tipo de arquivo${ext?' (.'+E(ext)+')':''} não tem visualização no navegador.`);
+  };
+  // todo clique em link de arquivo → leitor
+  document.addEventListener('click',function(ev){
+    try{
+      if(ev.defaultPrevented||ev.button!==0||ev.ctrlKey||ev.metaKey||ev.shiftKey)return;
+      const a=ev.target&&ev.target.closest&&ev.target.closest('a[href]');if(!a||a.hasAttribute('data-gc-direto')||a.closest('#gc-leitor'))return;
+      const h=a.getAttribute('href')||'';if(!ehArquivo(h))return;
+      ev.preventDefault();ev.stopPropagation();
+      window._gcVerArquivo(h,a.getAttribute('download')||'');
+    }catch(e){console.warn('leitor',e);}
+  },true);
+  // window.open de arquivo → leitor
+  window.open=function(u){try{if(typeof u==='string'&&ehArquivo(u))return window._gcVerArquivo(u),null;}catch(e){}return _abrirOrig.apply(window,arguments);};
 })();
 
 </script>
