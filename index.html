@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-05.11';</script>
+<script>const APP_BUILD_VERSION='2026-11-05.12';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -3175,6 +3175,7 @@ select.fc{cursor:pointer}
       <div class="dash-tabs" style="margin-bottom:14px" id="rh-main-tabs">
         <button class="dash-tab active rh-main-tab" onclick="rhSetMainTab('pontualidade',this)">Pontualidade e Assiduidade</button>
         <button class="dash-tab rh-main-tab" onclick="rhSetMainTab('colaboradores',this)">Lista de Colaboradores</button>
+        <button class="dash-tab rh-main-tab" onclick="rhSetMainTab('intervalo',this)">Intervalo</button>
         <button class="dash-tab rh-main-tab" onclick="rhSetMainTab('bancohoras',this)">Banco de Horas</button>
         <button class="dash-tab rh-main-tab" onclick="rhSetMainTab('ferias',this)">Férias</button>
         <button class="dash-tab rh-main-tab" onclick="rhSetMainTab('vencimentos',this)">Vencimentos e NRs</button>
@@ -3285,6 +3286,19 @@ select.fc{cursor:pointer}
            só lista cfg.rhFuncionarios e reaproveita o modal que já existe. -->
       <!-- Banco de Horas e Férias (2026-09-24.30, sugestões aprovadas pelo usuário) — ver
            renderRhBancoHoras()/renderRhFerias(). -->
+      <!-- Intervalo (2026-11-05) — almoço de 60 min entre 12:00 e 13:00, ver renderRhIntervalo(). -->
+      <div id="rh-sec-intervalo" style="display:none">
+        <div style="font-size:.78rem;color:var(--ink4);margin-bottom:16px;padding:12px 16px;background:#fff;border-radius:10px;border:1px solid var(--border-lt);border-left:3px solid #101B3D;line-height:1.5">
+          <b style="color:#101B3D">Regra:</b> todo colaborador faz <b>60 minutos de almoço, das 12:00 às 13:00</b>. Aqui aparece quem está cumprindo e quem precisa de conversa. Férias, licença, afastamento e atestado ficam de fora. Clique num colaborador pra ver os dias.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
+          <select id="rh-int-mes" onchange="rhIntSetMes(this.value)" style="padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:.83rem;font-family:inherit;cursor:pointer;min-width:190px;background:#fff"></select>
+          <select id="rh-int-depto" onchange="renderRhIntervalo()" style="padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:.83rem;font-family:inherit;cursor:pointer;min-width:190px;background:#fff"><option value="">Todos os departamentos</option></select>
+          <label style="font-size:.78rem;color:#64748b;display:flex;align-items:center;gap:6px;margin-left:auto">Tolerância
+            <select id="rh-int-tol" onchange="rhIntSetTol(this.value)" style="padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:.83rem;font-family:inherit;cursor:pointer;background:#fff"><option value="0">Sem tolerância</option><option value="1">1 min</option><option value="2">2 min</option><option value="3">3 min</option><option value="5">5 min</option></select></label>
+        </div>
+        <div id="rh-int-body"></div>
+      </div>
       <div id="rh-sec-bancohoras" style="display:none">
         <div style="font-size:.78rem;color:var(--ink4);margin-bottom:16px;padding:12px 16px;background:#fff;border-radius:10px;border:1px solid var(--border-lt);border-left:3px solid #101B3D;line-height:1.5">
           Horas extras, horas devidas e saldo de cada colaborador e de cada setor, calculados do Cartão Ponto já importado. Clique num colaborador pra ver o ponto dia a dia.
@@ -46218,13 +46232,14 @@ function _rhLimparPeriodo(){
 function rhSetMainTab(tab,btn){
   document.querySelectorAll('.rh-main-tab').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  ['pontualidade','colaboradores','bancohoras','ferias','vencimentos','gestao'].forEach(t=>{
+  ['pontualidade','colaboradores','intervalo','bancohoras','ferias','vencimentos','gestao'].forEach(t=>{
     const el=document.getElementById('rh-sec-'+t);
     if(el)el.style.display=t===tab?'':'none';
   });
   if(tab==='pontualidade')renderRhPontualidade();
   if(tab==='colaboradores')renderRhListaColaboradores();
   if(tab==='bancohoras')renderRhBancoHoras();
+  if(tab==='intervalo')renderRhIntervalo();
   if(tab==='ferias')renderRhFerias();
   if(tab==='vencimentos')renderRhVencimentos();
   if(tab==='gestao')renderRhGestao();
@@ -46489,6 +46504,7 @@ function renderRhPontualidade(){
   if(!_isRhUser()&&!_rhEhLider())return;
   try{
     if(document.getElementById('rh-sec-bancohoras')?.style.display==='')renderRhBancoHoras();
+    if(document.getElementById('rh-sec-intervalo')?.style.display==='')renderRhIntervalo();
     if(document.getElementById('rh-sec-ferias')?.style.display==='')renderRhFerias();
   }catch(err){console.error('RH abas extras',err);}
   const cardsElErro=document.getElementById('rh-cards-gerais');
@@ -47338,6 +47354,145 @@ function _rhBhCalc(dias){
 function _rhBhMesesDisponiveis(){return[...new Set(rhPontoMeses.map(m=>m.anoMes).filter(Boolean))].sort();}
 function _rhMesExtenso(am){if(!am)return'Todos os meses';const[a,m]=am.split('-');const n=String(MESES_PT[+m]||m);return n.charAt(0)+n.slice(1).toLowerCase()+' de '+a;}
 function rhBhSetMes(v){_rhBhMes=v;renderRhBancoHoras();}
+// ── RH · INTERVALO (2026-11-05, pedido do Guilherme) ─────────────────────────────────────────────
+// Regra da empresa: todo colaborador faz 60 minutos de almoço, entre 12:00 e 13:00. Análise À PARTE —
+// só LÊ os dias já calculados (_rhDiasDoFuncionario: afastamento, atestado, férias, admissão etc.) e
+// não muda nenhum outro indicador. Dia avaliado = dia com expediente e mais de 6h previstas (ou com as
+// batidas do almoço). Cumpriu = saiu a partir das 12:00, voltou até 13:00 e ficou 60 min ou mais fora
+// (com a tolerância escolhida na tela, que vale pra todo mundo).
+const RH_INT_INI=12*60,RH_INT_FIM=13*60,RH_INT_MIN=60;
+let _rhIntMes=null,_rhIntUlt=[];
+function _rhIntTol(){const t=+((cfg.rhIntervalo||{}).tolMin);return isNaN(t)?0:t;}
+function _rhIntDia(d,tol){
+  if(!d||!(d.previstoMin>0)||d.incompleto||d.afastamento||d.atestado||d.desligado||d.preAdmissao)return null;
+  if(!((d.trabalhadoMin||0)>0))return null;
+  const s=_rhParseHoraHHMM(d.saidaAlmoco),v=_rhParseHoraHHMM(d.voltaAlmoco);
+  if(s==null||v==null||v<=s){
+    if((d.previstoMin||0)<=360)return null; // jornada até 6h não tem almoço de 1h
+    return{data:d.data,ok:false,semReg:true,saida:d.saidaAlmoco||'',volta:d.voltaAlmoco||'',dur:null,probs:['Não registrou o almoço']};
+  }
+  const dur=v-s,probs=[];let curto=0,antes=0,depois=0;
+  if(s<RH_INT_INI-tol){antes=RH_INT_INI-s;probs.push('Saiu '+_rhFmtHoras(antes)+' antes das 12:00');}
+  if(v>RH_INT_FIM+tol){depois=v-RH_INT_FIM;probs.push('Voltou '+_rhFmtHoras(depois)+' depois das 13:00');}
+  if(dur<RH_INT_MIN-tol){curto=RH_INT_MIN-dur;probs.push('Intervalo '+_rhFmtHoras(curto)+' mais curto');}
+  return{data:d.data,ok:!probs.length,saida:d.saidaAlmoco,volta:d.voltaAlmoco,dur,curto,antes,depois,probs};
+}
+function _rhIntCalc(dias,tol){
+  const r={aval:0,ok:0,curto:0,antes:0,depois:0,semReg:0,somaDur:0,nDur:0,dias:[]};
+  dias.slice().sort((a,b)=>a.data.localeCompare(b.data)).forEach(d=>{
+    const x=_rhIntDia(d,tol);if(!x)return;
+    r.aval++;if(x.ok)r.ok++;if(x.semReg)r.semReg++;if(x.curto)r.curto++;if(x.antes)r.antes++;if(x.depois)r.depois++;
+    if(x.dur!=null){r.somaDur+=x.dur;r.nDur++;}
+    r.dias.push(x);
+  });
+  r.pct=r.aval?_rhPctArred(r.ok/r.aval*100):null;
+  r.media=r.nDur?Math.round(r.somaDur/r.nDur):null;
+  r.sit=r.pct==null?null:r.pct>=95?{t:'Cumprindo',c:'#15803d',b:'#dcfce7'}:r.pct>=80?{t:'Atenção',c:'#b45309',b:'#fef3c7'}:{t:'Conversar',c:'#b91c1c',b:'#fee2e2'};
+  return r;
+}
+function rhIntSetMes(v){_rhIntMes=v;renderRhIntervalo();}
+async function rhIntSetTol(v){
+  if(!_isRhUser()){toast('Só RH/Administrador pode mudar a tolerância','terr');renderRhIntervalo();return;}
+  cfg.rhIntervalo=Object.assign({},cfg.rhIntervalo||{},{tolMin:+v||0});
+  try{await _rhSalvarCfg();toast('Tolerância do intervalo salva ✅','tok');}catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
+  renderRhIntervalo();
+}
+function renderRhIntervalo(){
+  if(!_isRhUser()&&!_rhEhLider())return;
+  const el=document.getElementById('rh-int-body');if(!el)return;
+  const meses=_rhBhMesesDisponiveis();
+  if(_rhIntMes===null)_rhIntMes=meses.length?meses[meses.length-1]:'';
+  const selMes=document.getElementById('rh-int-mes');
+  if(selMes){selMes.innerHTML=`<option value="">Todos os meses</option>`+meses.slice().reverse().map(m=>`<option value="${m}">${_rhMesExtenso(m)}</option>`).join('');selMes.value=_rhIntMes;
+    try{if(typeof _MESX_SELECTS!=='undefined'&&_MESX_SELECTS.indexOf('rh-int-mes')<0)_MESX_SELECTS.push('rh-int-mes');_mesxSelect('rh-int-mes');}catch(e){}}
+  const tol=_rhIntTol();
+  const selTol=document.getElementById('rh-int-tol');if(selTol)selTol.value=String(tol);
+  let funcsTodos=(cfg.rhFuncionarios||[]).filter(f=>f.status!=='demitido');
+  {const _ld=_rhEhLider();if(_ld)funcsTodos=funcsTodos.filter(f=>_ld.includes(f.departamento));}
+  const selDep=document.getElementById('rh-int-depto');const depAtual=selDep?selDep.value:'';
+  const deptos=[...new Set(funcsTodos.map(f=>f.departamento||'SEM DEPARTAMENTO'))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  if(selDep){selDep.innerHTML='<option value="">Todos os departamentos</option>'+deptos.map(d=>`<option value="${String(d).replace(/"/g,'&quot;')}">${d}</option>`).join('');selDep.value=deptos.includes(depAtual)?depAtual:'';}
+  const depFil=selDep?selDep.value:'';
+  const linhas=funcsTodos.filter(f=>!depFil||(f.departamento||'SEM DEPARTAMENTO')===depFil)
+    .map(f=>({f,depto:f.departamento||'SEM DEPARTAMENTO',c:_rhIntCalc(_rhDiasDoFuncionario(f.id,_rhIntMes||'','',''),tol)}))
+    .filter(x=>x.c.aval>0);
+  _rhIntUlt=linhas;
+  if(!linhas.length){el.innerHTML=`<div style="padding:30px;text-align:center;color:var(--ink4);font-size:.85rem;background:#fff;border:1px solid #e2e8f0;border-radius:8px">Nenhum dia com almoço pra avaliar ${_rhIntMes?'em '+_rhMesExtenso(_rhIntMes):''} — suba o Cartão Ponto na aba Pontualidade e Assiduidade.</div>`;return;}
+  const T=linhas.reduce((a,x)=>{a.aval+=x.c.aval;a.ok+=x.c.ok;a.curto+=x.c.curto;a.antes+=x.c.antes;a.depois+=x.c.depois;a.semReg+=x.c.semReg;a.somaDur+=x.c.somaDur;a.nDur+=x.c.nDur;return a;},{aval:0,ok:0,curto:0,antes:0,depois:0,semReg:0,somaDur:0,nDur:0});
+  const pctG=_rhPctArred(T.ok/T.aval*100);
+  const nCump=linhas.filter(x=>x.c.sit.t==='Cumprindo').length,nAt=linhas.filter(x=>x.c.sit.t==='Atenção').length,nConv=linhas.filter(x=>x.c.sit.t==='Conversar').length;
+  const corG=pctG>=95?'#15803d':pctG>=80?'#b45309':'#b91c1c';
+  const kpi=(rot,val,sub,cor)=>`<div style="flex:1;min-width:150px;padding:14px 16px;border-right:1px solid #eef1f6"><div style="font-size:.64rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em">${rot}</div><div style="font-size:1.45rem;font-weight:800;color:${cor||'#101B3D'};margin-top:4px;font-variant-numeric:tabular-nums">${val}</div><div style="font-size:.7rem;color:#94a3b8;margin-top:2px">${sub}</div></div>`;
+  const th='text-align:left;font-size:.64rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;padding:10px 12px;border-bottom:1px solid #e2e8f0;white-space:nowrap;position:sticky;top:0;background:#fff';
+  const td='padding:9px 12px;font-size:.8rem;color:#1e293b;border-bottom:1px solid #f1f5f9;white-space:nowrap';
+  const pill=s=>`<span style="background:${s.b};color:${s.c};border-radius:999px;padding:3px 10px;font-size:.7rem;font-weight:800">${s.t}</span>`;
+  const num=(v,cor)=>v?`<b style="color:${cor}">${v}</b>`:'<span style="color:#cbd5e1">—</span>';
+  const ord=linhas.slice().sort((a,b)=>a.c.pct-b.c.pct||b.c.aval-a.c.aval||a.f.nome.localeCompare(b.f.nome,'pt-BR'));
+  const grupo=(s,lista)=>lista.length?`<div style="flex:1;min-width:220px;background:#fff;border:1px solid #e2e8f0;border-top:3px solid ${s.c};border-radius:8px;padding:12px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">${pill(s)}<b style="font-size:1.1rem;color:${s.c}">${lista.length}</b></div>
+      <div style="font-size:.76rem;line-height:1.7">${lista.map(x=>`<a href="javascript:void(0)" onclick="rhIntAbrir('${x.f.id}')" style="color:#101B3D;text-decoration:none;display:flex;justify-content:space-between;gap:8px"><span>${x.f.nome}</span><b style="color:${s.c}">${_rhPctTxt(x.c.pct)}</b></a>`).join('')}</div></div>`:'';
+  el.innerHTML=`
+    <div style="display:flex;flex-wrap:wrap;background:#fff;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:18px">
+      ${kpi('Intervalos cumpridos',_rhPctTxt(pctG),`${T.ok} de ${T.aval} ${T.aval===1?'almoço':'almoços'} dentro da regra`,corG)}
+      ${kpi('Colaboradores cumprindo',`${nCump} de ${linhas.length}`,'95% ou mais dos dias na regra','#15803d')}
+      ${kpi('Precisam de conversa',String(nConv),'menos de 80% dos dias na regra',nConv?'#b91c1c':'#15803d')}
+      ${kpi('Intervalo curto',String(T.curto),`${T.curto===1?'dia':'dias'} com menos de 60 min`,T.curto?'#b91c1c':'#15803d')}
+      ${kpi('Fora das 12:00–13:00',String(T.antes+T.depois),`${T.antes} saíram antes · ${T.depois} voltaram depois`,(T.antes+T.depois)?'#b45309':'#15803d')}
+      ${kpi('Média do intervalo',T.nDur?_rhFmtHoras(Math.round(T.somaDur/T.nDur)):'—',T.semReg?`${T.semReg} ${T.semReg===1?'dia':'dias'} sem registro do almoço`:'tempo médio fora no almoço')}
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px">
+      ${grupo({t:'Conversar',c:'#b91c1c',b:'#fee2e2'},ord.filter(x=>x.c.sit.t==='Conversar'))}
+      ${grupo({t:'Atenção',c:'#b45309',b:'#fef3c7'},ord.filter(x=>x.c.sit.t==='Atenção'))}
+      ${grupo({t:'Cumprindo',c:'#15803d',b:'#dcfce7'},ord.filter(x=>x.c.sit.t==='Cumprindo').reverse())}
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px"><div style="width:4px;height:18px;background:#101B3D;border-radius:2px"></div><h2 style="margin:0;font-size:.76rem;font-weight:800;color:#101B3D;letter-spacing:.09em;text-transform:uppercase">Por colaborador</h2><span style="font-size:.72rem;color:#94a3b8">clique pra ver os dias</span></div>
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:640px">
+      <table style="width:100%;border-collapse:collapse"><thead><tr>
+        <th style="${th}">Colaborador</th><th style="${th}">Departamento</th><th style="${th};min-width:170px">Dias na regra</th><th style="${th}">Média do intervalo</th><th style="${th}">Intervalo curto</th><th style="${th}">Saiu antes das 12:00</th><th style="${th}">Voltou depois das 13:00</th><th style="${th}">Sem registro</th><th style="${th}">Situação</th>
+      </tr></thead><tbody>${ord.map(x=>`<tr onclick="rhIntAbrir('${x.f.id}')" style="cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
+        <td style="${td};font-weight:700;color:#101B3D">${x.f.nome}</td>
+        <td style="${td};color:#64748b">${x.depto}</td>
+        <td style="${td}"><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:6px;background:#f1f5f9;border-radius:3px;min-width:70px"><div style="width:${x.c.pct}%;height:100%;background:${x.c.sit.c};border-radius:3px"></div></div><b style="color:${x.c.sit.c}">${_rhPctTxt(x.c.pct)}</b><span style="color:#94a3b8;font-size:.72rem">${x.c.ok}/${x.c.aval}</span></div></td>
+        <td style="${td};font-weight:700;color:${x.c.media!=null&&x.c.media<RH_INT_MIN-tol?'#b91c1c':'#1e293b'}">${x.c.media!=null?_rhFmtHoras(x.c.media):'—'}</td>
+        <td style="${td}">${num(x.c.curto,'#b91c1c')}</td>
+        <td style="${td}">${num(x.c.antes,'#b45309')}</td>
+        <td style="${td}">${num(x.c.depois,'#b45309')}</td>
+        <td style="${td}">${num(x.c.semReg,'#64748b')}</td>
+        <td style="${td}">${pill(x.c.sit)}</td>
+      </tr>`).join('')}</tbody></table>
+    </div>`;
+}
+function rhIntAbrir(id){
+  const x=(_rhIntUlt||[]).find(l=>l.f.id===id);if(!x)return;
+  document.getElementById('rh-int-modal')?.remove();
+  const m=document.createElement('div');m.id='rh-int-modal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  m.onclick=e=>{if(e.target===m)m.remove();};
+  const fora=x.c.dias.filter(d=>!d.ok);
+  const td='padding:8px 10px;font-size:.8rem;border-bottom:1px solid #f1f5f9;white-space:nowrap';
+  const th='text-align:left;font-size:.64rem;font-weight:700;color:#94a3b8;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid #e2e8f0';
+  const ds=iso=>{try{return['dom','seg','ter','qua','qui','sex','sáb'][new Date(iso+'T12:00:00').getDay()];}catch(e){return'';}};
+  m.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:720px;width:100%;max-height:88vh;overflow:auto;padding:20px 22px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
+      <div><div style="font-size:1rem;font-weight:800;color:#101B3D">${x.f.nome}</div><div style="font-size:.74rem;color:#64748b;margin-top:2px">${x.depto} · ${_rhMesExtenso(_rhIntMes||'')} · regra: 60 min, das 12:00 às 13:00${_rhIntTol()?` (tolerância de ${_rhIntTol()} min)`:''}</div></div>
+      <button onclick="document.getElementById('rh-int-modal').remove()" style="border:none;background:#f1f5f9;border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:1rem">✕</button></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+      <div style="flex:1;min-width:120px;background:${x.c.sit.b};border-radius:10px;padding:10px 12px"><div style="font-size:.64rem;font-weight:700;color:${x.c.sit.c};text-transform:uppercase">${x.c.sit.t}</div><div style="font-size:1.3rem;font-weight:800;color:${x.c.sit.c}">${_rhPctTxt(x.c.pct)}</div><div style="font-size:.7rem;color:${x.c.sit.c}">${x.c.ok} de ${x.c.aval} dias na regra</div></div>
+      <div style="flex:1;min-width:120px;background:#f8fafc;border-radius:10px;padding:10px 12px"><div style="font-size:.64rem;font-weight:700;color:#64748b;text-transform:uppercase">Média do intervalo</div><div style="font-size:1.3rem;font-weight:800;color:#101B3D">${x.c.media!=null?_rhFmtHoras(x.c.media):'—'}</div><div style="font-size:.7rem;color:#94a3b8">tempo médio fora no almoço</div></div>
+      <div style="flex:1;min-width:120px;background:#f8fafc;border-radius:10px;padding:10px 12px"><div style="font-size:.64rem;font-weight:700;color:#64748b;text-transform:uppercase">Dias fora da regra</div><div style="font-size:1.3rem;font-weight:800;color:${fora.length?'#b91c1c':'#15803d'}">${fora.length}</div><div style="font-size:.7rem;color:#94a3b8">${x.c.curto} curtos · ${x.c.antes+x.c.depois} fora do horário</div></div>
+    </div>
+    ${fora.length?`<table style="width:100%;border-collapse:collapse"><thead><tr><th style="${th}">Dia</th><th style="${th}">Saiu</th><th style="${th}">Voltou</th><th style="${th}">Intervalo</th><th style="${th}">O que aconteceu</th></tr></thead><tbody>
+      ${fora.map(d=>`<tr><td style="${td};font-weight:700">${fmtD(d.data)} <span style="color:#94a3b8;font-weight:400">${ds(d.data)}</span></td>
+        <td style="${td};color:${d.antes?'#b45309':'#1e293b'};font-weight:${d.antes?800:400}">${d.saida||'—'}</td>
+        <td style="${td};color:${d.depois?'#b45309':'#1e293b'};font-weight:${d.depois?800:400}">${d.volta||'—'}</td>
+        <td style="${td};color:${d.curto?'#b91c1c':'#1e293b'};font-weight:${d.curto?800:400}">${d.dur!=null?_rhFmtHoras(d.dur):'—'}</td>
+        <td style="${td};white-space:normal;color:#475569">${d.probs.join(' · ')}</td></tr>`).join('')}</tbody></table>`
+      :`<div style="padding:22px;text-align:center;background:#f0fdf4;border-radius:10px;color:#15803d;font-weight:700;font-size:.85rem">✅ Todos os almoços dentro da regra no período</div>`}
+    <div style="text-align:right;margin-top:14px"><button class="dash-btn-conf" style="background:#101B3D" onclick="document.getElementById('rh-int-modal').remove();abrirRhHistoricoFuncionario('${x.f.id}')">Ver ponto completo</button></div>
+  </div>`;
+  document.body.appendChild(m);
+}
+
 function renderRhBancoHoras(){
   if(!_isRhUser())return;
   const el=document.getElementById('rh-bh-body');
