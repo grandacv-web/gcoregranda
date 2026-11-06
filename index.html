@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-05.12';</script>
+<script>const APP_BUILD_VERSION='2026-11-06.1';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -7975,6 +7975,7 @@ function setupContasPagarSync(){
   if(!window._fbWatchContasPagar)return;
   window._fbWatchContasPagar(function(snapshot){
     contasPagar=snapshot.docs.map(d=>d.data());
+    _gcCpCarregado=true;
     try{_finxSnapCp();}catch(e){}
     if(_cpImportEmAndamento)return;
     const elFin=document.getElementById('sec-cat-FINANCEIRO');
@@ -16868,6 +16869,61 @@ if(!window.__GCORE_PORTAL)load().catch(()=>{});
 
 let usuarioLogado=null;
 
+// ── Abertura em 2 etapas (2026-11-06) — ver comentário dentro de initAuth ──
+let _gcTardiosIniciado=false,_gcCpCarregado=false;
+const _gcChegou={};
+function _gcPerfChegou(n){if(_gcChegou[n])return true;try{const P=window.__gcPerf;return!!(P&&(P.t[n]!=null||P.erro[n]!=null));}catch(e){return false;}}
+// Anota quando o 1º retorno (ou erro) de cada listener chega — não muda o callback nem o retorno.
+function _gcMarcarWatch(n){
+  const o=window[n];if(typeof o!=='function'||o._gcMarca)return;
+  const w=function(cb){
+    const a=Array.prototype.slice.call(arguments,1);
+    if(typeof a[0]==='function'){const e0=a[0];a[0]=function(){_gcChegou[n]=true;return e0.apply(this,arguments);};}
+    return o.apply(this,[function(){_gcChegou[n]=true;return cb.apply(this,arguments);}].concat(a));
+  };
+  w._gcMarca=true;window[n]=w;
+}
+['_fbWatchPedidos','_fbWatchCrmEmpresas','_fbWatchProspEmpresas','_fbWatchContasPagar','_fbWatchContasReceberManual','_fbWatchFinx','_fbWatchRhPonto','_fbWatchRhAtestadosAnexos'].forEach(n=>{try{_gcMarcarWatch(n);}catch(e){}});
+function _gcEsperarPrimeiraEtapa(maxMs){
+  return new Promise(res=>{
+    const t0=Date.now();
+    const ok=()=>['_fbWatchPedidos','_fbWatchCrmEmpresas','_fbWatchProspEmpresas'].every(_gcPerfChegou);
+    const iv=setInterval(()=>{if(ok()||Date.now()-t0>maxMs){clearInterval(iv);res();}},40);
+  });
+}
+function _gcIniciarDadosTardios(){
+  if(_gcTardiosIniciado||!usuarioLogado)return;
+  _gcTardiosIniciado=true;
+  try{setupContasPagarSync();}catch(e){console.error('Contas a Pagar',e);}
+  try{setupContasReceberManualSync();}catch(e){console.error('Contas a Receber',e);}
+  try{setupFinxSync();}catch(e){console.error('Gestão financeira',e);}
+  try{setupRhPontoSync();}catch(e){console.error('Ponto do RH',e);}
+  try{setupRhAtestadosAnexosSync();}catch(e){console.error('Atestados do RH',e);}
+  const nomes=['_fbWatchContasPagar','_fbWatchContasReceberManual','_fbWatchFinx','_fbWatchRhPonto','_fbWatchRhAtestadosAnexos'];
+  const t0=Date.now();let feitos=0;
+  const iv=setInterval(()=>{
+    const n=nomes.filter(_gcPerfChegou).length;
+    if(n>feitos){feitos=n;_gcRefreshDadosTardios();}
+    if(n===nomes.length)clearInterval(iv);
+    else if(Date.now()-t0>30000){clearInterval(iv);_gcRefreshDadosTardios();}
+  },250);
+}
+// Redesenha o que estiver aberto e usa Contas a Pagar / financeiro / RH (Gráficos, Vendas, Metas,
+// Meu dia com o painel da Diretoria, sino de avisos). Financeiro e RH já se redesenham sozinhos.
+let _gcRefreshT=null;
+function _gcRefreshDadosTardios(){
+  clearTimeout(_gcRefreshT);
+  _gcRefreshT=setTimeout(()=>{
+    try{if(typeof _invalidateDashCache==='function')_invalidateDashCache();}catch(e){}
+    try{renderAll();}catch(e){}
+    try{const elG=document.getElementById('dash-tab-graficos');if(typeof renderDashGraficos==='function'&&elG&&elG.style.display!=='none')renderDashGraficos();}catch(e){}
+    try{if(dashMetasUnlocked){if(typeof renderDashMetas==='function')renderDashMetas();if(typeof renderDashComissoes==='function')renderDashComissoes();}}catch(e){}
+    try{const elV=document.getElementById('geral-tab-vendas');if(typeof renderDashVendas==='function'&&elV&&elV.style.display!=='none')renderDashVendas();}catch(e){}
+    try{if(typeof _uxMdRefresh==='function')_uxMdRefresh();}catch(e){}
+    try{if(typeof _atualizarBadgeAvisos==='function')_atualizarBadgeAvisos();}catch(e){}
+  },150);
+}
+
 function initAuth(tries){
   if(window.__GCORE_PORTAL)return; // página do portal do cliente — sistema interno não inicia
   if(window._fbOnAuth){
@@ -16878,17 +16934,26 @@ function initAuth(tries){
         // NÃO esconde o login-screen ainda — ver comentário no HTML dele. Só some quando
         // load()+restauração da última página terminarem (.finally() logo abaixo), pra nunca
         // revelar a tela por trás ainda vazia/sem menu (era isso que parecia "travar" no F5).
+        // ABERTURA EM 2 ETAPAS (2026-11-06, pedido do Guilherme: "o sistema tá demorando muito pra
+        // carregar"). Medição real: 4,9 s, sendo 3,5 s baixando ~7 MB, e as configurações chegavam
+        // quase por último, na fila atrás de tudo. Agora: 1ª etapa = configurações (pedidas primeiro),
+        // pedidos, CRM, prospecção e reservas; a tela libera quando elas chegam. 2ª etapa = Contas a
+        // Pagar, Contas a Receber manuais, Gestão financeira, ponto e atestados do RH — pedidas logo
+        // depois, e as telas que usam esses dados se redesenham sozinhas quando chegam
+        // (_gcRefreshDadosTardios). Quem abre direto no Financeiro ou no RH baixa tudo junto, como antes.
+        // Nenhum dado, gravação ou regra muda — só a ordem do download.
+        ['_fbWatchPedidos','_fbWatchCrmEmpresas','_fbWatchProspEmpresas','_fbWatchContasPagar','_fbWatchContasReceberManual','_fbWatchFinx','_fbWatchRhPonto','_fbWatchRhAtestadosAnexos'].forEach(n=>{try{_gcMarcarWatch(n);}catch(e){}});
+        const _gcLoadP=load();
         setupRealtimeSync();
-        setupContasPagarSync();
-        setupContasReceberManualSync();
-        try{setupFinxSync();}catch(e){console.error('Gestão financeira',e);}
-        setupRhPontoSync();
-        setupRhAtestadosAnexosSync();
-        // Lixeira (2026-10-26): baixada só por admin, depois que a categoria é conhecida (ver abaixo).
         setupProspSync();
         setupCrmSync();
         setupSimReservasSync();
-        load().then(()=>{
+        // Lixeira (2026-10-26): baixada só por admin, depois que a categoria é conhecida (ver abaixo).
+        let _gcLand='';try{_gcLand=localStorage.getItem('gcore_lastSection')||'';}catch(e){}
+        if(/FINANCEIRO|cat:RH/.test(_gcLand))_gcIniciarDadosTardios();
+        setTimeout(_gcIniciarDadosTardios,8000); // segurança: nunca fica sem os dados da 2ª etapa
+        _gcLoadP.then(()=>_gcEsperarPrimeiraEtapa(10000)).then(()=>{
+          _gcIniciarDadosTardios();
           const nomeMap=cfg.usuarioNomes||{};
           const catMap=cfg.usuarioCats||{};
           const nome=nomeMap[user.email.toLowerCase()]||nomeMap[user.email]||user.displayName||user.email.split('@')[0].replace(/[._]/g,' ').toUpperCase();
@@ -32449,6 +32514,7 @@ function renderImportPreview(fileName){
 // renderImportPreview) pra refletir qualquer ajuste de Empresa/Centro de Custo feito na tabela
 // de revisão antes de clicar.
 async function confirmarImportacaoContasPagar(){
+  if(!_gcCpCarregado){toast('Aguarde alguns segundos: as Contas a Pagar ainda estão carregando','terr');return;}
   // Trava própria (2026-08-25, ver auditoria de acesso ao Financeiro) — grava lançamentos
   // direto no Firestore, sem checar nada até aqui.
   if(!_isFinanceiroUser()){toast('Apenas Financeiro/Administrador podem fazer isso','terr');return;}
