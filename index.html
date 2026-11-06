@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-06.1';</script>
+<script>const APP_BUILD_VERSION='2026-11-06.4';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -3034,6 +3034,12 @@ select.fc{cursor:pointer}
         </select>
       </div>
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+        <div id="prod-fil-rapido" style="display:inline-flex;gap:4px;background:#f1f5f9;border-radius:9px;padding:3px">
+          <button type="button" data-r="hoje" onclick="prodFiltroRapido('hoje')" class="prod-fr">Hoje</button>
+          <button type="button" data-r="semana" onclick="prodFiltroRapido('semana')" class="prod-fr" title="Segunda a domingo da semana que vem">Semana que vem</button>
+          <button type="button" data-r="mes" onclick="prodFiltroRapido('mes')" class="prod-fr" title="Do dia 1 ao último dia deste mês">Mês</button>
+          <button type="button" data-r="todos" onclick="prodFiltroRapido('todos')" class="prod-fr">Todos os meses</button>
+        </div>
         <select id="prod-fil-data-campo" onchange="prodRenderAtivo()" style="padding:9px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;cursor:pointer">
           <option value="">📅 Filtrar por data: nenhum</option>
           <option value="emissao">Data de Emissão/Venda</option>
@@ -9647,10 +9653,9 @@ document.getElementById('sec-geral').style.display=isGeral?'':'none';
     if(isProjetos)setTimeout(()=>{try{
       document.querySelectorAll('.proj-main-tab').forEach(b=>b.classList.remove('active'));
       document.getElementById('proj-main-tabs')?.querySelector('.proj-main-tab')?.classList.add('active');
-      const sl=document.getElementById('proj-sec-lista'),sk=document.getElementById('proj-sec-kanban'),sc=document.getElementById('proj-sec-calendario');
-      if(sl)sl.style.display='';if(sk)sk.style.display='none';if(sc)sc.style.display='none';
-      _projTabAtiva='lista';
-      renderProjLista();
+      // (2026-11-06) passa pelo projSetTab: esconde TODAS as outras abas (Indicadores, Produtos, Lista de FP)
+      // e devolve a barra de busca/filtros — antes a Lista de FP ficava aberta embaixo da lista.
+      projSetTab('lista',document.getElementById('proj-main-tabs')?.querySelector('.proj-main-tab'));
     }catch(e){console.error('Erro ao abrir Projetos',e);}},120);
     // COMPRAS ganhou visão própria em Lista/Kanban/Calendário (2026-08-03, mesmo padrão de
     // PROJETOS) — sempre reabre na aba Lista.
@@ -38838,7 +38843,33 @@ function prodSetPipeTab(sub,btn){ // nível 2, dentro do Pipeline: 'lista' | 'di
   _prodPipeLastSub=sub;
   prodRenderAtivo();
 }
+// Atalhos de período da Produção (2026-11-06, pedido do Guilherme): Hoje · Semana que vem · Mês ·
+// Todos os meses. Só preenchem o De/Até (e, se nenhuma data estiver escolhida, usam o Prazo de Produção).
+function _prodFrPeriodo(tipo){
+  const h=new Date();h.setHours(12,0,0,0);
+  if(tipo==='hoje'){const d=_isoLocal(h);return[d,d];}
+  if(tipo==='semana'){const dow=h.getDay();const seg=new Date(h);seg.setDate(h.getDate()+((8-dow)%7||7));const dom=new Date(seg);dom.setDate(seg.getDate()+6);return[_isoLocal(seg),_isoLocal(dom)];}
+  if(tipo==='mes'){return[_isoLocal(new Date(h.getFullYear(),h.getMonth(),1,12)),_isoLocal(new Date(h.getFullYear(),h.getMonth()+1,0,12))];}
+  return['',''];
+}
+function prodFiltroRapido(tipo){
+  const c=document.getElementById('prod-fil-data-campo'),de=document.getElementById('prod-fil-data-de'),ate=document.getElementById('prod-fil-data-ate');
+  if(!c||!de||!ate)return;
+  const[a,b]=_prodFrPeriodo(tipo);
+  if(tipo!=='todos'&&!c.value)c.value='etapas';
+  de.value=a;ate.value=b;
+  prodRenderAtivo();
+}
+function _prodFrSync(){
+  const box=document.getElementById('prod-fil-rapido');if(!box)return;
+  const de=(document.getElementById('prod-fil-data-de')||{}).value||'',ate=(document.getElementById('prod-fil-data-ate')||{}).value||'';
+  let at='';
+  if(!de&&!ate)at='todos';
+  else ['hoje','semana','mes'].forEach(t=>{const[a,b]=_prodFrPeriodo(t);if(a===de&&b===ate)at=t;});
+  box.querySelectorAll('.prod-fr').forEach(bt=>{const on=bt.dataset.r===at;bt.style.cssText='border:none;border-radius:7px;padding:6px 10px;font-size:.74rem;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap;'+(on?'background:#101B3D;color:#fff':'background:transparent;color:#475569');});
+}
 function prodRenderAtivo(){
+  try{_prodFrSync();}catch(e){}
   const capEl=document.getElementById('prod-cap-valor');
   if(capEl)capEl.textContent=fmtR(_lpCapProducaoDia());
   if(_prodTabAtiva==='dias')renderProdDias();
@@ -49921,7 +49952,7 @@ function _plObrasRenderLista(){
         <td style="padding:10px 12px">${_rcCelula(p,concl)}</td>
         <td style="padding:10px 12px;white-space:nowrap">${statusHtml}</td>
         <td style="padding:10px 12px;text-align:right;white-space:nowrap">
-          <button onclick="_planAbrirMenuAcoes(this,'${p.id}',${concl})" title="Mais ações" class="plan-acoes-btn plan-menu-trigger">⋮</button>
+          ${p.arq_os_url?`<a href="${String(p.arq_os_url).replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir a Ordem de Serviço (PDF) do pedido" style="${_acaoBtnSt('ver')};display:inline-block;text-decoration:none;border-radius:8px;padding:6px 11px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;margin-right:6px;vertical-align:middle">📄 Pedido (PDF)</a>`:`<span title="Este pedido não tem a Ordem de Serviço em PDF anexada" style="display:inline-block;margin-right:8px;font-size:.7rem;color:#94a3b8;white-space:nowrap;vertical-align:middle">sem PDF</span>`}<button onclick="_planAbrirMenuAcoes(this,'${p.id}',${concl})" title="Mais ações" class="plan-acoes-btn plan-menu-trigger">⋮</button>
         </td>
       </tr>${painel}`;
     }).join('')}
@@ -74610,7 +74641,7 @@ function _cadExportar(cad){
       ${l.map(p=>{const nd=p.fp.itens.reduce((s,x)=>s+(x.produtoId?difsItem(x).length:1),0);return`<button type="button" onclick="fpAbrir('${p.id}')" style="display:inline-flex;gap:6px;align-items:center;margin:0 6px 6px 0;border:1px solid #fcd34d;background:#fff;border-radius:999px;padding:4px 10px;font-size:.74rem;cursor:pointer">OS ${esc(p.os||'—')} · ${esc(String(p.cliente||'').slice(0,28))}${nd?` <b style="color:#b45309">⚠ ${nd}</b>`:''}</button>`;}).join('')}</div>`;
   }
   try{const _ra=projRenderAtivo;projRenderAtivo=function(){const r=_ra.apply(this,arguments);
-    try{const old=document.getElementById('fp-fila');if(old)old.remove();const h=filaHtml();const b=document.getElementById('proj-info-banner');if(h&&b&&b.parentElement)b.insertAdjacentHTML('beforebegin',h);}catch(e){}
+    try{const old=document.getElementById('fp-fila');if(old)old.remove();}catch(e){} // (2026-11-06) FP fica só na aba Lista de FP — a fila de aprovação saiu das telas de projetos
     return r;};}catch(e){}
 
   // ── 5) Configurar (admin): setores da FP e aprovadores ──
@@ -81223,9 +81254,15 @@ _pfSalvarEtapas=function(){
     .fpl-chip.al b{color:#b45309}.fpl-chip.on.al b{color:#fde68a}
     .fpl-sem{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:9px 12px;margin-bottom:12px}
     .fpl-sem-h{display:flex;align-items:center;gap:8px;font-size:.8rem;font-weight:800;color:#92400e;cursor:pointer}
-    .fpl-sem-l{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-    .fpl-sem-l button{display:inline-flex;gap:6px;align-items:center;border:1px solid #fcd34d;background:#fff;border-radius:999px;padding:4px 10px;font-size:.73rem;cursor:pointer;font-family:inherit;color:#334155}
-    .fpl-sem-l button b{color:#1a2b5e}
+    .fpl-sem-l{margin-top:10px;background:#fff;border:1px solid #fde68a;border-radius:8px;max-height:380px;overflow:auto}
+    .fpl-sem-r{display:grid;grid-template-columns:78px minmax(0,1fr) 150px 96px;gap:12px;align-items:center;padding:8px 12px;border-bottom:1px solid #fef3c7;font-size:.78rem;color:#334155;cursor:pointer}
+    .fpl-sem-r:last-child{border-bottom:none}.fpl-sem-r:hover{background:#fffbeb}
+    .fpl-sem-r .os{font-weight:800;color:#1a2b5e;white-space:nowrap}
+    .fpl-sem-r .cli{min-width:0}.fpl-sem-r .cli div{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fpl-sem-r .cli small{color:#94a3b8;font-size:.7rem}
+    .fpl-sem-r .dt{white-space:nowrap;font-size:.74rem;color:#64748b}.fpl-sem-r .dt.atr{color:#b91c1c;font-weight:700}
+    .fpl-sem-r button{border:none;background:#16a34a;color:#fff;border-radius:8px;padding:6px 10px;font-size:.72rem;font-weight:800;cursor:pointer;font-family:inherit;white-space:nowrap}
+    .fpl-sem-cab{position:sticky;top:0;background:#fff;font-size:.62rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;cursor:default;border-bottom:1px solid #fde68a}.fpl-sem-cab:hover{background:#fff}
+    @media(max-width:700px){.fpl-sem-r{grid-template-columns:64px minmax(0,1fr) 80px}.fpl-sem-r .dt{display:none}}
     .fpl-wrap{background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:auto;max-height:calc(100vh - 360px);min-height:240px}
     table.fpl-t{width:100%;border-collapse:collapse}
     .fpl-t th{text-align:left;font-size:.64rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;padding:10px 12px;border-bottom:1px solid #e2e8f0;white-space:nowrap;position:sticky;top:0;background:#fff;z-index:1}
@@ -81262,6 +81299,10 @@ _pfSalvarEtapas=function(){
     return r;};}
   {const _ra=projRenderAtivo;projRenderAtivo=function(){
     if(typeof _projTabAtiva!=='undefined'&&_projTabAtiva==='fps'){try{renderFps();}catch(e){console.error('Lista de FP',e);}return;}
+    // (2026-11-06) Ao voltar pro Projetos por outro menu, a Lista de FP ficava aberta embaixo da lista de
+    // projetos e a barra de busca/filtros sumia. Fora da aba Lista de FP ela sempre fica escondida.
+    try{const sf=document.getElementById('proj-sec-fps');if(sf)sf.style.display='none';
+      if(_projTabAtiva!=='produtos'){const fw=document.getElementById('proj-filtros-wrap');if(fw)fw.style.display='';}}catch(e){}
     return _ra.apply(this,arguments);};}
   // ── dados ──
   function todas(){
@@ -81326,7 +81367,7 @@ _pfSalvarEtapas=function(){
     // pedidos sem FP
     const sem=semFp();const se=document.getElementById('fpl-sem');
     if(se)se.innerHTML=sem.length?`<div class="fpl-sem"><div class="fpl-sem-h" onclick="fplSemToggle()">📌 ${sem.length} ${_plural(sem.length,'pedido em projeto ainda sem FP','pedidos em projeto ainda sem FP')}<span style="font-weight:600;color:#b45309;font-size:.72rem">${S.semAberto?'▲ esconder':'▼ ver e gerar'}</span></div>
-      ${S.semAberto?`<div class="fpl-sem-l">${sem.map(x=>`<button type="button" onclick="fpAbrir('${x.p.id}')" title="Gerar a FP deste pedido"><b>OS ${esc(x.p.os||'—')}</b>${esc(String(nomeCli(x.p)).slice(0,34))}<span style="color:#94a3b8">· projeto até ${fmtD(x.etapa.iso)}</span><span style="color:#16a34a;font-weight:800">＋ Gerar</span></button>`).join('')}</div>`:''}</div>`:'';
+      ${S.semAberto?`<div class="fpl-sem-l"><div class="fpl-sem-r fpl-sem-cab"><span>OS</span><span>Cliente</span><span>Projeto até</span><span></span></div>${sem.map(x=>{const hj=_hojeIso(),atr=x.etapa.iso<hj;return`<div class="fpl-sem-r" onclick="fpAbrir('${x.p.id}')" title="Gerar a FP deste pedido"><span class="os">OS ${esc(x.p.os||'—')}</span><span class="cli"><div title="${esc(nomeCli(x.p))}">${esc(nomeCli(x.p))}</div>${x.p.job?`<small>${esc(x.p.job)}</small>`:''}</span><span class="dt${atr?' atr':''}">${fmtD(x.etapa.iso)}${atr?' · atrasado':''}</span><span style="text-align:right"><button type="button" onclick="event.stopPropagation();fpAbrir('${x.p.id}')">＋ Gerar FP</button></span></div>`;}).join('')}</div>`:''}</div>`:'';
     let lista=S.st?base.filter(p=>stDe(p)===S.st):base;
     const ord={devolvida:0,aguardando:1,rascunho:2,aprovada:3};
     lista=lista.slice().sort((a,b)=>(ord[stDe(a)]-ord[stDe(b)])||String(a.prazo||'9999').localeCompare(String(b.prazo||'9999')));
