@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-06.4';</script>
+<script>const APP_BUILD_VERSION='2026-11-06.7';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -24265,7 +24265,8 @@ function _orcCadernosDisponiveis(){
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${chip('','Todos',_orc2CatalogoLista().length,'')}${cads.map(([c,n])=>chip(c,c,n,(()=>{try{return _cadernoLogoHtml(c,16);}catch(e){return'';}})())).join('')}</div>`;
     const gs=_orc2CatGrupos(''),nP=gs.length,nV=gs.reduce((s,g)=>s+g.vs.length,0);
     const hint=`${nP} ${_plural(nP,'produto','produtos')} · ${nV} ${_plural(nV,'variação','variações')}${orc2.catCad?' em '+_orcxEsc(orc2.catCad):''}. Abra o produto e escolha a variação — entram no orçamento o código, o nome, a descrição técnica, as medidas e o preço.`;
-    return _form.apply(this,arguments).replace(/(<div class="orcx-hint"[^>]*>)[^<]*(<\/div>)/,'$1'+hint+'$2').replace('<input class="fc no-upper" placeholder="🔍 Buscar',chips+'<input class="fc no-upper" placeholder="🔍 Buscar');
+    const tit=orc2.catCad?(orc2.catCad==='SEM CADERNO'?'📒 Produtos sem caderno':'📒 Caderno '+_orcxEsc(orc2.catCad)):'📚 Todos os cadernos';
+    return _form.apply(this,arguments).replace(/(<div class="orcx-hint"[^>]*>)[^<]*(<\/div>)/,'$1'+hint+'$2').replace('📚 Catálogo de produtos',tit); // (2026-11-06) os cadernos viraram botões no topo
   };
   // item que entra no orçamento: código + nome + variação, descrição técnica, medidas e o preço do produto
   const _ic=_orc2ItemCatalogo;
@@ -70799,20 +70800,16 @@ function orc2AtualizarPrecos(){
   toast('Preços atualizados — clique em 💾 Salvar pra gravar','tok');
 }
 function _orc2HtmlProdutos(){
-  const tipo=['fachada','bk','catalogo','manual','placa','config'].indexOf(orc2.prodTipo)>=0?orc2.prodTipo:'letra';if(tipo==='bk')_orc2BkWatch();_orc2IaWatch();
+  const tipo=['fachada','bk','catalogo','manual','placa','config','rc'].indexOf(orc2.prodTipo)>=0?orc2.prodTipo:'letra';if(tipo==='bk')_orc2BkWatch();_orc2IaWatch();
   const btn=(k,l)=>`<button type="button" class="orc2-prodbtn ${tipo===k?'on':''}" onclick="orc2SetProdTipo('${k}')">${l}</button>`;
   return`${_orc9HtmlAvisoPlanilha()}${_orc2HtmlAvisoPrecos()}${_orc2IaHtmlBotao()}${_orc9HtmlUsarModelo()}<div class="orc2-prodbtns">
-    ${btn('letra','🔠 Letra caixa')}
-    ${btn('fachada','🏢 Fachada')}
-    ${btn('placa','🪧 Placa')}
-    ${btn('config','🧩 Configurado')}
-    ${btn('bk','🍔 Tabela BK')}
-    ${btn('catalogo','📚 Catálogo')}
+    ${_orc2BtnsGrupos()}
+    ${_orc2BtnsCadernos(tipo)}
     ${btn('manual','✍️ Avulso')}
   </div>
   <div class="orc2-letra">
     <div class="dash-card" style="margin:0">
-${(tipo==='placa'||tipo==='config')?_orc8HtmlForm(tipo):tipo==='fachada'?_orc2HtmlFormFachada():tipo==='bk'?_orc2HtmlFormBk():tipo==='catalogo'?_orc2HtmlFormCatalogo():tipo==='manual'?_orc2HtmlFormManual():_orc2HtmlFormLetra()}
+${tipo==='rc'?_orc2RcFormHtml():(tipo==='placa'||tipo==='config')?_orc8HtmlForm(tipo):tipo==='fachada'?_orc2HtmlFormFachada():tipo==='bk'?_orc2HtmlFormBk():tipo==='catalogo'?_orc2HtmlFormCatalogo():tipo==='manual'?_orc2HtmlFormManual():_orc2HtmlFormLetra()}
     </div>
     <div>
       <div class="dash-card" style="margin:0"><div class="dash-sec-title">📦 Produtos do orçamento</div><div id="orc2-lista-prod"></div></div>
@@ -70852,7 +70849,21 @@ function _orc2HtmlFormLetra(){
       </div>
 `;
 }
-function orc2SetProdTipo(k){orc2.prodTipo=['fachada','bk','catalogo','manual','placa','config'].indexOf(k)>=0?k:'letra';_orc2ReRenderProdutos();}
+// (2026-11-06, pedido do Guilherme) "tire a tabela BK e coloque todos os cadernos": um botão por caderno
+// que tem produto com preço (aparece sozinho conforme novos cadernos forem cadastrados) + "Todos os cadernos".
+// Cada botão abre o catálogo já filtrado naquele caderno (orc2.catCad). Itens da Tabela BK já lançados em
+// orçamentos antigos continuam aparecendo e valendo normalmente.
+function _orc2BtnsCadernos(tipo){
+  let cads=[];try{cads=_orcCadernosDisponiveis();}catch(e){}
+  const E=_orcxEsc,on=c=>tipo==='catalogo'&&(orc2.catCad||'')===c;
+  const enc=c=>encodeURIComponent(c).replace(/'/g,'%27');
+  const logo=c=>{try{const h=_cadernoLogoHtml(c,16);if(h)return h;}catch(e){}return'📒';};
+  const nome=c=>c==='SEM CADERNO'?'Sem caderno':String(c).toLowerCase().replace(/(^|[\s\-\/])(\S)/g,(m,a,b)=>a+b.toUpperCase());
+  const b=(c,l)=>`<button type="button" class="orc2-prodbtn ${on(c)?'on':''}" onclick="orc2SetCaderno(decodeURIComponent('${enc(c)}'))">${l}</button>`;
+  return cads.map(([c])=>b(c,`<span style="display:inline-flex;align-items:center;gap:6px">${logo(c)}${E(nome(c))}</span>`)).join('')+(cads.length>1?b('','📚 Todos os cadernos'):'');
+}
+function orc2SetCaderno(c){orc2.catCad=c||'';orc2.catAberto='';orc2.catBusca='';orc2SetProdTipo('catalogo');}
+function orc2SetProdTipo(k){orc2.prodTipo=['fachada','bk','catalogo','manual','placa','config','rc'].indexOf(k)>=0?k:'letra';_orc2ReRenderProdutos();}
 function orc2Fach(k,v){orc2.fach=orc2.fach||_orc2FachVazia();orc2.fach[k]=v;orc2AtualizarPreviewLetra();}
 function orc2Letra(k,v,rerender){orc2.letra=orc2.letra||_orc2LetraVazia();orc2.letra[k]=v;if(rerender){_orc2ReRenderProdutos();return;}orc2AtualizarPreviewLetra();}
 function orc2AddAdesivo(){orc2.letra.adesivos.push({codigo:'',largura:'',altura:''});_orc2ReRenderProdutos();}
@@ -70860,10 +70871,10 @@ function orc2RemAdesivo(i){orc2.letra.adesivos.splice(i,1);_orc2ReRenderProdutos
 function orc2Adesivo(i,k,v){orc2.letra.adesivos[i][k]=v;orc2AtualizarPreviewLetra();}
 function _orc2ReRenderProdutos(){const el=document.getElementById('orc2-aba-produtos');if(el){el.innerHTML=_orc2HtmlProdutos();orc2AtualizarPreviewLetra();}}
 function orc2AtualizarPreviewLetra(){
-  if(orc2.prodTipo==='placa'||orc2.prodTipo==='config'){_orc8Preview();return;}
+  if(orc2.prodTipo==='placa'||orc2.prodTipo==='config'||orc2.prodTipo==='rc'){_orc8Preview();return;}
   const box=document.getElementById('orc2-l-preview');
   const fach=orc2.prodTipo==='fachada',L=fach?orc2.fach:orc2.letra;
-  if(box&&L&&['bk','catalogo','manual'].indexOf(orc2.prodTipo)<0){
+  if(box&&L&&['bk','catalogo','manual','rc'].indexOf(orc2.prodTipo)<0){
     const r=fach?orc2CalcFachada(L,_orc2Precos(),orc2.adesivoPrecos):orc2CalcLetra(L,_orc2Precos(),orc2.adesivoPrecos);
     const temMed=_orc2Num(L.largura)>0&&_orc2Num(L.altura)>0;
     const ar=document.getElementById(fach?'orc2-f-area':'orc2-l-area');
@@ -74001,7 +74012,7 @@ function _cadExportar(cad){
   {const _r8=_orc8Recalcular;_orc8Recalcular=function(p){const a=arguments;return comCtx(p&&p.mpAj,()=>_r8.apply(this,a));};}
 
   // formulário em uso
-  const ehCfg=()=>orc2.prodTipo==='placa'||orc2.prodTipo==='config';
+  const ehCfg=()=>orc2.prodTipo==='placa'||orc2.prodTipo==='config'||orc2.prodTipo==='rc';
   function form(){if(ehCfg())return orc8.form;if(orc2.prodTipo==='fachada')return orc2.fach;if(orc2.prodTipo==='letra')return orc2.letra;return null;}
   function aj(){const F=form();if(!F)return null;F.mpAj=F.mpAj||{rem:{},qtd:{},add:[]};F.mpAj.rem=F.mpAj.rem||{};F.mpAj.qtd=F.mpAj.qtd||{};F.mpAj.add=F.mpAj.add||[];return F.mpAj;}
   const vazio=a=>!a||(!Object.keys(a.rem||{}).length&&!Object.keys(a.qtd||{}).length&&!(a.add||[]).length);
@@ -74361,6 +74372,7 @@ function _cadExportar(cad){
     const inp=(campo,v,w,ph)=>`<input class="fc no-upper" ${ed?'':'disabled'} value="${esc(v)}" placeholder="${esc(ph||'')}" onchange="_fpItemSet('${campo}',this.value)" style="width:${w};padding:5px 7px;font-size:.8rem">`;
     const chips=it.setores.map(k=>{const s=setor(k);return`<span style="border:1.5px solid ${s.c};background:${s.c};color:${claroCor(s.c)?'#1f2937':'#fff'};border-radius:999px;padding:3px 9px;font-size:.68rem;font-weight:700">${esc(s.n)}</span>`;}).join('');
     const lay=(it.geral.imgs||[]).length;
+    const dfI=(()=>{try{return prod&&typeof _dfEh==='function'&&_dfEh(prod)?_dfDe(prod):null;}catch(e){return null;}})();const dfDif=!!(dfI&&dfI.df&&dfI.arte==='diferente');const layV=(it.geral.imgsVerso||[]).length;
     const setorCards=it.setores.map(k=>{const s=setor(k),d=it.dados[k]||(it.dados[k]={campos:camposDe(k,null),obs:'',imgs:[]});
       const campos=d.campos.map((c,i)=>{const alt=alterado(it,k,i);const bv=((it.base&&it.base[k]&&it.base[k].campos[i])||[])[1];
         return`<div style="font-weight:700;font-size:.74rem;color:#334155;padding:4px 0">${esc(c[0]||'—')}</div><div><input class="fc no-upper" ${ed?'':'disabled'} value="${esc(c[1])}" onchange="_fpCampo('${k}',${i},1,this.value)" style="width:100%;font-size:.76rem;padding:4px 6px;${alt?'background:#fffbeb;border-color:#f59e0b':''}">${alt?`<div style="font-size:.64rem;color:#b45309">⚠ alterado neste pedido · caderno: ${esc(bv||'—')}</div>`:''}</div>`;}).join('');
@@ -74383,7 +74395,7 @@ function _cadExportar(cad){
     return`<div style="display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0">
         ${prod.fotoUrl?`<img src="${esc(prod.fotoUrl)}" title="Tamanho padrão (caderno)" style="width:74px;height:56px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid #e2e8f0;flex-shrink:0">`:`<div style="width:74px;height:56px;border-radius:8px;background:#fff;border:1px dashed #cbd5e1;display:flex;align-items:center;justify-content:center;font-size:.6rem;color:#94a3b8;text-align:center;flex-shrink:0">sem foto no caderno</div>`}
         <div style="flex:1;min-width:0"><div style="font-size:.68rem;color:#15803d;font-weight:700">ITEM ${esc(it.numero)} · 📒 ${esc(prod.categoria||'Sem caderno')}${prod.codigo?' · '+esc(prod.codigo):''}</div>
-          <div style="font-size:.92rem;font-weight:800;color:#0f172a;line-height:1.25">${esc(prod.nome)}</div>
+          <div style="font-size:.92rem;font-weight:800;color:#0f172a;line-height:1.25">${esc(prod.nome)}</div>${dfI?`<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">${_dfSelo(prod,'g')}<span style="font-size:.7rem;color:#6d28d9;font-weight:700">${esc(_dfTxt(prod))}</span></div>`:''}
           ${it.descricao&&it.descricao!==prod.nome?`<div style="font-size:.7rem;color:#64748b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(it.descricao)}">Na OS: ${esc(it.descricao)}</div>`:''}</div>
         ${ed?`<div style="display:flex;gap:6px;flex-shrink:0"><button type="button" onclick="_fpPicker('trocar')" style="border:1px solid #cbd5e1;background:#fff;color:#1a2b5e;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.72rem;font-weight:700">↺ Trocar produto</button>${FP.fp.itens.length>1?`<button type="button" onclick="_fpItemDel()" style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:8px;padding:5px 10px;cursor:pointer;font-size:.72rem">Tirar item</button>`:''}</div>`:''}
       </div>
@@ -74394,9 +74406,10 @@ function _cadExportar(cad){
       </div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:.68rem;font-weight:700;color:#64748b;margin-right:2px">SETORES</span>${chips}<span style="font-size:.66rem;color:#94a3b8">· vêm do cadastro do produto no caderno</span></div>
       ${difs.length?`<div style="margin-top:8px;padding:6px 10px;border-radius:8px;background:#fffbeb;color:#92400e;font-size:.72rem"><b>⚠ Diferenças em relação ao caderno (o aprovador vê na aprovação):</b> ${difs.map(esc).join(' · ')}</div>`:''}
-      ${sec('#e91e63',`LAYOUT APLICADO ${lay?'':'<span style="background:#fee2e2;color:#b91c1c;border-radius:999px;padding:1px 8px;font-size:.62rem;margin-left:4px">obrigatório</span>'}`,'onde este item vai instalado: imagem do projeto/fachada do cliente',`
+      ${sec('#e91e63',`LAYOUT APLICADO${dfDif?' — FRENTE (FACE 1)':''} ${lay?'':'<span style="background:#fee2e2;color:#b91c1c;border-radius:999px;padding:1px 8px;font-size:.62rem;margin-left:4px">obrigatório</span>'}`,'onde este item vai instalado: imagem do projeto/fachada do cliente',`
         ${imgsHtml(it.geral.imgs,ed,'_fpGeralImgAdd','_fpGeralImgDel')}
         <textarea class="fc no-upper" ${ed?'':'disabled'} rows="2" placeholder="Observações do item (cada linha vira um tópico ao lado da imagem). Ex.: VERIFICAR ACESSO PARA PESCAR ELÉTRICA" onchange="_fpGeralObs(this.value)" style="width:100%;margin-top:8px;font-size:.76rem">${esc(it.geral.obs||'')}</textarea>`)}
+      ${dfDif?sec('#7c3aed',`🔁 LAYOUT DO VERSO (FACE 2) ${layV?'':'<span style="background:#fee2e2;color:#b91c1c;border-radius:999px;padding:1px 8px;font-size:.62rem;margin-left:4px">obrigatório</span>'}`,'produto dupla face com arte diferente em cada face: a arte da outra face',imgsHtml(it.geral.imgsVerso,ed,'_fpVersoImgAdd','_fpVersoImgDel')):''}
       ${setorCards}${mats}`;
   }
   const it=()=>FP.fp.itens[FP.sel];
@@ -74522,6 +74535,8 @@ function _cadExportar(cad){
   window._fpImgDel=(k,i)=>mexe(()=>{it().dados[k].imgs.splice(i,1);});
   window._fpGeralImgAdd=inp=>{if(travada())return;addImgs(inp,()=>it().geral.imgs);};
   window._fpGeralImgDel=i=>mexe(()=>{it().geral.imgs.splice(i,1);});
+  window._fpVersoImgAdd=inp=>{if(travada())return;const g=it().geral;g.imgsVerso=g.imgsVerso||[];addImgs(inp,()=>it().geral.imgsVerso);};
+  window._fpVersoImgDel=i=>mexe(()=>{(it().geral.imgsVerso||[]).splice(i,1);});
   async function gravar(acao){
     const p=pedAtual();if(!p)return false;FP.fp.hist=FP.fp.hist||[];if(acao)FP.fp.hist.push({em:new Date().toISOString(),por:quem(),acao});
     FP.fp.atualizadoEm=new Date().toISOString();p.fp=clone(FP.fp);
@@ -74534,6 +74549,8 @@ function _cadExportar(cad){
     const semProd=f.itens.filter(x=>!x.produtoId);if(semProd.length){toast('Só entram produtos do caderno — escolha o produto (ou tire) do item '+semProd.map(x=>x.numero).join(', '),'terr');return;}
     const sem=f.itens.filter(x=>!x.setores.length);if(sem.length){toast('Produto sem setores da produção no caderno: '+sem.map(x=>x.titulo).join(', '),'terr');return;}
     const semLay=f.itens.filter(x=>!(x.geral&&x.geral.imgs&&x.geral.imgs.length));if(semLay.length){toast('Falta o layout aplicado (onde vai instalado) no item '+semLay.map(x=>x.numero).join(', '),'terr');return;}
+    const semVerso=f.itens.filter(x=>{try{const pr=getProdutos().find(q=>q.id===x.produtoId);const d=pr&&_dfDe(pr);return d&&d.df&&d.arte==='diferente'&&!(x.geral&&x.geral.imgsVerso&&x.geral.imgsVerso.length);}catch(e){return false;}});
+    if(semVerso.length){toast('Item dupla face com arte diferente em cada face: falta o layout do verso no item '+semVerso.map(x=>x.numero).join(', '),'terr');return;}
     const nd=f.itens.reduce((s,x)=>s+(x.produtoId?difsItem(x).length:1),0);
     if(!confirm('Enviar a FP pra aprovação?'+(nd?`\n\n${nd} ${_plural(nd,'diferença em relação ao caderno será mostrada','diferenças em relação ao caderno serão mostradas')} ao aprovador.`:'')))return;
     f.status='aguardando';f.enviadoEm=new Date().toISOString();f.enviadoPor=quem();delete f.devolucao;
@@ -74603,11 +74620,15 @@ function _cadExportar(cad){
         doc.setTextColor(20,20,20);doc.setFont('helvetica','bold');doc.setFontSize(10);doc.text('INFORMAÇÕES GERAIS '+tit,10,24);doc.setFont('helvetica','normal');
         doc.setFontSize(8);doc.text([x.medidas?'MEDIDAS: '+x.medidas:'',x.qtd?'QUANTIDADE: '+x.qtd:''].filter(Boolean).join('   ·   '),10,29);
         doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.text('LAYOUT APLICADO'+(x.geral.local?' — '+String(x.geral.local).toUpperCase():''),10,34);doc.setFont('helvetica','normal');
+        const _dfP=(()=>{try{const pr=getProdutos().find(q=>q.id===x.produtoId);return pr&&_dfEh(pr)?pr:null;}catch(e){return null;}})();
+        if(_dfP){doc.setFillColor(243,232,255);doc.setDrawColor(124,58,237);doc.roundedRect(120,20.5,60,6,1.5,1.5,'FD');doc.setTextColor(109,40,217);doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.text('DUPLA FACE'+(_dfDe(_dfP).arte==='diferente'?' - ARTES DIFERENTES':''),150,24.6,{align:'center'});doc.setTextColor(20,20,20);doc.setFont('helvetica','normal');}
         await colocarImagens(doc,x.geral.imgs,10,37,170,132,cache);
         let yTop=40;const fotoPad=x.produtoFoto||((produtosAtivos().find(q=>q.id===x.produtoId)||{}).fotoUrl)||'';
         if(fotoPad){doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.text('TAMANHO PADRÃO:',188,34);doc.setFont('helvetica','normal');await colocarImagens(doc,[fotoPad],188,37,98,52,cache);yTop=96;}
         let yy=topicos(doc,x.geral.obs,188,yTop,98);
         if(!x.geral.obs&&x.descricao)topicos(doc,x.descricao.replace(/\s+-\s+/g,'\n'),188,yTop,98,[70,70,70]);
+        if(_dfP&&_dfDe(_dfP).arte==='diferente'&&(x.geral.imgsVerso||[]).length){nova();cabSetores(doc,x.setores);aba(doc,'LAYOUT DO VERSO','#c4b5fd');doc.setTextColor(20,20,20);doc.setFont('helvetica','bold');doc.setFontSize(10);doc.text('LAYOUT DO VERSO (FACE 2) '+tit,10,24);doc.setFont('helvetica','normal');
+          await colocarImagens(doc,x.geral.imgsVerso,10,30,277,140,cache);}
         // setores
         for(const k of x.setores){const s=setor(k),d=x.dados[k]||{campos:[],obs:'',imgs:[]};
           nova();aba(doc,s.n,s.c);doc.setTextColor(20,20,20);doc.setFont('helvetica','bold');doc.setFontSize(10);doc.text(s.n+' '+tit,10,14);doc.setFont('helvetica','normal');
@@ -81319,6 +81340,7 @@ _pfSalvarEtapas=function(){
     if(!its.length)out.push(['sem itens','#64748b','#f1f5f9']);
     const sp=its.filter(x=>!x.produtoId).length;if(sp)out.push([`⚠ ${sp} ${_plural(sp,'item sem produto do caderno','itens sem produto do caderno')}`,'#b91c1c','#fee2e2']);
     const sl=its.filter(x=>x.produtoId&&!(x.geral&&x.geral.imgs&&x.geral.imgs.length)).length;if(sl)out.push([`⚠ falta layout em ${sl} ${_plural(sl,'item','itens')}`,'#92400e','#fef3c7']);
+    try{const sv=its.filter(x=>{const pr=x.produtoId&&getProdutos().find(q=>q.id===x.produtoId);const d=pr&&_dfDe(pr);return d&&d.df&&d.arte==='diferente'&&!(x.geral&&x.geral.imgsVerso&&x.geral.imgsVerso.length);}).length;if(sv)out.push([`🔁 falta o verso em ${sv} ${_plural(sv,'item','itens')} dupla face`,'#6d28d9','#f3e8ff']);}catch(e){}
     if(f.status==='devolvida'&&f.devolucao)out.push(['↩ '+String(f.devolucao.motivo||'devolvida').slice(0,70),'#b91c1c','#fef2f2']);
     try{const nd=its.reduce((s,x)=>s+(x.produtoId&&window._fpDifs?window._fpDifs(x).length:0),0);if(nd)out.push([`${nd} ${_plural(nd,'ajuste','ajustes')} no caderno`,'#475569','#f1f5f9']);}catch(e){}
     return out;
@@ -83182,6 +83204,280 @@ ${lista}`;
   function irMenu(){try{closeM('mo-crm-card');}catch(e){}setSection('cat:GRANDA_MOB');}
   window.gmOrcDoCard=function(id){const e=(crmEmpresas||[]).find(x=>x.id===id);irMenu();if(currentSection!=='cat:GRANDA_MOB')return;gmOrcNovo({crmId:id,cliente:e?String(e.nome||'').toUpperCase():''});};
   window.gmOrcAbrirDoCard=function(oid){irMenu();if(currentSection!=='cat:GRANDA_MOB')return;gmOrcAbrir(oid);};
+})();
+
+
+// ── DUPLA FACE NO COMPONENTE (2026-11-06, pedido do Guilherme) ──────────────────────────────────────
+// Pergunta obrigatória no cadastro do componente (e na nova variação): "É dupla face?" Sim/Não. Se Sim:
+//  • "As duas faces têm a mesma arte?" (igual / frente e verso diferentes) — diferente = a FP pede o layout
+//    de cada face;  • "Iluminação" (sem / só uma face / as duas faces) — pergunta à parte.
+// O projetista lança a quantidade de matéria-prima certa na composição: o sistema NÃO dobra nada sozinho.
+// Fica visível: selo 🔁 DUPLA FACE na lista do caderno, na ficha, no catálogo do orçamento (e no nome do
+// item / PDF), na FP (item + PDF). Produto final com componente dupla face também mostra o selo.
+// Campos: p.duplaFace (true/false), p.dfArte ('igual'|'diferente'), p.dfLuz ('nenhuma'|'uma'|'duas').
+// Produto antigo com "DUPLA FACE" no nome/variação conta como dupla face (sem gravar nada); os outros
+// aparecem como "não informado" na ficha até alguém responder.
+const _DF_ARTE={igual:'mesma arte nas duas faces',diferente:'arte diferente em cada face'};
+const _DF_LUZ={nenhuma:'sem iluminação',uma:'só uma face iluminada',duas:'as duas faces iluminadas'};
+function _dfDe(p){
+  if(!p)return{df:null,arte:null,luz:null};
+  let df=p.duplaFace===true?true:p.duplaFace===false?false:null;
+  if(df==null&&/DUPLA\s*FACE/i.test(String(p.nome||'')+' '+String(p.variacao||'')))df=true;
+  return{df,arte:df?(p.dfArte||null):null,luz:df?(p.dfLuz||null):null,porNome:p.duplaFace==null&&df===true};
+}
+function _dfKit(p){try{if(typeof _compEhConjunto==='function'&&_compEhConjunto(p))return _compLista(p).some(o=>o.p&&_dfDe(o.p).df);}catch(e){}return false;}
+function _dfEh(p){return _dfDe(p).df===true||_dfKit(p);}
+function _dfTxt(p){const d=_dfDe(p);if(!d.df)return _dfKit(p)?'Tem componente dupla face':'';return['Dupla face',d.arte?_DF_ARTE[d.arte]:'',d.luz?_DF_LUZ[d.luz]:''].filter(Boolean).join(' · ');}
+function _dfSelo(p,modo){
+  if(!_dfEh(p))return'';const t=_dfTxt(p).replace(/"/g,'&quot;');const g=modo==='g';
+  return`<span class="df-selo" title="${t}" style="display:inline-flex;align-items:center;gap:4px;font-size:${g?'.72rem':'.62rem'};font-weight:800;color:#6d28d9;background:#f3e8ff;border:1px solid #d8b4fe;border-radius:999px;padding:${g?'4px 10px':'1px 7px'};white-space:nowrap;vertical-align:middle">🔁 DUPLA FACE${g&&_dfDe(p).arte==='diferente'?' · artes diferentes':''}</span>`;
+}
+// ── formulário (cadastro, nova variação e edição na ficha) ──
+function _dfFormHtml(pref,p){
+  const d=p?_dfDe(p):{df:null,arte:null,luz:null};
+  const r=(nm,v,l,on)=>`<label style="display:inline-flex;align-items:center;gap:5px;font-size:.76rem;cursor:pointer;margin-right:12px"><input type="radio" name="${pref}-${nm}" value="${v}" ${on?'checked':''} onchange="_dfToggle('${pref}')"> ${l}</label>`;
+  const lb='font-size:.7rem;font-weight:700;color:var(--ink3)';
+  return`<div id="${pref}-dfbox" style="margin-top:10px;padding:10px 12px;border:1.5px solid #e9d5ff;background:#faf5ff;border-radius:10px;max-width:720px">
+    <div style="${lb}">É dupla face? * <span style="font-weight:400;color:var(--ink4)">— tem arte dos dois lados</span></div>
+    <div style="margin-top:4px">${r('df','nao','Não',d.df===false)}${r('df','sim','Sim — 🔁 dupla face',d.df===true)}</div>
+    <div id="${pref}-dfsub" style="display:${d.df===true?'':'none'};margin-top:8px;border-top:1px dashed #e9d5ff;padding-top:8px">
+      <div style="${lb}">As duas faces têm a mesma arte? *</div>
+      <div style="margin-top:4px">${r('arte','igual','Sim, mesma arte',d.arte==='igual')}${r('arte','diferente','Não — frente e verso diferentes (a FP pede o layout de cada face)',d.arte==='diferente')}</div>
+      <div style="${lb};margin-top:8px">Iluminação *</div>
+      <div style="margin-top:4px">${r('luz','nenhuma','Sem iluminação',d.luz==='nenhuma')}${r('luz','uma','Só uma face iluminada',d.luz==='uma')}${r('luz','duas','As duas faces iluminadas',d.luz==='duas')}</div>
+      <div style="font-size:.68rem;color:#6d28d9;margin-top:6px">Lance na composição a quantidade de material das duas faces — o sistema não dobra sozinho.</div>
+    </div></div>`;
+}
+function _dfToggle(pref){const v=(document.querySelector(`input[name="${pref}-df"]:checked`)||{}).value;const s=document.getElementById(pref+'-dfsub');if(s)s.style.display=v==='sim'?'':'none';}
+function _dfLer(pref){
+  const g=n=>(document.querySelector(`input[name="${pref}-${n}"]:checked`)||{}).value||'';
+  const df=g('df');if(!df)return{erro:'Responda se o produto é dupla face'};
+  if(df==='nao')return{v:{duplaFace:false}};
+  const arte=g('arte'),luz=g('luz');
+  if(!arte)return{erro:'Dupla face: diga se as duas faces têm a mesma arte'};
+  if(!luz)return{erro:'Dupla face: diga como é a iluminação das faces'};
+  return{v:{duplaFace:true,dfArte:arte,dfLuz:luz}};
+}
+function _dfAplicar(p,v){p.duplaFace=v.duplaFace;if(v.duplaFace){p.dfArte=v.dfArte;p.dfLuz=v.dfLuz;}else{delete p.dfArte;delete p.dfLuz;}}
+function _dfHistTxt(p){return p.duplaFace?'Dupla face · '+_DF_ARTE[p.dfArte]+' · '+_DF_LUZ[p.dfLuz]:'Não é dupla face';}
+function _dfGravarCfg(){if(window._fbSaveCfg)window._fbSaveCfg(cfg);try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}}
+// cadastro novo: bloco entra antes da linha "* Obrigatórios"
+function _dfInjetarNovo(){
+  const box=document.getElementById('prodnovo-box');if(!box||document.getElementById('prodnovo-dfbox'))return;
+  const ult=[...box.children].filter(x=>x.tagName==='DIV').pop();if(!ult)return;
+  ult.insertAdjacentHTML('beforebegin',_dfFormHtml('prodnovo',null));
+}
+(function(){
+  const _rcp=renderComercialProdutos;
+  renderComercialProdutos=function(){const r=_rcp.apply(this,arguments);try{_dfInjetarNovo();_dfMarcarLista();}catch(e){console.warn('dupla face lista',e);}return r;};
+  const _novo=_prodNovoProjetos;
+  _prodNovoProjetos=async function(){
+    _dfInjetarNovo();
+    const lido=_dfLer('prodnovo');
+    if(_prodPodeEditar()&&lido.erro){toast(lido.erro,'terr');const b=document.getElementById('prodnovo-dfbox');if(b){b.style.borderColor='#dc2626';b.scrollIntoView({block:'center',behavior:'smooth'});}return;}
+    const antes=getProdutos().length;
+    const r=await _novo.apply(this,arguments);
+    const l=getProdutos();
+    if(l.length>antes&&lido.v){const p=l[l.length-1];_dfAplicar(p,lido.v);_dfGravarCfg();_prodHist(p.id,'Dupla face',_dfHistTxt(p));
+      const b=document.getElementById('prodnovo-dfbox');if(b)b.outerHTML=_dfFormHtml('prodnovo',null);
+      try{_pfAtualizarStatus();}catch(e){}try{_dfMarcarLista();}catch(e){}}
+    return r;
+  };
+  // nova variação: herda as respostas do produto (dá pra mudar)
+  const _nvA=_pfNovaVarAbrir;
+  _pfNovaVarAbrir=function(){
+    const r=_nvA.apply(this,arguments);
+    try{const et=document.getElementById('pfnv-etapas');const grid=et&&et.parentElement;const base=getProdutos()[_pfIdx];
+      if(grid&&!document.getElementById('pfnv-dfbox'))grid.insertAdjacentHTML('afterend',_dfFormHtml('pfnv',base&&_dfDe(base).df!=null?base:null));}catch(e){console.warn('dupla face variação',e);}
+    return r;
+  };
+  const _nvC=_pfNovaVarCriar;
+  _pfNovaVarCriar=async function(){
+    const lido=document.getElementById('pfnv-dfbox')?_dfLer('pfnv'):{};
+    if(lido.erro){toast(lido.erro,'terr');return;}
+    const antes=getProdutos().length;
+    const r=await _nvC.apply(this,arguments);
+    const l=getProdutos();
+    if(l.length>antes&&lido.v){const n=l[l.length-1];_dfAplicar(n,lido.v);_dfGravarCfg();_prodHist(n.id,'Dupla face',_dfHistTxt(n));try{_pfAtualizarStatus();}catch(e){}}
+    return r;
+  };
+  // ficha: selo + responder/alterar
+  const _sel=_pfSeloHtml;
+  _pfSeloHtml=function(p){
+    let h=_sel.apply(this,arguments);
+    try{
+      const d=_dfDe(p),pode=_prodPodeEditar(),kit=_dfKit(p);
+      const bt=t=>pode?`<button type="button" onclick="_dfEditarAbrir()" style="border:none;background:none;color:#6d28d9;font-size:.7rem;font-weight:700;cursor:pointer;text-decoration:underline;padding:0 2px">${t}</button>`:'';
+      if(d.df===true)h+=`<span style="display:inline-flex;align-items:center;gap:4px">${_dfSelo(p,'g')}${d.luz?`<span style="font-size:.68rem;color:#6d28d9">${_DF_LUZ[d.luz]}</span>`:''}${d.porNome||!d.arte||!d.luz?`<span style="font-size:.68rem;color:#b45309;font-weight:700">· falta responder ${!d.arte?'a arte':''}${!d.arte&&!d.luz?' e ':''}${!d.luz?'a iluminação':''}</span>`:''}${bt('alterar')}</span>`;
+      else if(d.df===false)h+=`<span style="display:inline-flex;align-items:center;gap:4px;font-size:.68rem;color:#64748b">Face única${bt('alterar')}</span>`;
+      else if(kit)h+=_dfSelo(p,'g');
+      else h+=`<span style="display:inline-flex;align-items:center;gap:4px;font-size:.7rem;font-weight:700;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:999px;padding:4px 10px">⚠️ Dupla face: não informado${bt('responder')}</span>`;
+    }catch(e){console.warn('dupla face ficha',e);}
+    return h;
+  };
+})();
+function _dfEditarAbrir(){
+  if(!_prodPodeEditar()){toast('Só Projetos ou administrador altera o cadastro','terr');return;}
+  const p=getProdutos()[_pfIdx];if(!p)return;
+  document.getElementById('df-modal')?.remove();
+  const m=document.createElement('div');m.id='df-modal';m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:10080;display:flex;align-items:center;justify-content:center;padding:16px';
+  m.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:760px;width:100%;padding:16px 18px;box-shadow:0 10px 40px rgba(0,0,0,.25)">
+    <div style="display:flex;justify-content:space-between;align-items:center"><div style="font-weight:800;color:#0f172a">🔁 Dupla face — ${_ptE(p.codigo||'')} ${_ptE(p.nome||'')}</div><button type="button" onclick="document.getElementById('df-modal').remove()" style="border:none;background:none;font-size:1.2rem;cursor:pointer;color:#64748b">✕</button></div>
+    ${_dfFormHtml('dfed',_dfDe(p).df!=null?p:null)}
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button type="button" onclick="document.getElementById('df-modal').remove()" style="border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:7px 14px;cursor:pointer;font-family:inherit">Cancelar</button><button type="button" class="dash-btn-conf" style="background:#1a2b5e" onclick="_dfEditarSalvar()">Salvar</button></div></div>`;
+  document.body.appendChild(m);
+}
+function _dfEditarSalvar(){
+  const p=getProdutos()[_pfIdx];if(!p)return;const lido=_dfLer('dfed');if(lido.erro){toast(lido.erro,'terr');return;}
+  const antes=_dfHistTxt(Object.assign({},p,{duplaFace:_dfDe(p).df}));
+  _dfAplicar(p,lido.v);_dfGravarCfg();_prodHist(p.id,'Dupla face',antes+' → '+_dfHistTxt(p));
+  document.getElementById('df-modal')?.remove();toast('Dupla face salvo ✅','tok');
+  try{_pfAtualizarStatus();}catch(e){}try{renderComercialProdutos();}catch(e){}
+}
+// lista do caderno: selo nas linhas e nas variações
+function _dfMarcarLista(){
+  const corpo=document.getElementById('comprod-body');if(!corpo)return;const L=getProdutos();
+  corpo.querySelectorAll('[onclick*="abrirFichaProduto("]').forEach(el=>{
+    if(el.dataset.df)return;const m=/abrirFichaProduto\((\d+)\)/.exec(el.getAttribute('onclick')||'');if(!m)return;const p=L[+m[1]];if(!p)return;
+    const chip=/stopPropagation/.test(el.getAttribute('onclick'));
+    if(el.tagName==='TR'){
+      // produto (família): selo se a variação aberta ou qualquer variação da família for dupla face
+      let fam=[p];try{fam=_prodFamilia(p,true).map(o=>o.x);}catch(e){}
+      const algum=fam.find(x=>_dfEh(x));if(!algum)return;el.dataset.df='1';
+      const td=el.children[1];if(!td)return;const todas=fam.every(x=>_dfEh(x));
+      const s=document.createElement('span');s.style.marginLeft='6px';s.innerHTML=_dfSelo(algum)+(todas||fam.length<2?'':'<span style="font-size:.62rem;color:#6d28d9;margin-left:3px">(algumas variações)</span>');
+      const ref=td.querySelector('div');if(ref)td.insertBefore(s,ref);else td.appendChild(s);
+    }else if(chip){if(!_dfEh(p))return;el.dataset.df='1';el.insertAdjacentHTML('beforeend',' <span title="Dupla face" style="color:#6d28d9">🔁</span>');}
+  });
+}
+// orçamento: catálogo mostra o selo; o item leva "DUPLA FACE" no nome e na descrição (sai no PDF)
+(function(){
+  const _ic=_orc2ItemCatalogo;
+  _orc2ItemCatalogo=function(p){
+    const it=_ic.apply(this,arguments);
+    try{if(p&&_dfEh(p)){const d=_dfDe(p);it.duplaFace=true;
+      if(!/DUPLA\s*FACE/i.test(it.nomeCurto||'')){it.nomeCurto=(it.nomeCurto||it.nome||'')+' · DUPLA FACE';it.nome=it.nomeCurto;}
+      const t=d.df?['Dupla face',d.arte==='diferente'?'com arte diferente em cada face':d.arte==='igual'?'com a mesma arte nas duas faces':'',d.luz==='duas'?'as duas faces iluminadas':d.luz==='uma'?'só uma face iluminada':''].filter(Boolean).join(', ')+'.':'Inclui componente dupla face.';
+      it.descricao=t+(it.descricao?' '+it.descricao:'');}}catch(e){console.warn('dupla face orçamento',e);}
+    return it;
+  };
+  const _ct=_orc2HtmlCatTabela;
+  _orc2HtmlCatTabela=function(){
+    let h=_ct.apply(this,arguments);
+    try{_orc2CatalogoLista().filter(_dfEh).forEach(v=>{const id=_orcxEsc(String(v.id));const k=`<button type="button" class="orc2-ic" title="Adicionar ao orçamento" onclick="event.stopPropagation();orc2CatAdicionar('${id}')"`;
+      h=h.split(k).join(_dfSelo(v)+' '+k);});}catch(e){}
+    return h;
+  };
+})();
+
+
+// ── ORÇAMENTO → PRODUTOS POR CATEGORIA (2026-11-06, pedido do Guilherme) ────────────────────────────
+// "Não quero o menu Configurado: quero em categorias, agrupando os nomes iguais — letras caixa todas dentro de
+// Letra caixa etc." Os modelos de cálculo (receitas da planilha, motor do orc8) passam a ficar dentro da
+// categoria deles, ao lado dos modelos que já existiam: Letra caixa · Fachada e testeira · Placa · Cavalete ·
+// Totem · Neon LED (· Outros, só se o admin cadastrar algum que não se encaixe). O botão 🧩 Configurado saiu.
+// Em seguida vêm os cadernos e o Avulso. Nada muda no cálculo nem nos itens já lançados.
+const ORC_GRUPOS=[
+  {k:'letra',ic:'🔠',l:'Letra caixa',eng:'letra'},
+  {k:'fachada',ic:'🏢',l:'Fachada e testeira',eng:'fachada'},
+  {k:'placa',ic:'🪧',l:'Placa'},
+  {k:'cavalete',ic:'🏗️',l:'Cavalete'},
+  {k:'totem',ic:'🗼',l:'Totem'},
+  {k:'neon',ic:'💡',l:'Neon LED'},
+  {k:'outros',ic:'🧩',l:'Outros'}];
+function _orcGrupoRc(rc){
+  if(!rc)return'outros';if(rc.grupo&&ORC_GRUPOS.some(g=>g.k===rc.grupo))return rc.grupo;
+  const n=String(rc.nome||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  if(rc.categoria==='placa'||/^placa/.test(n))return'placa';
+  if(/letra|letreiro em pvc|letras/.test(n)&&!/neon/.test(n))return'letra';
+  if(/neon/.test(n))return'neon';
+  if(/totem|monolit/.test(n))return'totem';
+  if(/cavalete/.test(n))return'cavalete';
+  if(/testeira|fachada|painel|acm/.test(n))return'fachada';
+  if(rc.categoria==='placa'||/placa/.test(n))return'placa';
+  return'outros';
+}
+function _orcGrupoDe(k){return ORC_GRUPOS.find(g=>g.k===k)||ORC_GRUPOS[ORC_GRUPOS.length-1];}
+function _orcRcDoGrupo(k){try{return _orc8Receitas().filter(r=>_orcGrupoRc(r)===k).sort((a,b)=>String(a.nome).localeCompare(String(b.nome),'pt-BR',{numeric:true}));}catch(e){return[];}}
+// grupo ativo pela tela atual
+function _orcGrupoAtivo(){
+  const t=orc2.prodTipo;
+  if(t==='letra'||t==='fachada')return t;
+  if(t==='rc')return orc2.rcGrupo||'outros';
+  if(t==='placa'||t==='config'){const rc=orc8.form&&_orc8Receita(orc8.form.receitaId);return rc?_orcGrupoRc(rc):(t==='placa'?'placa':'outros');}
+  return'';
+}
+function _orc2BtnsGrupos(){
+  const at=_orcGrupoAtivo();
+  return ORC_GRUPOS.filter(g=>g.eng||_orcRcDoGrupo(g.k).length).map(g=>`<button type="button" class="orc2-prodbtn ${at===g.k?'on':''}" onclick="orc2SetGrupo('${g.k}')">${g.ic} ${g.l}</button>`).join('');
+}
+function orc2SetGrupo(k){
+  const g=_orcGrupoDe(k);
+  if(g.eng){orc2.prodTipo=g.eng;orc8.editId=null;_orc2ReRenderProdutos();return;}
+  const rs=_orcRcDoGrupo(k);orc2.prodTipo='rc';orc2.rcGrupo=k;orc8.editId=null;
+  const atual=orc8.form&&_orc8Receita(orc8.form.receitaId);
+  if(!atual||_orcGrupoRc(atual)!==k){const r=rs[0];orc8.form=r?{cat:r.categoria,receitaId:r.id,nome:'',largura:'',altura:''}:null;}
+  _orc2ReRenderProdutos();
+}
+function orc2RcSel(id){
+  const r=_orc8Receita(id);if(!r)return;orc2.prodTipo='rc';orc2.rcGrupo=_orcGrupoRc(r);orc8.editId=null;
+  const F=orc8.form||{};orc8.form={cat:r.categoria,receitaId:r.id,nome:F.nome||'',largura:F.largura||'',altura:F.altura||'',vars:{}};
+  _orc2ReRenderProdutos();
+}
+function orc2EngSel(eng,modelo){orc2.prodTipo=eng;orc8.editId=null;if(eng==='letra'&&modelo){orc2.letra=orc2.letra||_orc2LetraVazia();orc2.letra.modelo=modelo;}_orc2ReRenderProdutos();}
+// linha de modelos da categoria (os do motor próprio + os da planilha)
+function _orcChipsGrupo(k,ativoRc){
+  const rs=_orcRcDoGrupo(k);const E=_orcxEsc;
+  const chip=(on,click,l,sub)=>`<button type="button" class="orcx-chip ${on?'on':''}" onclick="${click}">${E(l)}${sub?`<small>${E(sub)}</small>`:''}</button>`;
+  let h='';
+  if(k==='letra'){const md=(orc2.letra&&orc2.letra.modelo)||'';h+=ORC2_MODELOS.map(m=>chip(!ativoRc&&md===m.k,`orc2EngSel('letra','${m.k}')`,m.l,m.sub)).join('');}
+  if(k==='fachada')h+=chip(!ativoRc,`orc2EngSel('fachada')`,'Testeira em ACM 3 mm','cálculo completo');
+  h+=rs.map(r=>chip(ativoRc===r.id,`orc2RcSel('${E(r.id)}')`,_orcRcCurto(r,k),_orcRcSub(r))).join('');
+  return h;
+}
+function _orcRcCurto(r,k){
+  let n=String(r.nome||'');
+  if(k==='letra')n=n.replace(/^letra caixa\s*(com|em)?\s*/i,'');
+  if(k==='totem')n=n.replace(/^totem monol[ií]tico\s*[—-]\s*/i,'');
+  if(k==='cavalete')n=n.replace(/^cavalete em\s*/i,'');
+  n=n.trim();return n?n.charAt(0).toUpperCase()+n.slice(1):r.nome;
+}
+function _orcRcSub(r){const m=/\(([^)]+)\)/.exec(r.nome||'');return m?'':(r.categoria==='placa'?'placa':'');}
+// formulário de um modelo da planilha dentro da categoria
+function _orc2RcFormHtml(){
+  const k=orc2.rcGrupo||'outros',g=_orcGrupoDe(k),rs=_orcRcDoGrupo(k);
+  if(!orc8.form||!_orc8Receita(orc8.form.receitaId)||_orcGrupoRc(_orc8Receita(orc8.form.receitaId))!==k){const r=rs[0];if(!r)return`<div class="orc2-vazio" style="padding:16px">Nenhum modelo nesta categoria.</div>`;orc8.form={cat:r.categoria,receitaId:r.id,nome:'',largura:'',altura:''};}
+  const rc=_orc8Receita(orc8.form.receitaId);
+  let h=_orc8HtmlForm(rc.categoria);
+  // tira o título e o select de modelo do motor antigo: a categoria e os botões de modelo fazem esse papel
+  h=h.replace(/^<div class="dash-sec-title">[\s\S]*?<\/div>/,'').replace(/<div class="fg"><label>Modelo<\/label><select[\s\S]*?<\/select><\/div>/,'');
+  return`<div class="dash-sec-title">${g.ic} ${orc8.editId?'Editando ':''}${E2(g.l)}</div>
+    <div class="fg"><label>Modelo</label><div class="orcx-chips">${_orcChipsGrupo(k,rc.id)}</div></div>
+    ${rc.descricao?`<div class="orcx-hint" style="margin:2px 0 4px">${_orcxEsc(rc.descricao)}</div>`:''}${h}`;
+}
+function E2(s){return _orcxEsc(s);}
+(function(){
+  // letra caixa: modelos da planilha entram na mesma linha de modelos
+  const _fl=_orc2HtmlFormLetra;
+  _orc2HtmlFormLetra=function(){
+    let h=_fl.apply(this,arguments);
+    try{const extra=_orcRcDoGrupo('letra').map(r=>`<button type="button" class="orcx-chip" onclick="orc2RcSel('${_orcxEsc(r.id)}')">${_orcxEsc(_orcRcCurto(r,'letra'))}</button>`).join('');
+      if(extra){const i=h.indexOf('<label>Modelo</label><div class="orcx-chips">');if(i>=0){const j=h.indexOf('</div>',i+45);if(j>0)h=h.slice(0,j)+extra+h.slice(j);}}}catch(e){console.warn('letra caixa modelos',e);}
+    return h;
+  };
+  // fachada: linha de modelos no topo (ACM 3 mm do cálculo completo + os da planilha)
+  const _ff=_orc2HtmlFormFachada;
+  _orc2HtmlFormFachada=function(){
+    let h=_ff.apply(this,arguments);
+    try{if(_orcRcDoGrupo('fachada').length){const i=h.indexOf('</div>');if(i>0)h=h.slice(0,i+6).replace('🏢 Nova fachada','🏢 Fachada e testeira').replace('🏢 Editando fachada','🏢 Editando fachada e testeira')+`<div class="fg"><label>Modelo</label><div class="orcx-chips">${_orcChipsGrupo('fachada',null)}</div></div>`+h.slice(i+6);}}catch(e){console.warn('fachada modelos',e);}
+    return h;
+  };
+  // editar item de modelo da planilha abre na categoria dele
+  orc8Editar=function(p){const rc=_orc8Receita(p.receitaId);orc2.prodTipo='rc';orc2.rcGrupo=rc?_orcGrupoRc(rc):(p.categoria==='placa'?'placa':'outros');
+    orc8.form={cat:p.categoria==='placa'?'placa':'config',receitaId:p.receitaId,nome:p.nomeCurto===p.receitaNome?'':(p.nomeCurto||''),largura:p.largura,altura:p.altura,vars:Object.assign({},p.vars||{})};orc8.editId=p.id;_orc2ReRenderProdutos();};
+  // item na lista do orçamento: mostra a categoria em vez de "Produto configurado"
+  const _pt=_orc2ProdTitulo;
+  _orc2ProdTitulo=function(p){if(p&&p.tipo==='config'){const rc=_orc8Receita(p.receitaId);const g=_orcGrupoDe(rc?_orcGrupoRc(rc):(p.categoria==='placa'?'placa':'outros'));return g.l;}return _pt.apply(this,arguments);};
 })();
 
 </script>
