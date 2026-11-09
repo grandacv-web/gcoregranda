@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-09.3';</script>
+<script>const APP_BUILD_VERSION='2026-11-09.10';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -3300,7 +3300,7 @@ select.fc{cursor:pointer}
       <!-- Intervalo (2026-11-05) — almoço de 60 min entre 12:00 e 13:00, ver renderRhIntervalo(). -->
       <div id="rh-sec-intervalo" style="display:none">
         <div style="font-size:.78rem;color:var(--ink4);margin-bottom:16px;padding:12px 16px;background:#fff;border-radius:10px;border:1px solid var(--border-lt);border-left:3px solid #101B3D;line-height:1.5">
-          <b style="color:#101B3D">Regra:</b> todo colaborador faz <b>60 minutos de almoço, das 12:00 às 13:00</b>. Aqui aparece quem está cumprindo e quem precisa de conversa. Férias, licença, afastamento e atestado ficam de fora. Clique num colaborador pra ver os dias.
+          <b style="color:#101B3D">Regra:</b> todo colaborador faz <b>60 minutos de almoço</b>, em qualquer horário (não precisa ser das 12:00 às 13:00). Aqui aparece quem está cumprindo e quem precisa de conversa. Férias, licença, afastamento e atestado ficam de fora. Clique num colaborador pra ver os dias.
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
           <select id="rh-int-mes" onchange="rhIntSetMes(this.value)" style="padding:9px 12px;border-radius:8px;border:1px solid #cbd5e1;font-size:.83rem;font-family:inherit;cursor:pointer;min-width:190px;background:#fff"></select>
@@ -6053,7 +6053,36 @@ window._fbWatchCrmEmpresas=(cb,errCb)=>onSnapshot(collection(db,'crmEmpresas'),s
 // recebido, preservando inclusive deleções de chave aninhada feitas localmente antes de
 // chamar isso aqui (ex.: delete cfg.comissaoPagaFora[confKey]) — só os 5 campos já
 // blindados saem da jogada.
+// (2026-11-09) Lista de colaboradores do RH: merge POR COLABORADOR (id). Antes a lista inteira de um
+// navegador substituía a do servidor — se duas telas salvassem perto, o colaborador recém-criado por
+// uma (upload do Cartão Ponto) sumia do cadastro e o ponto dele ficava "órfão" (caso Josué/Kevin).
+function _fbMergeArrId(b,l,s,apagados){
+  const ok=a=>Array.isArray(a)&&a.every(x=>x&&typeof x==='object'&&x.id!=null);
+  if(!ok(b)||!ok(l)||!ok(s))return l;
+  const mB=new Map(b.map(x=>[String(x.id),x])),mL=new Map(l.map(x=>[String(x.id),x])),mS=new Map(s.map(x=>[String(x.id),x]));
+  const out=[];const vis=new Set();
+  const decide=id=>{
+    const xb=mB.get(id),xl=mL.get(id),xs=mS.get(id);
+    // Faltar na lista desta tela NÃO é apagar (a tela pode estar com a lista antiga) — só sai quem
+    // foi excluído de propósito nesta tela (lista "apagados", preenchida pelo botão Excluir).
+    if(!xl)return(apagados&&apagados.has(id))?null:(xs||null);
+    if(xb&&!xs)return _fbEq(xl,xb)?null:xl; // apagado por outra pessoa (fica se eu mudei)
+    if(!xb&&xl&&!xs)return xl;              // criado aqui
+    if(!xb&&!xl&&xs)return xs;              // criado por outra pessoa
+    if(xl&&xs)return xb?_fbMerge3(xb,xl,xs):Object.assign({},xs,xl);
+    return xs||xl||null;
+  };
+  s.forEach(x=>{const id=String(x.id);vis.add(id);const v=decide(id);if(v)out.push(v);});
+  l.forEach(x=>{const id=String(x.id);if(vis.has(id))return;vis.add(id);const v=decide(id);if(v)out.push(v);});
+  return out;
+}
 const _fbSaveCfgTx=(data)=>{
+  // (2026-11-09, achado no caso Josué/Kevin) Congela o que vai ser salvo NA HORA do clique. Antes a
+  // transação lia o objeto cfg "vivo": se uma atualização de outra tela chegasse nos milissegundos antes
+  // da transação rodar, cfg=Object.assign(cfg,dados) trocava as listas e o sistema gravava a versão
+  // antiga do servidor (o upload dizia "salvo", mas os colaboradores novos não iam). Vale pra todas as
+  // configurações, não só o RH.
+  data=Object.assign({},data);
   return runTransaction(db,async(tx)=>{
     const ref=doc(db,'sistema','config');
     const snap=await tx.get(ref);
@@ -6081,6 +6110,7 @@ const _fbSaveCfgTx=(data)=>{
     try{if(typeof _prodPodeEditar==='function'&&!_prodPodeEditar()){['produtos','modelosInstalacao','modelosEmbalagem','produtosCodigos'].forEach(k=>{if(k in atual)safeData[k]=atual[k];else delete safeData[k];});}}catch(e){}
     // 2026-10-18: código de produto é definitivo — o registro do servidor sempre vence (nunca muda um código já dado)
     try{const rc=atual.produtosCodigos||{};if(Object.keys(rc).length){const novo=Object.assign({},safeData.produtosCodigos||{},rc);safeData.produtosCodigos=novo;if(Array.isArray(safeData.produtos))safeData.produtos.forEach(p=>{if(p&&p.id&&novo[p.id]&&p.codigo!==novo[p.id])p.codigo=novo[p.id];});}}catch(e){}
+    try{if(baseCfg&&snap.exists()&&Array.isArray(data.rhFuncionarios)&&Array.isArray(atual.rhFuncionarios)&&Array.isArray(baseCfg.rhFuncionarios))safeData.rhFuncionarios=_fbMergeArrId(baseCfg.rhFuncionarios,data.rhFuncionarios,atual.rhFuncionarios,window._rhIdsExcluidos);}catch(e){console.warn('merge rhFuncionarios',e);}
     tx.set(ref,safeData);
   }).catch(e=>{
     console.error('_fbSaveCfg: falhou (dado inválido pro Firestore, ou erro de transação) — nada foi salvo no servidor',e);
@@ -9887,13 +9917,13 @@ function cqgSetInd(k){_cqgView.ind=k;renderCustosQualidade();}
 function cqgBuscar(v){_cqgView.busca=v||'';clearTimeout(window._cqgT);window._cqgT=setTimeout(()=>{renderCustosQualidade();const i=document.getElementById('cqg-busca');if(i){i.focus();const n=i.value.length;try{i.setSelectionRange(n,n);}catch(e){}}},250);}
 const _cqgPct=(a,b)=>b>0.005?((a/b)*100).toFixed(1).replace('.',',')+'%':'—';
 // Tabela de agrupamento (setor/marca/produto/origem): [{nome,n,custo,sub}]
-function _cqgTabelaGrupo(titulo,grupos,totalRef,nota){
+function _cqgTabelaGrupo(titulo,grupos,totalRef,nota,totalN){
   const max=Math.max(0.01,...grupos.map(g=>g.custo));
   if(!grupos.length)return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">${titulo}</div><div style="padding:14px 4px;color:var(--ink4);font-size:.8rem">Nada para mostrar nesse período.</div></div>`;
   return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">${titulo}</div>
-    <div style="overflow-x:auto;margin-top:8px"><table class="dash-table" style="font-size:.76rem"><thead><tr><th></th><th style="text-align:right">Pedidos</th><th style="text-align:right">Custo</th><th style="text-align:right">% do custo</th><th style="text-align:right">Custo médio</th><th style="min-width:140px"></th></tr></thead><tbody>
+    <div style="overflow-x:auto;margin-top:8px"><table class="dash-table" style="font-size:.76rem"><thead><tr><th></th><th style="text-align:right">Pedidos</th>${totalN?'<th style="text-align:right">% dos pedidos</th>':''}<th style="text-align:right">Custo</th><th style="text-align:right">% do custo</th><th style="text-align:right">Custo médio</th><th style="min-width:140px"></th></tr></thead><tbody>
     ${grupos.map(g=>`<tr><td style="font-weight:700;min-width:160px"${g.sub?` title="${_cqgEscH(g.sub)}"`:''}>${_cqgEscH(g.nome)}${g.sub?`<div style="font-size:.66rem;color:var(--ink4);font-weight:500;white-space:normal">${_cqgEscH(g.sub)}</div>`:''}</td>
-      <td style="text-align:right">${g.n}</td><td style="text-align:right;white-space:nowrap;font-weight:800">${fmtR(g.custo)}</td>
+      <td style="text-align:right">${g.n}</td>${totalN?`<td style="text-align:right;white-space:nowrap;font-weight:700">${_cqgPct(g.n,totalN)}</td>`:''}<td style="text-align:right;white-space:nowrap;font-weight:800">${fmtR(g.custo)}</td>
       <td style="text-align:right;white-space:nowrap">${_cqgPct(g.custo,totalRef)}</td><td style="text-align:right;white-space:nowrap">${g.n?fmtR(g.custo/g.n):'—'}</td>
       <td><div style="height:8px;border-radius:4px;background:#fee2e2"><div style="height:8px;border-radius:4px;background:#dc2626;width:${Math.max(2,Math.round(g.custo/max*100))}%"></div></div></td></tr>`).join('')}
     </tbody></table></div>${nota?`<div style="font-size:.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">${nota}</div>`:''}</div>`;
@@ -9913,7 +9943,7 @@ function _cqgIndHtml(L,T,ctx,totalGeral){
   let corpo='';
   if(ind==='setor'){
     const g=_cqgAgrupar(L,l=>({nome:l.setor||'Não informado',sub:l.setor==='OUTRO'&&l.p.rncSetorOutro?String(l.p.rncSetorOutro).trim():''}),[...RNC_SETORES,'Não informado']);
-    corpo=_cqgTabelaGrupo('Custo por setor que gerou o retrabalho/garantia',g,totalGeral,'O setor é escolhido na emissão do pedido de Garantia/Retrabalho (aba RNC). Pedidos emitidos antes disso aparecem como "Não informado" — a Qualidade pode informar clicando no pedido.');
+    corpo=_cqgTabelaGrupo('Custo por setor que gerou o retrabalho/garantia',g,totalGeral,'O setor é escolhido na emissão do pedido de Garantia/Retrabalho (aba RNC). Pedidos emitidos antes disso aparecem como "Não informado" — a Qualidade pode informar clicando no pedido.',L.length);
   }else if(ind==='origem'){
     const comSis=L.filter(l=>l.origem.tipo==='sistema'),ext=L.filter(l=>l.origem.tipo==='externo'),sem=L.filter(l=>l.origem.tipo==='sem');
     const sumC=a=>a.reduce((s,l)=>s+l.total,0);
@@ -9947,6 +9977,28 @@ function _cqgIndHtml(L,T,ctx,totalGeral){
       <div style="font-size:.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">Faturamento líquido = vendas líquidas do mês (mesma base de Vendas do Mês). O custo de cada mês é o das garantias emitidas naquele mês.</div></div>`;
   }
   return`<div class="dash-card" style="margin-bottom:14px;padding-bottom:6px"><div class="dash-sec-title">Indicadores</div><div class="gc-vend-tabs" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">${chips}</div></div>`+corpo;
+}
+// Painel fixo (2026-11-09, a pedido do Guilherme): quantas garantias/retrabalhos vieram de cada setor e o % do total.
+function _cqgSetoresPainelHtml(L){
+  const n=L.length;
+  const setores=[...RNC_SETORES];
+  const semInf=L.filter(l=>!l.setor).length;
+  if(semInf)setores.push('Não informado');
+  const cont=k=>L.filter(l=>(l.setor||'Não informado')===k);
+  const max=Math.max(1,...setores.map(k=>cont(k).length));
+  const cards=setores.map(k=>{const g=cont(k),q=g.length,custo=g.reduce((s,l)=>s+l.total,0);
+    const outros=k==='OUTRO'?[...new Set(g.map(l=>String(l.p.rncSetorOutro||'').trim()).filter(Boolean))].join(' · '):'';
+    const ni=k==='Não informado';
+    return`<div style="background:${q?'#fff':'#f8fafc'};border:1.5px solid ${q?(ni?'#fde68a':'#fecaca'):'var(--border-lt)'};border-radius:12px;padding:12px 14px"${outros?` title="${_cqgEscH(outros)}"`:''}>
+      <div style="font-size:.66rem;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:${ni?'#b45309':'#64748b'};white-space:nowrap">${_cqgEscH(k)}</div>
+      <div style="display:flex;align-items:baseline;gap:8px;margin-top:4px"><span style="font-size:1.5rem;font-weight:800;color:${q?(ni?'#b45309':'#dc2626'):'#cbd5e1'}">${q}</span><span style="font-size:.95rem;font-weight:800;color:${q?'#0f172a':'#cbd5e1'}">${n?Math.round(q/n*100)+'%':'—'}</span></div>
+      <div style="height:6px;border-radius:3px;background:#f1f5f9;margin-top:6px"><div style="height:6px;border-radius:3px;background:${ni?'#f59e0b':'#dc2626'};width:${q?Math.max(4,Math.round(q/max*100)):0}%"></div></div>
+      <div style="font-size:.68rem;color:var(--ink4);margin-top:6px;white-space:nowrap">${q?'Custo '+fmtR(custo):'Nenhuma'}</div>
+      ${outros?`<div style="font-size:.64rem;color:var(--ink4);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_cqgEscH(outros)}</div>`:''}
+    </div>`;}).join('');
+  return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">🏢 Garantias e retrabalhos por setor que gerou</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:10px">${cards}</div>
+    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px">Quantidade de pedidos de Garantia/Retrabalho do período e % sobre o total (${n} ${_plural(n,'pedido','pedidos')}).${semInf?' "Não informado" = emitidos antes do campo existir — a Qualidade informa clicando no pedido.':''}</div></div>`;
 }
 function renderCustosQualidade(){
   const wrap=document.getElementById('cqg-body');if(!wrap)return;
@@ -10010,7 +10062,8 @@ function renderCustosQualidade(){
     <div style="font-size:.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">Operacionais = realizado que o Planejamento lança em cada pedido (Fornecedores); Instalação inclui mobilização, remoção e pintura de tubo. Produção = material e mão de obra informados pela Qualidade. Clique no pedido para ver o detalhe${podeEd?' e informar setor e produção':''}.</div></div>`
     :`<div class="dash-card"><div style="padding:24px;text-align:center;color:var(--ink4);font-size:.84rem">Nenhum pedido de Garantia/Retrabalho emitido em ${periodo}.</div></div>`;
   let ind='';try{ind=_cqgIndHtml(L,T,ctx,totalGeral);}catch(e){console.error('indicadores garantia',e);}
-  wrap.innerHTML=filtros+tiles+cats+ind+tabela;
+  let painelSet='';try{painelSet=L.length?_cqgSetoresPainelHtml(L):'';}catch(e){console.error('painel setores',e);}
+  wrap.innerHTML=filtros+tiles+painelSet+cats+ind+tabela;
   try{if(typeof _MESX_SELECTS!=='undefined'&&_MESX_SELECTS.indexOf('cqg-mes')<0)_MESX_SELECTS.push('cqg-mes');_mesxSelect('cqg-mes');}catch(e){}
 }
 function cqgAbrirDetalhe(id){
@@ -26887,7 +26940,7 @@ function _projTopbarMontar(){
     if(!bar.querySelector('.proj-info-i')){
       const ban=document.getElementById('proj-info-banner');
       const txt=ban?ban.textContent.replace(/\s+/g,' ').replace(/^[^A-Za-zÀ-ú]+/,'').trim():'';
-      if(txt)tabs.insertAdjacentHTML('afterend',`<span class="proj-info-i" title="${_ptE(txt)}">i</span>`);}
+      if(txt)tabs.insertAdjacentHTML('afterend',`<span class="proj-info-i" title="${String(txt).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}">i</span>`);}
     const m=document.getElementById('meta-sem-PROJETOS');if(m&&m.parentNode!==bar)bar.appendChild(m);
   }catch(e){console.warn('topo projetos',e);}
 }
@@ -45928,8 +45981,16 @@ function _rhRecalcularComHorarioPersonalizado(d,horario){
   const voltaAlmocoRealMin=_rhParseHoraHHMM(d.voltaAlmoco);
   let atrasoEntradaMin=0;
   if(previstoDiaMin>0&&entradaRealMin!=null&&entradaPrevDiaMin!=null&&entradaRealMin>entradaPrevDiaMin)atrasoEntradaMin=entradaRealMin-entradaPrevDiaMin;
+  // INTRAJORNADA LIVRE (2026-11-09, pedido do RH): o almoço é 60 min, mas não precisa ser cravado
+  // das 12:00 às 13:00 — só conta como atraso o que passar da duração prevista do intervalo.
+  // Sem a batida de saída pro almoço, continua comparando a volta com o horário previsto.
+  const _saiAlmRealI=_rhParseHoraHHMM(d.saidaAlmoco);
+  const _saiAlmPrevI=horario.saidaAlmocoMin?horario.saidaAlmocoMin[diaSemana]:null;
+  const _durAlmPrev=(_saiAlmPrevI!=null&&voltaAlmocoPrevDiaMin!=null&&voltaAlmocoPrevDiaMin>_saiAlmPrevI)?voltaAlmocoPrevDiaMin-_saiAlmPrevI:60;
   let atrasoAlmocoMin=0;
-  if(previstoDiaMin>0&&voltaAlmocoRealMin!=null&&voltaAlmocoPrevDiaMin!=null&&voltaAlmocoRealMin>voltaAlmocoPrevDiaMin)atrasoAlmocoMin=voltaAlmocoRealMin-voltaAlmocoPrevDiaMin;
+  if(previstoDiaMin>0&&voltaAlmocoRealMin!=null&&_saiAlmRealI!=null&&voltaAlmocoRealMin>_saiAlmRealI){
+    const _durReal=voltaAlmocoRealMin-_saiAlmRealI;if(_durReal>_durAlmPrev)atrasoAlmocoMin=_durReal-_durAlmPrev;
+  }else if(previstoDiaMin>0&&voltaAlmocoRealMin!=null&&voltaAlmocoPrevDiaMin!=null&&voltaAlmocoRealMin>voltaAlmocoPrevDiaMin)atrasoAlmocoMin=voltaAlmocoRealMin-voltaAlmocoPrevDiaMin;
   const incompleto=previstoDiaMin>0&&(d.trabalhadoMin||0)===0&&entradaRealMin!=null;
   // HORÁRIO CRAVADO (2026-11-05, pedido do Guilherme): cada batida é comparada com o horário dela.
   // Chegar antes ou sair depois NUNCA abate atraso/saída antecipada de outra batida do dia.
@@ -45942,7 +46003,8 @@ function _rhRecalcularComHorarioPersonalizado(d,horario){
   if(previstoDiaMin>0&&(d.trabalhadoMin||0)>0&&entradaRealMin!=null&&saidaReal!=null&&entradaPrevDiaMin!=null&&saidaPrev!=null){
     const temAlmoco=saidaAlmPrev!=null&&voltaAlmocoPrevDiaMin!=null;
     if(!temAlmoco||(saidaAlmReal!=null&&voltaAlmocoRealMin!=null)){
-      if(temAlmoco&&saidaAlmReal<saidaAlmPrev)saidaAlmocoAntecMin=saidaAlmPrev-saidaAlmReal;
+      // (2026-11-09) Intrajornada livre: sair antes das 12:00 pro almoço não é mais perda — o que
+      // conta é o intervalo não passar de 60 min (já coberto pelo atraso da volta acima).
       if(saidaReal<saidaPrev)saidaAntecMin=saidaPrev-saidaReal;
       perdaCravadaMin=Math.min(previstoDiaMin,atrasoEntradaMin+atrasoAlmocoMin+saidaAlmocoAntecMin+saidaAntecMin);
     }
@@ -46102,7 +46164,11 @@ function _rhParseDiasTable(root,horario,hojeIso){
     const voltaAlmocoRealMin=_rhParseHoraHHMM(logical[4]);
     const voltaAlmocoPrevDiaMin=voltaAlmocoPrevMin[diaSemana];
     let atrasoAlmocoMin=0;
-    if(previstoDiaMin>0&&voltaAlmocoRealMin!=null&&voltaAlmocoPrevDiaMin!=null&&voltaAlmocoRealMin>voltaAlmocoPrevDiaMin){
+    // (2026-11-09) Intrajornada livre: só o que passar de 60 min de intervalo é atraso.
+    const _saiAlmRealP=_rhParseHoraHHMM(logical[3]);
+    if(previstoDiaMin>0&&voltaAlmocoRealMin!=null&&_saiAlmRealP!=null&&voltaAlmocoRealMin>_saiAlmRealP){
+      if(voltaAlmocoRealMin-_saiAlmRealP>60)atrasoAlmocoMin=voltaAlmocoRealMin-_saiAlmRealP-60;
+    }else if(previstoDiaMin>0&&voltaAlmocoRealMin!=null&&voltaAlmocoPrevDiaMin!=null&&voltaAlmocoRealMin>voltaAlmocoPrevDiaMin){
       atrasoAlmocoMin=voltaAlmocoRealMin-voltaAlmocoPrevDiaMin;
     }
     const atrasoMin=atrasoEntradaMin+atrasoAlmocoMin;
@@ -46266,6 +46332,7 @@ async function rhExcluirFuncionario(funcionarioId){
     await _lixeiraAdicionar('rhFuncionario',{funcionario:f,meses:mesesDoc},{resumo:`${f.nome} — ${docIds.length} ${_plural(docIds.length,'mês','meses')} de ponto`});
     if(window._fbDeleteRhPonto)await Promise.all(docIds.map(id=>window._fbDeleteRhPonto(id)));
     cfg.rhFuncionarios=(cfg.rhFuncionarios||[]).filter(x=>x.id!==funcionarioId);
+    (window._rhIdsExcluidos=window._rhIdsExcluidos||new Set()).add(String(funcionarioId));
     await _rhSalvarCfg();
     toast(`"${f.nome}" excluído do RH (${docIds.length} ${_plural(docIds.length,'mês','meses')} de ponto ${_plural(docIds.length,'removido','removidos')})`,'tok');
     const modal=document.getElementById('rh-hist-modal');if(modal)modal.remove();
@@ -46277,6 +46344,23 @@ async function rhExcluirFuncionario(funcionarioId){
 }
 // ── Gravação dos dias em rhPonto (1 doc por funcionário+mês, merge por dia) ────────────
 function _rhAnoMes(dataIso){return dataIso.slice(0,7);}
+// (2026-11-09) Colaborador que sumiu do cadastro mas tem ponto gravado com o nome → volta sozinho,
+// com o mesmo id (o ponto dele reaparece na hora). Só quem é RH/admin grava. Se já existe alguém
+// com o mesmo nome, não duplica.
+let _rhRecuperandoOrfaos=false;
+async function _rhRecuperarOrfaos(orfaos){
+  if(_rhRecuperandoOrfaos||!orfaos||!orfaos.length||!_isRhUser())return;
+  const L=cfg.rhFuncionarios=cfg.rhFuncionarios||[];const novos=[];
+  orfaos.forEach(d=>{
+    if(!d.funcionarioNome||L.some(f=>f.id===d.funcionarioId)||novos.some(f=>f.id===d.funcionarioId))return;
+    if(_rhFuncionarioPorNome(d.funcionarioNome))return;
+    novos.push({id:d.funcionarioId,nome:d.funcionarioNome,funcao:d.funcionarioFuncao||'',departamento:d.funcionarioDepto||'SEM DEPARTAMENTO',criadoEm:new Date().toISOString(),origem:'recuperado do ponto'});
+  });
+  if(!novos.length)return;
+  _rhRecuperandoOrfaos=true;
+  try{L.push(...novos);await _rhSalvarCfg();toast(`RH: ${novos.length} ${_plural(novos.length,'colaborador recuperado','colaboradores recuperados')} do Cartão Ponto (${novos.map(f=>f.nome).join(', ')})`,'tok');try{renderRhPontualidade();}catch(e){}}
+  catch(e){console.error(e);}finally{_rhRecuperandoOrfaos=false;}
+}
 async function _rhSalvarRegistrosFuncionario(funcionarioId,dias,arquivoNome){
   // Antes, se window._fbSaveRhPonto não existisse (Firestore não inicializado etc.), o "if"
   // simplesmente pulava sem avisar ninguém — o funcionário aparecia cadastrado mas com ZERO
@@ -46310,7 +46394,8 @@ async function _rhSalvarRegistrosFuncionario(funcionarioId,dias,arquivoNome){
         entrada:d.entrada||'',saidaAlmoco:d.saidaAlmoco||'',voltaAlmoco:d.voltaAlmoco||'',saidaFinal:d.saidaFinal||'',obs:d.obs||'',
         atestado:!!d.atestado,dispensaJustificada:!!d.dispensaJustificada,previstoOriginalMin:d.previstoOriginalMin||0};
     });
-    const payload={funcionarioId,anoMes,atualizadoEm:new Date().toISOString(),arquivoOrigem:arquivoNome||'',dias:diasMerged};
+    const _fRef=(cfg.rhFuncionarios||[]).find(x=>x.id===funcionarioId)||{};
+    const payload={funcionarioId,funcionarioNome:_fRef.nome||'',funcionarioDepto:_fRef.departamento||'',funcionarioFuncao:_fRef.funcao||'',anoMes,atualizadoEm:new Date().toISOString(),arquivoOrigem:arquivoNome||'',dias:diasMerged};
     promessas.push(window._fbSaveRhPonto(docId,payload));
   });
   await Promise.all(promessas);
@@ -46337,7 +46422,7 @@ async function processarArquivosRhPonto(fileList){
   let cfgMudou=false;
   // (2026-10-30) um arquivo pode trazer vários cartões (planilha única do Hponto) — cada colaborador é
   // processado e contado separado; "ok"/"erros" passam a contar cartões (= colaboradores).
-  let totalCartoes=0;const nomesLidos=new Set();const novosNomes=[];
+  let totalCartoes=0;const nomesLidos=new Set();const novosNomes=[];const _tocados=new Map();
   for(const file of arquivos){
     let lista;
     try{lista=await _rhParseArquivoTodos(file);}catch(e){lista=[{erro:e}];}
@@ -46355,6 +46440,7 @@ async function processarArquivosRhPonto(fileList){
         }
         const existiaAntes=!!_rhFuncionarioPorNome(dados.nome);
         const f=_rhGarantirFuncionario(dados.nome,dados.funcao,dados.departamento);
+        _tocados.set(f.id,f);
         cfgMudou=true;
         if(existiaAntes)atualizados++;else{novos++;novosNomes.push(dados.nome);}
         await _rhSalvarRegistrosFuncionario(f.id,dados.dias,file.name);
@@ -46370,7 +46456,19 @@ async function processarArquivosRhPonto(fileList){
   // colaboradores ativos do RH que não vieram em nenhum cartão deste upload (só aviso, nada é apagado)
   let ausentes=[];
   try{if(totalCartoes>1)ausentes=(cfg.rhFuncionarios||[]).filter(f=>!nomesLidos.has(f.nome)&&f.status!=='demitido').map(f=>f.nome).sort();}catch(e){}
-  if(cfgMudou)await _rhSalvarCfg();
+  // (2026-11-09, caso Josué/Kevin) O upload leva alguns segundos; se nesse meio-tempo chegar uma
+  // atualização das configurações (alguém salvou tarefa/aviso etc.), a lista de colaboradores desta
+  // tela é trocada pela do servidor e quem foi criado agora sumia antes de salvar (o ponto ficava sem
+  // cadastro). Antes de salvar, recoloca na lista quem este upload criou/atualizou.
+  if(cfgMudou){
+    cfg.rhFuncionarios=cfg.rhFuncionarios||[];
+    // Até 4 tentativas: se outra tela estiver salvando junto, a gravação pode falhar por concorrência.
+    for(let _t=1;_t<=4;_t++){
+      _tocados.forEach((f,id)=>{const i=cfg.rhFuncionarios.findIndex(x=>x.id===id);if(i<0)cfg.rhFuncionarios.push(f);else if(cfg.rhFuncionarios[i]!==f&&!cfg.rhFuncionarios[i].dadosManuais){const a=cfg.rhFuncionarios[i];if(f.funcao)a.funcao=f.funcao;if(f.departamento)a.departamento=f.departamento;}});
+      try{await _rhSalvarCfg();break;}
+      catch(e){if(_t===4){erros.push('Cadastro dos colaboradores: não consegui salvar ('+(e.message||e)+') — o sistema recupera sozinho ao abrir o RH.');}else await new Promise(r=>setTimeout(r,700*_t));}
+    }
+  }
   // alert() bloqueante (2026-07-30) — o banner fixo e o toast (abaixo) já existiam desde
   // 2026-07-29 mas continuavam passando despercebidos (usuário relatou repetidamente "não
   // aparece nada" mesmo depois de subir o arquivo). alert() força o usuário a ver e fechar
@@ -47060,6 +47158,7 @@ function renderRhPontualidade(){
   if(debugEl){
     const idsAtuais=new Set(funcs.map(f=>f.id));
     const orfaos=rhPontoMeses.filter(d=>!idsAtuais.has(d.funcionarioId));
+    try{_rhRecuperarOrfaos(orfaos);}catch(e){console.error('recuperar órfãos RH',e);}
     const totalDias=rhPontoMeses.reduce((s,d)=>s+Object.keys(d.dias||{}).length,0);
     debugEl.textContent=`[debug] ${rhPontoMeses.length} ${_plural(rhPontoMeses.length,'doc','docs')} de ponto no Firestore · ${totalDias} ${_plural(totalDias,'dia','dias')} somados · ${orfaos.length} ${_plural(orfaos.length,'órfão','órfãos')} (id de funcionário sem cadastro correspondente)`;
     if(orfaos.length)debugEl.title='Órfãos: '+orfaos.map(d=>d.funcionarioId+' ('+d.anoMes+', '+Object.keys(d.dias||{}).length+' dias)').join(' | ');
@@ -47861,9 +47960,10 @@ function _rhIntDia(d,tol){
     return{data:d.data,ok:false,semReg:true,saida:d.saidaAlmoco||'',volta:d.voltaAlmoco||'',dur:null,probs:['Não registrou o almoço']};
   }
   const dur=v-s,probs=[];let curto=0,antes=0,depois=0;
-  if(s<RH_INT_INI-tol){antes=RH_INT_INI-s;probs.push('Saiu '+_rhFmtHoras(antes)+' antes das 12:00');}
-  if(v>RH_INT_FIM+tol){depois=v-RH_INT_FIM;probs.push('Voltou '+_rhFmtHoras(depois)+' depois das 13:00');}
+  // (2026-11-09, pedido do RH) Intrajornada livre: vale ter feito 60 min, sem precisar ser das 12:00
+  // às 13:00. Fora da regra = intervalo mais curto ou mais longo que 60 min (com a tolerância).
   if(dur<RH_INT_MIN-tol){curto=RH_INT_MIN-dur;probs.push('Intervalo '+_rhFmtHoras(curto)+' mais curto');}
+  if(dur>RH_INT_MIN+tol){depois=dur-RH_INT_MIN;probs.push('Intervalo '+_rhFmtHoras(depois)+' mais longo');}
   return{data:d.data,ok:!probs.length,saida:d.saidaAlmoco,volta:d.voltaAlmoco,dur,curto,antes,depois,probs};
 }
 function _rhIntCalc(dias,tol){
@@ -47926,7 +48026,7 @@ function renderRhIntervalo(){
       ${kpi('Colaboradores cumprindo',`${nCump} de ${linhas.length}`,'95% ou mais dos dias na regra','#15803d')}
       ${kpi('Precisam de conversa',String(nConv),'menos de 80% dos dias na regra',nConv?'#b91c1c':'#15803d')}
       ${kpi('Intervalo curto',String(T.curto),`${T.curto===1?'dia':'dias'} com menos de 60 min`,T.curto?'#b91c1c':'#15803d')}
-      ${kpi('Fora das 12:00–13:00',String(T.antes+T.depois),`${T.antes} saíram antes · ${T.depois} voltaram depois`,(T.antes+T.depois)?'#b45309':'#15803d')}
+      ${kpi('Intervalo mais longo',String(T.depois),'Passou de 60 min',T.depois?'#b45309':'#15803d')}
       ${kpi('Média do intervalo',T.nDur?_rhFmtHoras(Math.round(T.somaDur/T.nDur)):'—',T.semReg?`${T.semReg} ${T.semReg===1?'dia':'dias'} sem registro do almoço`:'tempo médio fora no almoço')}
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px">
@@ -47937,14 +48037,13 @@ function renderRhIntervalo(){
     <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px"><div style="width:4px;height:18px;background:#101B3D;border-radius:2px"></div><h2 style="margin:0;font-size:.76rem;font-weight:800;color:#101B3D;letter-spacing:.09em;text-transform:uppercase">Por colaborador</h2><span style="font-size:.72rem;color:#94a3b8">clique pra ver os dias</span></div>
     <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;overflow:auto;max-height:640px">
       <table style="width:100%;border-collapse:collapse"><thead><tr>
-        <th style="${th}">Colaborador</th><th style="${th}">Departamento</th><th style="${th};min-width:170px">Dias na regra</th><th style="${th}">Média do intervalo</th><th style="${th}">Intervalo curto</th><th style="${th}">Saiu antes das 12:00</th><th style="${th}">Voltou depois das 13:00</th><th style="${th}">Sem registro</th><th style="${th}">Situação</th>
+        <th style="${th}">Colaborador</th><th style="${th}">Departamento</th><th style="${th};min-width:170px">Dias na regra</th><th style="${th}">Média do intervalo</th><th style="${th}">Intervalo curto</th><th style="${th}">Intervalo mais longo</th><th style="${th}">Sem registro</th><th style="${th}">Situação</th>
       </tr></thead><tbody>${ord.map(x=>`<tr onclick="rhIntAbrir('${x.f.id}')" style="cursor:pointer" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='transparent'">
         <td style="${td};font-weight:700;color:#101B3D">${x.f.nome}</td>
         <td style="${td};color:#64748b">${x.depto}</td>
         <td style="${td}"><div style="display:flex;align-items:center;gap:8px"><div style="flex:1;height:6px;background:#f1f5f9;border-radius:3px;min-width:70px"><div style="width:${x.c.pct}%;height:100%;background:${x.c.sit.c};border-radius:3px"></div></div><b style="color:${x.c.sit.c}">${_rhPctTxt(x.c.pct)}</b><span style="color:#94a3b8;font-size:.72rem">${x.c.ok}/${x.c.aval}</span></div></td>
         <td style="${td};font-weight:700;color:${x.c.media!=null&&x.c.media<RH_INT_MIN-tol?'#b91c1c':'#1e293b'}">${x.c.media!=null?_rhFmtHoras(x.c.media):'—'}</td>
         <td style="${td}">${num(x.c.curto,'#b91c1c')}</td>
-        <td style="${td}">${num(x.c.antes,'#b45309')}</td>
         <td style="${td}">${num(x.c.depois,'#b45309')}</td>
         <td style="${td}">${num(x.c.semReg,'#64748b')}</td>
         <td style="${td}">${pill(x.c.sit)}</td>
@@ -47963,7 +48062,7 @@ function rhIntAbrir(id){
   const ds=iso=>{try{return['dom','seg','ter','qua','qui','sex','sáb'][new Date(iso+'T12:00:00').getDay()];}catch(e){return'';}};
   m.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:720px;width:100%;max-height:88vh;overflow:auto;padding:20px 22px">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px">
-      <div><div style="font-size:1rem;font-weight:800;color:#101B3D">${x.f.nome}</div><div style="font-size:.74rem;color:#64748b;margin-top:2px">${x.depto} · ${_rhMesExtenso(_rhIntMes||'')} · regra: 60 min, das 12:00 às 13:00${_rhIntTol()?` (tolerância de ${_rhIntTol()} min)`:''}</div></div>
+      <div><div style="font-size:1rem;font-weight:800;color:#101B3D">${x.f.nome}</div><div style="font-size:.74rem;color:#64748b;margin-top:2px">${x.depto} · ${_rhMesExtenso(_rhIntMes||'')} · regra: 60 min de intervalo, em qualquer horário${_rhIntTol()?` (tolerância de ${_rhIntTol()} min)`:''}</div></div>
       <button onclick="document.getElementById('rh-int-modal').remove()" style="border:none;background:#f1f5f9;border-radius:8px;width:32px;height:32px;cursor:pointer;font-size:1rem">✕</button></div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
       <div style="flex:1;min-width:120px;background:${x.c.sit.b};border-radius:10px;padding:10px 12px"><div style="font-size:.64rem;font-weight:700;color:${x.c.sit.c};text-transform:uppercase">${x.c.sit.t}</div><div style="font-size:1.3rem;font-weight:800;color:${x.c.sit.c}">${_rhPctTxt(x.c.pct)}</div><div style="font-size:.7rem;color:${x.c.sit.c}">${x.c.ok} de ${x.c.aval} dias na regra</div></div>
@@ -59107,10 +59206,13 @@ async function prospMoverEtapa(id,etapaKey){
   // cuidando dele.
   const labelAntiga=(etapas.find(x=>x.key===e.etapa)||{}).label||e.etapa||'—';
   const labelNova=(etapas.find(x=>x.key===etapaKey)||{}).label||etapaKey;
+  const _etapaAntigaKey=_prospEtapaEfetiva(e);
   e.etapa=etapaKey;
   e.atualizadoEm=new Date().toISOString();
   if(!e.timeline)e.timeline=[];
-  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:`Etapa alterada: ${labelAntiga} → ${labelNova}`,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:e.atualizadoEm,sistema:true});
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:`Etapa alterada: ${labelAntiga} → ${labelNova}`,autor:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:e.atualizadoEm,sistema:true,de:_etapaAntigaKey,para:etapaKey});
+  // Cadência automática da etapa nova (2026-11-09) — ver _ppAplicarCadencia.
+  try{_ppAplicarCadencia(e,_etapaAntigaKey,etapaKey);}catch(err){console.error('cadência',err);}
   // Flash "acabou de chegar aqui" no card -- mesmo padrão do CRM Comercial (ver
   // crmMoverEtapa), consumido uma única vez dentro de _prospCardHtml() no próximo render.
   _prospUltimoMovidoId=id;
@@ -60491,6 +60593,7 @@ async function prospSalvarEmpresa(){
   }
   e.decisores=decisoresForm;
   if(!isNova)_prospLogDiffDecisores(e,decisoresAntigos,decisoresForm);
+  if(isNova){try{_ppAplicarCadencia(e,'',e.etapa);}catch(err){console.error('cadência',err);}}
   e.atualizadoEm=new Date().toISOString();
   try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
   closeM('mo-prosp-empresa');
@@ -60724,6 +60827,492 @@ function renderProspIndicadores(){
 }
 
 // ── GERENCIAR ETAPAS DO FUNIL ───────────────────────────────────────────────────────
+// ══ PROSPECÇÃO 2.0 (2026-11-09, a pedido do Guilherme: "preciso avançar na captação de novos clientes") ══
+// (2) Cadência automática por etapa · (3) Gerar negócio no CRM · (4) Conversão do funil ·
+// (5) Nota de prioridade · (6) Scripts de abordagem · (7) Descarte com motivo + geladeira.
+// Tudo por cima das funções que já existiam (wrappers), sem mudar o que já funcionava.
+const _ppEsc=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+const _ppEu=()=>(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+const _ppId=p=>p+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+function _ppPodeConfig(){try{return _getUserCat().isAdm||_pode('com_etapas_funil');}catch(e){return false;}}
+function _ppAtiva(e){return !(e&&e.descarte&&e.descarte.em);}
+function _ppDiaUtil(n){let iso=_lpProximoDiaUtilForward(_hojeIso());for(let i=0;i<n;i++)iso=_lpProximoDiaUtilForward(_opAddDias(iso,1));return iso;}
+function _ppModal(id,html,largura){
+  const old=document.getElementById(id);if(old)old.remove();
+  const m=document.createElement('div');m.id=id;
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10050;display:flex;align-items:center;justify-content:center;padding:20px';
+  try{_dynModalSemFechaClique(m);}catch(e){}
+  m.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:${largura||560}px;width:94%;max-height:90vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">${html}</div>`;
+  document.body.appendChild(m);return m;
+}
+const _ppFechar=id=>`<button type="button" onclick="document.getElementById('${id}').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--ink4);flex-shrink:0">✕</button>`;
+const _ppBtn='border:none;border-radius:8px;padding:7px 12px;font-size:.74rem;font-weight:800;cursor:pointer;font-family:inherit;color:#fff;white-space:nowrap';
+
+// ── (5) NOTA DE PRIORIDADE ──────────────────────────────────────────────────────────────
+const _PP_SEG_RE=/ALIMENT|FAST|RESTAUR|LANCH|FOOD|BURGER|PIZZ|CAF[EÉ]|VAREJ|LOJA|MODA|FARM|DROG|POSTO|COMBUST|BANC|FINANC|SUPERMERC|MERCAD|ATACAD|FRANQ|SHOPPING|CONCESSION|AUTO|VE[IÍ]CUL|ACADEMIA|COSM[EÉ]T|[OÓ]TICA|EDUCA|ESCOLA|SA[UÚ]DE|CL[IÍ]NIC|HOSPITAL|LABORAT|HOTEL|CONSTRUT|INCORPOR|TELEFON|OPERADORA/;
+function _ppNota(e){
+  const ab=Number(e.unidadesAbrir)||0,ex=Number(e.unidadesExistentes)||0,reg=(e.regioes||[]).length;
+  const m=[];let p=0;
+  const pa=ab>=20?40:ab>=10?32:ab>=5?24:ab>=2?16:ab>=1?10:0;p+=pa;m.push(`Unidades a abrir (${ab}): ${pa}/40`);
+  const pe=ex>=100?20:ex>=30?15:ex>=10?10:ex>=1?5:0;p+=pe;m.push(`Unidades existentes (${ex}): ${pe}/20`);
+  const pr=Math.min(15,reg*5);p+=pr;m.push(`Regiões de expansão (${reg}): ${pr}/15`);
+  const ps=_PP_SEG_RE.test(String(e.segmento||'').toUpperCase())?15:0;p+=ps;m.push(`Segmento ${ps?'com rede de lojas':'fora dos prioritários'}: ${ps}/15`);
+  const pd=(e.decisores||[]).some(d=>d.nome&&((d.telefones||[]).length||d.email))?10:0;p+=pd;m.push(`Decisor com contato: ${pd}/10`);
+  const c=p>=65?'A':p>=40?'B':'C';
+  return{p,c,motivos:m,cor:c==='A'?'#dc2626':c==='B'?'#d97706':'#64748b',bg:c==='A'?'#fee2e2':c==='B'?'#fef3c7':'#f1f5f9'};
+}
+function _ppNotaChip(e,grande){const n=_ppNota(e);return`<span title="Nota de prioridade ${n.p}/100 (${n.c})&#10;${n.motivos.join('&#10;')}" style="display:inline-flex;align-items:center;gap:3px;background:${n.bg};color:${n.cor};border-radius:20px;padding:${grande?'2px 10px':'0 6px'};font-size:${grande?'.68rem':'.6rem'};font-weight:800;white-space:nowrap;line-height:1.6;flex-shrink:0">${n.c==='A'?'🔥 ':''}${n.c}${grande?' · '+n.p+'/100':''}</span>`;}
+
+// ── (2) CADÊNCIA AUTOMÁTICA POR ETAPA ───────────────────────────────────────────────────
+// dia = dias úteis depois de entrar na etapa (0 = no mesmo dia). Editável em Gerenciar Etapas → ⏱️ Cadências.
+const PP_CADENCIA_PADRAO={
+  pesquisa_inicial:[{dia:0,tipo:'outro',titulo:'Pesquisar a empresa: unidades existentes, expansão e regiões'},{dia:1,tipo:'outro',titulo:'Procurar o decisor no LinkedIn e no site da empresa'}],
+  identificacao_decisores:[{dia:0,tipo:'outro',titulo:'Identificar o decisor (marketing, expansão, engenharia ou obras)'},{dia:2,tipo:'ligar',titulo:'Ligar na central para confirmar quem é o decisor'}],
+  confirmacao_decisores:[{dia:0,tipo:'ligar',titulo:'Ligar para o decisor (script: Ligação com o decisor)'},{dia:2,tipo:'email',titulo:'Enviar e-mail de apresentação da Granda'},{dia:5,tipo:'outro',titulo:'WhatsApp de follow-up'},{dia:9,tipo:'ligar',titulo:'Nova ligação para o decisor'}],
+  reuniao_apresentacao:[{dia:0,tipo:'reuniao',titulo:'Marcar a reunião de apresentação'},{dia:1,tipo:'email',titulo:'Enviar convite da reunião e o portfólio'},{dia:4,tipo:'email',titulo:'Follow-up depois da reunião'}],
+  acompanhamento:[{dia:0,tipo:'email',titulo:'Enviar novidades e portfólio da Granda'},{dia:15,tipo:'ligar',titulo:'Ligação de acompanhamento'},{dia:30,tipo:'ligar',titulo:'Ligação de acompanhamento'}],
+  tem_demanda_proxima:[{dia:0,tipo:'outro',titulo:'Gerar o negócio no CRM e passar para o vendedor'},{dia:1,tipo:'ligar',titulo:'Confirmar escopo, prazo e quantidade de unidades da demanda'}],
+  em_homologacao:[{dia:0,tipo:'outro',titulo:'Enviar os documentos pedidos na homologação'},{dia:5,tipo:'ligar',titulo:'Cobrar o retorno da homologação'}]
+};
+function _ppCadencias(){const c=cfg.prospCadencias;return(c&&typeof c==='object'&&!Array.isArray(c))?c:PP_CADENCIA_PADRAO;}
+// Aplica no objeto (não salva — quem chama salva). Cancela as pendentes da cadência da etapa anterior.
+function _ppAplicarCadencia(e,deKey,paraKey){
+  if(!e)return;
+  e.tarefas=e.tarefas||[];
+  if(deKey&&deKey!==paraKey){
+    const antes=e.tarefas.length;
+    e.tarefas=e.tarefas.filter(t=>!(t.cadencia&&t.cadencia===deKey&&!t.feita));
+    const n=antes-e.tarefas.length;
+    if(n)(e.timeline=e.timeline||[]).push({id:_ppId('pcm_'),texto:`⏱️ ${n} ${_plural(n,'tarefa','tarefas')} da cadência da etapa anterior ${_plural(n,'cancelada','canceladas')}`,autor:_ppEu(),em:new Date().toISOString(),sistema:true});
+  }
+  const lista=_ppCadencias()[paraKey]||[];
+  if(!lista.length)return;
+  const resp=e.responsavel||_ppEu();
+  lista.forEach((c,i)=>{
+    if(!String(c.titulo||'').trim())return;
+    e.tarefas.push({id:_ppId('pta_cad_'+i+'_'),tipo:c.tipo||'outro',decisorNome:'',titulo:String(c.titulo).trim(),data:_ppDiaUtil(Math.max(0,Number(c.dia)||0)),feita:false,criadoPor:'Cadência automática',responsavel:resp,criadoEm:new Date().toISOString(),cadencia:paraKey});
+  });
+  const etl=(_prospEtapas().find(x=>x.key===paraKey)||{}).label||paraKey;
+  (e.timeline=e.timeline||[]).push({id:_ppId('pcm_'),texto:`⏱️ Cadência de ${etl}: ${lista.length} ${_plural(lista.length,'tarefa agendada','tarefas agendadas')} para ${resp}`,autor:_ppEu(),em:new Date().toISOString(),sistema:true});
+}
+function ppAbrirCadencias(){
+  if(!_ppPodeConfig()){toast('Só o administrador pode mudar as cadências','terr');return;}
+  const cad=JSON.parse(JSON.stringify(_ppCadencias()));
+  window._ppCadEd=cad;
+  _ppRenderCadencias();
+}
+function _ppRenderCadencias(){
+  const cad=window._ppCadEd||{};const et=_prospEtapas();
+  const tipos=[['ligar','📞 Ligar'],['email','✉️ E-mail'],['reuniao','🤝 Reunião'],['outro','📌 Outro']];
+  const html=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><div style="font-size:1rem;font-weight:800">⏱️ Cadências do funil</div><div style="font-size:.74rem;color:var(--ink4);margin-top:2px">Quando o card entra na etapa, estas tarefas são criadas sozinhas para o responsável. "Dia" = dias úteis depois de entrar (0 = no mesmo dia).</div></div>${_ppFechar('pp-cad-modal')}</div>
+  ${et.map(x=>`<div style="margin-top:14px;border:1px solid var(--border-lt);border-radius:10px;padding:10px 12px">
+    <div style="font-weight:800;font-size:.8rem;margin-bottom:6px">${_ppEsc(x.label)}</div>
+    ${(cad[x.key]||[]).map((c,i)=>`<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+      <input type="number" min="0" value="${Number(c.dia)||0}" onchange="_ppCadSet('${x.key}',${i},'dia',this.value)" title="Dia útil" style="width:56px;padding:6px;border:1px solid #cbd5e1;border-radius:7px;font-family:inherit">
+      <select onchange="_ppCadSet('${x.key}',${i},'tipo',this.value)" style="padding:6px;border:1px solid #cbd5e1;border-radius:7px;font-family:inherit">${tipos.map(([v,l])=>`<option value="${v}"${c.tipo===v?' selected':''}>${l}</option>`).join('')}</select>
+      <input value="${_ppEsc(c.titulo||'')}" onchange="_ppCadSet('${x.key}',${i},'titulo',this.value)" style="flex:1;min-width:0;padding:6px 8px;border:1px solid #cbd5e1;border-radius:7px;font-family:inherit">
+      <button type="button" onclick="_ppCadDel('${x.key}',${i})" title="Remover" style="background:#fff;color:#dc2626;border:1.5px solid #fecaca;border-radius:6px;padding:4px 7px;cursor:pointer">🗑️</button></div>`).join('')||'<div style="font-size:.72rem;color:var(--ink4);margin-bottom:6px">Sem cadência nesta etapa.</div>'}
+    <button type="button" onclick="_ppCadAdd('${x.key}')" style="background:none;border:1.5px dashed #cbd5e1;border-radius:7px;padding:4px 10px;font-size:.72rem;font-weight:700;cursor:pointer;color:#475569">＋ Adicionar tarefa</button>
+  </div>`).join('')}
+  <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button type="button" onclick="ppSalvarCadencias()" style="${_ppBtn};background:#16a34a">💾 Salvar cadências</button></div>`;
+  _ppModal('pp-cad-modal',html,720);
+}
+function _ppCadSet(k,i,f,v){const l=(window._ppCadEd[k]=window._ppCadEd[k]||[]);if(l[i])l[i][f]=f==='dia'?Math.max(0,parseInt(v,10)||0):v;}
+function _ppCadDel(k,i){(window._ppCadEd[k]||[]).splice(i,1);_ppRenderCadencias();}
+function _ppCadAdd(k){(window._ppCadEd[k]=window._ppCadEd[k]||[]).push({dia:0,tipo:'ligar',titulo:''});_ppRenderCadencias();}
+async function ppSalvarCadencias(){
+  const c={};Object.entries(window._ppCadEd||{}).forEach(([k,l])=>{c[k]=(l||[]).filter(x=>String(x.titulo||'').trim()).map(x=>({dia:Math.max(0,Number(x.dia)||0),tipo:x.tipo||'outro',titulo:String(x.titulo).trim()}));});
+  try{cfg.prospCadencias=c;if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['prospCadencias'],c);toast('Cadências salvas ✅','tok');const m=document.getElementById('pp-cad-modal');if(m)m.remove();}
+  catch(e){console.error(e);toast('Não consegui salvar as cadências','terr');}
+}
+
+// ── (6) SCRIPTS DE ABORDAGEM ────────────────────────────────────────────────────────────
+// {decisor} {empresa} {meu_nome} {segmento} {cidade}. Editáveis pelo admin (cfg.prospScripts).
+const PP_SCRIPTS_PADRAO=[
+  {k:'central',t:'📞 Ligação para a central (achar o decisor)',canal:'ligacao',etapas:['identificacao_decisores','pesquisa_inicial'],texto:
+`Bom dia! Meu nome é {meu_nome}, falo da Granda Comunicação Visual, de Ponta Grossa (PR).
+
+Nós fabricamos e instalamos fachadas, letreiros e totens para redes com várias unidades no Brasil inteiro.
+
+Vi que a {empresa} está abrindo novas unidades e queria falar com quem cuida da comunicação visual das lojas — normalmente é o pessoal de expansão, obras ou marketing. Com quem eu poderia falar sobre isso?
+
+(Se pedirem para mandar e-mail) Perfeito! Qual o nome e o e-mail da pessoa, para eu mandar direto para ela?`},
+  {k:'decisor',t:'📞 Ligação com o decisor',canal:'ligacao',etapas:['confirmacao_decisores','identificacao_decisores'],texto:
+`Oi, {decisor}, tudo bem? Aqui é {meu_nome}, da Granda Comunicação Visual. Tem dois minutinhos?
+
+Nós somos fábrica de comunicação visual para redes: fachada, letreiro, totem, painel e sinalização, com projeto, produção e instalação no Brasil todo, no prazo da inauguração.
+
+Vi que a {empresa} está em expansão. Hoje, como vocês resolvem a comunicação visual das novas lojas? É um fornecedor só ou cada obra contrata o seu?
+
+(Ouvir e anotar: quem fornece hoje, o que incomoda — prazo, padrão, preço, instalação —, quantas lojas por ano)
+
+Faz sentido eu te mostrar em 20 minutos como atendemos outras redes? Que dia fica bom, terça ou quinta?`},
+  {k:'whats1',t:'🟢 WhatsApp — primeiro contato',canal:'whatsapp',etapas:['confirmacao_decisores'],texto:
+`Olá, {decisor}! Tudo bem? Aqui é {meu_nome}, da Granda Comunicação Visual.
+
+Somos fábrica de fachadas, letreiros e totens para redes, com instalação no Brasil todo. Vi que a {empresa} está abrindo novas unidades e acredito que podemos ajudar a padronizar e acelerar a comunicação visual das lojas.
+
+Posso te mandar nosso portfólio e marcar uma conversa rápida de 20 minutos?`},
+  {k:'email1',t:'✉️ E-mail de apresentação',canal:'email',assunto:'Comunicação visual para as novas unidades da {empresa}',etapas:['confirmacao_decisores','acompanhamento'],texto:
+`Olá, {decisor}, tudo bem?
+
+Sou {meu_nome}, da Granda Comunicação Visual. Somos fábrica de comunicação visual para redes — fachadas, letreiros, totens, painéis e sinalização — com projeto, produção e instalação em todo o Brasil.
+
+Acompanhamos a expansão da {empresa} e acredito que podemos ajudar a:
+• padronizar a identidade visual em todas as unidades;
+• cumprir o prazo das inaugurações, com produção e instalação no mesmo fornecedor;
+• ter previsibilidade de custo por loja.
+
+Posso te apresentar nosso trabalho em uma conversa de 20 minutos? Me diga o melhor dia e horário.
+
+Abraço,
+{meu_nome}
+Granda Comunicação Visual`},
+  {k:'follow',t:'🔁 Follow-up sem resposta',canal:'whatsapp',etapas:['confirmacao_decisores','reuniao_apresentacao','acompanhamento'],texto:
+`Oi, {decisor}! Passando para retomar o contato da Granda Comunicação Visual.
+
+Sei que a rotina de expansão é corrida. Se fizer sentido, consigo te mostrar em 20 minutos como atendemos outras redes. Qual o melhor dia para você?`},
+  {k:'reuniao',t:'🤝 Pedido de reunião',canal:'email',assunto:'Reunião rápida — Granda Comunicação Visual',etapas:['reuniao_apresentacao'],texto:
+`Olá, {decisor}!
+
+Conforme conversamos, quero te apresentar a Granda em uma reunião rápida (20 a 30 minutos, pode ser online).
+
+Sugiro estes horários:
+• ____ às ____
+• ____ às ____
+
+Se nenhum ficar bom, me diga o seu melhor horário que eu me ajusto.
+
+Abraço,
+{meu_nome}`},
+  {k:'posreuniao',t:'✅ Pós-reunião',canal:'email',assunto:'Obrigado pela reunião — próximos passos',etapas:['reuniao_apresentacao','acompanhamento','tem_demanda_proxima'],texto:
+`Olá, {decisor}!
+
+Obrigado pelo tempo hoje. Resumindo o que combinamos:
+• ____
+• ____
+
+Próximo passo: ____ até ____.
+
+Fico à disposição. Quando surgir a próxima unidade, é só me chamar que já colocamos o projeto em andamento.
+
+Abraço,
+{meu_nome}`},
+  {k:'retomada',t:'🧊 Retomada (voltou da geladeira)',canal:'whatsapp',etapas:['acompanhamento','pesquisa_inicial'],texto:
+`Oi, {decisor}, tudo bem? Aqui é {meu_nome}, da Granda Comunicação Visual.
+
+Conversamos há algum tempo sobre a comunicação visual das unidades da {empresa}. Como estão os planos de expansão para os próximos meses? Se tiver alguma loja nova no radar, posso te ajudar com o projeto e o orçamento.`}
+];
+function _ppScripts(){const s=cfg.prospScripts;return(Array.isArray(s)&&s.length)?s:PP_SCRIPTS_PADRAO;}
+function _ppPreencher(txt,e,d){
+  const meu=String(_ppEu()).toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase());
+  const primeiro=(d&&d.nome)?String(d.nome).trim().split(/\s+/)[0]:'tudo bem';
+  const dec=primeiro?primeiro.charAt(0).toUpperCase()+primeiro.slice(1).toLowerCase():'';
+  return String(txt||'').replace(/\{decisor\}/g,dec||'').replace(/\{empresa\}/g,e.nome||'').replace(/\{meu_nome\}/g,meu).replace(/\{segmento\}/g,e.segmento||'').replace(/\{cidade\}/g,e.sedeCidade||'');
+}
+function ppAbrirScripts(id,decIdx){
+  const e=prospEmpresas.find(x=>x.id===id);if(!e)return;
+  const decs=e.decisores||[];const di=Math.min(Math.max(0,Number(decIdx)||0),Math.max(0,decs.length-1));const d=decs[di]||null;
+  const et=_prospEtapaEfetiva(e);
+  const lista=_ppScripts().slice().sort((a,b)=>((b.etapas||[]).includes(et)?1:0)-((a.etapas||[]).includes(et)?1:0));
+  const tel=d?((d.telefones||[]).find(t=>/cel|whats/i.test(t.tipo||''))||(d.telefones||[])[0]):null;
+  const html=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div style="min-width:0"><div style="font-size:.7rem;font-weight:800;color:var(--ink4);text-transform:uppercase">📜 Scripts de abordagem</div><div style="font-size:1rem;font-weight:800">${_ppEsc(e.nome)}</div></div>${_ppFechar('pp-scr-modal')}</div>
+    ${decs.length?`<div style="margin-top:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:.74rem;font-weight:700">Falar com:</span><select onchange="ppAbrirScripts('${e.id}',this.value)" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:7px;font-family:inherit">${decs.map((x,i)=>`<option value="${i}"${i===di?' selected':''}>${_ppEsc(x.nome||'—')}${x.cargo?' — '+_ppEsc(x.cargo):''}</option>`).join('')}</select></div>`:'<div style="margin-top:10px;font-size:.74rem;color:#b45309">Sem decisor cadastrado — os scripts saem sem o nome.</div>'}
+    <div style="font-size:.7rem;color:var(--ink4);margin-top:6px">Os mais indicados para a etapa atual aparecem primeiro. Enviar por WhatsApp ou e-mail já registra na Atividade do card.</div>
+    ${lista.map((s,i)=>{const txt=_ppPreencher(s.texto,e,d),ass=_ppPreencher(s.assunto||'',e,d);const rec=(s.etapas||[]).includes(et);
+      return`<details${rec?' open':''} style="margin-top:12px;border:1.5px solid ${rec?'#bbf7d0':'var(--border-lt)'};border-radius:10px;padding:10px 12px;background:${rec?'#f0fdf4':'#fff'}">
+      <summary style="list-style:none;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap"><div style="font-weight:800;font-size:.8rem">${_ppEsc(s.t)}${rec?' <span style="font-size:.62rem;color:#16a34a">· indicado para a etapa</span>':' <span style="font-size:.62rem;color:var(--ink4)">· clique para ver</span>'}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" onclick="event.preventDefault();ppScriptCopiar(${i},'${e.id}',${di})" style="${_ppBtn};background:#475569">📋 Copiar</button>
+        ${s.canal==='whatsapp'||s.canal==='ligacao'?(tel?`<button type="button" onclick="event.preventDefault();ppScriptWhats(${i},'${e.id}',${di})" style="${_ppBtn};background:#16a34a">🟢 WhatsApp</button>`:''):''}
+        ${s.canal==='email'&&d&&d.email?`<button type="button" onclick="event.preventDefault();ppScriptEmail(${i},'${e.id}',${di})" style="${_ppBtn};background:#0ea5e9">✉️ Abrir e-mail</button>`:''}
+      </div></summary>
+      ${ass?`<div style="font-size:.72rem;margin-top:6px"><b>Assunto:</b> ${_ppEsc(ass)}</div>`:''}
+      <div style="font-size:.76rem;color:var(--ink3);white-space:pre-wrap;margin-top:6px;line-height:1.5">${_ppEsc(txt)}</div></details>`;}).join('')}
+    ${_ppPodeConfig()?`<div style="display:flex;justify-content:flex-end;margin-top:12px"><button type="button" onclick="ppEditarScripts()" style="background:none;border:none;color:var(--ink4);font-size:.72rem;font-weight:700;cursor:pointer">✏️ Editar scripts (admin)</button></div>`:''}`;
+  _ppModal('pp-scr-modal',html,640);
+  window._ppScrCtx={lista};
+}
+function _ppScrDados(i,id,di){const e=prospEmpresas.find(x=>x.id===id);const s=(window._ppScrCtx&&window._ppScrCtx.lista||[])[i];if(!e||!s)return null;const d=(e.decisores||[])[di]||null;return{e,s,d,txt:_ppPreencher(s.texto,e,d),ass:_ppPreencher(s.assunto||'',e,d)};}
+async function _ppScrRegistrar(e,txt){
+  e.timeline=e.timeline||[];e.timeline.push({id:_ppId('pcm_'),texto:txt,autor:_ppEu(),em:new Date().toISOString()});
+  e.atualizadoEm=new Date().toISOString();
+  try{await _prospSalvarEmpresaObj(e);}catch(err){}
+  if(_prospCardAtualId===e.id)try{_prospRenderCard(e);}catch(err){}
+}
+function ppScriptCopiar(i,id,di){const x=_ppScrDados(i,id,di);if(!x)return;const t=(x.ass?'Assunto: '+x.ass+'\n\n':'')+x.txt;
+  (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('Script copiado','tok')).catch(()=>{try{_prospCopiarFallback(t);toast('Script copiado','tok');}catch(e){toast('Não consegui copiar','terr');}});}
+function ppScriptWhats(i,id,di){const x=_ppScrDados(i,id,di);if(!x||!x.d)return;const tel=((x.d.telefones||[]).find(t=>/cel|whats/i.test(t.tipo||''))||(x.d.telefones||[])[0]||{}).numero||'';
+  let n=String(tel).replace(/\D/g,'');if(!n){toast('Decisor sem telefone','terr');return;}if(n.length<=11)n='55'+n;
+  window.open('https://wa.me/'+n+'?text='+encodeURIComponent(x.txt),'_blank','noopener');
+  _ppScrRegistrar(x.e,`📤 Script "${x.s.t.replace(/^\S+\s/,'')}" enviado por WhatsApp para ${x.d.nome||'o decisor'}`);}
+function ppScriptEmail(i,id,di){const x=_ppScrDados(i,id,di);if(!x||!x.d||!x.d.email)return;
+  window.open('mailto:'+encodeURIComponent(x.d.email)+'?subject='+encodeURIComponent(x.ass||'')+'&body='+encodeURIComponent(x.txt),'_blank');
+  _ppScrRegistrar(x.e,`📤 Script "${x.s.t.replace(/^\S+\s/,'')}" aberto no e-mail para ${x.d.nome||'o decisor'} (${x.d.email})`);}
+function ppEditarScripts(){
+  if(!_ppPodeConfig())return;
+  window._ppScrEd=JSON.parse(JSON.stringify(_ppScripts()));
+  const html=`<div style="display:flex;justify-content:space-between;gap:10px"><div><div style="font-size:1rem;font-weight:800">✏️ Editar scripts</div><div style="font-size:.72rem;color:var(--ink4)">Use {decisor}, {empresa}, {meu_nome}, {segmento} e {cidade} — o sistema troca pelo dado do card.</div></div>${_ppFechar('pp-scr-ed')}</div>
+  ${window._ppScrEd.map((s,i)=>`<div style="margin-top:12px;border:1px solid var(--border-lt);border-radius:10px;padding:10px">
+    <input value="${_ppEsc(s.t)}" onchange="window._ppScrEd[${i}].t=this.value" style="width:100%;font-weight:800;padding:6px 8px;border:1px solid #cbd5e1;border-radius:7px;font-family:inherit;box-sizing:border-box">
+    ${s.canal==='email'?`<input value="${_ppEsc(s.assunto||'')}" onchange="window._ppScrEd[${i}].assunto=this.value" placeholder="Assunto do e-mail" style="width:100%;margin-top:6px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:7px;font-family:inherit;box-sizing:border-box">`:''}
+    <textarea onchange="window._ppScrEd[${i}].texto=this.value" rows="7" style="width:100%;margin-top:6px;padding:8px;border:1px solid #cbd5e1;border-radius:7px;font-family:inherit;font-size:.78rem;box-sizing:border-box">${_ppEsc(s.texto)}</textarea></div>`).join('')}
+  <div style="display:flex;justify-content:space-between;margin-top:12px"><button type="button" onclick="if(confirm('Voltar todos os scripts para o texto original do sistema?')){window._ppScrEd=JSON.parse(JSON.stringify(PP_SCRIPTS_PADRAO));ppSalvarScripts();}" style="background:none;border:none;color:#dc2626;font-size:.72rem;font-weight:700;cursor:pointer">↩️ Voltar ao original</button>
+  <button type="button" onclick="ppSalvarScripts()" style="${_ppBtn};background:#16a34a">💾 Salvar scripts</button></div>`;
+  _ppModal('pp-scr-ed',html,720);
+}
+async function ppSalvarScripts(){
+  try{cfg.prospScripts=window._ppScrEd;if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['prospScripts'],window._ppScrEd);toast('Scripts salvos ✅','tok');['pp-scr-ed','pp-scr-modal'].forEach(i=>{const m=document.getElementById(i);if(m)m.remove();});}
+  catch(e){console.error(e);toast('Não consegui salvar os scripts','terr');}
+}
+
+// ── (3) GERAR NEGÓCIO NO CRM ────────────────────────────────────────────────────────────
+function _ppCrmDe(e){if(!e||!e.crmEmpresaId||typeof crmEmpresas==='undefined')return null;return crmEmpresas.find(x=>x.id===e.crmEmpresaId)||null;}
+function _ppCrmStatus(c){
+  if(!c)return{txt:'Negócio não encontrado no CRM',cor:'#94a3b8',st:'sumiu'};
+  const f=c.fechamento||{};
+  if(f.status==='ganho')return{txt:'✅ Ganho',cor:'#16a34a',st:'ganho'};
+  if(f.status==='perdido')return{txt:'❌ Perdido'+(f.motivo?' — '+f.motivo:''),cor:'#dc2626',st:'perdido'};
+  const et=(_crmEtapas().find(x=>x.key===_crmEtapaEfetiva(c))||{}).label||c.etapa||'—';
+  return{txt:'🟦 Em andamento — '+et,cor:'#2563eb',st:'aberto'};
+}
+// Valor vendido (líquido) dos pedidos emitidos ligados ao negócio do CRM.
+function _ppCrmVendido(c){
+  if(!c)return 0;let v=0;
+  try{pedidos.filter(p=>p&&p.origemComercial&&p.crmEmpresaId===c.id&&!(p.os&&isVendaCancelada(p.os))).forEach(p=>{try{v+=Number(pedidoToVendaRow(p).lq)||0;}catch(e){}});}catch(e){}
+  if(!v&&c.fechamento&&c.fechamento.status==='ganho')v=Number(c.fechamento.pedidoValorLiquido)||Number(c.propostaValorLiquido)||0;
+  return v;
+}
+function ppAbrirGerarCrm(id){
+  const e=prospEmpresas.find(x=>x.id===id);if(!e)return;
+  if(e.crmEmpresaId&&_ppCrmDe(e)){toast('Esta empresa já tem um negócio no CRM','tinf');return;}
+  const vend=(typeof _crmNomesEquipe==='function'?_crmNomesEquipe():[]);
+  const ufs=['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+  const html=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><div style="font-size:.7rem;font-weight:800;color:var(--ink4);text-transform:uppercase">🤝 Gerar negócio no CRM</div><div style="font-size:1rem;font-weight:800">${_ppEsc(e.nome)}</div><div style="font-size:.72rem;color:var(--ink4);margin-top:2px">O negócio nasce na 1ª etapa do CRM com os decisores e o histórico da prospecção, e o vendedor recebe uma tarefa de primeiro contato.</div></div>${_ppFechar('pp-crm-modal')}</div>
+    <div class="fg" style="margin-top:14px"><label style="font-size:.76rem;font-weight:700">Vendedor responsável <span class="r">*</span></label><select class="fc" id="pp-crm-vend"><option value="">Selecione</option>${vend.map(v=>`<option>${_ppEsc(v)}</option>`).join('')}</select></div>
+    <div style="display:grid;grid-template-columns:1fr 110px;gap:10px">
+      <div class="fg"><label style="font-size:.76rem;font-weight:700">Cidade da 1ª obra/instalação <span class="r">*</span></label><input class="fc" id="pp-crm-cid" value="${_ppEsc(e.sedeCidade||'')}"></div>
+      <div class="fg"><label style="font-size:.76rem;font-weight:700">UF <span class="r">*</span></label><select class="fc" id="pp-crm-uf"><option value=""></option>${ufs.map(u=>`<option${e.sedeUf===u?' selected':''}>${u}</option>`).join('')}</select></div>
+    </div>
+    <div class="fg"><label style="font-size:.76rem;font-weight:700">JOB (se já souber)</label><input class="fc" id="pp-crm-job" placeholder="Ex.: FACHADA LOJA SHOPPING X"></div>
+    <div class="fg"><label style="font-size:.76rem;font-weight:700">O que o cliente precisa <span class="r">*</span></label><textarea class="fc" id="pp-crm-obs" rows="3" placeholder="Demanda, prazo, quantas lojas, quem pediu..."></textarea></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" id="pp-crm-ok" onclick="ppGerarCrm('${e.id}')" style="${_ppBtn};background:#0f172a">🤝 Gerar negócio</button></div>`;
+  _ppModal('pp-crm-modal',html,520);
+}
+async function ppGerarCrm(id){
+  const e=prospEmpresas.find(x=>x.id===id);if(!e)return;
+  const v=k=>((document.getElementById(k)||{}).value||'').trim();
+  const vend=v('pp-crm-vend'),cid=v('pp-crm-cid'),uf=v('pp-crm-uf'),job=v('pp-crm-job'),obs=v('pp-crm-obs');
+  if(!vend){toast('Escolha o vendedor responsável','terr');return;}
+  if(!cid||!uf){toast('Informe a cidade e a UF da 1ª obra','terr');return;}
+  if(!obs){toast('Descreva o que o cliente precisa','terr');return;}
+  const btn=document.getElementById('pp-crm-ok');if(btn){btn.disabled=true;btn.textContent='Gerando...';}
+  const agora=new Date().toISOString(),eu=_ppEu();
+  const etapasCrm=_crmEtapas();
+  const coments=(e.timeline||[]).filter(t=>!t.sistema&&t.texto).slice(-6).map(t=>`• ${fmtD(String(t.em||'').slice(0,10))} ${t.autor||''}: ${String(t.texto).replace(/\s+/g,' ').slice(0,220)}`);
+  const c={id:_ppId('pe_'),nome:e.nome||'',job,responsavel:vend,sedeCidade:cid,sedeUf:uf,tipoNegocio:'Venda',caminhoPasta:'',
+    etapa:etapasCrm[0].key,etapaEntradaEm:agora,tarefas:[],criadoPor:eu,criadoEm:agora,atualizadoEm:agora,
+    decisores:(e.decisores||[]).map(d=>Object.assign({},d,{empresa:d.empresa||e.nome||''})),
+    origemProsp:{id:e.id,nome:e.nome||'',prospector:e.responsavel||eu,em:agora},
+    timeline:[{id:_ppId('pcm_'),texto:`🎯 Negócio vindo da Prospecção de Clientes — gerado por ${eu} (prospector: ${e.responsavel||eu}).\nO que o cliente precisa: ${obs}\nSegmento: ${e.segmento||'—'} · Unidades existentes: ${e.unidadesExistentes||'—'} · a abrir: ${e.unidadesAbrir||'—'} · Regiões: ${(e.regioes||[]).join(', ')||'—'}`,autor:eu,em:agora,sistema:true}]};
+  if(coments.length)c.timeline.push({id:_ppId('pcm_'),texto:'Histórico da prospecção:\n'+coments.join('\n'),autor:eu,em:agora,sistema:true});
+  try{await window._fbSaveCrmEmpresa(c);if(typeof crmEmpresas!=='undefined'&&!crmEmpresas.some(x=>x.id===c.id))crmEmpresas.push(c);}
+  catch(err){console.error('ppGerarCrm',err);toast('Não consegui criar o negócio no CRM','terr');if(btn){btn.disabled=false;btn.textContent='🤝 Gerar negócio';}return;}
+  // Tarefa de primeiro contato pro vendedor (mesmo padrão de _crmCriarTarefaEnvioProposta)
+  try{
+    const t=novaTarefaComercial('PRIMEIRO CONTATO — NEGÓCIO VINDO DA PROSPECÇÃO',vend,_ppDiaUtil(1),eu,`Empresa: ${e.nome}. ${obs}`);
+    t.crmEmpresaId=c.id;t.crmEmpresaNome=c.nome;t.crmCategoria='outro';
+    if(!cfg.tarefasGerais)cfg.tarefasGerais=[];cfg.tarefasGerais.push(t);
+    await window._fbTxTarefasGerais(l=>{l.push(t);return l;});
+    try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(x){}
+    try{_refreshTarefasBadge();}catch(x){}
+  }catch(err){console.error('tarefa primeiro contato',err);}
+  e.crmEmpresaId=c.id;e.crmGeradoEm=agora;e.crmGeradoPor=eu;e.crmVendedor=vend;e.atualizadoEm=agora;
+  (e.timeline=e.timeline||[]).push({id:_ppId('pcm_'),texto:`🤝 Negócio gerado no CRM para ${vend}: ${obs}`,autor:eu,em:agora,sistema:true});
+  try{await _prospSalvarEmpresaObj(e);}catch(err){}
+  const m=document.getElementById('pp-crm-modal');if(m)m.remove();
+  toast('Negócio criado no CRM para '+vend+' ✅','tok');
+  if(_prospCardAtualId===e.id)try{_prospRenderCard(e);}catch(err){}
+}
+function ppAbrirNoCrm(id){
+  const e=prospEmpresas.find(x=>x.id===id);const c=_ppCrmDe(e);if(!c){toast('Negócio não encontrado no CRM','terr');return;}
+  if(!_podeVerVisaoComercial()){toast('Você não tem acesso ao CRM — o vendedor '+(c.responsavel||'')+' cuida dele','tinf');return;}
+  try{closeM('mo-prosp-card');}catch(x){}
+  _avisosIrCrm('kanban',c.id);
+}
+
+// ── (7) DESCARTE COM MOTIVO + GELADEIRA ─────────────────────────────────────────────────
+const PP_MOTIVOS_PERDA=['SEM DEMANDA NO MOMENTO','JÁ TEM FORNECEDOR','PREÇO','SEM RETORNO / NÃO RESPONDE','NÃO É O PERFIL DA GRANDA','EMPRESA SEM EXPANSÃO / FECHOU','OUTRO'];
+function ppAbrirDescartar(id){
+  const e=prospEmpresas.find(x=>x.id===id);if(!e)return;
+  const html=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><div style="font-size:.7rem;font-weight:800;color:var(--ink4);text-transform:uppercase">🧊 Descartar empresa</div><div style="font-size:1rem;font-weight:800">${_ppEsc(e.nome)}</div><div style="font-size:.72rem;color:var(--ink4);margin-top:2px">Sai do funil e vai para a geladeira. Na data escolhida ela volta sozinha com uma tarefa de retomar o contato.</div></div>${_ppFechar('pp-desc-modal')}</div>
+    <div class="fg" style="margin-top:14px"><label style="font-size:.76rem;font-weight:700">Motivo <span class="r">*</span></label><select class="fc" id="pp-desc-mot"><option value="">Selecione o motivo</option>${PP_MOTIVOS_PERDA.map(m=>`<option>${m}</option>`).join('')}</select></div>
+    <div class="fg"><label style="font-size:.76rem;font-weight:700">Comentário</label><textarea class="fc" id="pp-desc-com" rows="2" placeholder="O que o cliente disse"></textarea></div>
+    <div class="fg"><label style="font-size:.76rem;font-weight:700">Voltar a tentar em <span class="r">*</span></label><select class="fc" id="pp-desc-volta"><option value="30">30 dias</option><option value="60">60 dias</option><option value="90" selected>90 dias</option><option value="180">6 meses</option><option value="365">1 ano</option><option value="0">Não voltar</option></select></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" onclick="ppDescartar('${e.id}')" style="${_ppBtn};background:#0369a1">🧊 Descartar</button></div>`;
+  _ppModal('pp-desc-modal',html,480);
+}
+async function ppDescartar(id){
+  const e=prospEmpresas.find(x=>x.id===id);if(!e)return;
+  const mot=(document.getElementById('pp-desc-mot')||{}).value||'',com=((document.getElementById('pp-desc-com')||{}).value||'').trim(),dias=parseInt((document.getElementById('pp-desc-volta')||{}).value,10)||0;
+  if(!mot){toast('Escolha o motivo','terr');return;}
+  if(mot==='OUTRO'&&!com){toast('Escreva o motivo no comentário','terr');return;}
+  const agora=new Date().toISOString(),volta=dias?_opAddDias(_hojeIso(),dias):'';
+  const pend=(e.tarefas||[]).filter(t=>!t.feita).length;
+  e.tarefas=(e.tarefas||[]).filter(t=>t.feita);
+  e.descarte={motivo:mot,comentario:com,em:agora,por:_ppEu(),voltarEm:volta,etapaAnterior:_prospEtapaEfetiva(e)};
+  (e.timeline=e.timeline||[]).push({id:_ppId('pcm_'),texto:`🧊 Descartada — ${mot}${com?': '+com:''}. ${volta?'Volta para o funil em '+fmtD(volta):'Não volta para o funil'}.${pend?' '+pend+' '+_plural(pend,'tarefa pendente cancelada','tarefas pendentes canceladas')+'.':''}`,autor:_ppEu(),em:agora,sistema:true});
+  e.atualizadoEm=agora;
+  try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
+  ['pp-desc-modal'].forEach(i=>{const m=document.getElementById(i);if(m)m.remove();});
+  try{closeM('mo-prosp-card');}catch(x){}
+  toast('Empresa na geladeira 🧊','tok');
+  try{renderProspKanban();}catch(x){}
+}
+async function ppReativar(id,auto){
+  const e=prospEmpresas.find(x=>x.id===id);if(!e||!e.descarte)return;
+  const d=e.descarte,et=_prospEtapas();
+  const destino=et.some(x=>x.key==='acompanhamento')?'acompanhamento':(et.some(x=>x.key===d.etapaAnterior)?d.etapaAnterior:et[0].key);
+  const agora=new Date().toISOString();
+  (e.descarteHistorico=e.descarteHistorico||[]).push(Object.assign({},d,{reativadoEm:agora,reativadoPor:auto?'Automático (data de retorno)':_ppEu()}));
+  e.descarte=null;e.etapa=destino;
+  e.tarefas=e.tarefas||[];
+  e.tarefas.push({id:'pta_ret_'+e.id+'_'+(d.voltarEm||agora.slice(0,10)),tipo:'ligar',decisorNome:'',titulo:`Retomar contato (voltou da geladeira) — motivo anterior: ${d.motivo}`,data:_hojeIso(),feita:false,criadoPor:'Geladeira',responsavel:e.responsavel||_ppEu(),criadoEm:agora});
+  (e.timeline=e.timeline||[]).push({id:_ppId('pcm_'),texto:`🔥 Voltou da geladeira${auto?' (data de retorno chegou)':' — reativada por '+_ppEu()} para ${(et.find(x=>x.key===destino)||{}).label||destino}. Script indicado: Retomada.`,autor:auto?'Sistema':_ppEu(),em:agora,sistema:true});
+  e.atualizadoEm=agora;
+  try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
+  if(!auto){toast('Empresa de volta ao funil 🔥','tok');try{renderProspKanban();}catch(x){}const g=document.getElementById('pp-gel-modal');if(g)ppAbrirGeladeira();}
+}
+let _ppRetornoRodando=false,_ppRetornoUlt=0;
+async function _ppChecarRetornos(){
+  if(_ppRetornoRodando||Date.now()-_ppRetornoUlt<60000)return;
+  try{if(!_temAcessoProspeccao())return;}catch(e){return;}
+  _ppRetornoRodando=true;_ppRetornoUlt=Date.now();
+  try{const hoje=_hojeIso();for(const e of prospEmpresas.filter(x=>x.descarte&&x.descarte.voltarEm&&x.descarte.voltarEm<=hoje))await ppReativar(e.id,true);}
+  catch(e){console.error('retorno geladeira',e);}finally{_ppRetornoRodando=false;}
+}
+setInterval(()=>{try{if(typeof usuarioLogado!=='undefined'&&usuarioLogado&&prospEmpresas.length)_ppChecarRetornos();}catch(e){}},30*60000);
+function ppAbrirGeladeira(){
+  const L=prospEmpresas.filter(e=>!_ppAtiva(e)).sort((a,b)=>String(a.descarte.voltarEm||'9999').localeCompare(String(b.descarte.voltarEm||'9999')));
+  const html=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><div style="font-size:1rem;font-weight:800">🧊 Geladeira</div><div style="font-size:.72rem;color:var(--ink4);margin-top:2px">Empresas descartadas. Na data de retorno elas voltam sozinhas para o funil (etapa Acompanhamento) com uma tarefa de retomar.</div></div>${_ppFechar('pp-gel-modal')}</div>
+  ${L.length?`<div style="overflow-x:auto;margin-top:12px"><table class="dash-table" style="font-size:.74rem"><thead><tr><th>Empresa</th><th>Motivo</th><th>Descartada</th><th>Volta em</th><th></th></tr></thead><tbody>
+  ${L.map(e=>`<tr><td style="font-weight:700;cursor:pointer;color:var(--brand-d)" onclick="document.getElementById('pp-gel-modal').remove();prospAbrirCard('${e.id}')">${_ppEsc(e.nome)}${e.responsavel?`<div style="font-size:.66rem;color:var(--ink4);font-weight:500">${_ppEsc(e.responsavel)}</div>`:''}</td>
+    <td>${_ppEsc(e.descarte.motivo)}${e.descarte.comentario?`<div style="font-size:.66rem;color:var(--ink4)">${_ppEsc(e.descarte.comentario)}</div>`:''}</td>
+    <td style="white-space:nowrap">${fmtD(String(e.descarte.em).slice(0,10))}<div style="font-size:.66rem;color:var(--ink4)">${_ppEsc(e.descarte.por||'')}</div></td>
+    <td style="white-space:nowrap;font-weight:700">${e.descarte.voltarEm?fmtD(e.descarte.voltarEm):'Não volta'}</td>
+    <td><button type="button" onclick="ppReativar('${e.id}')" style="${_ppBtn};background:#ea580c">🔥 Reativar</button></td></tr>`).join('')}</tbody></table></div>`:'<div style="padding:20px 4px;color:var(--ink4);font-size:.8rem">Nenhuma empresa na geladeira.</div>'}`;
+  _ppModal('pp-gel-modal',html,760);
+}
+
+// ── (4) CONVERSÃO DO FUNIL + PROSPECÇÃO → VENDAS + MOTIVOS DE PERDA ─────────────────────
+// Passagem por etapa reconstruída pela linha do tempo ("Etapa alterada: A → B", que já existia
+// desde o início do menu; os eventos novos também gravam de/para).
+function _ppHistEtapas(e,etapas){
+  const porLabel={};etapas.forEach(x=>{porLabel[String(x.label).toUpperCase()]=x.key;});
+  const evs=(e.timeline||[]).filter(t=>t.sistema&&(t.para||/^Etapa alterada:/.test(t.texto||''))).map(t=>{
+    let de=t.de,para=t.para;
+    if(!para){const m=String(t.texto).match(/^Etapa alterada:\s*(.*?)\s*→\s*(.*)$/);if(m){de=porLabel[m[1].toUpperCase().trim()];para=porLabel[m[2].toUpperCase().trim()];}}
+    return{de,para,em:t.em||''};}).filter(x=>x.para).sort((a,b)=>a.em.localeCompare(b.em));
+  const ini=evs.length?(evs[0].de||etapas[0].key):_prospEtapaEfetiva(e);
+  const estadias=[];let cur=ini,desde=e.criadoEm||(evs[0]&&evs[0].em)||new Date().toISOString();
+  evs.forEach(x=>{estadias.push({k:cur,de:desde,ate:x.em});cur=x.para;desde=x.em;});
+  const fim=(e.descarte&&e.descarte.em)||new Date().toISOString();
+  estadias.push({k:cur,de:desde,ate:fim,atual:_ppAtiva(e)});
+  const idx={};etapas.forEach((x,i)=>{idx[x.key]=i;});
+  const maxIdx=Math.max(...estadias.map(s=>idx[s.k]!=null?idx[s.k]:0));
+  return{estadias,maxIdx};
+}
+function _ppConversaoHtml(){
+  const etapas=_prospEtapas();const H=prospEmpresas.map(e=>({e,h:_ppHistEtapas(e,etapas)}));
+  const linhas=etapas.map((et,i)=>{
+    const chegaram=H.filter(x=>x.h.maxIdx>=i).length,avancaram=H.filter(x=>x.h.maxIdx>=i+1).length;
+    const est=[];H.forEach(x=>x.h.estadias.filter(s=>s.k===et.key).forEach(s=>est.push((Date.parse(s.ate)-Date.parse(s.de))/86400000)));
+    const media=est.length?est.reduce((a,b)=>a+b,0)/est.length:null;
+    const agora=prospEmpresas.filter(e=>_ppAtiva(e)&&_prospEtapaEfetiva(e)===et.key).length;
+    return{et,i,chegaram,avancaram,conv:(i<etapas.length-1&&chegaram)?avancaram/chegaram:null,media,agora};
+  });
+  const cand=linhas.filter(l=>l.conv!=null&&l.chegaram>=3);
+  const pior=cand.length?cand.reduce((a,b)=>b.conv<a.conv?b:a):null;
+  const corC=v=>v==null?'var(--ink4)':v<0.3?'#dc2626':v<0.6?'#d97706':'#16a34a';
+  return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">🔀 Conversão do funil</div>
+    ${pior?`<div style="margin-top:8px;padding:9px 12px;border-radius:9px;background:#fef2f2;border:1px solid #fecaca;font-size:.78rem;color:#991b1b"><b>Maior vazamento:</b> de ${_ppEsc(pior.et.label)} para a etapa seguinte só ${Math.round(pior.conv*100)}% avançam (${pior.avancaram} de ${pior.chegaram}).</div>`:''}
+    <div style="overflow-x:auto;margin-top:8px"><table class="dash-table" style="font-size:.76rem"><thead><tr><th>Etapa</th><th style="text-align:right">Chegaram</th><th style="text-align:right">Avançaram</th><th style="text-align:right">Conversão</th><th style="text-align:right">Tempo médio na etapa</th><th style="text-align:right">Nela agora</th></tr></thead><tbody>
+    ${linhas.map(l=>`<tr><td style="font-weight:700;white-space:nowrap">${_ppEsc(l.et.label)}</td><td style="text-align:right">${l.chegaram}</td><td style="text-align:right">${l.i<etapas.length-1?l.avancaram:'—'}</td>
+      <td style="text-align:right;font-weight:800;color:${corC(l.conv)}">${l.conv==null?'—':Math.round(l.conv*100)+'%'}</td>
+      <td style="text-align:right;white-space:nowrap">${l.media==null?'—':Math.round(l.media)+' '+_plural(Math.round(l.media),'dia','dias')}</td><td style="text-align:right">${l.agora}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">Conta todas as empresas que já passaram pelo funil, inclusive as descartadas. Conversão = quantas das que chegaram na etapa foram para a seguinte (ou além). Tempo em dias corridos.</div></div>`;
+}
+function _ppVendasHtml(){
+  const ger=prospEmpresas.filter(e=>e.crmEmpresaId);
+  const rows=ger.map(e=>{const c=_ppCrmDe(e),s=_ppCrmStatus(c);return{e,c,s,v:_ppCrmVendido(c)};});
+  const ganhos=rows.filter(r=>r.s.st==='ganho'),perd=rows.filter(r=>r.s.st==='perdido'),abertos=rows.filter(r=>r.s.st==='aberto');
+  const vend=rows.reduce((s,r)=>s+r.v,0);
+  const fech=ganhos.length+perd.length;
+  const tile=(l,v,s,c)=>`<div style="background:#fff;border-radius:12px;padding:14px 16px;border:1px solid #e5e7eb"><div style="font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:6px">${l}</div><div style="font-size:1.2rem;font-weight:800;color:${c}">${v}</div><div style="font-size:.72rem;color:#94a3b8;margin-top:4px">${s}</div></div>`;
+  return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">🤝 Prospecção → vendas</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:10px">
+      ${tile('Negócios gerados no CRM',String(rows.length),`${abertos.length} em andamento`,'#1a2b5e')}
+      ${tile('Ganhos',String(ganhos.length),fech?`${Math.round(ganhos.length/fech*100)}% dos fechados`:'Nenhum fechado ainda','#16a34a')}
+      ${tile('Perdidos',String(perd.length),'No CRM','#dc2626')}
+      ${tile('Vendido (líquido)',fmtR(vend),'Pedidos emitidos desses negócios','#7c3aed')}
+    </div>
+    ${rows.length?`<div style="overflow-x:auto;margin-top:12px"><table class="dash-table" style="font-size:.74rem"><thead><tr><th>Empresa</th><th>Vendedor</th><th>Gerado em</th><th>Situação no CRM</th><th style="text-align:right">Vendido</th></tr></thead><tbody>
+    ${rows.sort((a,b)=>String(b.e.crmGeradoEm||'').localeCompare(String(a.e.crmGeradoEm||''))).map(r=>`<tr><td style="font-weight:700;cursor:pointer;color:var(--brand-d)" onclick="prospAbrirCard('${r.e.id}')">${_ppEsc(r.e.nome)}</td><td>${_ppEsc(r.e.crmVendedor||(r.c&&r.c.responsavel)||'—')}</td><td style="white-space:nowrap">${r.e.crmGeradoEm?fmtD(String(r.e.crmGeradoEm).slice(0,10)):'—'}</td><td style="color:${r.s.cor};font-weight:700">${_ppEsc(r.s.txt)}</td><td style="text-align:right;white-space:nowrap;font-weight:700">${r.v?fmtR(r.v):'—'}</td></tr>`).join('')}
+    </tbody></table></div>`:'<div style="padding:12px 4px;color:#94a3b8;font-size:.78rem">Nenhum negócio gerado no CRM ainda. Use o botão 🤝 Gerar negócio no CRM dentro do card quando a empresa tiver demanda.</div>'}</div>`;
+}
+function _ppMotivosHtml(){
+  const regs=[];prospEmpresas.forEach(e=>{if(e.descarte&&e.descarte.em)regs.push(e.descarte);(e.descarteHistorico||[]).forEach(d=>regs.push(d));});
+  const naGel=prospEmpresas.filter(e=>!_ppAtiva(e)).length;
+  const cont={};regs.forEach(d=>{cont[d.motivo||'—']=(cont[d.motivo||'—']||0)+1;});
+  const L=Object.entries(cont).sort((a,b)=>b[1]-a[1]);const max=Math.max(1,...L.map(x=>x[1]));
+  return`<div class="dash-card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div class="dash-sec-title">🧊 Motivos de perda</div><button type="button" onclick="ppAbrirGeladeira()" style="${_ppBtn};background:#0369a1">🧊 Ver geladeira (${naGel})</button></div>
+    ${L.length?`<div style="margin-top:10px;display:flex;flex-direction:column;gap:7px">${L.map(([m,n])=>`<div style="display:grid;grid-template-columns:minmax(150px,240px) 1fr 60px;gap:10px;align-items:center;font-size:.76rem"><span style="font-weight:700">${_ppEsc(m)}</span><div style="height:8px;border-radius:4px;background:#e0f2fe"><div style="height:8px;border-radius:4px;background:#0369a1;width:${Math.round(n/max*100)}%"></div></div><span style="text-align:right;font-weight:800">${n} (${Math.round(n/regs.length*100)}%)</span></div>`).join('')}</div>`:'<div style="padding:12px 4px;color:#94a3b8;font-size:.78rem">Nenhuma empresa descartada ainda.</div>'}</div>`;
+}
+
+// ── GANCHOS NAS FUNÇÕES QUE JÁ EXISTIAM ─────────────────────────────────────────────────
+// Funil/lista/indicadores de saúde: só empresas ativas (fora da geladeira); kanban ordena pela nota.
+{const _o=_prospBaseFiltrada;_prospBaseFiltrada=function(){return _o.apply(this,arguments).filter(_ppAtiva);};}
+{const _o=_prospAplicaRapido;_prospAplicaRapido=function(l){const r=_o.apply(this,arguments)||[];try{return r.slice().sort((a,b)=>_ppNota(b).p-_ppNota(a).p);}catch(e){return r;}};}
+{const _o=_prospIndicadoresDados;_prospIndicadoresDados=function(){const todas=prospEmpresas;prospEmpresas=todas.filter(_ppAtiva);try{return _o.apply(this,arguments);}finally{prospEmpresas=todas;}};}
+{const _o=_prospCardHtml;_prospCardHtml=function(e){let h=_o.apply(this,arguments);try{
+  h=h.replace(/(<div class="prosp-card-nome"[^>]*>)/,'$1'+_ppNotaChip(e)+' ');
+  if(e.crmEmpresaId){const s=_ppCrmStatus(_ppCrmDe(e));h=h.replace('<div class="prosp-card-f">',`<div class="prosp-card-dec" style="color:${s.cor};font-weight:700">🤝 CRM: ${_ppEsc(s.txt)}</div><div class="prosp-card-f">`);}
+}catch(err){}return h;};}
+{const _o=_prospListaHtml;_prospListaHtml=function(empresas){let h=_o.apply(this,arguments);try{
+  const map={};(empresas||[]).forEach(e=>{map[e.id]=e;});
+  h=h.replace(/(<tr onclick="prospAbrirCard\('([^']+)'\)"[^>]*>\s*<td style="font-weight:800;border-left:4px solid [^"]*">)/g,(m,a,id)=>map[id]?a+_ppNotaChip(map[id])+' ':a);
+}catch(err){}return h;};}
+{const _o=renderProspKanban;renderProspKanban=function(){const r=_o.apply(this,arguments);try{
+  const faixa=document.getElementById('prosp-etapas-faixa');const n=prospEmpresas.filter(e=>!_ppAtiva(e)).length;
+  if(faixa&&!faixa.querySelector('.pp-gel-fx'))faixa.insertAdjacentHTML('beforeend',`<button type="button" class="prosp-fx pp-gel-fx${n?'':' vazia'}" onclick="ppAbrirGeladeira()" title="Empresas descartadas — voltam sozinhas na data de retorno" style="border-style:dashed;border-color:#94a3b8"><span class="prosp-fx-l">🧊 GELADEIRA</span><b>${n}</b><small></small></button>`);
+  _ppChecarRetornos();
+}catch(err){console.error('geladeira faixa',err);}return r;};}
+{const _o=renderProspIndicadores;renderProspIndicadores=function(){const r=_o.apply(this,arguments);try{
+  const w=document.getElementById('prosp-ind-body');
+  if(w)w.insertAdjacentHTML('beforeend',`<div style="margin-top:14px">${_ppVendasHtml()}${_ppConversaoHtml()}${_ppMotivosHtml()}</div>`);
+}catch(err){console.error('indicadores prospecção 2.0',err);}return r;};}
+{const _o=_prospRenderEtapasModal;_prospRenderEtapasModal=function(){const r=_o.apply(this,arguments);try{
+  const w=document.getElementById('prosp-etapas-list');
+  if(w&&_ppPodeConfig())w.insertAdjacentHTML('beforeend',`<button type="button" onclick="ppAbrirCadencias()" style="margin-top:6px;background:#eef2ff;color:#4338ca;border:1.5px solid #c7d2fe;border-radius:8px;padding:8px 12px;font-size:.76rem;font-weight:800;cursor:pointer;font-family:inherit">⏱️ Cadências — tarefas automáticas de cada etapa</button>`);
+}catch(err){}return r;};}
+{const _o=_prospRenderCard;_prospRenderCard=function(e){const r=_o.apply(this,arguments);try{
+  const b=document.getElementById('prosp-card-badges');
+  if(b){
+    b.insertAdjacentHTML('afterbegin',_ppNotaChip(e,true));
+    const c=_ppCrmDe(e),s=e.crmEmpresaId?_ppCrmStatus(c):null;
+    const etapaDemanda=_prospEtapaEfetiva(e)==='tem_demanda_proxima';
+    b.insertAdjacentHTML('beforeend',`<div style="flex-basis:100%;display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">
+      <button type="button" onclick="ppAbrirScripts('${e.id}')" style="${_ppBtn};background:#7c3aed">📜 Scripts</button>
+      ${e.crmEmpresaId?`<button type="button" onclick="ppAbrirNoCrm('${e.id}')" style="${_ppBtn};background:#fff;color:${s.cor};border:1.5px solid ${s.cor}">🤝 CRM: ${_ppEsc(s.txt)}</button>`
+        :`<button type="button" onclick="ppAbrirGerarCrm('${e.id}')" style="${_ppBtn};background:${etapaDemanda?'#ea580c':'#334155'}${etapaDemanda?';box-shadow:0 0 0 3px #fed7aa':''}">🤝 Gerar negócio no CRM</button>`}
+      ${_ppAtiva(e)?`<button type="button" onclick="ppAbrirDescartar('${e.id}')" style="${_ppBtn};background:#fff;color:#0369a1;border:1.5px solid #bae6fd">🧊 Descartar</button>`:''}
+    </div>`);
+  }
+  if(!_ppAtiva(e)){const body=document.getElementById('prosp-card-body');const d=e.descarte;
+    if(body)body.insertAdjacentHTML('afterbegin',`<div style="background:#e0f2fe;border:1.5px solid #0369a1;border-radius:10px;padding:10px 12px;margin-bottom:12px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><div style="font-size:.78rem;color:#0c4a6e"><b>🧊 Na geladeira</b> — ${_ppEsc(d.motivo)}${d.comentario?': '+_ppEsc(d.comentario):''}<div style="font-size:.7rem;margin-top:2px">Descartada em ${fmtD(String(d.em).slice(0,10))} por ${_ppEsc(d.por||'—')} · ${d.voltarEm?'volta em '+fmtD(d.voltarEm):'não volta sozinha'}</div></div><button type="button" onclick="ppReativar('${e.id}');setTimeout(()=>{const x=prospEmpresas.find(y=>y.id==='${e.id}');if(x&&_prospCardAtualId==='${e.id}')_prospRenderCard(x);},500)" style="${_ppBtn};background:#ea580c">🔥 Reativar</button></div>`);}
+}catch(err){console.error('card prospecção 2.0',err);}return r;};}
+
 function prospAbrirGerenciarEtapas(){
   if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   _prospRenderEtapasModal();
