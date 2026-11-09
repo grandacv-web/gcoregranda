@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-09.13';</script>
+<script>const APP_BUILD_VERSION='2026-11-09.15';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -34715,7 +34715,7 @@ function _opCalcularTodosEventos(){
         pendencias.push({...base,valor:r.ft*0.7,motivo:'Falta '+faltando.join(' e ')+' pra calcular a data de coleta exata — usando o Prazo de Finalização como estimativa.'});
         eventos.push({...base,iso:prazo,cat:'FRETE',valor:r.ft*0.7,detalhe:'Estimativa — data exata de coleta não calculada (falta dado na Emissão), usando o Prazo de Finalização'});
       } else {
-        const coleta=_opAddDias(prazo,-(diasInst+diasFrete));
+        const coleta=_opAddDias(prazo,-(diasInst+_lpFreteCorridos(p,prazo,diasInst,diasFrete)));
         const dFrete=coleta?_opAddDias(coleta,20):null;
         if(dFrete)eventos.push({...base,iso:dFrete,cat:'FRETE',valor:r.ft*0.7,detalhe:`20 dias após a coleta estimada (${fmtD(coleta)})`});
       }
@@ -35445,6 +35445,25 @@ function _addHorasUteis(inicio,horas){
 }
 function _lpDiasInst(p){return _opDiasFromTxt(p.instalacao&&p.instalacao['Estimativa']);}
 function _lpDiasFrete(p){return _opDiasFromTxt(p.frete&&p.frete['Prazo Estimado de Entrega']);}
+// (2026-11-09, Guilherme: "frete fracionado são dias úteis, aquela tabela é de dias úteis, então tem que pular
+// sábado, domingo e feriado" — no Planejamento e no Pipeline). O prazo de frete vindo da Tabela de Fretes
+// Fracionados (texto "X dias úteis") é contado em dias ÚTEIS pra trás a partir da chegada; dedicado por
+// distância ("X dias corridos") continua em dias corridos.
+function _lpFreteEmDiasUteis(p){
+  const fr=(p&&p.frete)||{};let t=String(fr['Prazo Estimado de Entrega']||'');
+  if(!t.trim()){try{t=String(_lpCalcDiasFreteFallback(p)||'');}catch(e){}}
+  if(/corrid/i.test(t))return false;
+  if(/[úu]til|[úu]teis/i.test(t))return true;
+  return fr['Modalidade Logística']==='Fracionado';
+}
+// Dias CORRIDOS equivalentes ao frete, contados pra trás a partir da chegada (prazoBase − instalação).
+function _lpFreteCorridos(p,prazoBase,diasInst,diasFrete){
+  if(!(diasFrete>0)||!prazoBase||!_lpFreteEmDiasUteis(p))return diasFrete;
+  const chRaw=_opAddDias(prazoBase,-(diasInst||0));if(!chRaw)return diasFrete;
+  const col=_lpSubtraiDiasUteis(_lpAjustaDiaUtil(chRaw),diasFrete);if(!col)return diasFrete;
+  const d=Math.round((new Date(chRaw+'T00:00:00')-new Date(col+'T00:00:00'))/86400000);
+  return d>0?d:diasFrete;
+}
 function _lpTemMedicao(p){return (p.instalacao&&p.instalacao['Medição Técnica'])==='Sim';}
 // (2026-09-29) Garantia/Retrabalho/Interno costumam vir com valor 0 — instalação "Por nossa conta"
 // com Estimativa preenchida (ou frete com endereço + prazo, em pedido que não é venda) também
@@ -35713,7 +35732,7 @@ function _lpCalcEtapas(p){
   // calendário. O ajuste de dia útil (_lpAjustaDiaUtil) entra só DEPOIS, em cada data que vira
   // prazo de verdade pra alguém (coletaIso/chegadaIso expostos abaixo e cada etapa em si) —
   // nunca na Final da Instalação, que é o Prazo de Finalização combinado com o cliente.
-  const coletaIsoRaw=_opAddDias(prazoIso,-(diasInst+diasFrete));
+  const coletaIsoRaw=_opAddDias(prazoIso,-(diasInst+_lpFreteCorridos(p,prazoIso,diasInst,diasFrete)));
   const chegadaIsoRaw=_opAddDias(prazoIso,-diasInst);
   const prazoInternoDias=coletaIsoRaw?Math.round((new Date(coletaIsoRaw+'T00:00:00')-new Date(emissaoIso+'T00:00:00'))/86400000):0;
   if(!coletaIsoRaw||!(prazoInternoDias>0))return{ok:false,curto:true};
@@ -35751,7 +35770,7 @@ function _lpCalcEtapas(p){
   // continuam os do prazo combinado na emissão — o que estava atrasado continua atrasado.
   // Se o prazo for ANTECIPADO, todo mundo acompanha o prazo novo (mais cedo).
   if(_prazoFabIso&&_prazoFabIso<prazoIso){
-    const _coletaIsoRawOrig=_opAddDias(_prazoFabIso,-(diasInst+diasFrete));
+    const _coletaIsoRawOrig=_opAddDias(_prazoFabIso,-(diasInst+_lpFreteCorridos(p,_prazoFabIso,diasInst,diasFrete)));
     const _prazoInternoDiasOrig=_coletaIsoRawOrig?Math.round((new Date(_coletaIsoRawOrig+'T00:00:00')-new Date(emissaoIso+'T00:00:00'))/86400000):0;
     if(_coletaIsoRawOrig&&_prazoInternoDiasOrig>0){
       _prazoIsoProducao=_prazoFabIso;
@@ -76325,6 +76344,402 @@ function _cadExportar(cad){
   }
   window._projRegraCorrigir20261104=corrigir;
   let n=0;const t=setInterval(async()=>{n++;try{const r=await corrigir();if(r==='ok'||n>40)clearInterval(t);}catch(e){if(n>40)clearInterval(t);}},9500);
+})();
+// ── PROJETOS: REVISÃO PELO SUPERVISOR (build 2026-11-09.14) ────────────────────────────────────────────
+// Guilherme (09/11): "estrutura de revisão dos projetos: o projetista termina, vai pro supervisor revisar,
+// ele faz as anotações de não conformidades e volta para ele". Quem revisa é o supervisor da área
+// (Bruno Baldykoski, Projetos). Decisões dele:
+//  • o projeto só conta como CONCLUÍDO (Pipeline, Lista, Indicadores) quando o supervisor APROVA;
+//  • TODOS os projetos passam pela revisão;
+//  • o tempo em revisão CONTA no prazo do projeto (a data de conclusão passa a ser a da aprovação);
+//  • os projetos já concluídos antes desta versão ficam como estão.
+// Fluxo: projetista conclui (baixa/checklist) → 🔍 Em revisão → supervisor ✅ aprova (concluído) ou ↩️ devolve
+// com a lista de não conformidades (descrição, tipo, gravidade, foto) → o projetista marca cada uma como
+// corrigida e 📤 reenvia → nova rodada. Tudo fica em p.projAprov:
+//   {status:'aguardando'|'devolvido'|'aprovado', rodadas:[{n,enviadoEm,enviadoPor,decididoEm,decididoPor,
+//    resultado,obs,ncs:[{id,desc,tipo,grav,foto,corrigido:{em,por,obs}}]}], aprovadoEm, aprovadoPor, baixaStamp}
+// Quem revisa: cfg.projRevisores (e-mails, o admin escolhe no ⚙). Vazio = usuários de PROJETOS com nível
+// Supervisor ou acima + quem aprova FP. O administrador sempre pode agir (substituto).
+(function(){
+  const INICIO='2026-11-09T20:30:00.000Z';   // conclusões a partir desta versão entram na revisão
+  const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const js=s=>"'"+String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'";
+  const quem=()=>(typeof usuarioLogado!=='undefined'&&usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—';
+  const norm=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+  const ped=id=>(typeof pedidos!=='undefined'&&pedidos||[]).find(x=>x&&x.id===id);
+  const dtH=v=>{if(!v)return'—';try{const d=new Date(v);return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}catch(e){return String(v);}};
+  const nomePed=p=>{try{return _pedNome(p);}catch(e){return(p.cliente||'')+' · '+(p.job||'');}};
+  const TIPOS=[['medida','📏 Medida'],['material','🧱 Material'],['cor','🎨 Cor / acabamento'],['arte','🖼️ Arte / layout'],['estrutura','🏗️ Técnico / estrutura'],
+    ['eletrica','⚡ Elétrica'],['instalacao','🔧 Instalação'],['rm','📋 RM / LM / documentação'],['info','❓ Falta de informação'],['outro','✏️ Outro']];
+  const tipoLbl=k=>(TIPOS.find(t=>t[0]===k)||[k,'✏️ '+(k||'Outro')])[1];
+
+  // ── quem revisa ──
+  function revisoresEmails(){
+    const set=new Set();
+    const lista=(cfg.projRevisores||[]).map(x=>String(x).toLowerCase()).filter(Boolean);
+    if(lista.length){lista.forEach(e=>set.add(e));return[...set];}
+    const cats=cfg.usuarioCats||{};
+    Object.keys(cats).forEach(e=>{try{if(/PROJETO/i.test(cats[e]||'')&&_nivelRank(_nivelDe(e))>=2)set.add(e.toLowerCase());}catch(x){}});
+    (cfg.fpAprovadores||[]).forEach(e=>{const k=String(e).toLowerCase();if(k&&!/ADMIN/i.test(cats[k]||''))set.add(k);});
+    return[...set];
+  }
+  const nomeDe=e=>(cfg.usuarioNomes&&cfg.usuarioNomes[e])||e;
+  const revisoresNomes=()=>revisoresEmails().map(nomeDe);
+  function souRevisor(){try{const u=_getUserCat();return u.isAdm||revisoresEmails().includes(u.email);}catch(e){return false;}}
+  function possoRevisar(p){
+    if(!souRevisor())return false;
+    try{if(_getUserCat().isAdm)return true;}catch(e){}
+    return norm(p&&p.projResponsavel)!==norm(quem());   // ninguém revisa o próprio projeto
+  }
+
+  // ── estado da revisão ──
+  const _ec=_lpEtapaConcluida;   // regra de conclusão anterior (regra definitiva de 04/11)
+  const baseConcluido=p=>{try{return!!_ec(p,'projeto');}catch(e){return false;}};
+  const prazoPassou=p=>{try{return!!(window._projPrazoPassou&&window._projPrazoPassou(p));}catch(e){return false;}};
+  function momento(p){
+    const b=p&&p.lpBaixas&&p.lpBaixas.projeto;
+    if(b&&b.dataHora)return b.dataHora;
+    if(b&&b.data)return String(b.data).slice(0,10)+'T23:59:59';
+    const it=p&&p.projChecklist&&p.projChecklist.itens;let ult='';
+    if(it)Object.keys(it).forEach(k=>{const q=it[k]&&it[k].feito&&it[k].quando;if(q&&q>ult)ult=q;});
+    return ult||'';
+  }
+  function status(p){
+    if(!p)return null;
+    const b=p.lpBaixas&&p.lpBaixas.projeto;
+    if(b&&b.na)return null;
+    if(prazoPassou(p))return null;
+    const A=p.projAprov;
+    if(A&&A.status==='devolvido')return'devolvido';
+    if(!baseConcluido(p))return null;
+    if(A&&A.status==='aprovado'){
+      if(b&&A.baixaStamp&&b.dataHora===A.baixaStamp)return'aprovado';
+      const m=momento(p);if(!m||!A.aprovadoEm||m<=A.aprovadoEm)return'aprovado';
+      return'aguardando';   // reaberto e concluído de novo depois da aprovação → revisa de novo
+    }
+    if(A&&A.status==='aguardando')return'aguardando';
+    const m=momento(p);if(!m||m<INICIO)return null;
+    return'aguardando';
+  }
+  window._projRevStatus=status;
+  const pendente=p=>{const s=status(p);return s==='aguardando'||s==='devolvido';};
+
+  _lpEtapaConcluida=function(p,key){
+    const r=_ec.apply(this,arguments);
+    if(key!=='projeto'||!r)return r;
+    try{if(pendente(p))return false;}catch(e){}
+    return r;
+  };
+  // indicadores: projeto em revisão/devolvido não conta como concluído
+  {const _dl=window._projDeLote;window._projDeLote=function(p){try{if(pendente(p))return true;}catch(e){}return _dl?_dl.apply(this,arguments):false;};}
+
+  function rodadaAtual(p){
+    const A=p.projAprov=p.projAprov||{status:'aguardando',rodadas:[]};
+    A.rodadas=A.rodadas||[];
+    let r=A.rodadas[A.rodadas.length-1];
+    if(!r||r.resultado){
+      const b=p.lpBaixas&&p.lpBaixas.projeto;
+      r={n:A.rodadas.length+1,enviadoEm:momento(p)||new Date().toISOString(),enviadoPor:(b&&b.por)||p.projResponsavel||'—',ncs:[]};
+      A.rodadas.push(r);
+    }
+    return r;
+  }
+  const rodadas=p=>(p&&p.projAprov&&p.projAprov.rodadas)||[];
+  const enviadoEm=p=>{const s=status(p);if(s!=='aguardando')return'';const r=rodadas(p);const u=r[r.length-1];return(u&&!u.resultado&&u.enviadoEm)||momento(p);};
+  const nRodada=p=>{const r=rodadas(p);const u=r[r.length-1];return u&&!u.resultado?u.n:r.length+1;};
+  const ncsAbertas=p=>{const r=rodadas(p);const u=r[r.length-1];return u&&u.resultado==='devolvido'?(u.ncs||[]).filter(n=>!n.corrigido):[];};
+  const fila=()=>((typeof _lpPedidosElegiveis==='function'&&_lpPedidosElegiveis())||[]).filter(p=>{try{return status(p)==='aguardando';}catch(e){return false;}});
+  const devolvidos=()=>((typeof _lpPedidosElegiveis==='function'&&_lpPedidosElegiveis())||[]).filter(p=>{try{return status(p)==='devolvido';}catch(e){return false;}});
+  const rerender=id=>{try{projRenderAtivo();}catch(e){}try{if(id&&document.getElementById('proj-check-modal'))projAbrirChecklist(id);}catch(e){}try{if(document.getElementById('prv-fila'))prvFilaAbrir();}catch(e){}};
+
+  // ── ações ──
+  window.prvAprovar=async function(id){
+    const p=ped(id);if(!p)return;
+    if(!possoRevisar(p)){toast('Só o supervisor de Projetos (ou o administrador) aprova — e ninguém aprova o próprio projeto','terr');return;}
+    if(status(p)!=='aguardando'){toast('Este projeto não está aguardando revisão','twar');return;}
+    const r=rodadaAtual(p);const agora=new Date();
+    r.resultado='aprovado';r.decididoEm=agora.toISOString();r.decididoPor=quem();
+    const obs=(document.getElementById('prv-obs-'+id)||{}).value;if(obs&&obs.trim())r.obs=obs.trim();
+    p.lpBaixas=p.lpBaixas||{};
+    const b=p.lpBaixas.projeto;
+    if(b){b.enviadoRevisao=b.enviadoRevisao||{data:b.data||'',dataHora:b.dataHora||''};b.data=_isoLocal(agora);b.dataHora=agora.toISOString();b.aprovadoRevisao={em:agora.toISOString(),por:quem()};}
+    else p.lpBaixas.projeto={data:_isoLocal(agora),dataHora:agora.toISOString(),por:p.projResponsavel||r.enviadoPor||'—',viaChecklist:true,aprovadoRevisao:{em:agora.toISOString(),por:quem()},enviadoRevisao:{dataHora:r.enviadoEm}};
+    Object.assign(p.projAprov,{status:'aprovado',aprovadoEm:agora.toISOString(),aprovadoPor:quem(),baixaStamp:p.lpBaixas.projeto.dataHora});
+    await savePedidoFS(p);
+    toast('✅ Projeto da OS '+(p.os||'—')+' aprovado','tok');rerender(id);
+  };
+  window.prvDevolverAbrir=function(id){
+    const p=ped(id);if(!p)return;
+    if(!possoRevisar(p)){toast('Só o supervisor de Projetos (ou o administrador) devolve — e ninguém revisa o próprio projeto','terr');return;}
+    const old=document.getElementById('prv-dev');if(old)old.remove();
+    const m=document.createElement('div');m.id='prv-dev';m.dataset.id=id;
+    m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10080;display:flex;align-items:center;justify-content:center;padding:16px';
+    m.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:760px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px">
+      <div style="display:flex;align-items:center;gap:8px"><b style="flex:1;color:#1a2b5e">↩️ Devolver projeto com não conformidades</b><button type="button" onclick="document.getElementById('prv-dev').remove()" style="border:none;background:none;font-size:1.2rem;cursor:pointer;color:#94a3b8">✕</button></div>
+      <div style="font-size:.78rem;color:#475569;margin:4px 0 12px">OS ${esc(p.os||'—')} · ${esc(nomePed(p))} · projetista <b>${esc(p.projResponsavel||'—')}</b> · rodada ${nRodada(p)}</div>
+      <div id="prv-nc-l"></div>
+      <button type="button" class="projx-mini" onclick="prvNcLinha()" style="margin:6px 0 12px">➕ Adicionar não conformidade</button>
+      <label style="display:block;font-size:.74rem;font-weight:700;color:#64748b">Observação geral (opcional)<textarea id="prv-dev-obs" rows="2" style="width:100%;margin-top:4px;border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font:inherit;font-size:.8rem"></textarea></label>
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button type="button" class="dash-btn-conf" style="background:#64748b" onclick="document.getElementById('prv-dev').remove()">Cancelar</button><button type="button" id="prv-dev-ok" class="dash-btn-conf" style="background:#b91c1c" onclick="prvDevolver()">↩️ Devolver ao projetista</button></div></div>`;
+    document.body.appendChild(m);prvNcLinha();
+  };
+  window.prvNcLinha=function(){
+    const l=document.getElementById('prv-nc-l');if(!l)return;
+    const d=document.createElement('div');d.className='prv-nc';
+    d.style.cssText='display:grid;grid-template-columns:1fr 170px 100px 34px;gap:6px;align-items:start;padding:8px;border:1px solid #fecaca;background:#fff7f7;border-radius:10px;margin-bottom:6px';
+    d.innerHTML=`<textarea class="prv-nc-desc" rows="2" placeholder="O que está errado / o que precisa corrigir" style="border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font:inherit;font-size:.8rem;width:100%"></textarea>
+      <select class="prv-nc-tipo" style="border:1px solid #cbd5e1;border-radius:8px;padding:6px;font-size:.78rem">${TIPOS.map(t=>`<option value="${t[0]}">${t[1]}</option>`).join('')}</select>
+      <select class="prv-nc-grav" style="border:1px solid #cbd5e1;border-radius:8px;padding:6px;font-size:.78rem"><option value="leve">🟡 Leve</option><option value="grave">🔴 Grave</option></select>
+      <button type="button" title="Remover" onclick="this.closest('.prv-nc').remove()" style="border:none;background:none;cursor:pointer;font-size:1rem;color:#94a3b8">🗑</button>
+      <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;font-size:.72rem;color:#64748b">📷 Foto/print (opcional) <input type="file" class="prv-nc-foto" accept="image/*" style="font-size:.72rem"></div>`;
+    l.appendChild(d);try{d.querySelector('textarea').focus();}catch(e){}
+  };
+  async function subirFoto(f){
+    if(!f)return'';
+    if(!cfg.cld_cloud||!cfg.cld_preset)throw new Error('Cloudinary não configurado');
+    const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_pedidos');
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/image/upload`,{method:'POST',body:fd});
+    const d=await r.json();if(!d.secure_url)throw new Error((d.error&&d.error.message)||'falha no upload');
+    try{_cldRegistrarUpload(f.size);}catch(e){}
+    return d.secure_url;
+  }
+  window.prvDevolver=async function(){
+    const m=document.getElementById('prv-dev');if(!m)return;const id=m.dataset.id;const p=ped(id);if(!p)return;
+    if(!possoRevisar(p))return;
+    const linhas=[...m.querySelectorAll('.prv-nc')];
+    const ncs=[];let falta=false;
+    linhas.forEach(l=>{const t=l.querySelector('.prv-nc-desc');const v=(t.value||'').trim();t.style.borderColor=v?'#cbd5e1':'#dc2626';if(!v){falta=true;return;}
+      ncs.push({el:l,desc:v,tipo:l.querySelector('.prv-nc-tipo').value,grav:l.querySelector('.prv-nc-grav').value});});
+    if(falta&&ncs.length<linhas.length){toast('Descreva cada não conformidade (ou remova a linha vazia)','terr');return;}
+    if(!ncs.length){toast('Lance pelo menos uma não conformidade','terr');return;}
+    const bt=document.getElementById('prv-dev-ok');if(bt){bt.disabled=true;bt.textContent='Salvando…';}
+    try{
+      for(let i=0;i<ncs.length;i++){const f=ncs[i].el.querySelector('.prv-nc-foto');const arq=f&&f.files&&f.files[0];
+        if(arq){if(bt)bt.textContent=`Enviando foto ${i+1}…`;try{ncs[i].foto=await subirFoto(arq);}catch(e){toast('Foto não enviada: '+e.message,'twar');}}}
+      if(status(p)!=='aguardando'){toast('Este projeto não está aguardando revisão','twar');m.remove();return;}
+      const r=rodadaAtual(p);const agora=new Date().toISOString();
+      r.resultado='devolvido';r.decididoEm=agora;r.decididoPor=quem();
+      const obs=(document.getElementById('prv-dev-obs')||{}).value;if(obs&&obs.trim())r.obs=obs.trim();
+      r.ncs=ncs.map((n,i)=>({id:Date.now().toString(36)+i,desc:n.desc,tipo:n.tipo,grav:n.grav,foto:n.foto||''}));
+      p.projAprov.status='devolvido';p.projAprov.devolvidoEm=agora;
+      await savePedidoFS(p);
+      m.remove();toast('↩️ Devolvido ao projetista com '+r.ncs.length+' '+(r.ncs.length===1?'não conformidade':'não conformidades'),'tok');rerender(id);
+    }catch(e){console.error('devolver projeto',e);toast('Erro ao devolver: '+e.message,'terr');if(bt){bt.disabled=false;bt.textContent='↩️ Devolver ao projetista';}}
+  };
+  window.prvNcCorrigir=async function(id,ncId,ok){
+    const p=ped(id);if(!p)return;const r=rodadas(p);const u=r[r.length-1];if(!u)return;
+    const n=(u.ncs||[]).find(x=>x.id===ncId);if(!n)return;
+    if(ok){const obs=(document.getElementById('prv-cor-'+ncId)||{}).value||'';n.corrigido={em:new Date().toISOString(),por:quem(),obs:obs.trim()};}
+    else delete n.corrigido;
+    await savePedidoFS(p);rerender(id);
+  };
+  window.prvReenviar=async function(id){
+    const p=ped(id);if(!p)return;
+    if(status(p)!=='devolvido'){toast('Este projeto não está devolvido','twar');return;}
+    if(ncsAbertas(p).length){toast('Marque todas as não conformidades como corrigidas antes de reenviar','terr');return;}
+    if(!baseConcluido(p)){toast('Conclua o checklist do projeto antes de reenviar para revisão','terr');return;}
+    const A=p.projAprov;const agora=new Date().toISOString();
+    A.rodadas.push({n:A.rodadas.length+1,enviadoEm:agora,enviadoPor:quem(),ncs:[]});
+    A.status='aguardando';
+    await savePedidoFS(p);
+    toast('📤 Reenviado para revisão','tok');rerender(id);
+  };
+
+  // ── HTML: histórico das rodadas ──
+  function histHtml(p){
+    const r=rodadas(p);if(!r.length)return'';
+    return`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:.74rem;font-weight:700;color:#475569">🗂️ Histórico da revisão (${r.length} ${r.length===1?'rodada':'rodadas'})</summary>
+      ${r.map(x=>`<div style="margin-top:6px;padding:6px 8px;border-left:3px solid ${x.resultado==='aprovado'?'#16a34a':x.resultado==='devolvido'?'#dc2626':'#f59e0b'};background:#f8fafc;font-size:.74rem">
+        <b>Rodada ${x.n}</b> · enviado ${dtH(x.enviadoEm)} por ${esc(x.enviadoPor||'—')}
+        ${x.resultado?` · ${x.resultado==='aprovado'?'✅ aprovado':'↩️ devolvido'} ${dtH(x.decididoEm)} por ${esc(x.decididoPor||'—')}`:' · 🔍 aguardando'}
+        ${x.obs?`<div style="color:#475569">💬 ${esc(x.obs)}</div>`:''}
+        ${(x.ncs||[]).map(n=>`<div style="margin-left:10px">${n.corrigido?'☑️':'⬜'} ${n.grav==='grave'?'🔴':'🟡'} ${esc(tipoLbl(n.tipo))}: ${esc(n.desc)}${n.foto?` <a href="${esc(n.foto)}" target="_blank">📷</a>`:''}${n.corrigido?` <span style="color:#16a34a">— corrigido ${dtH(n.corrigido.em)} ${esc(n.corrigido.por||'')}${n.corrigido.obs?': '+esc(n.corrigido.obs):''}</span>`:''}</div>`).join('')}
+      </div>`).join('')}</details>`;
+  }
+  // ── HTML: faixa no checklist do projeto ──
+  function faixaHtml(p){
+    const s=status(p);const id=p.id;
+    if(s==='aguardando'){
+      const env=enviadoEm(p);let h='';try{h=_horasUteisEntre(new Date(env),new Date());h=h>=0?(h<1?'< 1h útil':h.toFixed(1).replace('.',',')+'h úteis'):'';}catch(e){h='';}
+      const pode=possoRevisar(p);
+      return`<div class="prv-faixa" style="margin:8px 0;padding:10px 12px;border-radius:10px;background:#fffbeb;border:1px solid #fcd34d">
+        <div style="font-size:.82rem;font-weight:800;color:#92400e">🔍 Em revisão — rodada ${nRodada(p)}</div>
+        <div style="font-size:.74rem;color:#78350f;margin-top:2px">Enviado ${dtH(env)}${h?' · há '+h:''}. Só conta como concluído quando ${esc(revisoresNomes().join(', ')||'o supervisor de Projetos')} aprovar. O prazo do projeto continua correndo.</div>
+        ${pode?`<textarea id="prv-obs-${id}" rows="1" placeholder="Comentário da aprovação (opcional)" style="width:100%;margin-top:8px;border:1px solid #fcd34d;border-radius:8px;padding:6px 8px;font:inherit;font-size:.78rem"></textarea>
+        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap"><button type="button" class="dash-btn-conf" style="background:#16a34a" onclick="prvAprovar('${id}')">✅ Aprovar projeto</button><button type="button" class="dash-btn-conf" style="background:#b91c1c" onclick="prvDevolverAbrir('${id}')">↩️ Devolver com não conformidades</button></div>`:''}
+        ${histHtml(p)}</div>`;
+    }
+    if(s==='devolvido'){
+      const r=rodadas(p);const u=r[r.length-1]||{};const ab=ncsAbertas(p).length;const tot=(u.ncs||[]).length;
+      return`<div class="prv-faixa" style="margin:8px 0;padding:10px 12px;border-radius:10px;background:#fef2f2;border:1px solid #fca5a5">
+        <div style="font-size:.82rem;font-weight:800;color:#991b1b">↩️ Devolvido pela revisão — ${tot-ab}/${tot} ${tot===1?'corrigida':'corrigidas'}</div>
+        <div style="font-size:.74rem;color:#7f1d1d;margin-top:2px">Devolvido ${dtH(u.decididoEm)} por ${esc(u.decididoPor||'—')}. Corrija, marque cada item e reenvie.${u.obs?`<br>💬 ${esc(u.obs)}`:''}</div>
+        <div style="margin-top:8px">${(u.ncs||[]).map(n=>`<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 8px;background:#fff;border:1px solid #fecaca;border-radius:8px;margin-bottom:5px;font-size:.78rem">
+          <input type="checkbox" ${n.corrigido?'checked':''} onchange="prvNcCorrigir('${id}','${n.id}',this.checked)" style="margin-top:3px;width:16px;height:16px;cursor:pointer" title="Marcar como corrigida">
+          <div style="flex:1"><b>${n.grav==='grave'?'🔴 Grave':'🟡 Leve'} · ${esc(tipoLbl(n.tipo))}</b><div>${esc(n.desc)}</div>${n.foto?`<a href="${esc(n.foto)}" target="_blank"><img src="${esc(n.foto)}" style="max-height:90px;max-width:160px;border-radius:6px;margin-top:4px;border:1px solid #e2e8f0"></a>`:''}
+          ${n.corrigido?`<div style="color:#16a34a;font-size:.72rem">✔ corrigido ${dtH(n.corrigido.em)} por ${esc(n.corrigido.por||'')}${n.corrigido.obs?': '+esc(n.corrigido.obs):''}</div>`:`<input id="prv-cor-${n.id}" placeholder="O que foi feito (opcional)" style="width:100%;margin-top:4px;border:1px solid #e2e8f0;border-radius:6px;padding:4px 6px;font-size:.74rem">`}</div></div>`).join('')}</div>
+        <button type="button" class="dash-btn-conf" style="background:${ab?'#94a3b8':'#0284c7'}" onclick="prvReenviar('${id}')" ${ab?'title="Marque todas como corrigidas"':''}>📤 Reenviar para revisão</button>
+        ${histHtml(p)}</div>`;
+    }
+    if(s==='aprovado'){
+      const A=p.projAprov||{};const r=rodadas(p);
+      return`<div class="prv-faixa" style="margin:8px 0;padding:8px 12px;border-radius:10px;background:#f0fdf4;border:1px solid #86efac;font-size:.78rem;color:#166534">✅ <b>Projeto aprovado</b> ${dtH(A.aprovadoEm)} por ${esc(A.aprovadoPor||'—')}${r.length>1?` · ${r.length} rodadas`:' · aprovado de primeira'}${histHtml(p)}</div>`;
+    }
+    if(!baseConcluido(p)&&!(p.lpBaixas&&p.lpBaixas.projeto&&p.lpBaixas.projeto.na))
+      return`<div class="prv-faixa" style="margin:6px 0;font-size:.72rem;color:#64748b">🔍 Ao concluir, o projeto vai para a revisão de ${esc(revisoresNomes().join(', ')||'o supervisor de Projetos')}. Só conta como concluído depois da aprovação.</div>`;
+    return'';
+  }
+  try{const _ck=projAbrirChecklist;projAbrirChecklist=function(pid){const r=_ck.apply(this,arguments);
+    try{const md=document.getElementById('proj-check-modal'),box=md&&md.firstElementChild,p=ped(pid);
+      if(box&&p){box.querySelectorAll('.prv-faixa').forEach(x=>x.remove());const h=faixaHtml(p);
+        if(h){const a=box.querySelector('.projx2-nav')||box.querySelector('.fp-barra')||box.firstElementChild;if(a)a.insertAdjacentHTML('afterend',h);else box.insertAdjacentHTML('afterbegin',h);}}
+    }catch(e){console.warn('revisão projetos (checklist)',e);}
+    return r;};}catch(e){console.warn('revisão projetos',e);}
+
+  // ── etiquetas na lista/kanban ──
+  try{const _tg=_projxTagsLinha;_projxTagsLinha=function(p){let h=_tg.apply(this,arguments);
+    try{const s=status(p);let t='';
+      if(s==='aguardando')t=`<span class="projx-tag" style="background:#fef3c7;color:#92400e" title="Aguardando a revisão do supervisor">🔍 Em revisão${nRodada(p)>1?' · '+nRodada(p)+'ª':''}</span>`;
+      else if(s==='devolvido')t=`<span class="projx-tag" style="background:#fee2e2;color:#991b1b" title="Devolvido com não conformidades">↩️ Devolvido · ${ncsAbertas(p).length} p/ corrigir</span>`;
+      else if(s==='aprovado'&&rodadas(p).length)t=`<span class="projx-tag" style="background:#dcfce7;color:#166534">✅ Revisado${rodadas(p).length>1?' ('+rodadas(p).length+' rodadas)':''}</span>`;
+      if(t){h=String(h||'');const i=h.lastIndexOf('</div>');h=i>=0?h.slice(0,i)+t+h.slice(i):h+'<div class="projx-tags">'+t+'</div>';}
+    }catch(e){}
+    return h;};}catch(e){}
+
+  // ── topo da tela de Projetos: fila do revisor e devolvidos ──
+  try{const _tp=_projxTopoHtml;_projxTopoHtml=function(){let h=_tp.apply(this,arguments);
+    try{
+      const f=fila(),d=devolvidos();const meu=norm(quem());
+      const souRev=souRevisor();const adm=(()=>{try{return _getUserCat().isAdm;}catch(e){return false;}})();
+      const meusDev=d.filter(p=>adm||souRev||norm(p.projResponsavel)===meu);
+      const meusRev=f.filter(p=>norm(p.projResponsavel)===meu);
+      const bts=[];
+      if(souRev)bts.push(`<button type="button" class="projx-fc" onclick="prvFilaAbrir()" style="border-color:#f59e0b;background:#fffbeb"><span class="projx-fc-l">🔍 Para revisar</span><b>${f.length}</b><small>${f.length?'clique pra abrir a fila':'nada aguardando'}</small></button>`);
+      else if(meusRev.length)bts.push(`<button type="button" class="projx-fc" onclick="prvFilaAbrir()" style="border-color:#f59e0b;background:#fffbeb"><span class="projx-fc-l">🔍 Meus em revisão</span><b>${meusRev.length}</b><small>aguardando o supervisor</small></button>`);
+      if(meusDev.length)bts.push(`<button type="button" class="projx-fc" onclick="prvFilaAbrir('dev')" style="border-color:#f87171;background:#fef2f2"><span class="projx-fc-l">↩️ Devolvidos p/ corrigir</span><b>${meusDev.length}</b><small>${souRev&&!adm?'com o projetista':'abra e corrija'}</small></button>`);
+      if(adm)bts.push(`<button type="button" class="projx-mini" onclick="prvCfgAbrir()" title="Quem revisa os projetos">⚙ Quem revisa</button>`);
+      if(bts.length){const blk=`<div class="prv-topo" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 10px">${bts.join('')}</div>`;h=blk+h;}
+    }catch(e){console.warn('revisão projetos (topo)',e);}
+    return h;};}catch(e){}
+
+  // ── janela: fila de revisão / devolvidos ──
+  window.prvFilaAbrir=function(aba){
+    const old=document.getElementById('prv-fila');const ab=aba||(old&&old.dataset.aba)||'rev';if(old)old.remove();
+    const souRev=souRevisor();const meu=norm(quem());
+    let l=ab==='dev'?devolvidos():fila();
+    if(!souRev)l=l.filter(p=>norm(p.projResponsavel)===meu);
+    const hoje=_hojeIso();
+    l.sort((a,b)=>String(ab==='dev'?'':enviadoEm(a)).localeCompare(String(ab==='dev'?'':enviadoEm(b))));
+    const linha=p=>{
+      let pz='—',atr=false;try{const x=_projInfo(p,hoje);if(x&&x.ok){pz=fmtD(x.etapa.iso);atr=x.etapa.iso<hoje;}}catch(e){}
+      const env=ab==='dev'?((rodadas(p).slice(-1)[0]||{}).decididoEm):enviadoEm(p);
+      let h='';try{const v=_horasUteisEntre(new Date(env),new Date());h=v>=0?(v<1?'< 1h':v.toFixed(1).replace('.',',')+'h'):'';}catch(e){}
+      const acoes=ab==='dev'?`<button type="button" class="projx-mini" onclick="document.getElementById('prv-fila').remove();projIniciarOuAbrirChecklist('${p.id}')">📂 Abrir e corrigir</button>`
+        :`<button type="button" class="projx-mini" onclick="document.getElementById('prv-fila').remove();projIniciarOuAbrirChecklist('${p.id}')">📂 Abrir</button>${possoRevisar(p)?` <button type="button" class="projx-mini" style="background:#16a34a;color:#fff;border-color:#16a34a" onclick="prvAprovar('${p.id}')">✅ Aprovar</button> <button type="button" class="projx-mini" style="background:#b91c1c;color:#fff;border-color:#b91c1c" onclick="prvDevolverAbrir('${p.id}')">↩️ Devolver</button>`:''}`;
+      return`<tr style="border-bottom:1px solid #eef2f7">
+        <td style="padding:7px 8px;font-weight:700">${esc(p.os||'—')}</td>
+        <td style="padding:7px 8px">${esc(nomePed(p))}</td>
+        <td style="padding:7px 8px">${esc(p.projResponsavel||'—')}</td>
+        <td style="padding:7px 8px;text-align:center">${ab==='dev'?ncsAbertas(p).length+'/'+((rodadas(p).slice(-1)[0]||{}).ncs||[]).length:nRodada(p)+'ª'}</td>
+        <td style="padding:7px 8px;white-space:nowrap">${dtH(env)}${h?`<div style="font-size:.7rem;color:#64748b">há ${h} úteis</div>`:''}</td>
+        <td style="padding:7px 8px;white-space:nowrap;${atr?'color:#dc2626;font-weight:700':''}">${pz}${atr?' ⚠':''}</td>
+        <td style="padding:7px 8px;text-align:right;white-space:nowrap">${acoes}</td></tr>`;
+    };
+    const m=document.createElement('div');m.id='prv-fila';m.dataset.aba=ab;
+    m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:10050;display:flex;align-items:center;justify-content:center;padding:16px';
+    const nF=(souRev?fila():fila().filter(p=>norm(p.projResponsavel)===meu)).length,nD=(souRev?devolvidos():devolvidos().filter(p=>norm(p.projResponsavel)===meu)).length;
+    m.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:1000px;width:100%;max-height:90vh;overflow:auto;padding:16px 18px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><b style="flex:1;color:#1a2b5e">🔍 Revisão de projetos</b><button type="button" onclick="document.getElementById('prv-fila').remove()" style="border:none;background:none;font-size:1.2rem;cursor:pointer;color:#94a3b8">✕</button></div>
+      <div style="display:flex;gap:6px;margin-bottom:10px"><button type="button" class="projx-mini ${ab==='rev'?'on':''}" onclick="prvFilaAbrir('rev')">🔍 Aguardando revisão (${nF})</button><button type="button" class="projx-mini ${ab==='dev'?'on':''}" onclick="prvFilaAbrir('dev')">↩️ Devolvidos (${nD})</button></div>
+      ${l.length?`<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem"><thead><tr style="text-align:left;border-bottom:2px solid #e2e8f0;color:#475569">
+        <th style="padding:7px 8px">OS</th><th style="padding:7px 8px">Cliente · JOB</th><th style="padding:7px 8px">Projetista</th><th style="padding:7px 8px;text-align:center">${ab==='dev'?'Abertas':'Rodada'}</th><th style="padding:7px 8px">${ab==='dev'?'Devolvido em':'Enviado em'}</th><th style="padding:7px 8px">Prazo do projeto</th><th></th></tr></thead>
+        <tbody>${l.map(linha).join('')}</tbody></table></div>`:`<div style="padding:30px;text-align:center;color:#94a3b8;font-size:.85rem">${ab==='dev'?'Nenhum projeto devolvido.':'Nenhum projeto aguardando revisão 🎉'}</div>`}
+    </div>`;
+    document.body.appendChild(m);
+  };
+
+  // ── ⚙ quem revisa (admin) ──
+  window.prvCfgAbrir=function(){
+    if(!_getUserCat().isAdm){toast('Só o administrador escolhe quem revisa','terr');return;}
+    const old=document.getElementById('prv-cfg');if(old)old.remove();
+    const atuais=revisoresEmails();const definido=(cfg.projRevisores||[]).length>0;
+    const users=Object.keys(cfg.usuarioCats||{}).map(e=>({e:e.toLowerCase(),n:nomeDe(e.toLowerCase()),c:cfg.usuarioCats[e]})).sort((a,b)=>String(a.n).localeCompare(String(b.n)));
+    const m=document.createElement('div');m.id='prv-cfg';m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:10060;display:flex;align-items:center;justify-content:center;padding:16px';
+    m.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:18px 20px">
+      <div style="display:flex;align-items:center"><b style="flex:1;color:#1a2b5e">⚙ Quem revisa os projetos</b><button type="button" onclick="document.getElementById('prv-cfg').remove()" style="border:none;background:none;font-size:1.2rem;cursor:pointer;color:#94a3b8">✕</button></div>
+      <div style="font-size:.74rem;color:#64748b;margin:8px 0 10px;padding:8px 10px;background:#f8fafc;border-radius:8px">${definido?'Escolhidos por você.':'Ninguém escolhido ainda: hoje revisam os usuários de Projetos com nível Supervisor ou acima e quem aprova FP.'} O administrador sempre pode aprovar ou devolver no lugar.</div>
+      ${users.map(u=>`<label style="display:flex;gap:6px;align-items:center;font-size:.78rem;margin-bottom:3px"><input type="checkbox" class="prv-cfg-u" value="${esc(u.e)}" ${atuais.includes(u.e)?'checked':''}> ${esc(u.n)} <span style="color:#94a3b8">· ${esc(u.c||'')}</span></label>`).join('')}
+      <div style="margin-top:14px"><button type="button" class="dash-btn-conf" onclick="prvCfgSalvar()">💾 Salvar</button></div></div>`;
+    document.body.appendChild(m);
+  };
+  window.prvCfgSalvar=async function(){
+    cfg.projRevisores=[...document.querySelectorAll('.prv-cfg-u:checked')].map(i=>i.value);
+    try{await salvarCfg();toast('Revisores salvos ✅','tok');}catch(e){toast('Erro ao salvar: '+e.message,'terr');return;}
+    const m=document.getElementById('prv-cfg');if(m)m.remove();try{projRenderAtivo();}catch(e){}
+  };
+
+  // ── avisos no sino ──
+  try{const _av=_projxAvisos;_projxAvisos=function(){const out=_av.apply(this,arguments)||[];
+    try{
+      const revs=revisoresNomes();
+      fila().forEach(p=>{const env=enviadoEm(p);
+        revs.forEach(n=>{if(norm(n)===norm(p.projResponsavel))return;
+          out.push({id:'proj_rev_'+p.id+'_'+nRodada(p)+'_'+norm(n).replace(/\W/g,''),automatico:true,tipoAuto:'proj_revisao',
+            assunto:'🔍 Projeto para revisar — OS '+(p.os||'—'),
+            texto:`O projetista ${p.projResponsavel||'—'} concluiu o projeto da OS ${p.os||'—'} (${nomePed(p)}) e enviou para revisão${nRodada(p)>1?' ('+nRodada(p)+'ª rodada)':''} em ${dtH(env)}. Abra Projetos → 🔍 Para revisar pra aprovar ou devolver.`,
+            destinatarioTipo:'nome',destinatarioValor:n});});
+      });
+      devolvidos().forEach(p=>{if(!p.projResponsavel)return;const u=rodadas(p).slice(-1)[0]||{};
+        out.push({id:'proj_dev_'+p.id+'_'+(u.n||0),automatico:true,tipoAuto:'proj_devolvido',
+          assunto:'↩️ Projeto devolvido — OS '+(p.os||'—'),
+          texto:`${u.decididoPor||'O supervisor'} devolveu o projeto da OS ${p.os||'—'} (${nomePed(p)}) com ${(u.ncs||[]).length} ${(u.ncs||[]).length===1?'não conformidade':'não conformidades'}. Abra o checklist do projeto, corrija, marque cada item e reenvie.`,
+          destinatarioTipo:'nome',destinatarioValor:p.projResponsavel});
+      });
+    }catch(e){console.warn('revisão projetos (avisos)',e);}
+    return out;};}catch(e){}
+
+  // ── indicadores da revisão ──
+  function indHtml(){
+    let per=null;try{per=_projIndPeriodo();}catch(e){}
+    const noPer=iso=>{if(!iso)return false;if(!per)return true;try{return _lpDataNoIntervalo(_isoLocal(new Date(iso)),per.de,per.ate);}catch(e){return true;}};
+    const todos=(typeof pedidos!=='undefined'&&pedidos||[]).filter(p=>p&&p.projAprov&&(p.projAprov.rodadas||[]).length);
+    const aprov=todos.filter(p=>p.projAprov.status==='aprovado'&&noPer(p.projAprov.aprovadoEm));
+    const deP=aprov.filter(p=>p.projAprov.rodadas.length===1).length;
+    const medR=aprov.length?aprov.reduce((s,p)=>s+p.projAprov.rodadas.length,0)/aprov.length:0;
+    const decs=[];todos.forEach(p=>p.projAprov.rodadas.forEach(r=>{if(r.resultado&&noPer(r.decididoEm))decs.push({p,r});}));
+    const dev=decs.filter(x=>x.r.resultado==='devolvido');
+    const ncs=[];dev.forEach(x=>(x.r.ncs||[]).forEach(n=>ncs.push({p:x.p,n})));
+    let hRev=[];decs.forEach(x=>{try{const h=_horasUteisEntre(new Date(x.r.enviadoEm),new Date(x.r.decididoEm));if(h>=0)hRev.push(h);}catch(e){}});
+    const media=a=>a.length?a.reduce((s,v)=>s+v,0)/a.length:null;
+    const f1=v=>v==null?'—':v.toFixed(1).replace('.',',');
+    const pct=(a,b)=>b?Math.round(a/b*100)+'%':'—';
+    const porTipo={};ncs.forEach(x=>{porTipo[x.n.tipo]=(porTipo[x.n.tipo]||0)+1;});
+    const graves=ncs.filter(x=>x.n.grav==='grave').length;
+    const porProj={};
+    aprov.forEach(p=>{const k=p.projResponsavel||'— sem projetista';const o=porProj[k]=porProj[k]||{a:0,p1:0,dev:0,nc:0};o.a++;if(p.projAprov.rodadas.length===1)o.p1++;});
+    dev.forEach(x=>{const k=x.p.projResponsavel||'— sem projetista';const o=porProj[k]=porProj[k]||{a:0,p1:0,dev:0,nc:0};o.dev++;o.nc+=(x.r.ncs||[]).length;});
+    const filaN=fila().length;
+    const card=(t,v,s,c)=>`<div style="flex:1;min-width:140px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;background:#fff"><div style="font-size:.7rem;color:#64748b;font-weight:700">${t}</div><div style="font-size:1.3rem;font-weight:800;color:${c||'#1a2b5e'}">${v}</div>${s?`<div style="font-size:.68rem;color:#94a3b8">${s}</div>`:''}</div>`;
+    const tiposOrd=Object.entries(porTipo).sort((a,b)=>b[1]-a[1]);
+    return`<div id="prv-ind" style="margin-top:16px;padding:14px 16px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc">
+      <div style="font-size:.9rem;font-weight:800;color:#1a2b5e;margin-bottom:10px">🔍 Revisão dos projetos <span style="font-size:.72rem;color:#64748b;font-weight:600">· período dos indicadores</span></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${card('Aprovados',aprov.length,'no período')}
+        ${card('Aprovados de primeira',pct(deP,aprov.length),deP+' de '+aprov.length,'#16a34a')}
+        ${card('Média de rodadas',aprov.length?f1(medR):'—','por projeto aprovado')}
+        ${card('Devoluções',dev.length,ncs.length+' '+(ncs.length===1?'não conformidade':'não conformidades')+' · '+graves+' '+(graves===1?'grave':'graves'),'#b91c1c')}
+        ${card('Tempo médio em revisão',hRev.length?f1(media(hRev))+'h':'—','horas úteis até a decisão')}
+        ${card('Na fila agora',filaN,'aguardando revisão','#b45309')}
+      </div>
+      ${tiposOrd.length?`<div style="margin-top:12px;font-size:.78rem"><b style="color:#475569">Não conformidades por tipo</b>${tiposOrd.map(([k,n])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:4px"><span style="width:190px">${esc(tipoLbl(k))}</span><div style="flex:1;background:#e2e8f0;border-radius:6px;height:10px;overflow:hidden"><div style="width:${Math.round(n/ncs.length*100)}%;height:100%;background:#dc2626"></div></div><b style="width:70px;text-align:right">${n} · ${pct(n,ncs.length)}</b></div>`).join('')}</div>`:''}
+      ${Object.keys(porProj).length?`<div style="margin-top:12px;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem;background:#fff;border-radius:8px"><thead><tr style="text-align:left;border-bottom:2px solid #e2e8f0;color:#475569"><th style="padding:6px 8px">Projetista</th><th style="padding:6px 8px">Aprovados</th><th style="padding:6px 8px">De primeira</th><th style="padding:6px 8px">Devoluções</th><th style="padding:6px 8px">Não conformidades</th></tr></thead><tbody>
+        ${Object.entries(porProj).sort((a,b)=>b[1].a-a[1].a).map(([n,o])=>`<tr style="border-bottom:1px solid #eef2f7"><td style="padding:6px 8px">${esc(n)}</td><td style="padding:6px 8px">${o.a}</td><td style="padding:6px 8px">${pct(o.p1,o.a)}</td><td style="padding:6px 8px">${o.dev}</td><td style="padding:6px 8px">${o.nc}</td></tr>`).join('')}</tbody></table></div>`:''}
+      ${!todos.length?`<div style="font-size:.76rem;color:#94a3b8;margin-top:8px">Ainda não há projetos revisados. Os números aparecem conforme o supervisor aprova ou devolve.</div>`:''}
+    </div>`;
+  }
+  try{const _ir=_projxIndExtrasRender;_projxIndExtrasRender=function(){const r=_ir.apply(this,arguments);
+    try{const el=document.getElementById('proj-ind-extras');if(el&&_isSetorUser('PROJETOS')){const o=document.getElementById('prv-ind');if(o)o.remove();el.insertAdjacentHTML('beforeend',indHtml());}}catch(e){console.warn('revisão projetos (indicadores)',e);}
+    return r;};}catch(e){}
 })();
 // ── FINANCEIRO: BUSCA RÁPIDA E EM TODOS OS CAMPOS (build 2026-11-04.20) ─────────────────────────────────
 // Pedido do Guilherme: "o Financeiro está travando demais ao pesquisar … deixe ele rodando liso" + "quando
