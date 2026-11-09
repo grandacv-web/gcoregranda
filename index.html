@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-06.11';</script>
+<script>const APP_BUILD_VERSION='2026-11-09.3';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -1458,6 +1458,7 @@ select.fc{cursor:pointer}
     <button class="dash-tab" id="gtab-metas" onclick="geralTab('metas',this)" style="display:none">💰 Comissões</button>
     <!-- 📦 Produtos saiu daqui em 2026-10-16: agora é Projetos → 📦 Produtos (ver proj-sec-produtos) -->
     <button class="dash-tab" id="gtab-fechamento" onclick="geralTab('fechamento',this)" style="display:none">📊 Fechamento de Pedidos</button>
+    <button class="dash-tab" id="gtab-custosqual" onclick="geralTab('custosqual',this)" style="display:none">💸 Custos Retrabalho/Garantias</button>
   </div>
 
   <!-- SUB-ABA: VENDAS DO MÊS (padrão ao abrir) -->
@@ -1872,6 +1873,10 @@ select.fc{cursor:pointer}
        dos operacionais lançado pelo Planejamento (p.fornGestao, via _fgCalc) + gastos extras. -->
   <div id="geral-tab-fechamento" style="display:none;padding:16px 20px">
     <div id="fech-body"></div>
+  </div>
+  <!-- 💸 CUSTOS RETRABALHO/GARANTIAS (2026-11-09) — só no menu QUALIDADE. Ver renderCustosQualidade(). -->
+  <div id="geral-tab-custosqual" style="display:none;padding:16px 20px">
+    <div id="cqg-body"></div>
   </div>
   <div id="geral-tab-produtos" style="display:none;padding:16px 20px">
   </div>
@@ -6422,14 +6427,22 @@ const vEl=id=>document.getElementById(id)?.value||'';
 // gravada em p.cliente — busca, agrupamento e financeiro seguem por ela).
 function _pedCliExib(p){
   if(p&&p.isChumbador&&!p.nomeFantasia&&p.chumbadorDe&&typeof pedidos!=='undefined'){const pai=pedidos.find(x=>x&&x.id===p.chumbadorDe);if(pai&&pai.nomeFantasia)return('CHUMBADOR PARA O PEDIDO '+(pai.os||'')+' '+pai.nomeFantasia).trim();}
-  return String((p&&(p.nomeFantasia||p.cliente))||'').trim();}
+  // (2026-11-09) Nunca deixar o pedido sem nome de cliente: nome fantasia → razão social →
+  // nome provisório do Conselho → nome do card do CRM ligado ao pedido.
+  if(!p)return'';
+  let c=String(p.nomeFantasia||p.cliente||p.razaoSocial||'').trim();
+  if(!c)c=String(p.conselhoClienteProvisorio||'').trim();
+  if(!c){try{c=String(_conselhoNomeCrm(p)||'').trim();}catch(_){}}
+  return c;}
+// (2026-11-09, a pedido do Guilherme) Padrão em TODO o sistema: NOME FANTASIA · JOB (ou RAZÃO SOCIAL · JOB
+// nos pedidos antigos sem nome fantasia). Nunca só o JOB — senão ninguém sabe quem é o cliente.
 function _pedNome(p){
   if(!p)return'—';
   const c=_pedCliExib(p),j=String(p.job||'').trim();
   if(!j)return c||'—';
-  if(!c)return j;
+  if(!c)return 'Cliente não informado · '+j;
   if(c.toUpperCase().includes(j.toUpperCase()))return c;
-  return j+' · '+c;
+  return c+' · '+j;
 }
 // Variante "cliente primeiro, JOB depois" (2026-10-06, a pedido do usuário: "na lista de pedidos do pipeline não
 // colocar o job antes do nome do cliente, colocar primeiro o nome fantasia do cliente e depois o job").
@@ -6437,7 +6450,7 @@ function _pedNomeCliJob(p){
   if(!p)return'—';
   const c=_pedCliExib(p),j=String(p.job||'').trim();
   if(!j)return c||'—';
-  if(!c)return j;
+  if(!c)return 'Cliente não informado · '+j;
   if(c.toUpperCase().includes(j.toUpperCase()))return c;
   return c+' · '+j;
 }
@@ -6459,7 +6472,7 @@ function _pedTipoTag(p){
   return ` <span class="ped-tipo-tag" title="Categoria do pedido" style="display:inline-block;background:${c[0]};color:${c[1]};border-radius:20px;padding:0 6px;font-size:.6rem;font-weight:800;line-height:1.5;vertical-align:middle;white-space:nowrap">${t}</span>`;
 }
 function _pedTipoSuf(p){const t=_pedTipoTxt(p);return t?' · '+t:'';}
-function _pedCliTipo(p){return (String((p&&p.cliente)||'').trim()||'—')+_pedTipoSuf(p);}
+function _pedCliTipo(p){return (_pedCliExib(p)||'—')+_pedTipoSuf(p);}
 function _pedTipoCurto(p){const t=_pedTipoTxt(p);return t?' '+t.slice(0,3):'';}
 const fmtD=d=>{if(!d)return'';if(d.includes('/'))return d;try{const[y,m,dd]=d.split('-');return`${dd}/${m}/${y}`}catch(e){return d}};
 // Data+hora da tarefa formatada junto (2026-09-17, a pedido do usuário: "quero que as
@@ -7778,6 +7791,8 @@ function setupRealtimeSync(){
       }
     });}catch(e){}
     try{pedidos.forEach(_prodNormLetraCaixa);}catch(e){}
+    // Custos Retrabalho/Garantias (Qualidade) atualiza sozinho quando o Planejamento lança custo.
+    try{setTimeout(()=>{const b=document.getElementById('cqg-body');if(b&&b.offsetParent&&typeof renderCustosQualidade==='function')renderCustosQualidade();},0);}catch(e){}
     // Roda em TODA sessão nova (sem flag "só 1x", ao contrário das migrações abaixo) — é uma
     // limpeza de segurança que precisa continuar rodando se algum resíduo antigo reaparecer;
     // o próprio corpo da função já é idempotente (não faz nada se não achar nenhum "__x__").
@@ -9075,6 +9090,10 @@ function _avisoDestino(av){
       if(!d||!_temMenu(d.menu))return null;
       return{label:'Abrir '+d.label,go:()=>{_avisoFecharPaineis();setSection('cat:'+d.menu);}};
     }
+    if(t==='gar_semcusto'){
+      if(!_isPlanejamentoUser()||!av.pedidoId)return null;
+      return{label:'Lançar custos',go:()=>{_avisoFecharPaineis();setSection('cat:PLANEJAMENTO');setTimeout(()=>{try{abrirFgLancar(av.pedidoId);}catch(e){console.error(e);}},300);}};
+    }
     if(t==='sim_reserva'){
       if(!_isPlanejamentoUser())return null;
       return{label:'Ir pro Simulador',go:_avisosIrSimulador};
@@ -9431,6 +9450,9 @@ function _aplicarModoConselhoQualidade(ativo){
     const el=document.getElementById(id);
     if(el)el.style.display=ativo?'none':'';
   });
+  // 💸 Custos Retrabalho/Garantias (2026-11-09) — só existe dentro do menu Qualidade.
+  {const el=document.getElementById('gtab-custosqual');if(el)el.style.display=ativo?'':'none';
+   if(!ativo){const c=document.getElementById('geral-tab-custosqual');if(c)c.style.display='none';}}
   // 2026-09-08 (correção a pedido do Guilherme: viu Comissões/Produtos aparecendo dentro
   // do menu Qualidade mesmo logado como admin) — Comissões/Produtos são admin-only (regra
   // em buildSidebarCats()), mas essa regra só roda 1x no login e não sabia nada sobre o
@@ -9767,6 +9789,348 @@ function geralConselhoEmissoesSub(sub,btn){
     renderAll();
   }
 }
+// ══ 💸 CUSTOS RETRABALHO/GARANTIAS (2026-11-09, a pedido do Guilherme) ══ menu QUALIDADE.
+// Todo pedido de Garantia/Retrabalho emitido entra sozinho na lista (data = emissão). Custos:
+// o que o Planejamento lança no pedido (Fornecedores → p.fornGestao, via _fgCalc) — Instalação
+// (instalação+mobilização+remoção+pintura de tubo), Frete, Elevações/Munque, Medição, ART, Laudo,
+// Gastos extras — + Produção (material e mão de obra), que a Qualidade informa (p.qualCustos).
+// Setor que gerou (p.rncSetor/p.rncSetorOutro) vem da emissão (aba RNC) e a Qualidade pode corrigir.
+// Indicadores: por setor, por origem (vendedor/fornecedores do pedido original — pedido antigo de
+// outro sistema fica separado), por marca, por tipo de produto e % sobre o faturamento (12 meses).
+var RNC_SETORES=['PRODUÇÃO','PROJETOS','PLANEJAMENTO','QUALIDADE','COMERCIAL','OUTRO'];
+let _cqgView={y:new Date().getFullYear(),m:new Date().getMonth()+1,busca:'',ind:'setor'};
+const _CQG_CATS=[
+  {k:'inst',l:'🔧 Instalação',c:'Instalação'},{k:'frete',l:'🚚 Frete',c:'Frete'},{k:'munque',l:'🏗️ Elevações / Munque',c:'Elevações'},
+  {k:'medicao',l:'📏 Medição técnica',c:'Medição'},{k:'art',l:'📜 ART',c:'ART'},{k:'laudo',l:'🧪 Laudo técnico',c:'Laudo'},
+  {k:'extras',l:'🧾 Gastos extras',c:'Gastos extras'},{k:'producao',l:'🏭 Produção',c:'Produção'}
+];
+const _CQG_PRODUTOS=[['TOTEM',/TOTEM/],['LETREIRO / LETRA CAIXA',/LETREIRO|LETRA/],['FACHADA / ACM',/FACHADA|\bACM\b|REVESTIMENTO/],
+  ['LUMINOSO / BACKLIGHT',/LUMINOSO|BACKLIGHT|BACK LIGHT|\bLED\b|NEON/],['PLACA',/PLACA/],['PAINEL / MENU BOARD',/PAINEL|MENU ?BOARD|DISPLAY/],
+  ['ADESIVO / ENVELOPAMENTO',/ADESIV|ENVELOP|PELICULA|PELÍCULA|LONA|IMPRESS/],['MOBILIÁRIO',/MOBILI|BALC|MESA|ARMARIO|ARMÁRIO|PRATELEIRA/],
+  ['ESTRUTURA METÁLICA',/ESTRUTURA|METALIC|METÁLIC|TUBO|POSTE/]];
+const _cqgEscH=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+function _cqgEhGarantia(p){try{return _pedTipoTxt(p)==='GARANTIA';}catch(e){return false;}}
+function _cqgPodeEditar(){try{return _getUserCat().isAdm||_isSetorUser('QUALIDADE');}catch(e){return false;}}
+function _cqgFornNome(v){if(!v)return'';const f=(cfg.fornecedores||[]).find(x=>x.id===v);return(f&&f.nome)||String(v);}
+function _cqgSetorLbl(p){const s=String(p.rncSetor||'').trim();if(!s)return'Não informado';if(s==='OUTRO')return'OUTRO'+(p.rncSetorOutro?' — '+String(p.rncSetorOutro).trim():'');return s;}
+function _cqgEmIso(p){return _normPrazoIso(p.emissaoEm)||String(p.emissaoEm||'').slice(0,10);}
+// Pedido original (dentro do sistema ou só na planilha de vendas); null = pedido antigo de outro sistema.
+function _cqgOrigemInfo(p,rowsVenda){
+  const o=p.rncPedidoOrigem||null;
+  if(!o||!o.os)return{tipo:'sem',os:''};
+  const os=String(o.os);
+  let po=o.id?pedidos.find(x=>x.id===o.id):null;
+  if(!po)po=pedidos.find(x=>x.id!==p.id&&String(x.os||'')===os&&!_cqgEhGarantia(x))||null;
+  const row=(rowsVenda||[]).find(r=>String(r.p)===os)||null;
+  if(!po&&!row)return{tipo:'externo',os};
+  const fg=(po&&po.fornGestao)||{};
+  return{tipo:'sistema',os,p:po,vendedor:(po&&po.responsavel)||(row&&row.v)||'',
+    instalador:_cqgFornNome(fg.instalador),transportadora:_cqgFornNome(fg.transportadora),munque:_cqgFornNome(fg.munque)};
+}
+function _cqgTiposProduto(p){
+  const txt=[p.job,...((p.itensProducao||[]).filter(i=>!i.foraEscopo).map(i=>i.nome))].join(' ').toUpperCase();
+  const t=_CQG_PRODUTOS.filter(([,re])=>re.test(txt)).map(([n])=>n);
+  return t.length?t:['OUTROS'];
+}
+function _cqgLinha(p,ctx){
+  ctx=ctx||{};
+  let c={};try{c=_fgCalc(p)||{};}catch(e){console.error('_cqgLinha',p.os,e);}
+  const fg=p.fornGestao||{},sv=c.servicos||{},qc=p.qualCustos||{};
+  const prodMat=moneyToNum(qc.material||0),prodMo=moneyToNum(qc.maoObra||0);
+  const v={inst:c.temInst?(c.fechadoInst||0):0,frete:c.temFrete?(c.fechadoFrete||0):0,munque:c.temMunque?(c.fechadoMunque||0):0,
+    medicao:(sv.medicao&&sv.medicao.tem)?(sv.medicao.fechado||0):0,art:(sv.art&&sv.art.tem)?(sv.art.fechado||0):0,
+    laudo:(sv.laudo&&sv.laudo.tem)?(sv.laudo.fechado||0):0,extras:c.gastosExtras||0,producao:prodMat+prodMo};
+  const forn={inst:_cqgFornNome(fg.instalador),frete:_cqgFornNome(fg.transportadora),munque:_cqgFornNome(fg.munque),
+    medicao:(sv.medicao&&sv.medicao.forn)||'',art:(sv.art&&sv.art.forn)||'',laudo:(sv.laudo&&sv.laudo.forn)||'',
+    producao:(prodMat||prodMo)?`Material ${fmtR(prodMat)} · Mão de obra ${fmtR(prodMo)}`:''};
+  const lancado=!!(fg.instalador||fg.transportadora||fg.munque||forn.medicao||forn.art||forn.laudo||(fg.gastosExtras||[]).length);
+  const noPlan=ctx.elegPlan?ctx.elegPlan.has(p.id):true;
+  const total=_CQG_CATS.reduce((s,x)=>s+(v[x.k]||0),0);
+  let marca='—';try{marca=_fatClienteGrupoNome({cl:p.cliente||_pedCliExib(p),job:p.job||'',p:p.os})||'—';}catch(e){}
+  return{p,os:p.os||'',nome:_pedNome(p),em:_cqgEmIso(p),v,forn,total,lancado,noPlan,
+    extrasLista:Array.isArray(fg.gastosExtras)?fg.gastosExtras:[],
+    origem:_cqgOrigemInfo(p,ctx.rowsVenda),setor:String(p.rncSetor||'').trim()||'',setorLbl:_cqgSetorLbl(p),
+    marca,produtos:_cqgTiposProduto(p),prodInformado:!!(qc.material||qc.maoObra),qc,
+    por:fg.atualizadoPor||'',atualizadoEm:fg.atualizadoEm||'',finalizado:!!(p.finalizacao&&p.finalizacao.dataFinalizacao),resp:p.responsavel||''};
+}
+function _cqgCtx(){
+  let elegPlan=null;try{elegPlan=new Set(_plPedidosElegiveis().map(x=>x.id));}catch(e){}
+  let rowsVenda=[];try{rowsVenda=getVendaRowsMerged();}catch(e){}
+  return{elegPlan,rowsVenda};
+}
+// Todas as garantias emitidas (sem filtro de data) — base dos indicadores de 12 meses.
+function _cqgTodas(ctx){
+  return pedidos.filter(p=>p&&p.origemComercial&&_cqgEhGarantia(p)&&!(p.os&&typeof isVendaCancelada==='function'&&isVendaCancelada(p.os))&&_cqgEmIso(p))
+    .map(p=>_cqgLinha(p,ctx));
+}
+function _cqgFiltrar(T){
+  const{y,m,busca}=_cqgView;
+  const N=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase();
+  const q=N(busca).trim();
+  return T.filter(l=>{
+    const[yy,mm]=l.em.split('-').map(Number);
+    if(yy!==y||(m&&mm!==m))return false;
+    if(q&&!N([l.os,l.p.cliente,l.p.nomeFantasia,l.p.job,l.resp,l.origem.os,l.setorLbl,l.marca].join(' ')).includes(q))return false;
+    return true;
+  }).sort((a,b)=>String(b.em).localeCompare(String(a.em))||String(b.os).localeCompare(String(a.os),'pt-BR',{numeric:true}));
+}
+function _cqgLinhas(){return _cqgFiltrar(_cqgTodas(_cqgCtx()));}
+function _cqgFatLiq(y,m,rows){
+  try{return(rows||getVendaRowsMerged()).filter(r=>_vrNoPeriodo(r,y,m)).reduce((s,r)=>s+(Number(r.lq)||0),0);}catch(e){return 0;}
+}
+function cqgSetPeriodo(){
+  _cqgView.y=parseInt(document.getElementById('cqg-ano').value,10)||new Date().getFullYear();
+  _cqgView.m=parseInt(document.getElementById('cqg-mes').value,10)||0;
+  renderCustosQualidade();
+}
+function cqgSetInd(k){_cqgView.ind=k;renderCustosQualidade();}
+function cqgBuscar(v){_cqgView.busca=v||'';clearTimeout(window._cqgT);window._cqgT=setTimeout(()=>{renderCustosQualidade();const i=document.getElementById('cqg-busca');if(i){i.focus();const n=i.value.length;try{i.setSelectionRange(n,n);}catch(e){}}},250);}
+const _cqgPct=(a,b)=>b>0.005?((a/b)*100).toFixed(1).replace('.',',')+'%':'—';
+// Tabela de agrupamento (setor/marca/produto/origem): [{nome,n,custo,sub}]
+function _cqgTabelaGrupo(titulo,grupos,totalRef,nota){
+  const max=Math.max(0.01,...grupos.map(g=>g.custo));
+  if(!grupos.length)return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">${titulo}</div><div style="padding:14px 4px;color:var(--ink4);font-size:.8rem">Nada para mostrar nesse período.</div></div>`;
+  return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">${titulo}</div>
+    <div style="overflow-x:auto;margin-top:8px"><table class="dash-table" style="font-size:.76rem"><thead><tr><th></th><th style="text-align:right">Pedidos</th><th style="text-align:right">Custo</th><th style="text-align:right">% do custo</th><th style="text-align:right">Custo médio</th><th style="min-width:140px"></th></tr></thead><tbody>
+    ${grupos.map(g=>`<tr><td style="font-weight:700;min-width:160px"${g.sub?` title="${_cqgEscH(g.sub)}"`:''}>${_cqgEscH(g.nome)}${g.sub?`<div style="font-size:.66rem;color:var(--ink4);font-weight:500;white-space:normal">${_cqgEscH(g.sub)}</div>`:''}</td>
+      <td style="text-align:right">${g.n}</td><td style="text-align:right;white-space:nowrap;font-weight:800">${fmtR(g.custo)}</td>
+      <td style="text-align:right;white-space:nowrap">${_cqgPct(g.custo,totalRef)}</td><td style="text-align:right;white-space:nowrap">${g.n?fmtR(g.custo/g.n):'—'}</td>
+      <td><div style="height:8px;border-radius:4px;background:#fee2e2"><div style="height:8px;border-radius:4px;background:#dc2626;width:${Math.max(2,Math.round(g.custo/max*100))}%"></div></div></td></tr>`).join('')}
+    </tbody></table></div>${nota?`<div style="font-size:.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">${nota}</div>`:''}</div>`;
+}
+function _cqgAgrupar(L,chave,fixos){
+  const m=new Map();(fixos||[]).forEach(k=>m.set(k,{nome:k,n:0,custo:0,subs:new Set()}));
+  L.forEach(l=>{[].concat(chave(l)).filter(Boolean).forEach(k=>{
+    const nome=typeof k==='string'?k:k.nome,sub=typeof k==='string'?'':(k.sub||'');
+    if(!m.has(nome))m.set(nome,{nome,n:0,custo:0,subs:new Set()});
+    const g=m.get(nome);g.n++;g.custo+=l.total;if(sub)g.subs.add(sub);});});
+  return[...m.values()].filter(g=>g.n||!fixos).map(g=>({nome:g.nome,n:g.n,custo:g.custo,sub:[...g.subs].join(' · ')})).sort((a,b)=>b.custo-a.custo||b.n-a.n);
+}
+function _cqgIndHtml(L,T,ctx,totalGeral){
+  const ind=_cqgView.ind;
+  const chips=[['setor','🏢 Por setor'],['origem','🔗 Por origem'],['marca','🏷️ Por marca'],['produto','📦 Por produto'],['meses','📈 12 meses']]
+    .map(([k,l])=>`<button type="button" class="gc-vend-tab${ind===k?' active':''}" onclick="cqgSetInd('${k}')">${l}</button>`).join('');
+  let corpo='';
+  if(ind==='setor'){
+    const g=_cqgAgrupar(L,l=>({nome:l.setor||'Não informado',sub:l.setor==='OUTRO'&&l.p.rncSetorOutro?String(l.p.rncSetorOutro).trim():''}),[...RNC_SETORES,'Não informado']);
+    corpo=_cqgTabelaGrupo('Custo por setor que gerou o retrabalho/garantia',g,totalGeral,'O setor é escolhido na emissão do pedido de Garantia/Retrabalho (aba RNC). Pedidos emitidos antes disso aparecem como "Não informado" — a Qualidade pode informar clicando no pedido.');
+  }else if(ind==='origem'){
+    const comSis=L.filter(l=>l.origem.tipo==='sistema'),ext=L.filter(l=>l.origem.tipo==='externo'),sem=L.filter(l=>l.origem.tipo==='sem');
+    const sumC=a=>a.reduce((s,l)=>s+l.total,0);
+    const gV=_cqgAgrupar(comSis,l=>l.origem.vendedor||'Sem vendedor');
+    const gF=_cqgAgrupar(comSis,l=>[l.origem.instalador&&{nome:l.origem.instalador,sub:'Instalador'},l.origem.transportadora&&{nome:l.origem.transportadora,sub:'Transportadora'},l.origem.munque&&{nome:l.origem.munque,sub:'Munque'}].filter(Boolean));
+    corpo=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:14px;font-size:.78rem">
+      <div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:9px;padding:10px 12px"><div style="font-weight:800">🔗 Pedido original no sistema</div><div style="margin-top:4px">${comSis.length} ${_plural(comSis.length,'pedido','pedidos')} · <b>${fmtR(sumC(comSis))}</b></div></div>
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:9px;padding:10px 12px"><div style="font-weight:800">🗄️ Pedido antigo (outro sistema)</div><div style="margin-top:4px">${ext.length} ${_plural(ext.length,'pedido','pedidos')} · <b>${fmtR(sumC(ext))}</b></div><div style="font-size:.66rem;color:#92400e;margin-top:2px">Sem vendedor/fornecedor vinculado</div></div>
+      ${sem.length?`<div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:9px;padding:10px 12px"><div style="font-weight:800">❔ Sem pedido de origem</div><div style="margin-top:4px">${sem.length} ${_plural(sem.length,'pedido','pedidos')} · <b>${fmtR(sumC(sem))}</b></div></div>`:''}
+    </div>`+_cqgTabelaGrupo('Por vendedor do pedido original',gV,totalGeral,'Só garantias cujo pedido original está no sistema (ou na planilha de vendas).')
+      +_cqgTabelaGrupo('Por fornecedor do pedido original (instalador, transportadora, munque)',gF,totalGeral,'Uma garantia conta para cada fornecedor que trabalhou no pedido original — a soma pode passar do total.');
+  }else if(ind==='marca'){
+    corpo=_cqgTabelaGrupo('Ranking por marca / cliente',_cqgAgrupar(L,l=>l.marca),totalGeral,'Marca pelo mesmo agrupamento do Faturamento por Cliente (Grupos de Cliente).');
+  }else if(ind==='produto'){
+    corpo=_cqgTabelaGrupo('Ranking por tipo de produto',_cqgAgrupar(L,l=>l.produtos),totalGeral,'Tipo identificado pelo JOB e pelos itens de produção do pedido de garantia. Um pedido com mais de um tipo conta em cada um — a soma pode passar do total.');
+  }else{
+    const{y,m}=_cqgView;const hoje=new Date();
+    let ay=y,am=m||(y===hoje.getFullYear()?hoje.getMonth()+1:12);
+    const meses=[];for(let i=0;i<12;i++){meses.unshift({y:ay,m:am});am--;if(!am){am=12;ay--;}}
+    const linhas=meses.map(x=>{const g=T.filter(l=>{const[yy,mm]=l.em.split('-').map(Number);return yy===x.y&&mm===x.m;});
+      const custo=g.reduce((s,l)=>s+l.total,0),fat=_cqgFatLiq(x.y,x.m,ctx.rowsVenda);return{...x,n:g.length,custo,fat,pct:fat>0.005?custo/fat:null};});
+    const maxP=Math.max(0.0001,...linhas.map(l=>l.pct||0));
+    corpo=`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">Custo de garantia sobre o faturamento líquido — últimos 12 meses</div>
+      <div style="display:flex;align-items:flex-end;gap:6px;height:130px;margin:14px 0 6px;padding:0 4px">${linhas.map(l=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%" title="${MESES_PT[l.m]} ${l.y}: ${l.pct==null?'sem faturamento':_cqgPct(l.custo,l.fat)}">
+        <div style="font-size:.6rem;font-weight:800;color:#dc2626;white-space:nowrap">${l.pct==null?'':_cqgPct(l.custo,l.fat)}</div>
+        <div style="width:100%;max-width:34px;background:#dc2626;border-radius:4px 4px 0 0;height:${l.pct?Math.max(3,Math.round(l.pct/maxP*95)):0}px"></div>
+        <div style="font-size:.6rem;color:var(--ink4);margin-top:3px;white-space:nowrap">${MESES_PT[l.m].slice(0,3)}/${String(l.y).slice(2)}</div></div>`).join('')}</div>
+      <div style="overflow-x:auto"><table class="dash-table" style="font-size:.74rem"><thead><tr><th>Mês</th><th style="text-align:right">Garantias</th><th style="text-align:right">Custo</th><th style="text-align:right">Faturamento líquido</th><th style="text-align:right">% do faturamento</th></tr></thead><tbody>
+      ${linhas.slice().reverse().map(l=>`<tr><td style="white-space:nowrap">${MESES_PT[l.m]} ${l.y}</td><td style="text-align:right">${l.n}</td><td style="text-align:right;white-space:nowrap;font-weight:700">${fmtR(l.custo)}</td><td style="text-align:right;white-space:nowrap">${fmtR(l.fat)}</td><td style="text-align:right;white-space:nowrap;font-weight:800;color:#dc2626">${l.pct==null?'—':_cqgPct(l.custo,l.fat)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div style="font-size:.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">Faturamento líquido = vendas líquidas do mês (mesma base de Vendas do Mês). O custo de cada mês é o das garantias emitidas naquele mês.</div></div>`;
+  }
+  return`<div class="dash-card" style="margin-bottom:14px;padding-bottom:6px"><div class="dash-sec-title">Indicadores</div><div class="gc-vend-tabs" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">${chips}</div></div>`+corpo;
+}
+function renderCustosQualidade(){
+  const wrap=document.getElementById('cqg-body');if(!wrap)return;
+  if(!_getUserCat().isAdm&&!_isSetorUser('QUALIDADE')){wrap.innerHTML='<div style="padding:40px 4px;text-align:center;color:#dc2626;font-weight:700">🔒 ACESSO NÃO PERMITIDO — apenas Qualidade ou Administrador.</div>';return;}
+  const{y,m}=_cqgView;
+  const ctx=_cqgCtx();const T=_cqgTodas(ctx);const L=_cqgFiltrar(T);
+  const esc=_cqgEscH;
+  const tot={};_CQG_CATS.forEach(x=>{tot[x.k]=L.reduce((s,l)=>s+(l.v[x.k]||0),0);});
+  const totalGeral=L.reduce((s,l)=>s+l.total,0);
+  const aguard=L.filter(l=>!l.lancado&&l.noPlan).length;
+  const semProd=L.filter(l=>!l.prodInformado).length;
+  const fat=_cqgFatLiq(y,m,ctx.rowsVenda);
+  const anoAtual=new Date().getFullYear();
+  const anos=[anoAtual+1,anoAtual,anoAtual-1,anoAtual-2];if(!anos.includes(y))anos.push(y);
+  const periodo=m?`${MESES_PT[m]} de ${y}`:`${y} (todos os meses)`;
+  const filtros=`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+    <div style="position:relative;flex:1;min-width:220px;max-width:380px">
+      <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:.85rem;color:#94a3b8;pointer-events:none">🔍</span>
+      <input id="cqg-busca" class="fc" value="${esc(_cqgView.busca)}" oninput="cqgBuscar(this.value)" placeholder="Buscar por OS, cliente, JOB, setor..." style="padding-left:34px">
+    </div>
+    <span style="font-size:.78rem;font-weight:700;color:var(--ink3)">Emitidos em:</span>
+    <select id="cqg-mes" class="fc" style="width:auto;padding:6px 10px" onchange="cqgSetPeriodo()"><option value="0"${!m?' selected':''}>Todos os meses</option>${MESES_PT.slice(1).map((n,i)=>`<option value="${i+1}"${m===i+1?' selected':''}>${n}</option>`).join('')}</select>
+    <select id="cqg-ano" class="fc" style="width:auto;padding:6px 10px" onchange="cqgSetPeriodo()">${anos.map(a=>`<option value="${a}"${a===y?' selected':''}>${a}</option>`).join('')}</select>
+    <span style="margin-left:auto;display:inline-flex;gap:8px">
+      <button class="dash-btn-conf" style="background:#16a34a" type="button" onclick="cqgExportarExcel()">📊 Excel</button>
+      <button class="dash-btn-conf" style="background:#dc2626" type="button" onclick="cqgExportarPdf()">📄 PDF</button>
+    </span>
+  </div>`;
+  const tiles=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:14px">
+    <div class="gc-kp az"><div class="gc-kl">🛠️ Garantias/Retrabalhos</div><div class="gc-kv">${L.length}</div><div class="gc-ks">${aguard?`${aguard} aguardando lançamento do Planejamento`:'Nenhum aguardando o Planejamento'}</div></div>
+    <div class="gc-kp ro"><div class="gc-kl">💸 Custo total</div><div class="gc-kv">${fmtR(totalGeral)}</div><div class="gc-ks">${periodo}</div></div>
+    <div class="gc-kp ro"><div class="gc-kl">📉 % do faturamento líquido</div><div class="gc-kv">${_cqgPct(totalGeral,fat)}</div><div class="gc-ks">Faturamento líquido: ${fmtR(fat)}</div></div>
+    <div class="gc-kp dk"><div class="gc-kl">📊 Custo médio por pedido</div><div class="gc-kv">${L.length?fmtR(totalGeral/L.length):'—'}</div><div class="gc-ks">${semProd?`${semProd} sem custo de produção informado`:'Produção informada em todos'}</div></div>
+  </div>`;
+  const cats=`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">Custos por categoria</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:10px;font-size:.78rem">
+    ${_CQG_CATS.map(x=>`<div style="background:#f8fafc;border:1px solid var(--border-lt);border-radius:9px;padding:9px 11px">
+      <div style="font-weight:800;color:var(--ink)">${x.l}</div>
+      <div style="font-weight:800;font-size:.95rem;margin-top:4px;color:${tot[x.k]>0.005?'#dc2626':'var(--ink4)'};white-space:nowrap">${fmtR(tot[x.k])}</div>
+      <div style="color:var(--ink4)">${totalGeral>0.005?_cqgPct(tot[x.k],totalGeral)+' do total':'—'}</div></div>`).join('')}
+    </div></div>`;
+  const podeEd=_cqgPodeEditar();
+  const cel=(l,x)=>{const val=l.v[x.k],forn=l.forn[x.k];
+    if(x.k==='producao'&&!l.prodInformado)return`<td style="text-align:right;white-space:nowrap">${podeEd?`<span onclick="cqgAbrirDetalhe('${l.p.id}')" style="cursor:pointer;color:var(--brand-d);font-weight:700">✏️ Informar</span>`:'<span style="color:#cbd5e1">—</span>'}</td>`;
+    return`<td style="text-align:right;white-space:nowrap;${val>0.005?'font-weight:700;color:#0f172a':'color:#cbd5e1'}"${forn?` title="${esc(forn)}"`:''}>${val>0.005?fmtR(val):'—'}</td>`;};
+  const origemTxt=o=>o.tipo==='sem'?'—':o.tipo==='externo'?`OS ${esc(o.os)} <span style="color:#b45309;font-size:.66rem">(sistema antigo)</span>`:`OS ${esc(o.os)}`;
+  const statusTxt=l=>l.lancado?`<span style="color:#16a34a;font-weight:700">✅ Lançado</span>`:l.noPlan?'<span style="color:#b45309;font-weight:700">⏳ Aguardando Planejamento</span>':'<span style="color:var(--ink4)" title="Pedido sem instalação, frete ou medição — não passa pelo Planejamento">Sem operacional</span>';
+  const tabela=L.length?`<div class="dash-card"><div class="dash-sec-title">Pedidos de Garantia/Retrabalho — ${periodo}</div>
+    <div style="overflow-x:auto;margin-top:8px"><table class="dash-table" style="font-size:.74rem"><thead><tr>
+      <th>Pedido</th><th>Emissão</th><th>Setor que gerou</th><th>Origem</th>${_CQG_CATS.map(x=>`<th style="text-align:right;white-space:nowrap">${x.c}</th>`).join('')}<th style="text-align:right">Total</th><th>Status</th></tr></thead>
+    <tbody>${L.map(l=>`<tr>
+      <td style="min-width:200px"><span onclick="cqgAbrirDetalhe('${l.p.id}')" style="cursor:pointer;font-weight:700;color:var(--brand-d)">OS ${esc(l.os)} · ${esc(l.nome)}</span>${l.resp?`<div style="font-size:.66rem;color:var(--ink4)">${esc(l.resp)}</div>`:''}</td>
+      <td style="white-space:nowrap">${fmtD(l.em)}</td>
+      <td style="white-space:nowrap;${l.setor?'font-weight:700':'color:var(--ink4)'}"${l.setor==='OUTRO'&&l.p.rncSetorOutro?` title="${esc(l.p.rncSetorOutro)}"`:''}>${esc(l.setor||'Não informado')}</td>
+      <td style="white-space:nowrap">${origemTxt(l.origem)}</td>
+      ${_CQG_CATS.map(x=>cel(l,x)).join('')}
+      <td style="text-align:right;white-space:nowrap;font-weight:800;color:${l.total>0.005?'#dc2626':'var(--ink4)'}">${fmtR(l.total)}</td>
+      <td style="white-space:nowrap">${statusTxt(l)}</td></tr>`).join('')}
+      <tr style="font-weight:800;background:#f8fafc"><td colspan="4">TOTAL (${L.length})</td>${_CQG_CATS.map(x=>`<td style="text-align:right;white-space:nowrap">${fmtR(tot[x.k])}</td>`).join('')}<td style="text-align:right;white-space:nowrap;color:#dc2626">${fmtR(totalGeral)}</td><td></td></tr>
+    </tbody></table></div>
+    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">Operacionais = realizado que o Planejamento lança em cada pedido (Fornecedores); Instalação inclui mobilização, remoção e pintura de tubo. Produção = material e mão de obra informados pela Qualidade. Clique no pedido para ver o detalhe${podeEd?' e informar setor e produção':''}.</div></div>`
+    :`<div class="dash-card"><div style="padding:24px;text-align:center;color:var(--ink4);font-size:.84rem">Nenhum pedido de Garantia/Retrabalho emitido em ${periodo}.</div></div>`;
+  let ind='';try{ind=_cqgIndHtml(L,T,ctx,totalGeral);}catch(e){console.error('indicadores garantia',e);}
+  wrap.innerHTML=filtros+tiles+cats+ind+tabela;
+  try{if(typeof _MESX_SELECTS!=='undefined'&&_MESX_SELECTS.indexOf('cqg-mes')<0)_MESX_SELECTS.push('cqg-mes');_mesxSelect('cqg-mes');}catch(e){}
+}
+function cqgAbrirDetalhe(id){
+  const p=pedidos.find(x=>x.id===id);if(!p){toast('Pedido não encontrado','terr');return;}
+  const l=_cqgLinha(p,_cqgCtx());
+  const esc=_cqgEscH,podeEd=_cqgPodeEditar(),qc=p.qualCustos||{};
+  const old=document.getElementById('cqg-det-modal');if(old)old.remove();
+  const modal=document.createElement('div');modal.id='cqg-det-modal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  try{_dynModalSemFechaClique(modal);}catch(e){}
+  const linhas=_CQG_CATS.filter(x=>x.k!=='extras'&&x.k!=='producao').map(x=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-lt)">
+    <div><div style="font-weight:800;font-size:.82rem">${x.l}</div>${l.forn[x.k]?`<div style="font-size:.68rem;color:var(--ink4)">${esc(l.forn[x.k])}</div>`:'<div style="font-size:.68rem;color:#cbd5e1">Não lançado</div>'}</div>
+    <div style="font-weight:800;white-space:nowrap;${l.v[x.k]>0.005?'color:#0f172a':'color:#cbd5e1'}">${l.v[x.k]>0.005?fmtR(l.v[x.k]):'—'}</div></div>`).join('');
+  const extras=l.extrasLista.length?l.extrasLista.map(e=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px dashed var(--border-lt);font-size:.78rem">
+    <div>${esc(e.motivo||'—')}${e.setor?`<div style="font-size:.66rem;color:var(--ink4)">Setor: ${esc(e.setor)}</div>`:''}</div><div style="font-weight:700;white-space:nowrap">${fmtR(moneyToNum(e.valor)||0)}</div></div>`).join(''):'<div style="font-size:.76rem;color:var(--ink4);padding:6px 0">Nenhum gasto extra lançado.</div>';
+  const o=l.origem;
+  const origemHtml=o.tipo==='sem'?'Sem pedido de origem informado':o.tipo==='externo'?`OS ${esc(o.os)} — pedido antigo de outro sistema (sem vendedor/fornecedor vinculado)`:
+    `OS ${esc(o.os)}${o.vendedor?' · vendedor '+esc(o.vendedor):''}${[o.instalador&&'instalador '+o.instalador,o.transportadora&&'transportadora '+o.transportadora,o.munque&&'munque '+o.munque].filter(Boolean).map(t=>' · '+esc(t)).join('')}`;
+  const qualHtml=podeEd?`<div style="margin-top:16px;padding:14px;border:1.5px solid #e2e8f0;border-radius:12px;background:#f8fafc">
+      <div style="font-weight:800;font-size:.82rem;margin-bottom:10px">✅ Preenchido pela Qualidade</div>
+      <div class="fg" style="margin-bottom:10px"><label style="font-size:.74rem;font-weight:700">Setor que gerou o retrabalho/garantia</label>
+        <select class="fc" id="cqg-ed-setor" onchange="document.getElementById('cqg-ed-outro-wrap').style.display=this.value==='OUTRO'?'':'none'"><option value="">Selecione o setor</option>${RNC_SETORES.map(s=>`<option${p.rncSetor===s?' selected':''}>${s}</option>`).join('')}</select>
+        <div id="cqg-ed-outro-wrap" style="margin-top:6px;${p.rncSetor==='OUTRO'?'':'display:none'}"><input class="fc" id="cqg-ed-outro" value="${esc(p.rncSetorOutro||'')}" placeholder="Qual? Descreva o setor"></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fg"><label style="font-size:.74rem;font-weight:700">🏭 Material (R$)</label><input class="fc" id="cqg-ed-mat" inputmode="decimal" value="${esc(qc.material||'')}" placeholder="R$ 0,00"></div>
+        <div class="fg"><label style="font-size:.74rem;font-weight:700">👷 Mão de obra da produção (R$)</label><input class="fc" id="cqg-ed-mo" inputmode="decimal" value="${esc(qc.maoObra||'')}" placeholder="R$ 0,00"></div>
+      </div>
+      ${qc.por?`<div style="font-size:.66rem;color:var(--ink4);margin-top:6px">Informado por ${esc(qc.por)}${qc.em?' em '+new Date(qc.em).toLocaleString('pt-BR'):''}</div>`:''}
+      <div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" class="dash-btn-conf" id="cqg-ed-salvar" onclick="cqgSalvarQualidade('${p.id}')">💾 Salvar</button></div>
+    </div>`:(l.v.producao>0.005?`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border-lt)"><div><div style="font-weight:800;font-size:.82rem">🏭 Produção</div><div style="font-size:.68rem;color:var(--ink4)">${esc(l.forn.producao)}</div></div><div style="font-weight:800">${fmtR(l.v.producao)}</div></div>`:'');
+  modal.innerHTML=`<div style="background:#fff;border-radius:16px;padding:22px 24px;max-width:560px;width:94%;max-height:88vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+      <div style="min-width:0"><div style="font-size:.7rem;font-weight:800;color:var(--ink4);text-transform:uppercase">💸 Custos da Garantia/Retrabalho</div>
+      <div style="font-size:1rem;font-weight:800;color:#1a1f36;margin-top:2px">OS ${esc(l.os)} · ${esc(l.nome)}</div>
+      <div style="font-size:.72rem;color:var(--ink4);margin-top:2px">Emitido em ${fmtD(l.em)}${l.resp?' · '+esc(l.resp):''} · setor que gerou: <b>${esc(l.setorLbl)}</b></div>
+      <div style="font-size:.72rem;color:var(--ink4);margin-top:2px">🔗 Origem: ${origemHtml}</div></div>
+      <button type="button" onclick="document.getElementById('cqg-det-modal').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--ink4)">✕</button>
+    </div>
+    <div style="margin-top:12px;font-weight:800;font-size:.82rem">🏗️ Operacionais (Planejamento)</div>
+    <div>${linhas}</div>
+    <div style="font-weight:800;font-size:.82rem;margin-top:14px">🧾 Gastos extras</div>${extras}
+    ${qualHtml}
+    <div style="display:flex;justify-content:space-between;margin-top:14px;padding:12px;background:#fef2f2;border-radius:10px;font-weight:800"><span>Custo total</span><span style="color:#dc2626">${fmtR(l.total)}</span></div>
+    ${l.por?`<div style="font-size:.68rem;color:var(--ink4);margin-top:8px">Último lançamento do Planejamento: ${esc(l.por)}${l.atualizadoEm?' em '+new Date(l.atualizadoEm).toLocaleString('pt-BR'):''}</div>`:(l.noPlan?'<div style="font-size:.68rem;color:#b45309;margin-top:8px">⏳ O Planejamento ainda não lançou os custos deste pedido.</div>':'<div style="font-size:.68rem;color:var(--ink4);margin-top:8px">Pedido sem instalação, frete ou medição — não passa pelo Planejamento.</div>')}
+  </div>`;
+  document.body.appendChild(modal);
+}
+async function cqgSalvarQualidade(id){
+  if(!_cqgPodeEditar()){toast('Apenas Qualidade ou Administrador pode alterar','terr');return;}
+  const p=pedidos.find(x=>x.id===id);if(!p){toast('Pedido não encontrado','terr');return;}
+  const setor=(document.getElementById('cqg-ed-setor')||{}).value||'';
+  const outro=((document.getElementById('cqg-ed-outro')||{}).value||'').trim();
+  if(setor==='OUTRO'&&!outro){toast('Informe qual é o outro setor','terr');return;}
+  const matTxt=((document.getElementById('cqg-ed-mat')||{}).value||'').trim(),moTxt=((document.getElementById('cqg-ed-mo')||{}).value||'').trim();
+  const mat=moneyToNum(matTxt),mo=moneyToNum(moTxt);
+  if((matTxt&&!(mat>=0))||(moTxt&&!(mo>=0))){toast('Valor inválido','terr');return;}
+  const btn=document.getElementById('cqg-ed-salvar');if(btn){btn.disabled=true;btn.textContent='Salvando...';}
+  const quem=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'';
+  const ant={s:p.rncSetor,o:p.rncSetorOutro,q:p.qualCustos};
+  p.rncSetor=setor;p.rncSetorOutro=setor==='OUTRO'?outro:'';
+  const qcAnt=p.qualCustos||{};
+  const mudouValor=String(qcAnt.material||'')!==(matTxt?fmtR(mat):'')||String(qcAnt.maoObra||'')!==(moTxt?fmtR(mo):'');
+  p.qualCustos={material:matTxt?fmtR(mat):'',maoObra:moTxt?fmtR(mo):'',por:mudouValor?quem:(qcAnt.por||quem),em:mudouValor?new Date().toISOString():(qcAnt.em||new Date().toISOString())};
+  try{await savePedidoFS(p);toast('Salvo ✅','tok');const m=document.getElementById('cqg-det-modal');if(m)m.remove();renderCustosQualidade();}
+  catch(e){console.error('cqgSalvarQualidade',e);p.rncSetor=ant.s;p.rncSetorOutro=ant.o;p.qualCustos=ant.q;toast('Não consegui salvar — tente de novo','terr');if(btn){btn.disabled=false;btn.textContent='💾 Salvar';}}
+}
+function cqgExportarExcel(){
+  const L=_cqgLinhas();if(!L.length){toast('Nada para exportar nesse período','terr');return;}
+  const n=v=>(Math.round((v||0)*100)/100).toString().replace('.',',');
+  const headers=['OS','Cliente · JOB','Responsável','Emissão','Setor que gerou','OS de origem','Origem','Vendedor do pedido original','Marca','Tipo de produto',..._CQG_CATS.map(x=>x.c),'Total','Fornecedores','Gastos extras (detalhe)','Status'];
+  const rows=L.map(l=>[l.os,l.nome,l.resp,fmtD(l.em),l.setorLbl,l.origem.os||'',l.origem.tipo==='externo'?'Sistema antigo':l.origem.tipo==='sistema'?'No sistema':'',l.origem.vendedor||'',l.marca,l.produtos.join(', '),
+    ..._CQG_CATS.map(x=>n(l.v[x.k])),n(l.total),
+    _CQG_CATS.filter(x=>l.forn[x.k]).map(x=>x.c+': '+l.forn[x.k]).join(' | '),
+    l.extrasLista.map(e=>(e.motivo||'')+(e.setor?' ('+e.setor+')':'')+' '+(e.valor||'')).join(' | '),
+    l.lancado?'Lançado':l.noPlan?'Aguardando Planejamento':'Sem operacional']);
+  const{y,m}=_cqgView;
+  _csvDownload(`custos_retrabalho_garantias_${y}${m?'_'+String(m).padStart(2,'0'):''}.csv`,headers,rows);
+}
+function cqgExportarPdf(){
+  const ctx=_cqgCtx();const L=_cqgFiltrar(_cqgTodas(ctx));if(!L.length){toast('Nada para exportar nesse período','terr');return;}
+  const{y,m}=_cqgView;const periodo=m?`${MESES_PT[m]} de ${y}`:`${y} (todos os meses)`;
+  const esc=_cqgEscH;
+  const tot={};_CQG_CATS.forEach(x=>{tot[x.k]=L.reduce((s,l)=>s+(l.v[x.k]||0),0);});
+  const tg=L.reduce((s,l)=>s+l.total,0),fat=_cqgFatLiq(y,m,ctx.rowsVenda);
+  const gS=_cqgAgrupar(L,l=>l.setor||'Não informado');
+  const w=window.open('','_blank');if(!w){toast('Libere pop-up para gerar o PDF','terr');return;}
+  const td='style="padding:4px 6px;border-bottom:1px solid #e5e7eb"',tdr='style="padding:4px 6px;border-bottom:1px solid #e5e7eb;text-align:right;white-space:nowrap"';
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Custos Retrabalho/Garantias — ${esc(periodo)}</title>
+  <style>body{font-family:Arial,sans-serif;color:#0f172a;margin:24px;font-size:10.5px}h1{font-size:17px;margin:0}h2{font-size:12px;margin:16px 0 4px;border-bottom:2px solid #0f172a;padding-bottom:3px}table{border-collapse:collapse;width:100%;margin-top:8px}th{background:#101B3D;color:#fff;padding:5px 6px;text-align:left;font-size:9.5px}th.r{text-align:right}@media print{button{display:none}@page{size:landscape;margin:12mm}}</style></head><body>
+  <button onclick="window.print()" style="float:right;padding:6px 12px">🖨️ Imprimir / Salvar PDF</button>
+  <h1>Custos Retrabalho/Garantias — ${esc(periodo)}</h1><div style="color:#64748b">Gerado em ${new Date().toLocaleString('pt-BR')} · ${L.length} ${_plural(L.length,'pedido','pedidos')} · custo total ${fmtR(tg)} · ${_cqgPct(tg,fat)} do faturamento líquido (${fmtR(fat)})</div>
+  <h2>Por setor que gerou</h2><table><tr><th>Setor</th><th class="r">Pedidos</th><th class="r">Custo</th><th class="r">% do custo</th></tr>${gS.map(g=>`<tr><td ${td}>${esc(g.nome)}</td><td ${tdr}>${g.n}</td><td ${tdr}>${fmtR(g.custo)}</td><td ${tdr}>${_cqgPct(g.custo,tg)}</td></tr>`).join('')}</table>
+  <h2>Pedidos</h2><table><tr><th>Pedido</th><th>Emissão</th><th>Setor</th><th>Origem</th>${_CQG_CATS.map(x=>`<th class="r">${x.c}</th>`).join('')}<th class="r">Total</th></tr>
+  ${L.map(l=>`<tr><td ${td}>OS ${esc(l.os)} · ${esc(l.nome)}</td><td ${td}>${fmtD(l.em)}</td><td ${td}>${esc(l.setorLbl)}</td><td ${td}>${l.origem.os?'OS '+esc(l.origem.os)+(l.origem.tipo==='externo'?' (sistema antigo)':''):'—'}</td>${_CQG_CATS.map(x=>`<td ${tdr}>${l.v[x.k]>0.005?fmtR(l.v[x.k]):'—'}</td>`).join('')}<td ${tdr}><b>${fmtR(l.total)}</b></td></tr>`).join('')}
+  <tr style="font-weight:bold;background:#f1f5f9"><td ${td} colspan="4">TOTAL</td>${_CQG_CATS.map(x=>`<td ${tdr}>${fmtR(tot[x.k])}</td>`).join('')}<td ${tdr}>${fmtR(tg)}</td></tr></table>
+  </body></html>`);
+  w.document.close();
+}
+// 🔔 Aviso pro Planejamento: garantia/retrabalho emitida há 3+ dias úteis, que passa pelo Planejamento
+// e ainda não tem nenhum custo lançado. Um aviso por dia (a partir das 08h) até alguém lançar.
+let _cqgAvisoCache=null;
+function _cqgAvisosPlanejamento(){
+  const out=[];if(new Date().getHours()<8)return out;
+  const hoje=_hojeIso();
+  let eleg=[];try{eleg=_plPedidosElegiveis();}catch(e){return out;}
+  eleg.forEach(p=>{
+    if(!p.origemComercial||!_cqgEhGarantia(p))return;
+    const fg=p.fornGestao||{},sv=fg.servicos||{};
+    if(fg.instalador||fg.transportadora||fg.munque||(fg.gastosExtras||[]).length||Object.values(sv).some(x=>x&&String(x.forn||'').trim()))return;
+    const em=_cqgEmIso(p);if(!em)return;
+    let lim=null;try{lim=_addDiasUteis(em,3);}catch(e){}
+    if(!lim||_isoLocal(lim)>hoje)return;
+    out.push({id:'gar_semcusto_'+p.id+'_'+hoje,automatico:true,tipoAuto:'gar_semcusto',pedidoId:p.id,criadoEm:hoje+'T08:00:00',
+      assunto:`🛠️ Garantia sem custo lançado — OS ${p.os||'—'}`,
+      texto:`OS ${p.os||'—'} · ${_pedNome(p)}: Garantia/Retrabalho emitida em ${fmtD(em)} e ainda sem nenhum custo operacional lançado. Lance instalador, frete, munque e gastos extras em Planejamento → Fornecedores para a Qualidade acompanhar o custo.`,
+      destinatarioTipo:'setor',destinatarioValor:'PLANEJAMENTO'});
+  });
+  return out;
+}
+{const _oA=_avisosAutomaticos;_avisosAutomaticos=function(){const out=_oA.apply(this,arguments);try{const agora=Date.now();if(!_cqgAvisoCache||agora-_cqgAvisoCache.t>30000)_cqgAvisoCache={t:agora,r:_cqgAvisosPlanejamento()};return out.concat(_cqgAvisoCache.r);}catch(e){console.error('aviso garantia sem custo',e);return out;}};}
 // ══ 📊 FECHAMENTO DE PEDIDOS (2026-09-24, a pedido do usuário: "pode implantar o 8 B que vai
 // ter fechamento de pedidos") ══ SÓ ADMIN, SÓ LEITURA.
 // Obras FINALIZADAS (p.finalizacao.dataFinalizacao) no período, sem venda cancelada.
@@ -10222,6 +10586,8 @@ function geralTab(tab,btn){
   if(elCrm)elCrm.style.display=tab==='crm'?'':'none';
   const elFech=document.getElementById('geral-tab-fechamento');
   if(elFech)elFech.style.display=tab==='fechamento'?'':'none';
+  const elCqg=document.getElementById('geral-tab-custosqual');
+  if(elCqg)elCqg.style.display=tab==='custosqual'?'':'none';
   const h2=document.getElementById('geral-hdr-h2'),p=document.getElementById('geral-hdr-p');
   if(tab==='graficos'){
     const subBtn=document.querySelector('.gind-subtab[data-sub="'+_geralIndicadoresSubAtiva+'"]');
@@ -10247,6 +10613,10 @@ function geralTab(tab,btn){
       if(restr)restr.style.display='none';
       try{initDashComercial();}catch(e){console.error('Erro ao abrir Metas e Comissões',e);}
     }
+  } else if(tab==='custosqual'){
+    if(h2)h2.textContent='✅ Qualidade — Custos Retrabalho/Garantias';
+    if(p)p.textContent='Custos operacionais que o Planejamento lançou em cada pedido de Garantia/Retrabalho';
+    try{renderCustosQualidade();}catch(e){console.error('Erro ao abrir Custos Retrabalho/Garantias',e);}
   } else if(tab==='fechamento'){
     if(h2)h2.textContent='Fechamento de Pedidos';
     if(p)p.textContent='Vendido x realizado de cada obra finalizada';
@@ -12193,7 +12563,7 @@ async function openEmissao(eid2){
       fend:fr['Endereço de Entrega']||'',fie:fr['Inscrição Estadual']||'',chumbador:p.chumbador||'',arq_chumb:p.arq_chumb_url?'Arquivo já enviado':'',arq_chumb_url:p.arq_chumb_url||'',os_chumb:p.os_chumb||'',temProducao:p.temProducao||'',dt_chumb:p.dt_chumb||'',_dtChumbOrig:p.dt_chumb||'',
       // RNC (Relatório de Não Conformidade, 2026-09-08) — mesmo padrão de restauração do
       // arq_chumb acima.
-      arq_rnc:p.arq_rnc_url?'Arquivo já enviado':'',arq_rnc_url:p.arq_rnc_url||'',rncOrigem:p.rncPedidoOrigem||null,
+      arq_rnc:p.arq_rnc_url?'Arquivo já enviado':'',arq_rnc_url:p.arq_rnc_url||'',rncOrigem:p.rncPedidoOrigem||null,rncSetor:p.rncSetor||'',rncSetorOutro:p.rncSetorOutro||'',
       // ftel lia 'Telefone Descarga' (nunca gravada; a chave real é 'Telefone da Descarga').
       facomp:fr['Quem Acompanhou a Descarga']||'',ftel:fr['Telefone da Descarga']||'',bases:p.bases||'',
       // Conselho de Pedidos (2026-08-07) — reconstrói a partir do que já foi salvo (rascunho
@@ -12208,7 +12578,7 @@ async function openEmissao(eid2){
       tem_oc:'',arq_oc:'',tem_ent:'Não tem entrada',vent:'',dent:'',fent:'',
       nparc:'Sem parcelamento',fparc:'',pdatas:[],pvals:[],nf:'',obsfin:'',art:'',cnpj_art:'',cnpj_art_url:'',arq_prod:'',layout_inst:'',fotos_orig:'',pasta_arquivos:'',laudo:'',
       iacomp:'',itel:'',icep:'',ilog:'',inum_e:'',icomp:'',ibairro:'',icidade:'',iuf:'',ihor:'Comercial',inum:'',idias:'',iinteg:'',iseg:'',vseg:'',ibloqenergia:'',pintubo:'',vpintub:'',icep_ok:false,
-      minfo:'',fcep:'',flog:'',fnum_e:'',fcomp:'',fbairro:'',fcidade:'',fuf:'',fend:'',fie:'',facomp:'',ftel:'',fdist:'',bases:'',chumbador:'',arq_chumb:'',os_chumb:'',dt_chumb:'',fcep_ok:false,arq_rnc:'',arq_rnc_url:'',rncOrigem:null};
+      minfo:'',fcep:'',flog:'',fnum_e:'',fcomp:'',fbairro:'',fcidade:'',fuf:'',fend:'',fie:'',facomp:'',ftel:'',fdist:'',bases:'',chumbador:'',arq_chumb:'',os_chumb:'',dt_chumb:'',fcep_ok:false,arq_rnc:'',arq_rnc_url:'',rncOrigem:null,rncSetor:'',rncSetorOutro:''};
   }
   step=0;renderEM();openM('mo-em');
 }
@@ -12298,7 +12668,13 @@ function _rncOrigemEscolher(inp){
 }
 function validarAba(id){
   // Retorna lista de erros da aba atual
-  if(id==='rnc'&&ed.tipo==='Garantia / Retrabalho'&&!(ed.rncOrigem&&ed.rncOrigem.os))return['Informe o número da OS original desta Garantia/Retrabalho'];
+  if(id==='rnc'&&ed.tipo==='Garantia / Retrabalho'){
+    const _er=[];
+    if(!(ed.rncOrigem&&ed.rncOrigem.os))_er.push('Informe o número da OS original desta Garantia/Retrabalho');
+    if(!ed.rncSetor)_er.push('Informe qual setor gerou este retrabalho/garantia');
+    else if(ed.rncSetor==='OUTRO'&&!String(ed.rncSetorOutro||'').trim())_er.push('Informe qual é o outro setor que gerou este retrabalho/garantia');
+    if(_er.length)return _er;
+  }
   const erros=[];
   // Conselho de Pedidos (2026-08-07) — só exige RESPOSTA (Sim ou Não vale) pra avançar de
   // aba, mesmo padrão "obrigatório responder" do resto do formulário. A trava mais forte —
@@ -13420,6 +13796,13 @@ function _renderStepBase(id){
         <div id="em-rnc-origem-sel">${ed.rncOrigem?_rncOrigemOkHtml(ed.rncOrigem):''}</div>
         <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Obrigatório informar a OS original. Se o pedido for do sistema antigo e não aparecer na lista, digite só o número da OS.</div>
       </div>
+      <div class="fg"><label>Qual setor gerou este retrabalho/garantia? <span class="r">*</span></label>
+        <select class="fc" id="em-rnc-setor" onchange="ed.rncSetor=this.value;const _w=document.getElementById('em-rnc-setor-outro-wrap');if(_w)_w.style.display=this.value==='OUTRO'?'':'none';">
+          <option value="">Selecione o setor</option>${RNC_SETORES.map(s=>`<option${ed.rncSetor===s?' selected':''}>${s}</option>`).join('')}
+        </select>
+        <div id="em-rnc-setor-outro-wrap" style="margin-top:6px;${ed.rncSetor==='OUTRO'?'':'display:none'}"><input class="fc" id="em-rnc-setor-outro" value="${String(ed.rncSetorOutro||'').replace(/"/g,'&quot;')}" placeholder="Qual? Descreva o setor" oninput="ed.rncSetorOutro=this.value"></div>
+        <div style="font-size:.68rem;color:var(--ink4);margin-top:4px">Vai para Qualidade → Custos Retrabalho/Garantias, que mostra o custo por setor.</div>
+      </div>
       <div class="fg"><label>Inserir o Relatório de Não Conformidade</label>
         <div class="upload-zone${ed.arq_rnc?' has-file':''}" id="uz-rnc" onclick="document.getElementById('em-rnc-file').click()">
           <span class="uz-icon">${ed.arq_rnc?'✅':'📄'}</span>
@@ -14029,7 +14412,7 @@ function buildEmissaoEmailContent(p){
       ${fmtSec('Pagamento',pagSemLiquido)}
       ${p.arq_os_url?`
       <tr style="background:#fafafa"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Ordem de Serviço</td>
-        <td style="padding:10px 0;font-size:13px;font-weight:600"><a href="${cldDownload(p.arq_os_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">${/* 2026-09-23 (pedido do usuário): link mostra nº da OS + cliente/JOB/cidade, igual ao assunto, pra não precisar baixar o PDF pra saber qual é */''}📄 OS Nº ${p.os} · ${p.cliente||''}${p.job?' - '+p.job:''}${(()=>{const ci=(p.locCidade||'').toUpperCase(),uf=(p.locUf||'').toUpperCase();return ci&&uf?' - '+ci+'/'+uf:ci?' - '+ci:uf?' - '+uf:'';})()} ↗</a></td>
+        <td style="padding:10px 0;font-size:13px;font-weight:600"><a href="${cldDownload(p.arq_os_url)}" target="_blank" style="color:#e91e63;font-weight:700;text-decoration:underline">${/* 2026-09-23 (pedido do usuário): link mostra nº da OS + cliente/JOB/cidade, igual ao assunto, pra não precisar baixar o PDF pra saber qual é */''}📄 OS Nº ${p.os} · ${p.nomeFantasia||p.cliente||''}${p.job?' - '+p.job:''}${(()=>{const ci=(p.locCidade||'').toUpperCase(),uf=(p.locUf||'').toUpperCase();return ci&&uf?' - '+ci+'/'+uf:ci?' - '+ci:uf?' - '+uf:'';})()} ↗</a></td>
       </tr>`:''}
       ${p.arq_oc_url?`
       <tr style="background:#ffffff"><td style="padding:10px 16px 10px 0;color:#6b7280;font-size:13px;width:40%">Ordem de Compra</td>
@@ -15150,6 +15533,8 @@ function _buildPedidoBaseDoEd(){
     // cidade/UF do assunto). Sempre com fallback pra string vazia — nunca undefined,
     // porque undefined no objeto quebra o savePedidoFS (ver [[project_firestore_undefined_fields]]).
     arq_os_url:ed.arq_os_url||'',arq_oc_url:ed.arq_oc_url||'',...(ed.oc_num?{numOC:ed.oc_num}:{}),...(ed.oc_valor?{ocValor:ed.oc_valor}:{}),...(ed.oc_original?{ocArquivoOriginal:ed.oc_original}:{}),arq_chumb_url:ed.arq_chumb_url||'',arq_rnc_url:ed.arq_rnc_url||'',
+    rncSetor:ed.tipo==='Garantia / Retrabalho'?(ed.rncSetor||''):'',
+    rncSetorOutro:(ed.tipo==='Garantia / Retrabalho'&&ed.rncSetor==='OUTRO')?String(ed.rncSetorOutro||'').trim():'',
     rncPedidoOrigem:(ed.tipo==='Garantia / Retrabalho'&&ed.rncOrigem)?{id:ed.rncOrigem.id||'',os:ed.rncOrigem.os||'',cliente:ed.rncOrigem.cliente||'',job:ed.rncOrigem.job||'',externo:!!ed.rncOrigem.externo}:null,
     temProducao:ed.temProducao||'',chumbador:ed.chumbador||'',os_chumb:ed.os_chumb||'',dt_chumb:(ed.chumbador==='Sim'&&ed.dt_chumb)?ed.dt_chumb:'',
     // Congela a config de Etapas de Pedidos (percentuais/removidas/extras) NO MOMENTO da
@@ -15715,6 +16100,12 @@ async function submit(){
     const tRnc=getTabs().findIndex(t=>t.id==='rnc');if(tRnc>=0){step=tRnc;renderEM();}
     return;
   }
+  // Setor que gerou a Garantia/Retrabalho (2026-11-09) — obrigatório, vai pra Qualidade → Custos.
+  if(ed.tipo==='Garantia / Retrabalho'&&(!ed.rncSetor||(ed.rncSetor==='OUTRO'&&!String(ed.rncSetorOutro||'').trim()))){
+    toast('Informe na aba RNC qual setor gerou este retrabalho/garantia','terr');
+    const tRnc=getTabs().findIndex(t=>t.id==='rnc');if(tRnc>=0){step=tRnc;renderEM();}
+    return;
+  }
   if(ed.tipo==='Garantia / Retrabalho'&&!ed.arq_rnc_url){
     const prosseguirSemRNC=await _confirmarEmitirSemRNC();
     if(!prosseguirSemRNC)return;
@@ -15762,7 +16153,7 @@ async function submit(){
   // GCore", mas pensado pra crescer — ver novaTarefaComercial()/sec-cat-FERRAMENTAS). Só cria
   // a tarefa padrão na emissão de verdade; numa edição de pedido já emitido, mantém as
   // tarefas que já existiam.
-  p.tarefasComerciais=_jaEmitidoAntes?(_pedidoExistente.tarefasComerciais||[]):gerarTarefasAutomaticas(ed.tipo,ed.tipoPedido||'',{os:ed.os,cliente:ed.cli,job:ed.job,chumbador:ed.chumbador});
+  p.tarefasComerciais=_jaEmitidoAntes?(_pedidoExistente.tarefasComerciais||[]):gerarTarefasAutomaticas(ed.tipo,ed.tipoPedido||'',{os:ed.os,cliente:(ed.fantasia||ed.cli),job:ed.job,chumbador:ed.chumbador});
   const wasEditing=_jaEmitidoAntes;
   editing=null;
   // Fechar modal ANTES do save para não travar
@@ -15779,7 +16170,7 @@ async function submit(){
   // 🏆 Celebração de pedido ganho (2026-09-25) — só na 1ª emissão de verdade de uma Venda/Permuta.
   if(!wasEditing&&(p.tipo==='Venda'||p.tipo==='Permuta')){
     try{let _lqCel=0;try{_lqCel=calcLiq()||0;}catch(err){}
-      _celebrarPedidoGanho({vendedor:p.responsavel||'',cliente:p.cliente||'',job:p.job||'',os:p.os||'',bruto:moneyToNum(ed.vtotal||'0')||0,liq:_lqCel});
+      _celebrarPedidoGanho({vendedor:p.responsavel||'',cliente:_pedCliExib(p)||'',job:p.job||'',os:p.os||'',bruto:moneyToNum(ed.vtotal||'0')||0,liq:_lqCel});
     }catch(err){console.error('Erro na celebração:',err);}
   }
   // Registra no card do CRM o que foi emitido DE VERDADE (2026-09-24) — OS, valor bruto e
@@ -36451,7 +36842,7 @@ function _projxAvisos(){
       if(!concl&&_projxPausado(p)&&p.responsavel){
         out.push({id:'proj_pausa_'+p.id+'_'+String(p.projPausa.desde||'').slice(0,16),automatico:true,tipoAuto:'proj_pausa',
           assunto:'⏸️ Projeto aguardando você — OS '+(p.os||'—'),
-          texto:`O setor de Projetos parou a OS ${p.os||'—'} (${_pedNome(p)}${p.job?' · '+p.job:''}) aguardando: "${p.projPausa.motivo||''}". Resolva com o cliente e avise o projetista${p.projResponsavel?' ('+p.projResponsavel+')':''} pra retomar.`,
+          texto:`O setor de Projetos parou a OS ${p.os||'—'} (${_pedNome(p)}) aguardando: "${p.projPausa.motivo||''}". Resolva com o cliente e avise o projetista${p.projResponsavel?' ('+p.projResponsavel+')':''} pra retomar.`,
           destinatarioTipo:'nome',destinatarioValor:p.responsavel});
       }
       // 2) Projetista atribuído → aviso pro projetista
@@ -36459,7 +36850,7 @@ function _projxAvisos(){
         let pz='';try{const x=_projInfo(p,hoje);if(x.ok)pz=' Prazo do projeto: '+fmtD(x.etapa.iso)+'.';}catch(e){}
         out.push({id:'proj_resp_'+p.id+'_'+p.projResponsavel,automatico:true,tipoAuto:'proj_resp',
           assunto:'📐 Projeto atribuído a você — OS '+(p.os||'—'),
-          texto:`Você é o projetista da OS ${p.os||'—'} (${_pedNome(p)}${p.job?' · '+p.job:''}).${pz} Abra Projetos → Lista pra ver o checklist.`,
+          texto:`Você é o projetista da OS ${p.os||'—'} (${_pedNome(p)}).${pz} Abra Projetos → Lista pra ver o checklist.`,
           destinatarioTipo:'nome',destinatarioValor:p.projResponsavel});
       }
       // 3) Encaminhado aos próximos setores → Compras e Produção
@@ -36478,7 +36869,7 @@ function _projxAvisos(){
         ['COMPRAS','PRODUÇÃO'].forEach(setor=>{
           out.push({id:'proj_encaminhado_'+setor+'_'+p.id+'_'+String(enc.quando).slice(0,10),automatico:true,tipoAuto:'proj_encaminhado',
             assunto:'📐 Projeto liberado — OS '+(p.os||'—'),
-            texto:`O projeto da OS ${p.os||'—'} (${_pedNome(p)}${p.job?' · '+p.job:''}) foi encaminhado pelos Projetos${p.projResponsavel?' ('+p.projResponsavel+')':''}.`+(prox?' '+prox+'.':'')+(na?` ${na} ${_plural(na,'arquivo','arquivos')} do projeto final ${_plural(na,'anexado','anexados')} — veja no checklist do projeto.`:''),
+            texto:`O projeto da OS ${p.os||'—'} (${_pedNome(p)}) foi encaminhado pelos Projetos${p.projResponsavel?' ('+p.projResponsavel+')':''}.`+(prox?' '+prox+'.':'')+(na?` ${na} ${_plural(na,'arquivo','arquivos')} do projeto final ${_plural(na,'anexado','anexados')} — veja no checklist do projeto.`:''),
             destinatarioTipo:'setor',destinatarioValor:setor});
         });
       }
@@ -36605,7 +36996,7 @@ function _projRmMensalHtml(){
       <span style="text-align:right;color:var(--ink3)">${pct(l.simples)}</span>
       <span style="text-align:right;color:${l.sem?'#b45309':'var(--ink4)'}">${l.com.length}${l.sem?` <em title="projetos concluídos sem RM/CMV">+${l.sem}</em>`:''}</span>
     </summary>
-    ${l.it.length?`<div style="padding:4px 4px 8px 78px;font-size:.72rem">${l.it.sort((a,b)=>(b.cmv||0)-(a.cmv||0)).map(x=>`<div style="display:flex;gap:10px;padding:2px 0;cursor:pointer" onclick="lpAbrirDetalhe('${x.p.id}')"><b style="min-width:52px">OS ${_projxEsc(x.p.os||'—')}</b><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_projxEsc(x.p.cliente||'')}${x.p.job?' · '+_projxEsc(x.p.job):''}</span><span>${x.liq?fmtR(x.liq):'—'}</span><span>RM ${x.rm!=null?fmtR(x.rm)+(x.estimada?'*':''):'<em style="color:#b45309">pendente</em>'}</span><b style="min-width:52px;text-align:right;color:${corC(x.cmv)}">${pct(x.cmv)}</b></div>`).join('')}</div>`:'<div style="padding:2px 4px 8px 78px;font-size:.72rem;color:var(--ink4)">Nenhum projeto concluído no mês.</div>'}
+    ${l.it.length?`<div style="padding:4px 4px 8px 78px;font-size:.72rem">${l.it.sort((a,b)=>(b.cmv||0)-(a.cmv||0)).map(x=>`<div style="display:flex;gap:10px;padding:2px 0;cursor:pointer" onclick="lpAbrirDetalhe('${x.p.id}')"><b style="min-width:52px">OS ${_projxEsc(x.p.os||'—')}</b><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_projxEsc(_pedNome(x.p))}</span><span>${x.liq?fmtR(x.liq):'—'}</span><span>RM ${x.rm!=null?fmtR(x.rm)+(x.estimada?'*':''):'<em style="color:#b45309">pendente</em>'}</span><b style="min-width:52px;text-align:right;color:${corC(x.cmv)}">${pct(x.cmv)}</b></div>`).join('')}</div>`:'<div style="padding:2px 4px 8px 78px;font-size:.72rem;color:var(--ink4)">Nenhum projeto concluído no mês.</div>'}
   </details>`).join('');
   // CMV ponderado por categoria de pedido (12 meses)
   const cats={};dados.filter(x=>meses.includes(x.mes)&&x.rm!=null&&x.liq>0).forEach(x=>{const c=cats[x.cat]=cats[x.cat]||{v:0,r:0,n:0};c.v+=x.liq;c.r+=x.rm;c.n++;});
@@ -37459,7 +37850,7 @@ function _cmpAvisos(){
   const hoje=_hojeIso();
   _lpPedidosElegiveis().forEach(p=>{
     const regs=_cmpRegs(p);if(!regs.length)return;
-    const lbl=`OS ${p.os||'—'} · ${_pedNome(p)}${p.job?' · '+p.job:''}`;
+    const lbl=`OS ${p.os||'—'} · ${_pedNome(p)}`;
     regs.forEach(r=>{
       if(!r.chegouEm||(Date.parse(r.chegouEm)||0)<lim)return;
       ['PRODUÇÃO','PCP'].forEach(setor=>out.push({id:'cmp_chegou_'+r.id+'_'+setor,automatico:true,tipoAuto:'compras_chegou',
@@ -37629,7 +38020,7 @@ function _comprasAbrirChecklistAntigo(pedidoId,etapaKey){ // (2026-10-01) substi
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px">
       <div>
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">🛒 Checklist de Compra — ${etapa.label} · OS ${p.os||'—'}</div>
-        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_pedNome(p)}${p.job?' · '+p.job:''} · Prazo esperado: ${fmtD(etapa.iso)}</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_pedNome(p)} · Prazo esperado: ${fmtD(etapa.iso)}</div>
       </div>
       <button onclick="comprasFecharChecklist('${pedidoId}','${etapaKey}')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar (Esc)">✕</button>
     </div>
@@ -37857,7 +38248,7 @@ function comprasAbrirChecklist(pedidoId,etapaKey){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px">
       <div>
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">🛒 Compras por setor — OS ${_cmpEsc(p.os||'—')}</div>
-        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_cmpEsc(_pedNome(p))}${_pedTipoTag(p)}${p.job?' · '+_cmpEsc(p.job):''} · Prazo de chegada: ${fmtD(etapa.iso)}</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_cmpEsc(_pedNome(p))}${_pedTipoTag(p)} · Prazo de chegada: ${fmtD(etapa.iso)}</div>
       </div>
       <button onclick="comprasFecharChecklist('${pedidoId}','${etapaKey}')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar (Esc)">✕</button>
     </div>
@@ -38374,7 +38765,7 @@ function prodAbrirChecklist(pedidoId){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px">
       <div>
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">🏭 Checklist de Produção — OS ${p.os||'—'}</div>
-        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_pedNome(p)}${_pedTipoTag(p)}${p.job?' · '+p.job:''}</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_pedNome(p)}${_pedTipoTag(p)}</div>
       </div>
       <button onclick="prodFecharChecklist()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar (Esc)">✕</button>
     </div>
@@ -39907,7 +40298,7 @@ function renderProdDiasPorPedido(){
       return `<tr onclick="prodIniciarOuAbrirChecklist('${p.id}')" style="border-bottom:1px solid var(--border-lt);cursor:pointer">
         <td style="padding:8px 10px">
           <div style="font-weight:700;color:var(--ink)">OS ${p.os||'—'}</div>
-          <div style="font-size:.72rem;color:var(--ink4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}${_pedTipoTag(p)}${p.job?' · '+p.job:''}</div>
+          <div style="font-size:.72rem;color:var(--ink4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px" title="${(_pedNome(p)).replace(/"/g,'&quot;')}">${_pedNome(p)}${_pedTipoTag(p)}</div>
         </td>
         <td style="padding:8px 10px;white-space:nowrap">${fmtD(etapa.iso)}</td>
         <td style="padding:8px 10px;font-weight:800;color:${cor};white-space:nowrap">${atrasado?'🔴 Atrasado':dias+' dia'+(dias===1?'':'s')}</td>
@@ -42643,7 +43034,7 @@ function lpAbrirDetalhe(pedidoId,voltarParaDia){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:10px">
       <div>
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">📦 Etapas do Pedido — OS ${p.os||'—'}</div>
-        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_pedNome(p)}${_pedTipoTag(p)}${p.job?' · '+p.job:''}</div>
+        <div style="font-size:.8rem;color:var(--ink3);margin-top:2px">${_pedNome(p)}${_pedTipoTag(p)}</div>
       </div>
       <button onclick="document.getElementById('lp-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px" title="Fechar">✕</button>
     </div>
@@ -44058,7 +44449,7 @@ function planAbrirDetalhePedido(pedidoId){
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;gap:10px">
       <div>
         <div style="font-size:1rem;font-weight:800;color:#1a1f36">📋 Planejamento — OS ${p.os||'—'}</div>
-        <div style="font-size:.78rem;color:var(--ink4);margin-top:2px">${_pedNome(p)}${_pedTipoTag(p)}${p.job?' · '+p.job:''}</div>
+        <div style="font-size:.78rem;color:var(--ink4);margin-top:2px">${_pedNome(p)}${_pedTipoTag(p)}</div>
       </div>
       <button onclick="document.getElementById('plan-detalhe-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;flex-shrink:0" title="Fechar">✕</button>
     </div>
@@ -51016,7 +51407,7 @@ function _histPedidoEventos(p){
   // se este pedido É uma garantia, a venda de origem dele.
   try{
     pedidos.filter(x=>x.id!==p.id&&x.rncPedidoOrigem&&(x.rncPedidoOrigem.id===p.id||(p.os&&String(x.rncPedidoOrigem.os)===String(p.os)))).forEach(g=>{
-      add('⚠️','Garantia/Retrabalho aberta para este pedido',g.emissaoEmHora||g.emissaoEm||g.conselhoCriadoEm,`OS ${g.os||'—'} · ${g.job||g.cliente||'—'} · ${g.origemComercial?'emitida':'em rascunho no Conselho'}${g.responsavel?' · '+g.responsavel:''}`,'#dc2626');
+      add('⚠️','Garantia/Retrabalho aberta para este pedido',g.emissaoEmHora||g.emissaoEm||g.conselhoCriadoEm,`OS ${g.os||'—'} · ${_pedNome(g)} · ${g.origemComercial?'emitida':'em rascunho no Conselho'}${g.responsavel?' · '+g.responsavel:''}`,'#dc2626');
     });
     if(p.rncPedidoOrigem&&p.rncPedidoOrigem.os){
       add('🔗','Garantia/Retrabalho referente a uma venda anterior',p.emissaoEmHora||p.emissaoEm||p.conselhoCriadoEm,`Venda de origem: ${_rncOrigemLabel(p.rncPedidoOrigem)}`,'#dc2626');
@@ -51278,7 +51669,7 @@ async function hpExportarPedidoPDF(pedidoId){
     doc.setTextColor(...PINK);doc.setFontSize(10);
     doc.text('GCORE - Sistema Granda',pageW-14,21,{align:'right'});
     doc.setTextColor(...GRAY);doc.setFont('helvetica','normal');doc.setFontSize(7.5);
-    doc.text(`OS ${p.os||'—'} · ${_pedNome(p)}${p.job?' · '+p.job:''}`,pageW-14,26.5,{align:'right'});
+    doc.text(`OS ${p.os||'—'} · ${_pedNome(p)}`,pageW-14,26.5,{align:'right'});
     const lineY=29;
     doc.setDrawColor(...PINK);doc.setLineWidth(0.7);doc.line(14,lineY,pageW-14,lineY);
     doc.setFont('helvetica','normal');
@@ -51493,7 +51884,7 @@ function abrirFinalizacaoObra(pedidoId){
     // campo, pra quem digita conferir que é o pedido certo ANTES de escrever o e-mail —
     // motivado pelo caso da OS 216 (Burger King Manaíra x Bob's Manaíra).
     const hintEl=document.getElementById('pl-email-comprador-hint');
-    if(hintEl)hintEl.innerHTML=`Esta obra não foi emitida pelo sistema, então não tem e-mail de comprador cadastrado — confira que é o pedido certo antes de digitar: <strong>OS ${p.os||'—'} — ${(_pedNome(p)).toUpperCase()}${p.job?' · JOB: '+p.job.toUpperCase():''}</strong>.`;
+    if(hintEl)hintEl.innerHTML=`Esta obra não foi emitida pelo sistema, então não tem e-mail de comprador cadastrado — confira que é o pedido certo antes de digitar: <strong>OS ${p.os||'—'} — ${(_pedCliExib(p)||'—').toUpperCase()}${p.job?' · JOB: '+p.job.toUpperCase():''}</strong>.`;
   }
 
   const docZone=document.getElementById('pl-doc-zone');
@@ -51847,7 +52238,7 @@ async function salvarFinalizacaoObra(){
   // do MESMO objeto de pedido (mesmo OS/cliente/JOB sempre), sem cruzamento nenhum entre
   // pedidos diferentes — não tem o risco que motivou isso, então não pede confirmação (usuário
   // pediu explicitamente pra manter o preenchimento automático sem fricção nesse caso).
-  if(!emitidoNormal&&!window.confirm(`Confirma o envio do resumo de finalização para:\n\n${emailComprador}\n\nReferente a:\nOS ${p.os||'—'} — ${_pedNome(p)}${p.job?' (JOB: '+p.job+')':''}\n\nEste pedido não foi emitido pelo sistema, então o e-mail acima foi digitado manualmente — confira se é realmente do cliente certo antes de confirmar.`)){toast('Envio cancelado — confira o e-mail do comprador(a)','tinf');return;}
+  if(!emitidoNormal&&!window.confirm(`Confirma o envio do resumo de finalização para:\n\n${emailComprador}\n\nReferente a:\nOS ${p.os||'—'} — ${_pedCliExib(p)||'—'}${p.job?' (JOB: '+p.job+')':''}\n\nEste pedido não foi emitido pelo sistema, então o e-mail acima foi digitado manualmente — confira se é realmente do cliente certo antes de confirmar.`)){toast('Envio cancelado — confira o e-mail do comprador(a)','tinf');return;}
 
   clearTimeout(_plRascunhoTimer);
   // Pro pedido não emitido pelo sistema, o e-mail digitado aqui vira o próprio
@@ -53478,7 +53869,7 @@ function renderFaturamentoPorCliente(){
   function linhaAvulso(g){
     const v=g.vendas[0];
     const osJobTxt=[v.os?('OS '+v.os):'',v.job].filter(Boolean).join(' · ');
-    return `<tr onclick="verVendaDetalhe('${String(v.os||'').replace(/'/g,"\\'")}','${v.pid||''}')" style="cursor:pointer" title="Clique para ver o resumo da emissão"><td>${v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span>${osJobTxt?`<div style="font-size:.64rem;color:#94a3b8">${osJobTxt}</div>`:''}</td><td style="text-align:right">${fmtR(g.totalBr)}</td>${_tdDespesas(g)}<td style="text-align:right">${fmtR(g.totalLq)}</td></tr>`;
+    return `<tr onclick="verVendaDetalhe('${String(v.os||'').replace(/'/g,"\\'")}','${v.pid||''}')" style="cursor:pointer" title="Clique para ver o resumo da emissão"><td>${v.nomeFantasia||v.cliente} <span style="color:#94a3b8;font-size:.72rem;font-weight:700">(${GC_MESES_S[v.mes-1]})</span>${osJobTxt?`<div style="font-size:.64rem;color:#94a3b8">${osJobTxt}</div>`:''}</td><td style="text-align:right">${fmtR(g.totalBr)}</td>${_tdDespesas(g)}<td style="text-align:right">${fmtR(g.totalLq)}</td></tr>`;
   }
   const bodyEmpresas=empresas.map(linhaEmpresa).join('');
   const divisorAvulsos=avulsos.length?`<tr><td colspan="${NCOLS}" style="background:#eef2f7;color:#64748b;font-size:.68rem;font-weight:800;letter-spacing:.5px;padding:8px 10px;text-transform:uppercase">🎲 Clientes avulsos — 1 pedido só até agora, ainda sem histórico de recorrência</td></tr>`:'';
@@ -75535,14 +75926,14 @@ function _cadExportar(cad){
       .sort((a,b)=>String(b.emissaoEm||'').localeCompare(String(a.emissaoEm||''))).slice(0,10);
     if(!l.length)return'<div style="color:#94a3b8;font-size:.76rem;padding:6px 2px">Nenhum pedido encontrado.</div>';
     return l.map(p=>`<button type="button" onclick="document.getElementById('fp-gerar-md').remove();fpAbrir('${p.id}')" style="display:flex;width:100%;gap:8px;align-items:center;text-align:left;border:1px solid #e2e8f0;background:#fff;border-radius:9px;padding:7px 10px;margin-bottom:5px;cursor:pointer;font-family:inherit;font-size:.78rem">
-      <b style="min-width:44px">OS ${esc(p.os||'—')}</b><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((typeof _pedNome==='function'?_pedNome(p):p.cliente)||'—')}${p.job?' · '+esc(p.job):''}</span>${p.fp?chip(p):'<span style="color:#94a3b8;font-size:.68rem">sem FP</span>'}</button>`).join('');
+      <b style="min-width:44px">OS ${esc(p.os||'—')}</b><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((typeof _pedNome==='function'?_pedNome(p):p.cliente)||'—')}</span>${p.fp?chip(p):'<span style="color:#94a3b8;font-size:.68rem">sem FP</span>'}</button>`).join('');
   }
   window._fpGerarBusca=v=>{const el=document.getElementById('fp-gerar-res');if(el)el.innerHTML=lista(v);};
   function avulsasHtml(){
     const a=(window._fpAvulsas||[]).slice().sort((x,y)=>(y.fpAvNum||0)-(x.fpAvNum||0));
     if(!a.length)return'<div style="color:#94a3b8;font-size:.76rem;padding:4px 2px">Nenhuma FP sem pedido ainda.</div>';
     return a.map(p=>`<button type="button" onclick="document.getElementById('fp-gerar-md').remove();fpAbrir('${p.id}')" style="display:flex;width:100%;gap:8px;align-items:center;text-align:left;border:1px solid #e2e8f0;background:#fff;border-radius:9px;padding:7px 10px;margin-bottom:5px;cursor:pointer;font-family:inherit;font-size:.78rem">
-      <b style="min-width:52px">${esc(p.os)}</b><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.cliente||'—')}${p.job?' · '+esc(p.job):''}</span>${chip(p)}</button>`).join('');
+      <b style="min-width:52px">${esc(p.os)}</b><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(_pedNome(p))}</span>${chip(p)}</button>`).join('');
   }
   window.fpGerarAbrir=async function(){
     if(typeof _isSetorUser==='function'&&!_isSetorUser('PROJETOS')){toast('Só Projetos ou administrador geram FP','terr');return;}
@@ -77065,7 +77456,7 @@ function _uxBuscaColetar(q){
   try{add('Menus',[...document.querySelectorAll('#sb-nav .sb-btn')].filter(b=>b.offsetParent!==null||b.id).map(b=>({t:(b.querySelector('.sb-btn-label')||b).textContent.trim(),s:'Abrir menu',fn:()=>b.click()})).filter(x=>x.t&&tem(x.t)));}catch(e){}
   // pedidos
   try{const rows=(typeof getVendaRowsMerged==='function')?getVendaRowsMerged():[];
-    add('Pedidos',rows.filter(r=>tem(r.p)||tem(r.cl)||tem(r.job)).sort((a,b)=>(b.m||0)-(a.m||0)).map(r=>({t:(typeof pedidoDisplay==='function'?pedidoDisplay(r.p):r.p)+' — '+(r.cl||'—'),s:[r.job,r.mes,r.cat].filter(Boolean).join(' · '),fn:()=>_uxAbrirPedido(r.p),link:'pedido/'+r.p})));}catch(e){}
+    add('Pedidos',rows.filter(r=>tem(r.p)||tem(r.cl)||tem(r.job)).sort((a,b)=>(b.m||0)-(a.m||0)).map(r=>({t:(typeof pedidoDisplay==='function'?pedidoDisplay(r.p):r.p)+' — '+(r.fant||r.cl||'—'),s:[r.job,r.mes,r.cat].filter(Boolean).join(' · '),fn:()=>_uxAbrirPedido(r.p),link:'pedido/'+r.p})));}catch(e){}
   // CRM
   try{if(_podeVerVisaoComercial()&&typeof crmEmpresas!=='undefined')add('Negócios (CRM)',crmEmpresas.filter(e=>tem(e.nome)||tem(e.job)||tem(e.sedeCidade)).map(e=>({t:e.nome||'—',s:[e.job,e.responsavel,[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'),e.fechamento?(e.fechamento.status==='ganho'?'Ganho':'Perdido'):''].filter(Boolean).join(' · '),fn:()=>_uxAbrirCrm(e.id),link:'crm/'+e.id})));}catch(e){}
   // Prospecção
