@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-09.15';</script>
+<script>const APP_BUILD_VERSION='2026-11-10.3';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -6581,7 +6581,9 @@ function gerarTarefasAutomaticas(tipo,tipoPedido,extra){
   // sempre com esse nome exato), então fica hardcoded aqui em vez de depender de alguém
   // cadastrar a regra certa em Configurações. Só dispara na emissão original (mesma regra
   // de "Lançar no GCore": edição de pedido já emitido não recria tarefas automáticas).
-  if(extra&&extra.chumbador==='Sim'){
+  // (2026-11-10, Guilherme: "remova essa tarefa automática de lançar chumbador, não precisa mais me avisar
+  // disso, o pedido do chumbador já é lançado na produção automaticamente") — desligada.
+  if(false&&extra&&extra.chumbador==='Sim'){
     const prazoChumb=new Date();prazoChumb.setDate(prazoChumb.getDate()+2);
     const prazoISO=_isoLocal(prazoChumb);
     const infoPedido=`OS ${extra.os||'—'} · ${_pedNome(extra)}`;
@@ -6597,6 +6599,7 @@ function getTarefasComerciaisPendentes(){
   const out=[];
   pedidos.forEach(p=>{
     (p.tarefasComerciais||[]).forEach(t=>{
+      if(t&&t.tipo==='LANÇAR PEDIDO CHUMBADOR GCORE')return; // tarefa desligada em 2026-11-10
       if((t.status||'pendente')==='pendente')out.push({...t,pedidoId:p.id,os:p.os,cliente:(p.nomeFantasia||p.cliente),vendedor:p.responsavel||'—',tipoPedido:p.tipoPedido||'',job:p.job||'',prazo:p.prazo||''});
     });
   });
@@ -10063,22 +10066,34 @@ function renderCustosQualidade(){
     return`<td style="text-align:right;white-space:nowrap;${val>0.005?'font-weight:700;':''}color:${corReal(val,pv)}"${forn?` title="${esc(forn)}"`:''}>${val>0.005?fmtR(val):'—'}</td>`;};
   const origemTxt=o=>o.tipo==='sem'?'—':o.tipo==='externo'?`OS ${esc(o.os)} <span style="color:#b45309;font-size:.66rem">(sistema antigo)</span>`:`OS ${esc(o.os)}`;
   const statusTxt=l=>l.lancado?`<span style="color:#16a34a;font-weight:700">✅ Lançado</span>`:l.noPlan?'<span style="color:#b45309;font-weight:700">⏳ Aguardando Planejamento</span>':'<span style="color:var(--ink4)" title="Pedido sem instalação, frete ou medição — não passa pelo Planejamento">Sem operacional</span>';
+  // (2026-11-10, Guilherme: "tire tudo que for de rolar pro lado… quando a lista for grande os nomes das colunas
+  // somem") — lista sem rolagem lateral: as categorias viram uma mini-tabela DENTRO da linha (prévia × realizado
+  // lado a lado), e o cabeçalho fica grudado no topo enquanto rola pra baixo.
+  const catsLinha=l=>{
+    const it=colsCat.map(x=>{
+      const val=l.v[x.k]||0,pv=_CQG_COM_PREVIA.has(x.k)?(l.prev[x.k]||0):0;
+      if(x.k==='producao'&&!l.prodInformado)return podeEd?`<tr><td class="cqx-cl">${x.c}</td><td class="cqx-cp">—</td><td class="cqx-cr"><span onclick="cqgAbrirDetalhe('${l.p.id}')" style="cursor:pointer;color:var(--brand-d);font-weight:700">✏️ Informar</span></td></tr>`:'';
+      if(val<=0.005&&pv<=0.005)return'';
+      const forn=l.forn[x.k];
+      return`<tr><td class="cqx-cl">${x.c}</td><td class="cqx-cp">${_CQG_COM_PREVIA.has(x.k)?(pv>0.005?fmtR(pv):'—'):'<span title="Sem prévia nesta categoria">·</span>'}</td><td class="cqx-cr" style="color:${corReal(val,pv)};${val>0.005?'font-weight:700':''}"${forn?` title="${esc(forn)}"`:''}>${val>0.005?fmtR(val):'—'}</td></tr>`;
+    }).filter(Boolean);
+    return it.length?`<table class="cqx-cats"><thead><tr><th></th><th>Prévia</th><th>Realizado</th></tr></thead><tbody>${it.join('')}</tbody></table>`:'<span style="color:var(--ink4);font-size:.74rem">Sem custo operacional</span>';
+  };
+  const difCel=l=>{if(!l.lancado)return`<div class="cqx-dif" style="color:var(--ink4)" title="O Planejamento ainda não lançou os custos">—</div>`;const d=l.total-l.totalPrev;return`<div class="cqx-dif" style="color:${Math.abs(d)<0.005?'var(--ink4)':d>0?'#dc2626':'#16a34a'}">${Math.abs(d)<0.005?'igual':(d>0?'+':'−')+fmtR(Math.abs(d))}</div>`;};
+  try{_cqxCss();}catch(e){}
   const tabela=L.length?`<div class="dash-card"><div class="dash-sec-title">Pedidos de Garantia/Retrabalho — ${periodo}</div>
-    <div style="overflow-x:auto;margin-top:8px"><table class="dash-table" style="font-size:.74rem"><thead><tr>
-      <th rowspan="2">Pedido</th><th rowspan="2">Emissão</th><th rowspan="2">Setor que gerou</th><th rowspan="2">Origem</th>${colsCat.map(x=>_CQG_COM_PREVIA.has(x.k)?`<th colspan="2" style="text-align:center;white-space:nowrap">${x.c}</th>`:`<th rowspan="2" style="text-align:right;white-space:nowrap">${x.c}</th>`).join('')}<th colspan="3" style="text-align:center">Total</th><th rowspan="2">Status</th></tr>
-      <tr>${colsCat.filter(x=>_CQG_COM_PREVIA.has(x.k)).map(()=>'<th style="text-align:right;font-weight:600">Prévia</th><th style="text-align:right">Realizado</th>').join('')}<th style="text-align:right;font-weight:600">Prévia</th><th style="text-align:right">Realizado</th><th style="text-align:right">Diferença</th></tr></thead>
+    <table class="cqx-tbl"><colgroup><col style="width:30%"><col style="width:14%"><col style="width:30%"><col style="width:14%"><col style="width:12%"></colgroup>
+    <thead><tr><th>Pedido</th><th>Setor que gerou</th><th>Custos por categoria</th><th style="text-align:right">Total</th><th>Status</th></tr></thead>
     <tbody>${L.map(l=>`<tr>
-      <td style="min-width:200px"><span onclick="cqgAbrirDetalhe('${l.p.id}')" style="cursor:pointer;font-weight:700;color:var(--brand-d)">OS ${esc(l.os)} · ${esc(l.nome)}</span>${l.resp?`<div style="font-size:.66rem;color:var(--ink4)">${esc(l.resp)}</div>`:''}</td>
-      <td style="white-space:nowrap">${fmtD(l.em)}</td>
-      <td style="white-space:nowrap;${l.setor?'font-weight:700':'color:var(--ink4)'}"${l.setor==='OUTRO'&&l.p.rncSetorOutro?` title="${esc(l.p.rncSetorOutro)}"`:''}>${esc(l.setor||'Não informado')}</td>
-      <td style="white-space:nowrap">${origemTxt(l.origem)}</td>
-      ${colsCat.map(x=>(_CQG_COM_PREVIA.has(x.k)?celP(l,x):'')+cel(l,x)).join('')}
-      <td style="text-align:right;white-space:nowrap;background:#f8fafc;color:#475569">${l.totalPrev>0.005?fmtR(l.totalPrev):'—'}</td>
-      <td style="text-align:right;white-space:nowrap;font-weight:800;color:${l.total>0.005?'#0f172a':'var(--ink4)'}">${fmtR(l.total)}</td>
-      ${(()=>{if(!l.lancado)return`<td style="text-align:right;white-space:nowrap;color:var(--ink4)" title="O Planejamento ainda não lançou os custos">—</td>`;const d=l.total-l.totalPrev;return`<td style="text-align:right;white-space:nowrap;font-weight:800;color:${Math.abs(d)<0.005?'var(--ink4)':d>0?'#dc2626':'#16a34a'}">${Math.abs(d)<0.005?'—':(d>0?'+':'−')+fmtR(Math.abs(d))}</td>`;})()}
-      <td style="white-space:nowrap">${statusTxt(l)}</td></tr>`).join('')}
-      <tr style="font-weight:800;background:#f8fafc"><td colspan="4">TOTAL (${L.length})</td>${colsCat.map(x=>(_CQG_COM_PREVIA.has(x.k)?`<td style="text-align:right;white-space:nowrap;color:#475569">${fmtR(totP[x.k])}</td>`:'')+`<td style="text-align:right;white-space:nowrap">${fmtR(tot[x.k])}</td>`).join('')}<td style="text-align:right;white-space:nowrap;color:#475569">${fmtR(totalPrevGeral)}</td><td style="text-align:right;white-space:nowrap">${fmtR(totalGeral)}</td>${(()=>{const d=_difLanc;return`<td style="text-align:right;white-space:nowrap;color:${Math.abs(d)<0.005?'var(--ink4)':d>0?'#dc2626':'#16a34a'}">${Math.abs(d)<0.005?'—':(d>0?'+':'−')+fmtR(Math.abs(d))}</td>`;})()}<td></td></tr>
-    </tbody></table></div>
+      <td><span onclick="cqgAbrirDetalhe('${l.p.id}')" class="cqx-nome">OS ${esc(l.os)} · ${esc(l.nome)}</span>
+        <div class="cqx-sub">${l.resp?esc(l.resp)+' · ':''}emitido ${fmtD(l.em)}${l.origem&&l.origem.tipo!=='sem'?' · origem '+origemTxt(l.origem):''}</div></td>
+      <td style="${l.setor?'font-weight:700':'color:var(--ink4)'}"${l.setor==='OUTRO'&&l.p.rncSetorOutro?` title="${esc(l.p.rncSetorOutro)}"`:''}>${esc(l.setor||'Não informado')}${l.setor==='OUTRO'&&l.p.rncSetorOutro?`<div class="cqx-sub">${esc(l.p.rncSetorOutro)}</div>`:''}</td>
+      <td>${catsLinha(l)}</td>
+      <td style="text-align:right"><div class="cqx-k">Prévia</div><div class="cqx-pv">${l.totalPrev>0.005?fmtR(l.totalPrev):'—'}</div>
+        <div class="cqx-k">Realizado</div><div class="cqx-rv" style="color:${l.total>0.005?'#0f172a':'var(--ink4)'}">${fmtR(l.total)}</div>${difCel(l)}</td>
+      <td>${statusTxt(l)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td colspan="3">TOTAL · ${L.length} ${L.length===1?'pedido':'pedidos'}</td><td style="text-align:right"><div class="cqx-k">Prévia</div><div class="cqx-pv">${fmtR(totalPrevGeral)}</div><div class="cqx-k">Realizado</div><div class="cqx-rv">${fmtR(totalGeral)}</div></td><td></td></tr></tfoot>
+    </table>
     <div style="font-size:.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">Prévia = valores operacionais informados no pedido (a base do previsto do Planejamento). Realizado = o que o Planejamento lança em Fornecedores — em vermelho quando passa da prévia, em verde quando fica dentro. Instalação inclui mobilização, remoção e pintura de tubo. Produção = material e mão de obra informados pela Qualidade. Clique no pedido para ver o detalhe${podeEd?' e informar setor e produção':''}.</div></div>`
     :`<div class="dash-card"><div style="padding:24px;text-align:center;color:var(--ink4);font-size:.84rem">Nenhum pedido de Garantia/Retrabalho emitido em ${periodo}.</div></div>`;
   let ind='';try{ind=_cqgIndHtml(L,T,ctx,totalGeral);}catch(e){console.error('indicadores garantia',e);}
@@ -50371,19 +50386,16 @@ function _plObrasRenderLista(){
   }
   const podeEditarPrazo=_isPlanejamentoUser();
   const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
-  const th='padding:10px 12px;font-size:.7rem;text-transform:uppercase;letter-spacing:.03em;color:var(--ink4);font-weight:700;background:#f8fafc;position:sticky;top:0;z-index:1';
-  body.innerHTML=`<div style="overflow-x:auto"><table class="tbl-acoes-fixa pl-pipe-tbl" style="width:100%;border-collapse:collapse;font-size:.82rem">
-    <thead><tr style="text-align:left;border-bottom:2px solid var(--border)">
-      <th style="${th};width:28px"></th>
-      <th style="${th}">OS</th>
-      <th style="${th}">Cliente</th>
-      <th style="${th}">Venda</th>
-      <th style="${th}">Prazo Final</th>
-      <th style="${th}">Próxima ação</th>
-      <th style="${th}" title="Tarefas de planejamento em ordem de data — verde feita, vermelha atrasada, amarela vence em até 7 dias, cinza futura">Etapas</th>
-      <th style="${th}" title="Próxima mensagem do roteiro de comunicação com o cliente — clique pra abrir a mensagem pronta">💬 Cliente</th>
-      <th style="${th}">Status</th>
-      <th style="${th}"></th>
+  
+  try{_plxCss();}catch(e){}
+  body.innerHTML=`<table class="pl-pipe-tbl plx-tbl"><colgroup><col style="width:34px"><col style="width:28%"><col style="width:12%"><col style="width:21%"><col style="width:19%"><col style="width:20%"></colgroup>
+    <thead><tr>
+      <th></th>
+      <th>Pedido</th>
+      <th>Prazos</th>
+      <th>Próxima ação</th>
+      <th title="Bolinhas: tarefas de planejamento em ordem de data — verde feita, vermelha atrasada, amarela vence em até 7 dias, cinza futura. Embaixo, a próxima mensagem pro cliente.">Etapas · 💬 Cliente</th>
+      <th style="text-align:right">Status</th>
     </tr></thead>
     <tbody>
     ${rows.map(({p,concl,atrasado,atrasoPrazo,etapasAtr,et,prazoIso})=>{
@@ -50415,14 +50427,14 @@ function _plObrasRenderLista(){
       }else{
         const t=et.proxima,dt=_plDiasTxt(t.iso,hojeISO);
         const outrasAtr=et.tarefas.filter(x=>x.st==='atrasado'&&x!==t).length;
-        proxHtml=`<div style="font-weight:700;color:var(--ink);white-space:nowrap">${t.ico} ${t.label} · ${fmtD(t.iso)}</div>
-          <div style="font-size:.72rem;font-weight:700;color:${dt.cor};margin-top:2px;white-space:nowrap">${dt.txt}${outrasAtr?` <span onclick="_plObrasToggleExpandir('${p.id}')" title="Ver todas as etapas" style="cursor:pointer;background:#fee2e2;color:#b91c1c;border-radius:10px;padding:1px 7px;margin-left:4px">+${outrasAtr} atrasada${outrasAtr>1?'s':''} ${aberto?'▴':'▾'}</span>`:''}</div>`;
+        proxHtml=`<div style="font-weight:700;color:var(--ink)">${t.ico} ${t.label} · ${fmtD(t.iso)}</div>
+          <div style="font-size:.72rem;font-weight:700;color:${dt.cor};margin-top:2px">${dt.txt}${outrasAtr?` <span onclick="_plObrasToggleExpandir('${p.id}')" title="Ver todas as etapas" style="cursor:pointer;background:#fee2e2;color:#b91c1c;border-radius:10px;padding:1px 7px;margin-left:4px">+${outrasAtr} atrasada${outrasAtr>1?'s':''} ${aberto?'▴':'▾'}</span>`:''}</div>`;
       }
       // Trilha de bolinhas
       let trilha='<span style="color:var(--ink4)">—</span>';
       if(et&&et.ok&&et.tarefas.length){
         const feitas=et.tarefas.filter(t=>t.st==='ok').length;
-        trilha=`<div style="display:flex;align-items:center;gap:4px;white-space:nowrap">${et.tarefas.map(t=>{
+        trilha=`<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap">${et.tarefas.map(t=>{
           const dias=Math.round((new Date(t.iso+'T00:00:00')-new Date(hojeISO+'T00:00:00'))/86400000);
           const cor=t.st==='ok'?'#16a34a':t.st==='atrasado'?'#dc2626':dias<=7?'#f59e0b':'#cbd5e1';
           const stTxt=t.st==='ok'?`feito${t.dataFeito?' em '+fmtD(t.dataFeito):''}`:t.st==='atrasado'?'ATRASADO':'pendente';
@@ -50447,50 +50459,50 @@ function _plObrasRenderLista(){
         // (2026-08-03, a pedido do usuário — "tabela azul" com os offsets de dias úteis de cada
         // tarefa, ver PLAN_TAREFAS_REGRAS).
         const _lpArtHtml=_lpCellTarefa(p,'art',hojeISO);
-        const _lpPrazosHtml=_lpc.ok
-          ?(_lpCellEmbalagem(p,_lpc,hojeISO,podeEditarPrazo)
-            +_lpCellTarefa(p,'instalador',hojeISO)
-            +_lpCellTarefa(p,'frete',hojeISO)
-            +_lpCellTarefa(p,'elevacao',hojeISO)
-            +_lpCellTarefa(p,'rao',hojeISO)
-            +_lpCell(_lpc.temFrete?_lpc.coletaIso:null,'Pedido sem Frete — cliente retira')
-            +_lpCell(_lpc.temFrete?_lpc.chegadaIso:null,'Pedido sem Frete')
-            +_lpCell(_lpc.temInst?_lpc.chegadaIso:null,'Pedido sem Instalação')
-            +_lpCell(_lpc.temInst?_lpc.prazoIso:null,'Pedido sem Instalação'))
-          :_lpc.curto?`<td colspan="9" style="padding:8px 10px;color:#b45309;font-size:.72rem" title="Prazo de Finalização curto demais pro Frete + Instalação informados">⚠️ Prazo curto demais — confira o prazo do pedido</td>`
-          :`<td colspan="9" style="padding:8px 10px;color:#b45309;font-size:.72rem" title="${_lpProblemasTexto(_lpc.problemas).replace(/"/g,'&quot;')}">⚠️ ${_lpProblemasTexto(_lpc.problemas)}</td>`;
+        const _lpItens=_lpc.ok?[
+            ['📄 Receber ART',_lpArtHtml],
+            ['📦 Embalagem',_lpCellEmbalagem(p,_lpc,hojeISO,podeEditarPrazo)],
+            ['🔧 Contratar instalador',_lpCellTarefa(p,'instalador',hojeISO)],
+            ['🚚 Contratar frete',_lpCellTarefa(p,'frete',hojeISO)],
+            ['🏗️ Contratar elevação',_lpCellTarefa(p,'elevacao',hojeISO)],
+            ['📋 RAO',_lpCellTarefa(p,'rao',hojeISO)],
+            ['🚛 Saída do frete',_lpCell(_lpc.temFrete?_lpc.coletaIso:null,'Pedido sem Frete — cliente retira')],
+            ['📍 Chegada do frete',_lpCell(_lpc.temFrete?_lpc.chegadaIso:null,'Pedido sem Frete')],
+            ['🛠️ Início da instalação',_lpCell(_lpc.temInst?_lpc.chegadaIso:null,'Pedido sem Instalação')],
+            ['🏁 Fim da instalação',_lpCell(_lpc.temInst?_lpc.prazoIso:null,'Pedido sem Instalação')]
+          ]:[['📄 Receber ART',_lpArtHtml]];
+        const _lpErro=_lpc.ok?'':_lpc.curto?'⚠️ Prazo curto demais pro frete + instalação — confira o prazo do pedido':'⚠️ '+_lpProblemasTexto(_lpc.problemas);
         const thp='padding:6px 10px;font-size:.66rem;text-transform:uppercase;color:var(--ink4);font-weight:700;white-space:nowrap';
-        painel=`<tr class="pl-pipe-painel"><td></td><td colspan="9" style="padding:4px 12px 14px">
-          <div style="background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+        painel=`<tr class="pl-pipe-painel plx-painel"><td></td><td colspan="5">
+          <div class="plx-painel-box">
             <div style="font-size:.72rem;font-weight:800;color:var(--ink);margin-bottom:6px">🗓️ Todas as etapas — clique numa data pra dar baixa / abrir Fornecedores</div>
-            <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.8rem">
-              <thead><tr style="text-align:left">
-                <th style="${thp}">Receber ART</th><th style="${thp}">Embalagem</th><th style="${thp}">Contr. Instalador</th><th style="${thp}">Contr. Frete</th><th style="${thp}">Contr. Elevação</th><th style="${thp}">RAO</th><th style="${thp}">Início Frete</th><th style="${thp}">Fim Frete</th><th style="${thp}">Início Instalação</th><th style="${thp}">Fim Instalação</th>
-              </tr></thead>
-              <tbody><tr>${_lpArtHtml}${_lpPrazosHtml}</tr></tbody>
-            </table></div>
+            <div class="plx-etgrid">${_lpItens.map(([l,td])=>`<div class="plx-et"><div class="plx-et-l">${l}</div><table><tbody><tr>${td}</tr></tbody></table></div>`).join('')}</div>
+            ${_lpErro?`<div style="font-size:.74rem;color:#b45309;font-weight:600;margin-top:8px">${esc(_lpErro)}</div>`:''}
             <div style="font-size:.72rem;color:var(--ink4);margin-top:8px">Conselho: <b>${p.conselhoData?fmtD(p.conselhoData):'—'}</b> · Data da Venda: <b>${p.emissaoEm?fmtD(p.emissaoEm):'—'}</b></div>
           </div></td></tr>`;
       }
       return`<tr onclick="plFichaClick('${p.id}',event)" title="Clique pra abrir a Ficha da Obra" style="border-bottom:1px solid var(--border-lt);cursor:pointer;box-shadow:inset 3px 0 0 ${bordaEsq};${aberto?'background:#f8fafc':''}" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='${aberto?'#f8fafc':''}'">
         <td onclick="event.stopPropagation();_plObrasToggleExpandir('${p.id}',event)" title="Ver etapas aqui mesmo" style="padding:10px 4px 10px 10px;color:var(--ink4);font-size:.75rem">${aberto?'▾':'▸'}</td>
-        <td style="padding:10px 12px;font-weight:800;color:${corTxt}">${p.os||'—'}</td>
-        <td style="padding:10px 12px;min-width:180px;max-width:280px">
-          <a href="#" onclick="event.stopPropagation();plAbrirFicha('${p.id}');return false;" title="${esc(_pedNome(p))}" style="color:${corTxt};font-weight:700;text-decoration:none">${esc(_pedNome(p))}${_pedTipoTag(p)}</a>
-          <div style="font-size:.72rem;color:var(--ink4);margin-top:2px">${sub}</div>${verFormLink}
+        <td>
+          <div class="plx-os" style="color:${corTxt}">OS ${p.os||'—'}</div>
+          <a href="#" onclick="event.stopPropagation();plAbrirFicha('${p.id}');return false;" title="${esc(_pedNome(p))}" class="plx-nome" style="color:${corTxt}">${esc(_pedNome(p))}${_pedTipoTag(p)}</a>
+          <div class="plx-sub">${sub}</div>${verFormLink}
         </td>
-        <td style="padding:10px 12px;white-space:nowrap">${p.emissaoEm?fmtD(p.emissaoEm):'—'}${p.conselhoData?`<div style="font-size:.7rem;color:var(--ink4)">Conselho ${fmtD(p.conselhoData)}</div>`:''}</td>
-        <td style="padding:10px 12px;white-space:nowrap;color:${atrasoPrazo?'#dc2626':'var(--ink)'};font-weight:600">${fmtD(p.prazo)||'—'}${editPrazoBtn}${prazoOrigTag}</td>
-        <td style="padding:10px 12px">${proxHtml}</td>
-        <td style="padding:10px 12px">${trilha}</td>
-        <td style="padding:10px 12px">${_rcCelula(p,concl)}</td>
-        <td style="padding:10px 12px;white-space:nowrap">${statusHtml}</td>
-        <td style="padding:10px 12px;text-align:right;white-space:nowrap">
-          ${p.arq_os_url?`<a href="${String(p.arq_os_url).replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir a Ordem de Serviço (PDF) do pedido" style="${_acaoBtnSt('ver')};display:inline-block;text-decoration:none;border-radius:8px;padding:6px 11px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;margin-right:6px;vertical-align:middle">📄 Pedido (PDF)</a>`:`<span title="Este pedido não tem a Ordem de Serviço em PDF anexada" style="display:inline-block;margin-right:8px;font-size:.7rem;color:#94a3b8;white-space:nowrap;vertical-align:middle">sem PDF</span>`}<button onclick="_planAbrirMenuAcoes(this,'${p.id}',${concl})" title="Mais ações" class="plan-acoes-btn plan-menu-trigger">⋮</button>
+        <td>
+          <div class="plx-k">Prazo final</div>
+          <div class="plx-v" style="color:${atrasoPrazo?'#dc2626':'var(--ink)'}">${fmtD(p.prazo)||'—'}${editPrazoBtn}</div>${prazoOrigTag}
+          <div class="plx-k" style="margin-top:6px">Venda</div>
+          <div class="plx-v2">${p.emissaoEm?fmtD(p.emissaoEm):'—'}</div>${p.conselhoData?`<div class="plx-sub">Conselho ${fmtD(p.conselhoData)}</div>`:''}
+        </td>
+        <td>${proxHtml}</td>
+        <td>${trilha}<div style="margin-top:8px">${_rcCelula(p,concl)}</div></td>
+        <td style="text-align:right">
+          <div class="plx-status">${statusHtml}</div>
+          <div class="plx-acoes">${p.arq_os_url?`<a href="${String(p.arq_os_url).replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir a Ordem de Serviço (PDF) do pedido" style="${_acaoBtnSt('ver')};display:inline-block;text-decoration:none;border-radius:8px;padding:6px 11px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;margin-right:6px;vertical-align:middle">📄 Pedido (PDF)</a>`:`<span title="Este pedido não tem a Ordem de Serviço em PDF anexada" style="display:inline-block;margin-right:8px;font-size:.7rem;color:#94a3b8;white-space:nowrap;vertical-align:middle">sem PDF</span>`}<button onclick="_planAbrirMenuAcoes(this,'${p.id}',${concl})" title="Mais ações" class="plan-acoes-btn plan-menu-trigger">⋮</button></div>
         </td>
       </tr>${painel}`;
     }).join('')}
-    </tbody></table></div>`;
+    </tbody></table>`;
 }
 function _plObrasRenderKanban(){
   const wrap=document.getElementById('pl-obras-kanban-body');
@@ -53682,9 +53694,23 @@ function _zampGrupoManual(os){
   if(!key||!cfg.zampGruposManuais)return null;
   return cfg.zampGruposManuais[key]||null;
 }
-function _zampResolver(cliente,os){
+function _zampResolver(cliente,os,extra){
   if(!/ZAMP/.test((cliente||'').toUpperCase()))return null;
-  return _zampGrupoManual(os)||ZAMP_NAO_IDENTIFICADO;
+  return _zampGrupoManual(os)||_zampAuto(extra)||ZAMP_NAO_IDENTIFICADO;
+}
+// (2026-11-10) Quando o nome fantasia ou o JOB já deixam a marca clara (ex.: fantasia "BURGER KING", JOB
+// "BK - GOIANIAGO…"), a ZAMP é identificada sozinha — o aviso fica só pros casos realmente sem marca.
+function _zampAuto(extra){
+  const up=String(extra||'').toUpperCase();if(!up.trim())return null;
+  try{
+    const gs=getGruposClienteFinanceiro();
+    for(const g of gs){
+      if(/ZAMP/i.test(g.nome||''))continue;
+      if((g.palavras||[]).some(p=>{const pu=(p||'').toUpperCase().trim();return pu&&up.includes(pu);}))return g.nome;
+    }
+    if(/(^|[^A-Z0-9])BK([^A-Z0-9]|$)/.test(up)){const bk=gs.find(g=>String(g.nome||'').toUpperCase()==='BURGER KING');if(bk)return bk.nome;}
+  }catch(e){}
+  return null;
 }
 function getGruposClienteFinanceiro(){
   const padrao=_finGruposPadrao();
@@ -53729,7 +53755,7 @@ function _finGrupoCliente(item){
     if(g.separarFranqueado&&categoria.includes('FRANQUEADO'))return item.cliente||'—';
     return g.nome;
   }
-  const zampR=_zampResolver(item.cliente,item.pedidoOs);
+  const zampR=_zampResolver(item.cliente,item.pedidoOs,(item.job||'')+' '+(item.nomeFantasia||item.fant||''));
   if(zampR)return zampR;
   return item.cliente||'—'; // sem grupo cadastrado pra essa palavra-chave: cliente individual, como sempre foi
 }
@@ -53773,7 +53799,7 @@ function _fatClienteGrupoNome(r){
     const bateu=(g.palavras||[]).some(p=>{const pu=(p||'').toUpperCase().trim();return pu&&(cliente.includes(pu)||job.includes(pu));});
     if(bateu)return g.nome;
   }
-  const zampR=_zampResolver(r.cl,r.p);
+  const zampR=_zampResolver(r.cl,r.p,(r.job||'')+' '+(r.fant||''));
   if(zampR)return zampR;
   return _fatClientePrimeiraPalavra(r.cl);
 }
@@ -53854,12 +53880,27 @@ async function salvarGrupoZampManual(os){
   const inp=document.getElementById('zamp-input-'+domId);
   const nome=((sel&&sel.value==='__outro__')?(inp?inp.value:''):(sel?sel.value:'')).trim().toUpperCase();
   if(!nome){toast('Escolha ou digite o nome da marca','terr');return;}
+  // (2026-11-10, Guilherme: "está travando e eu confirmo e depois volta pra confirmar de novo") — antes
+  // regravava as configurações INTEIRAS numa transação (pesada, disputada com outros usuários); se ela
+  // demorava/falhava, a próxima atualização do servidor trazia a lista antiga e o pedido voltava pro aviso.
+  // Agora grava SÓ este campo (zampGruposManuais.<OS>), na hora, e a tela atualiza sem esperar.
+  const key=String(os||'').trim();
+  if(!key){toast('Pedido sem número de OS — não dá pra identificar','terr');return;}
   if(!cfg.zampGruposManuais)cfg.zampGruposManuais={};
-  cfg.zampGruposManuais[String(os||'').trim()]=nome;
-  if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
-  localStorage.setItem('gcore_cfg',JSON.stringify(cfg));
-  toast('OS '+(os||'—')+' identificada como '+nome+'!','tok');
+  cfg.zampGruposManuais[key]=nome;
+  try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
   renderFaturamentoPorCliente();
+  try{
+    if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['zampGruposManuais',key],nome);
+    else if(window._fbSaveCfg)await window._fbSaveCfg(cfg);
+    toast('OS '+(os||'—')+' identificada como '+nome+'!','tok');
+  }catch(e){
+    console.error('ZAMP manual',e);
+    toast('Não foi possível salvar a marca da OS '+(os||'—')+': '+(e&&e.message||e),'terr');
+  }
+  // garante que uma atualização do servidor que chegue no meio não desfaça a escolha
+  if(!cfg.zampGruposManuais)cfg.zampGruposManuais={};
+  if(cfg.zampGruposManuais[key]!==nome){cfg.zampGruposManuais[key]=nome;renderFaturamentoPorCliente();}
 }
 function _renderFaturamentoZampAlerta(vendasPendentes){
   const el=document.getElementById('gc-fatcli-zamp-alerta');if(!el)return;
@@ -76344,6 +76385,201 @@ function _cadExportar(cad){
   }
   window._projRegraCorrigir20261104=corrigir;
   let n=0;const t=setInterval(async()=>{n++;try{const r=await corrigir();if(r==='ok'||n>40)clearInterval(t);}catch(e){if(n>40)clearInterval(t);}},9500);
+})();
+// ── SEM ROLAGEM LATERAL + CABEÇALHO GRUDADO (build 2026-11-10.2) ───────────────────────────────────────
+// Guilherme (10/11): "menu travado assim no canto e de rolar eu não quero mais no sistema, tire tudo que for de
+// rolar pro lado que eu detesto, faça um negócio bonito, harmonioso e fácil do usuário se achar e navegar" +
+// "quando a lista for grande o usuário vai rolar pra baixo e os nomes das colunas somem".
+//  • Planejamento (Pedidos) e Qualidade (Custos Retrabalho/Garantias) foram redesenhados pra caber na tela.
+//  • Em TODO o sistema: a coluna de ações deixou de ficar presa no canto direito; tabela que não cabe na
+//    largura passa a quebrar o texto (valores curtos — datas, R$ — continuam inteiros) em vez de rolar pro
+//    lado; e o cabeçalho de toda tabela fica grudado no topo enquanto a lista rola pra baixo.
+//  • Kanbans continuam com colunas lado a lado (é o formato deles).
+function _plxCss(){
+  if(document.getElementById('plx-css'))return;
+  const st=document.createElement('style');st.id='plx-css';
+  st.textContent=`
+  .plx-tbl{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:.82rem}
+  .plx-tbl thead th{text-align:left;padding:11px 12px;font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:#64748b;font-weight:800;background:#f8fafc;border-bottom:1.5px solid #e2e8f0}
+  .plx-tbl > tbody > tr:not(.plx-painel) > td{padding:14px 12px;vertical-align:top;border-bottom:1px solid #eef2f7;overflow-wrap:anywhere}
+  .plx-tbl > tbody > tr:not(.plx-painel):hover > td{background:#f8fafc}
+  .plx-os{font-size:.72rem;font-weight:800;letter-spacing:.02em;margin-bottom:2px}
+  .plx-nome{display:block;font-weight:700;text-decoration:none;line-height:1.3}
+  .plx-sub{font-size:.72rem;color:#94a3b8;margin-top:3px;line-height:1.35}
+  .plx-k{font-size:.64rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8}
+  .plx-v{font-weight:700;white-space:nowrap}
+  .plx-v2{white-space:nowrap;color:#334155}
+  .plx-status{font-size:.78rem;margin-bottom:8px}
+  .plx-acoes{display:flex;gap:6px;justify-content:flex-end;align-items:center;flex-wrap:wrap}
+  .plx-acoes a{margin-right:0!important}
+  .plx-tbl > tbody > tr:not(.plx-painel) > td:nth-child(5) *{white-space:normal!important;max-width:100%}
+  .plx-tbl > tbody > tr:not(.plx-painel) > td{overflow:hidden}
+  .plx-painel > td{padding:0 12px 16px!important;border-bottom:1px solid #eef2f7;background:#f8fafc}
+  .plx-painel-box{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px 14px}
+  .plx-etgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+  .plx-et{background:#f8fafc;border:1px solid #eef2f7;border-radius:10px;padding:8px 10px}
+  .plx-et-l{font-size:.68rem;font-weight:800;color:#475569;margin-bottom:4px}
+  .plx-et table{border-collapse:collapse}
+  .plx-et td{padding:0!important;border:none!important;background:none!important}
+  @media (max-width:900px){
+    .plx-tbl colgroup{display:none}
+    .plx-tbl,.plx-tbl tbody,.plx-tbl tr,.plx-tbl td{display:block;width:auto}
+    .plx-tbl thead{display:none}
+    .plx-tbl > tbody > tr:not(.plx-painel){border:1px solid #e2e8f0;border-radius:12px;margin-bottom:10px;background:#fff}
+    .plx-tbl > tbody > tr:not(.plx-painel) > td{border:none;padding:8px 12px}
+    .plx-tbl > tbody > tr > td[style*="text-align:right"]{text-align:left!important}
+    .plx-acoes{justify-content:flex-start}
+  }`;
+  document.head.appendChild(st);
+}
+function _cqxCss(){
+  if(document.getElementById('cqx-css'))return;
+  const st=document.createElement('style');st.id='cqx-css';
+  st.textContent=`
+  .cqx-tbl{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:.8rem;margin-top:10px}
+  .cqx-tbl > thead th{text-align:left;padding:10px 12px;font-size:.68rem;text-transform:uppercase;letter-spacing:.04em;color:#64748b;font-weight:800;background:#f8fafc;border-bottom:1.5px solid #e2e8f0}
+  .cqx-tbl > tbody > tr > td{padding:12px;vertical-align:top;border-bottom:1px solid #eef2f7;overflow-wrap:anywhere}
+  .cqx-tbl > tbody > tr:hover > td{background:#fafbfc}
+  .cqx-tbl > tfoot td{padding:12px;font-weight:800;background:#f8fafc;border-top:1.5px solid #e2e8f0;vertical-align:top}
+  .cqx-nome{cursor:pointer;font-weight:700;color:var(--brand-d);line-height:1.3}
+  .cqx-sub{font-size:.7rem;color:#94a3b8;margin-top:3px;line-height:1.35}
+  .cqx-k{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8}
+  .cqx-pv{color:#475569;white-space:nowrap;margin-bottom:4px}
+  .cqx-rv{font-weight:800;white-space:nowrap}
+  .cqx-dif{font-size:.74rem;font-weight:800;white-space:nowrap;margin-top:3px}
+  .cqx-cats{width:100%;border-collapse:collapse;font-size:.74rem}
+  .cqx-cats th{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;text-align:right;padding:0 0 3px;position:static!important;background:none!important;border:none!important}
+  .cqx-cats td{padding:3px 0;border-top:1px dashed #eef2f7}
+  .cqx-cl{color:#334155;font-weight:600;padding-right:8px!important}
+  .cqx-cp{text-align:right;color:#94a3b8;white-space:nowrap;padding-right:10px!important}
+  .cqx-cr{text-align:right;white-space:nowrap}
+  @media (max-width:900px){
+    .cqx-tbl colgroup{display:none}
+    .cqx-tbl,.cqx-tbl > tbody,.cqx-tbl > tbody > tr,.cqx-tbl > tbody > tr > td,.cqx-tbl > tfoot,.cqx-tbl > tfoot tr,.cqx-tbl > tfoot td{display:block;width:auto}
+    .cqx-tbl > thead{display:none}
+    .cqx-tbl > tbody > tr{border:1px solid #e2e8f0;border-radius:12px;margin-bottom:10px}
+    .cqx-tbl > tbody > tr > td{border:none;text-align:left!important}
+  }`;
+  document.head.appendChild(st);
+}
+(function(){
+  const st=document.createElement('style');st.id='nx-css';
+  st.textContent=`
+  /* rolagem da página sem "prender" o cabeçalho das tabelas (overflow:hidden criava uma caixa de rolagem) */
+  .main{overflow-x:clip!important}
+  /* coluna de ações não fica mais presa no canto direito */
+  .dash-table th:last-child,.dash-table td:last-child,.tbl-acoes-fixa th:last-child,.tbl-acoes-fixa td:last-child{position:static;box-shadow:none}
+  /* cabeçalho grudado (o JS calcula o topo de cada linha do cabeçalho) */
+  table.nx-sticky > thead > tr > th{position:sticky!important;z-index:6;background-clip:padding-box}
+  table.nx-sticky > thead > tr > th:not([style*="background"]){background:#f8fafc}
+  /* tabela que não cabia: quebra o texto em vez de rolar pro lado */
+  .nx-wrap > table th,.nx-wrap > table td{white-space:normal!important;overflow-wrap:anywhere}
+  .nx-wrap > table th{padding-left:8px!important;padding-right:8px!important}
+  .nx-wrap > table td{padding-left:8px!important;padding-right:8px!important}
+  .nx-wrap > table td.nx-keep,.nx-wrap > table th.nx-keep{white-space:nowrap!important;overflow-wrap:normal}
+  .nx-fit{overflow:visible!important}
+  .nx-wrap2 > table{font-size:.72rem!important}
+  .nx-wrap2 > table td.nx-keep{white-space:normal!important}
+  /* último recurso: cada linha vira um cartão com "rótulo: valor" */
+  .nx-stack > table,.nx-stack > table > tbody,.nx-stack > table > tfoot{display:block;width:100%}
+  .nx-stack > table > thead{display:none}
+  .nx-stack > table > tbody > tr,.nx-stack > table > tfoot > tr{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:2px 14px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;background:#fff}
+  .nx-stack > table > tbody > tr > td,.nx-stack > table > tfoot > tr > td{display:block;border:none!important;padding:3px 0!important;text-align:left!important;white-space:normal!important;position:static!important;box-shadow:none!important}
+  .nx-stack > table > tbody > tr > td:first-child{grid-column:1/-1;font-size:.82rem}
+  .nx-stack > table > tbody > tr > td[data-nxl]::before,.nx-stack > table > tfoot > tr > td[data-nxl]::before{content:attr(data-nxl);display:block;font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8}
+  `;
+  document.head.appendChild(st);
+
+  const KANBAN=/kanban|crm-board|crm-col|kb-|-cols\b/i;
+  function ehKanban(el){
+    if(KANBAN.test(el.id||'')||KANBAN.test(el.className||''))return true;
+    const f=el.firstElementChild;
+    return !!(f&&!f.matches('table')&&getComputedStyle(el).display==='flex');
+  }
+  function scrollPai(el){
+    let p=el.parentElement;
+    while(p&&p!==document.body){
+      const cs=getComputedStyle(p);
+      if(/(auto|scroll)/.test(cs.overflowY)&&p.scrollHeight>p.clientHeight+2)return p;
+      if(p.id==='sec-cat'||cs.position==='fixed')return p;
+      p=p.parentElement;
+    }
+    return null;
+  }
+  // fundo do cabeçalho escuro do sistema (ele fica por cima do conteúdo dos menus)
+  function hdrFundo(){const h=document.querySelector('.hdr');if(!h||!h.offsetParent)return 0;const r=h.getBoundingClientRect();return r.height>0&&r.top<=1?r.bottom:0;}
+  function grudar(t){
+    if(!t.tHead||!t.tHead.rows.length||t.closest('.cqx-cats,.plx-et'))return;
+    t.classList.add('nx-sticky');
+    const cont=scrollPai(t);const ct=cont?cont.getBoundingClientRect().top:0;
+    const base=Math.max(0,Math.round(hdrFundo()-ct));
+    let acc=base;
+    [...t.tHead.rows].forEach(r=>{[...r.cells].forEach(c=>{c.style.top=acc+'px';});acc+=r.getBoundingClientRect().height||0;});
+  }
+  function encaixar(w){
+    const t=w.querySelector(':scope > table');if(!t)return;
+    if(w.scrollWidth<=w.clientWidth+1){w.classList.add('nx-fit');return;}
+    // marca valores curtos (datas, R$, números) pra não quebrarem no meio
+    t.querySelectorAll('td,th').forEach(c=>{const tx=(c.textContent||'').trim();if(tx.length<=14&&!c.querySelector('table,div,br'))c.classList.add('nx-keep');});
+    w.classList.add('nx-wrap');
+    if(w.scrollWidth<=w.clientWidth+1){w.classList.add('nx-fit');return;}
+    w.classList.add('nx-wrap2');
+    if(w.scrollWidth<=w.clientWidth+1){w.classList.add('nx-fit');return;}
+    // ainda não cabe: vira cartões (rótulo do cabeçalho em cima de cada valor)
+    try{
+      const lbl=rotulos(t);
+      [t.tBodies[0],t.tFoot].filter(Boolean).forEach(sec=>[...sec.rows].forEach(r=>{let c=0;[...r.cells].forEach(td=>{const l=lbl[c];if(l&&!td.hasAttribute('data-nxl')&&(td.textContent||'').trim())td.setAttribute('data-nxl',l);c+=td.colSpan||1;});}));
+    }catch(e){}
+    w.classList.remove('nx-wrap','nx-wrap2');w.classList.add('nx-stack','nx-fit');
+  }
+  // rótulo de cada coluna, juntando cabeçalhos de 2 linhas (ex.: "Instalação · Prévia")
+  function rotulos(t){
+    const grid=[];
+    [...t.tHead.rows].forEach((r,ri)=>{grid[ri]=grid[ri]||[];let c=0;[...r.cells].forEach(th=>{while(grid[ri][c]!==undefined)c++;const cs=th.colSpan||1,rs=th.rowSpan||1,tx=(th.textContent||'').trim();for(let a=0;a<rs;a++){grid[ri+a]=grid[ri+a]||[];for(let b=0;b<cs;b++)grid[ri+a][c+b]=tx;}c+=cs;});});
+    const n=Math.max(0,...grid.map(r=>r.length));const out=[];
+    for(let c=0;c<n;c++){const partes=[];grid.forEach(r=>{const v=r[c];if(v&&partes[partes.length-1]!==v)partes.push(v);});out[c]=partes.join(' · ');}
+    return out;
+  }
+  function passar(raiz){
+    try{
+      (raiz||document).querySelectorAll('div[style*="overflow-x"],div[style*="overflow:auto"],div[style*="overflow: auto"]').forEach(w=>{
+        const ox=w.style&&w.style.overflowX;
+        if(ox!=='auto'&&ox!=='scroll'&&!(w.style.overflow==='auto'))return;
+        if(!w.querySelector(':scope > table'))return;
+        if(ehKanban(w))return;
+        if(!w.offsetParent)return;
+        if(!w.classList.contains('nx-fit'))encaixar(w);
+      });
+      (raiz||document).querySelectorAll('table').forEach(t=>{if(t.offsetParent&&t.tHead)grudar(t);});
+    }catch(e){console.warn('sem rolagem lateral',e);}
+  }
+  window._nxPassar=passar;
+  let tm=null;
+  const agendar=()=>{clearTimeout(tm);tm=setTimeout(()=>passar(),120);};
+  try{new MutationObserver(ms=>{for(const m of ms){if(m.addedNodes&&m.addedNodes.length){agendar();return;}}}).observe(document.body,{childList:true,subtree:true});}catch(e){}
+  window.addEventListener('resize',()=>{document.querySelectorAll('.nx-fit,.nx-wrap,.nx-wrap2,.nx-stack').forEach(w=>w.classList.remove('nx-fit','nx-wrap','nx-wrap2','nx-stack'));agendar();});
+  document.addEventListener('click',()=>setTimeout(agendar,60),true);
+  setTimeout(agendar,800);
+})();
+
+// ── Remove as tarefas "LANÇAR PEDIDO CHUMBADOR GCORE" que ficaram pendentes (2026-11-10) ──
+// A tarefa foi desligada (o pedido do chumbador já entra sozinho na Produção). As pendentes que já
+// existiam saem dos pedidos — roda uma vez, no navegador de um administrador, depois que os pedidos carregam.
+(function(){
+  const TIPO='LANÇAR PEDIDO CHUMBADOR GCORE';
+  async function limpar(){
+    if(!(typeof _getUserCat==='function'&&_getUserCat().isAdm))return false;
+    if(typeof pedidos==='undefined'||!Array.isArray(pedidos)||!pedidos.length)return false;
+    let n=0;
+    for(const p of pedidos){
+      const l=p&&p.tarefasComerciais;if(!Array.isArray(l))continue;
+      const fica=l.filter(t=>!(t&&t.tipo===TIPO&&(t.status||'pendente')==='pendente'));
+      if(fica.length!==l.length){n+=l.length-fica.length;p.tarefasComerciais=fica;try{await savePedidoFS(p);}catch(e){console.warn('tarefa chumbador',p.os,e);}}
+    }
+    if(n)try{toast(n+' '+(n===1?'tarefa':'tarefas')+' de "Lançar pedido chumbador" '+(n===1?'removida':'removidas'),'tok');renderAll();}catch(e){}
+    return true;
+  }
+  let k=0;const t=setInterval(async()=>{k++;try{if(await limpar()||k>40)clearInterval(t);}catch(e){if(k>40)clearInterval(t);}},9000);
 })();
 // ── PROJETOS: REVISÃO PELO SUPERVISOR (build 2026-11-09.14) ────────────────────────────────────────────
 // Guilherme (09/11): "estrutura de revisão dos projetos: o projetista termina, vai pro supervisor revisar,
