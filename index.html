@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-10.5';</script>
+<script>const APP_BUILD_VERSION='2026-11-10.7';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -69720,20 +69720,28 @@ async function _orc2IaPaginas(buf,lim){
   const maxImg=lim?lim.img:ORC2_IA_MAX_IMG,maxPag=lim?lim.pag:ORC2_IA_MAX_PAG,rotArq=lim&&lim.rot?lim.rot+' — ':'';
   if(!window.pdfjsLib)throw new Error('o leitor de PDF ainda está carregando — tente de novo em alguns segundos');
   if(!pdfjsLib.GlobalWorkerOptions.workerSrc)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-  const nPag=Math.max(0,Math.min(pdf.numPages,maxPag));const paginas=[];let nImg=0;
+  // (2026-11-10, Guilherme: "tá demorando demais pra ler meu projeto de mobiliário") — prazo máximo pra abrir o
+  // PDF e pra desenhar cada pedaço (prancha vetorial gigante travava); progresso também no Granda Mob (lim.prog);
+  // lim.partesSoSemTexto: só recorta a prancha em partes quando a página não tem texto legível.
+  const prog=m=>{try{if(lim&&lim.prog)lim.prog(m);else _orc2IaProgresso(m);}catch(e){}};
+  const comPrazo=(p,ms,msg)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)),ms))]);
+  prog(rotArq+'Abrindo o PDF…');
+  const pdf=await comPrazo(pdfjsLib.getDocument({data:buf}).promise,60000,'o PDF demorou demais pra abrir — confira a internet e tente de novo');
+  const nPag=Math.max(0,Math.min(pdf.numPages,maxPag));const paginas=[];let nImg=0;const t0=Date.now();
   for(let n=1;n<=nPag;n++){
-    _orc2IaProgresso(rotArq+'Preparando página '+n+' de '+nPag+'…');
+    if(lim&&lim.cancelado&&lim.cancelado())throw new Error('leitura cancelada');
+    prog(rotArq+'Preparando página '+n+' de '+nPag+(pdf.numPages>nPag?' (o PDF tem '+pdf.numPages+'; leio as '+nPag+' primeiras)':'')+'… '+Math.round((Date.now()-t0)/1000)+'s');
     const pg=await pdf.getPage(n);const vp1=pg.getViewport({scale:1});
     let texto='';try{const tc=await pg.getTextContent();texto=tc.items.map(i=>i.str).join(' ').replace(/\s+/g,' ').trim().slice(0,6000);}catch(e){}
-    const W=vp1.width,H=vp1.height,grande=Math.max(W,H)>1300;
-    const cols=grande?Math.ceil(W/1100):1,lins=grande?Math.ceil(H/1100):1;
+    const W=vp1.width,H=vp1.height,grande=Math.max(W,H)>1300&&!(lim&&lim.partesSoSemTexto&&texto.length>=300);
+    const tile=(lim&&lim.tile)||1100;const cols=grande?Math.ceil(W/tile):1,lins=grande?Math.ceil(H/tile):1;
     const imgs=[];
     const desenhar=async(x0,y0,w,h,rot)=>{
       const esc=Math.min(1568/Math.max(w,h),4);const vp=pg.getViewport({scale:esc});
       const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(w*esc));cv.height=Math.max(1,Math.round(h*esc));
       const ctx=cv.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);ctx.translate(-x0*esc,-y0*esc);
-      await pg.render({canvasContext:ctx,viewport:vp}).promise;
+      const tarefa=pg.render({canvasContext:ctx,viewport:vp});
+      try{await comPrazo(tarefa.promise,lim&&lim.msPorImagem||45000,'render');}catch(e){try{tarefa.cancel();}catch(x){}console.warn('IA: página '+n+' demorou demais pra desenhar — vai só o texto',e);return;}
       imgs.push({rot,data:cv.toDataURL('image/jpeg',0.82).split(',')[1]});
     };
     if(nImg<maxImg){await desenhar(0,0,W,H,grande?'página inteira':'');nImg++;}
@@ -84464,7 +84472,7 @@ ${lista}`;
   }
   function htmlIa(){
     const ia=GM.ia;let corpo='';
-    if(ia&&ia.status==='lendo')corpo=`<div style="padding:14px;text-align:center;font-size:.8rem;color:#475569">⏳ <b>${E(ia.arquivo)}</b><br>${E(ia.msg||'')}</div>`;
+    if(ia&&ia.status==='lendo')corpo=`<div style="padding:14px;text-align:center;font-size:.8rem;color:#475569">⏳ <b>${E(ia.arquivo)}</b><br>${E(ia.msg||'')}<div style="margin-top:8px"><button type="button" class="gm-b" onclick="gmIaCancelar()">✕ Cancelar leitura</button></div></div>`;
     else if(ia&&ia.status==='erro')corpo=`<div style="padding:10px 12px;font-size:.78rem;color:#b91c1c">Não consegui ler o projeto: ${E(ia.erro)}</div>`;
     else if(ia&&ia.status==='ok'){
       const opts=sel=>`<option value="">— fora da LPU (avulso) —</option>`+cadLista().map(x=>`<option value="${x.id}" ${x.id===sel?'selected':''}>${E(x.codigo+' · '+x.nome)}</option>`).join('');
@@ -84484,6 +84492,7 @@ ${lista}`;
   }
   const iaChave=()=>{try{return orc2&&orc2.iaCfg&&orc2.iaCfg.chave;}catch(e){return'';}};
   window.gmIaEscolher=function(){if(!iaChave()){toast(adm()?'Cadastre a chave da IA em Orçamentos → ⚙️ Matérias-primas e preços':'A leitura com IA ainda não foi ativada — peça pro administrador','terr');return;}const i=document.getElementById('gm-ia-arq');if(i){i.value='';i.click();}};
+  window.gmIaCancelar=function(){if(GM.ia&&GM.ia.status==='lendo'){GM.ia.cancelar=true;if(GM.ia.ctrl)try{GM.ia.ctrl.abort();}catch(e){}GM.ia=null;render();toast('Leitura cancelada','tinf');}};
   window.gmIaSet=(ix,k,v)=>{const it=GM.ia&&GM.ia.itens[ix];if(!it)return;it[k]=k==='qtd'?Math.max(1,parseInt(v)||1):v;render();};
   function iaProg(m){if(GM.ia){GM.ia.msg=m;}const el=document.querySelector('#sec-cat-GRANDA_MOB .gm-ia');if(el&&el.parentNode&&GM.doc){el.parentNode.outerHTML=htmlIa();}}
   window.gmIaLer=async function(inp){
@@ -84496,7 +84505,7 @@ ${lista}`;
       const content=[{type:'text',text:iaPrompt()+(files.length>1?`\n\nVÁRIOS ARQUIVOS: é UM projeto só, em ${files.length} arquivos. Não repita o mesmo móvel que aparece em mais de uma prancha.`:'')}];
       let restImg=40,restPag=30,totPag=0;
       for(let k=0;k<files.length;k++){const f=files[k];if(restImg<=0||restPag<=0)break;
-        const lim={img:Math.max(1,restImg-(files.length-k-1)),pag:restPag,rot:files.length>1?'Arquivo '+(k+1):''};
+        const lim={img:Math.max(1,restImg-(files.length-k-1)),pag:restPag,rot:files.length>1?'Arquivo '+(k+1):'',prog:iaProg,partesSoSemTexto:true,msPorImagem:30000,tile:1600,cancelado:()=>!GM.ia||GM.ia.cancelar};
         iaProg('Preparando '+f.name+'…');
         const pg=ehImg(f)?await _orc2IaImagemArq(f,lim.img):await _orc2IaPaginas(await f.arrayBuffer(),lim);
         if(files.length>1)content.push({type:'text',text:`##### ARQUIVO ${k+1}: ${f.name}`});
@@ -84504,9 +84513,18 @@ ${lista}`;
         restImg-=pg.nImg;restPag-=pg.lidas;totPag+=pg.lidas;}
       content.push({type:'text',text:'Liste agora todos os móveis do projeto, relacionados com a LPU, seguindo as regras.'});
       const modelo=(orc2.iaCfg&&orc2.iaCfg.modelo)||'claude-opus-5-5';
-      iaProg('A IA está lendo '+totPag+' '+pl(totPag,'página','páginas')+'… leva de 30 segundos a 2 minutos.');
-      const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':orc2.iaCfg.chave,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-        body:JSON.stringify({model:modelo,max_tokens:12000,messages:[{role:'user',content}],output_config:{format:{type:'json_schema',schema:GM_IA_SCHEMA}}})});
+      if(!GM.ia||GM.ia.cancelar)return;
+      // limite de tamanho do envio (a IA recusa acima de ~32 MB): tira recortes ("partes") do fim até caber
+      const tam=()=>content.reduce((a,c)=>a+(c.type==='image'?c.source.data.length:String(c.text||'').length),0);
+      for(let i=content.length-1;i>=0&&tam()>22e6;i--){const c=content[i];if(c.type==='image'&&i>0&&/parte /.test(String(content[i-1].text||''))){content.splice(i-1,2);i--;}}
+      for(let i=content.length-1;i>=0&&tam()>22e6;i--){if(content[i].type==='image'){content.splice(i-1,2);i--;}}
+      const nIm=content.filter(c=>c.type==='image').length;
+      const t1=Date.now();const tick=setInterval(()=>{if(!GM.ia||GM.ia.status!=='lendo'){clearInterval(tick);return;}iaProg('A IA está lendo '+totPag+' '+pl(totPag,'página','páginas')+' ('+nIm+' '+pl(nIm,'imagem','imagens')+')… '+Math.round((Date.now()-t1)/1000)+'s — costuma levar de 30 segundos a 3 minutos.');},1000);
+      const ctrl=new AbortController();GM.ia.ctrl=ctrl;const tmo=setTimeout(()=>{try{ctrl.abort();}catch(e){}},300000);
+      let r;try{r=await fetch('https://api.anthropic.com/v1/messages',{signal:ctrl.signal,method:'POST',headers:{'content-type':'application/json','x-api-key':orc2.iaCfg.chave,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify({model:modelo,max_tokens:12000,messages:[{role:'user',content}],output_config:{format:{type:'json_schema',schema:GM_IA_SCHEMA}}})});}
+      catch(e){clearInterval(tick);clearTimeout(tmo);if(!GM.ia||GM.ia.cancelar)return;throw new Error(e&&e.name==='AbortError'?'a IA passou de 5 minutos sem responder — tente mandar só as pranchas com o mobiliário':'sem conexão com a IA ('+(e.message||e)+')');}
+      clearInterval(tick);clearTimeout(tmo);if(!GM.ia||GM.ia.cancelar)return;
       const js=await r.json().catch(()=>null);
       if(!r.ok){const m=(js&&js.error&&js.error.message)||('HTTP '+r.status);throw new Error(r.status===401?'chave da IA inválida':(r.status===429||r.status===529)?'a IA está ocupada, tente de novo em 1 minuto':m);}
       const out=JSON.parse(((js&&js.content)||[]).filter(b=>b.type==='text').map(b=>b.text).join(''));
@@ -84516,7 +84534,7 @@ ${lista}`;
       const d=GM.doc;if(d){if(!d.cliente&&out.cliente)d.cliente=String(out.cliente).toUpperCase();if(!d.cidade&&out.cidade)d.cidade=String(out.cidade).toUpperCase();if(!d.uf&&out.uf)d.uf=String(out.uf).toUpperCase().slice(0,2);
         d.leituraIA=(d.leituraIA||[]).concat([{em:agora(),por:quem(),arquivo:rot,modelo,itens:itens.length,uso:js.usage||null}]);sujo();}
       render();toast('Projeto lido: '+itens.length+' '+pl(itens.length,'móvel','móveis')+' pra conferir','tok');
-    }catch(e){console.error('gm ia',e);GM.ia={status:'erro',arquivo:rot,erro:e.message||String(e),itens:[]};render();}
+    }catch(e){if(!GM.ia||GM.ia.cancelar)return;console.error('gm ia',e);GM.ia={status:'erro',arquivo:rot,erro:e.message||String(e),itens:[]};render();}
   };
   window.gmIaAdicionar=function(){const ia=GM.ia;if(!ia||!GM.doc)return;const sel=ia.itens.filter(i=>i.sel);
     if(!sel.length){toast('Marque pelo menos um item','terr');return;}
