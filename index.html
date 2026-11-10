@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-10.3';</script>
+<script>const APP_BUILD_VERSION='2026-11-10.4';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -85536,6 +85536,25 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
   const lbl='font-size:.62rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:3px';
   const acmCores=()=>{try{return Object.keys(_orc2AcmCores()).sort((a,b)=>a===ORC2_ACM_PADRAO?-1:b===ORC2_ACM_PADRAO?1:a.localeCompare(b,'pt-BR'));}catch(e){return[];}};
   const acrils=()=>{try{return _orcAcrilLista();}catch(e){return[];}};
+  // (2026-11-10, Guilherme: "remover a medida de chapa e deixar somente a espessura e a cor de cada material")
+  // Uma opção por tipo + cor + espessura — as várias medidas de chapa (1000x2000, 2000x3000…) viram uma só.
+  const _tit=s=>String(s||'').split(' ').map(w=>/\d/.test(w)?w:w.toLowerCase().replace(/(^|[(\/-])([a-zà-ú])/g,(m,a,b)=>a+b.toUpperCase())).join(' ');
+  function acrilGrupos(){
+    const g={};
+    acrils().forEach(x=>{
+      const n=String(x.nome||'').toUpperCase().replace(/\s+/g,' ').trim();
+      const tipo=/^POLICARBONATO COMPACTO/.test(n)?'POLICARBONATO':'ACRILICO';
+      const em=n.match(/(\d+(?:[.,]\d+)?)\s*MM\b/);const esp=em?String(parseFloat(em[1].replace(',','.'))).replace('.',','):'';
+      let cor=n.replace(/^POLICARBONATO COMPACTO|^ACRILICO/,'').replace(/\d+(?:[.,]\d+)?\s*[X×]\s*\d+(?:[.,]\d+)?/g,' ').replace(/\d+(?:[.,]\d+)?\s*MM\b/g,' ')
+        .replace(/\s-\s[A-Z]+\b/g,' ').replace(/\s+/g,' ').trim();
+      if(!cor)cor='SEM COR';
+      const k='k:'+tipo+'|'+cor+'|'+esp;
+      if(!g[k])g[k]={key:k,cod:x.cod,tipo,cor,esp,nome:(tipo==='POLICARBONATO'?'Policarbonato ':'Acrílico ')+_tit(cor)+(esp?' · '+esp+' mm':''),cods:[]};
+      g[k].cods.push(String(x.cod));
+    });
+    return Object.values(g).sort((a,b)=>a.tipo.localeCompare(b.tipo)||a.cor.localeCompare(b.cor,'pt-BR')||(parseFloat(String(a.esp).replace(',','.'))||0)-(parseFloat(String(b.esp).replace(',','.'))||0));
+  }
+  const acrilDoValor=v=>acrilGrupos().find(x=>x.key===v||x.cods.includes(String(v)));
   const tintas=()=>{try{return _orcTintasLista();}catch(e){return[];}};
   const rcNome=id=>{try{const r=_orc8Receita(id);return r?String(r.nome||''):'';}catch(e){return'';}};
   // o que perguntar pra cada produto/modelo
@@ -85553,11 +85572,14 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
   window._ckPrecisa=_ckPrecisa;
   // ── um campo (select da lista + OUTRO) ──
   function campo(tipo,titulo,dica,ops,atual){
-    atual=atual||{};const ehOutro=!!atual.outro;const v=ehOutro?'__outro':(atual.v||'');
+    atual=atual||{};const ehOutro=!!atual.outro;
+    const vOutro=tipo==='tinta'&&ehOutro?(/^\s*RAL\b/i.test(atual.outro)?'__ral':/PANTONE/i.test(atual.outro)?'__pc':'__outro'):'__outro';
+    const v=ehOutro?vOutro:(atual.v||'');
+    const extra=tipo==='tinta'?`<option value="__ral" ${v==='__ral'?'selected':''}>🎨 Cor RAL — escolher na tabela</option><option value="__pc" ${v==='__pc'?'selected':''}>🎨 Pantone C — escolher na tabela</option>`:'';
     const sw=_ckSwatch(atual.outro);
     return`<div class="crm-ck-mat" data-tipo="${tipo}" style="margin-top:8px">
       <label style="${lbl}">${titulo} *</label>
-      <select class="crm-ck-mat-sel" onchange="_ckMatSel(this)" style="${inp}"><option value="">Escolha…</option>${ops.map(o=>`<option value="${esc(o.v)}" ${v===o.v?'selected':''}>${esc(o.l)}</option>`).join('')}<option value="__outro" ${ehOutro?'selected':''}>✍️ OUTRO (digitar)</option></select>
+      <select class="crm-ck-mat-sel" onchange="_ckMatSel(this)" style="${inp}"><option value="">Escolha…</option>${extra}${ops.map(o=>`<option value="${esc(o.v)}" ${v===o.v?'selected':''}>${esc(o.l)}</option>`).join('')}<option value="__outro" ${v==='__outro'?'selected':''}>✍️ OUTRO (digitar)</option></select>
       <div class="crm-ck-mat-outro" style="display:${ehOutro?'flex':'none'};gap:6px;align-items:center;margin-top:6px">
         <span class="crm-ck-mat-sw" style="width:26px;height:26px;border-radius:6px;flex-shrink:0;border:1px solid #cbd5e1;${sw?'background:#'+sw:'background:repeating-linear-gradient(45deg,#f1f5f9,#f1f5f9 4px,#fff 4px,#fff 8px)'}"></span>
         <input type="text" class="crm-ck-mat-txt no-upper" value="${esc(atual.outro||'')}" oninput="_ckMatTxt(this)" placeholder="${tipo==='acril'?'Qual acrílico? (cor, espessura)':'Qual cor? Digite ou escolha na tabela →'}" style="${inp};flex:1">
@@ -85568,12 +85590,13 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
   }
   function matsHtml(key,mv,mats){
     const p=_ckPrecisa(key,mv);mats=mats||{};let h='';
-    if(p.acm){const a=mats.acm||{};h+=campo('acm','Cor do ACM','',acmCores().map(c=>({v:c,l:'ACM '+c})),a.outro?{outro:a.outro}:{v:a.cor||''});}
-    if(p.acril){const a=mats.acril||{};h+=campo('acril','Acrílico da frente','',acrils().map(x=>({v:String(x.cod),l:x.nome})),a.outro?{outro:a.outro}:{v:a.cod?String(a.cod):''});}
+    if(p.acm){const a=mats.acm||{};h+=campo('acm','Cor do ACM','',acmCores().map(c=>({v:c,l:'ACM '+_tit(c)+' · 3 mm'})),a.outro?{outro:a.outro}:{v:a.cor||''});}
+    if(p.acril){const a=mats.acril||{};const ga=a.key?acrilDoValor(a.key):a.cod?acrilDoValor(a.cod):null;
+      h+=campo('acril','Acrílico da frente','',acrilGrupos().map(x=>({v:x.key,l:x.nome})),a.outro?{outro:a.outro}:{v:ga?ga.key:''});}
     if(p.tinta){const a=mats.tinta||{};
       const tit=p.tinta==='acril'?'Pintura de fora da letra':p.tinta==='pvc'?'Cor da pintura PU':'Cor da pintura da letra';
       const dica=p.tinta==='acril'?'A chapa galvanizada é pintada por dentro de branco fosco — aqui é a cor de fora (laterais).':'';
-      h+=campo('tinta',tit,dica,tintas().map(x=>({v:x.key,l:x.nome})),a.outro?{outro:a.outro}:{v:a.key||(a.cod?'cod:'+a.cod:'')});}
+      h+=campo('tinta',tit,dica,[],a.outro?{outro:a.outro}:a.nome?{outro:a.nome}:{});}
     return h;
   }
   window._ckMatsHtml=matsHtml;
@@ -85587,8 +85610,10 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
   window._ckSwatch=_ckSwatch;
   window._ckMatSel=function(sel){
     const w=sel.closest('.crm-ck-mat');const o=w&&w.querySelector('.crm-ck-mat-outro');if(!o)return;
-    o.style.display=sel.value==='__outro'?'flex':'none';
+    const tab=sel.value==='__ral'?'ral':sel.value==='__pc'?'pc':'';
+    o.style.display=(sel.value==='__outro'||tab)?'flex':'none';
     if(sel.value==='__outro'){const i=o.querySelector('.crm-ck-mat-txt');if(i)setTimeout(()=>i.focus(),20);}
+    if(tab){const i=o.querySelector('.crm-ck-mat-txt');if(i&&!(tab==='ral'?/^\s*RAL\b/i:/PANTONE/i).test(i.value)){i.value='';_ckMatTxt(i);}_ckCoresAbrir(sel,tab);}
     sel.style.borderColor='#e5e7eb';const row=sel.closest('.crm-ck-row');if(row)row.style.borderColor='#fbcfe8';
   };
   window._ckMatTxt=function(i){i.style.borderColor='#e5e7eb';const w=i.closest('.crm-ck-mat');const s=w&&w.querySelector('.crm-ck-mat-sw');const hx=_ckSwatch(i.value);if(s)s.style.background=hx?'#'+hx:'repeating-linear-gradient(45deg,#f1f5f9,#f1f5f9 4px,#fff 4px,#fff 8px)';};
@@ -85598,11 +85623,12 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
     row.querySelectorAll('.crm-ck-mat').forEach(w=>{
       const tipo=w.dataset.tipo,sel=w.querySelector('.crm-ck-mat-sel'),v=sel?sel.value:'',txt=(w.querySelector('.crm-ck-mat-txt')?.value||'').trim();
       const nomes={acm:'a cor do ACM',acril:'o acrílico da frente',tinta:'a cor da pintura'};
-      if(!v||(v==='__outro'&&!txt)){faltas.push(nomes[tipo]);w.querySelector(v==='__outro'?'.crm-ck-mat-txt':'.crm-ck-mat-sel').style.borderColor='#dc2626';return;}
+      const livre=v==='__outro'||v==='__ral'||v==='__pc';
+      if(!v||(livre&&!txt)){faltas.push(nomes[tipo]);w.querySelector(livre?'.crm-ck-mat-txt':'.crm-ck-mat-sel').style.borderColor='#dc2626';return;}
       w.querySelectorAll('select,input').forEach(x=>x.style.borderColor='#e5e7eb');
-      if(v==='__outro'){out[tipo]={outro:txt};return;}
+      if(livre){out[tipo]={outro:txt};return;}
       if(tipo==='acm')out.acm={cor:v};
-      else if(tipo==='acril'){const a=acrils().find(x=>String(x.cod)===v);out.acril={cod:v,nome:a?a.nome:''};}
+      else if(tipo==='acril'){const a=acrilDoValor(v);out.acril=a?{key:a.key,cod:a.cod,nome:a.nome,cor:a.cor,esp:a.esp}:{key:v,nome:v};}
       else{const t=tintas().find(x=>x.key===v);out.tinta=t?{key:t.key,cod:t.cod||'',nome:t.nome}:{key:v,nome:v.replace(/^(cod|nova):/,'')};}
     });
     return{mats:out,faltas};
@@ -85685,7 +85711,7 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
   };
   // ── TABELA DE CORES (RAL Clássico · Pantone C · Pantone U) ──
   let _ckCorAlvo=null,_ckCorAba='ral';
-  window._ckCoresAbrir=function(btn){
+  window._ckCoresAbrir=function(btn,abaIni){
     _ckCorAlvo=btn.closest('.crm-ck-mat')?.querySelector('.crm-ck-mat-txt')||null;
     const old=document.getElementById('ck-cores-modal');if(old)old.remove();
     const m=document.createElement('div');m.id='ck-cores-modal';
@@ -85701,7 +85727,7 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
     </div>`;
     document.body.appendChild(m);
     const atual=String(_ckCorAlvo&&_ckCorAlvo.value||'').toUpperCase();
-    _ckCorAba=/PANTONE.*\bU\b/.test(atual)?'pu':/PANTONE/.test(atual)?'pc':'ral';
+    _ckCorAba=abaIni||(/PANTONE.*\bU\b/.test(atual)?'pu':/PANTONE/.test(atual)?'pc':'ral');
     _ckCoresAba(_ckCorAba);
     setTimeout(()=>{const b=document.getElementById('ck-cor-busca');if(b)b.focus();},30);
   };
