@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-10.7';</script>
+<script>const APP_BUILD_VERSION='2026-11-10.11';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -84163,10 +84163,22 @@ _pfSalvarEtapas=function(){
     try{if(window._fbWatchCol){
       window._fbWatchCol(COL_ORC,l=>{GM.orcs={};l.forEach(d=>{if(d&&d.id)GM.orcs[d.id]=d;});re();});
       window._fbWatchCol(COL_PED,l=>{GM.peds={};l.forEach(d=>{if(d&&d.id)GM.peds[d.id]=d;});re();});}}catch(e){console.warn('gm watch',e);}
-    try{if(window._fbOrcWatch)window._fbOrcWatch(DOC_CAD,it=>{GM.cad=it||{};GM.cadOk=true;semear();re();});}catch(e){}
+    try{if(window._fbOrcWatch)window._fbOrcWatch(DOC_CAD,it=>{GM.cad=it||{};GM.cadOk=true;semear();garantirLT();re();});}catch(e){}
     try{_orc2IaWatch();}catch(e){}
   }
   window._gmWatch=watch;
+  // (2026-11-10, Guilherme: "painel linha do tempo: cadastre um item no caderno que é adesivo impresso e cobraremos
+  // R$ 200,00 o m², daí o sistema calcula; usar esse item quando for linha do tempo") — OJM-37, preço por m².
+  const LT_ITEM={id:'ojm37',codigo:'OJM-37',item:37,nome:'PAINEL LINHA DO TEMPO',descricao:'Adesivo impresso para aplicação em parede — cobrado por m² (R$ 200,00/m²)',larg:3,alt:1.4,prof:null,un:'M²',porM2:true,preco:200};
+  let ltFeito=false;
+  async function garantirLT(){
+    if(ltFeito||!adm()||!GM.cadOk||!Object.keys(GM.cad).some(k=>k!=='_ops'))return;
+    if(GM.cad.ojm37){ltFeito=true;return;}
+    ltFeito=true;
+    try{const x=Object.assign({},LT_ITEM,{criadoEm:agora(),criadoPor:quem(),origem:'Cadastrado em 10/11/2026 a pedido do Guilherme'});await window._fbOrcSalvar(DOC_CAD,x.id,x);GM.cad[x.id]=x;}catch(e){ltFeito=false;console.warn('gm linha do tempo',e);}
+  }
+  const ehM2=x=>!!(x&&x.porM2);
+  const precoM2=(x,it)=>R2(N(x.preco)*N(it.larg)*N(it.alt));
   // carga única do caderno (Projetos/admin): grava a LPU no banco se ainda não existir
   async function semear(){
     if(GM.seedFeito||!adm())return;
@@ -84330,14 +84342,14 @@ _pfSalvarEtapas=function(){
     const card=d.crmId?cards.find(e=>e.id===d.crmId):null;
     const itens=(d.itens||[]).map((it,ix)=>{const x=it.lpu?cadItem(it.lpu):null;const f=x?GM_FOTOS[x.codigo]:'';
       return`<tr><td>${f?`<img class="gm-foto" src="${f}" alt="">`:'<div class="gm-foto"></div>'}</td>
-        <td style="min-width:260px">${x?`<div style="font-weight:800;font-size:.78rem"><span style="color:#94a3b8">${E(x.codigo)}</span> ${E(it.nome||'')}</div><div style="font-size:.68rem;color:#64748b">${E(medida(x))}</div>`:
+        <td style="min-width:260px">${x?`<div style="font-weight:800;font-size:.78rem"><span style="color:#94a3b8">${E(x.codigo)}</span> ${E(it.nome||'')}</div>${ehM2(x)?`<div style="display:flex;gap:4px;margin-top:3px;align-items:center">${['larg','alt'].map((k,i)=>`<input class="fc" ${dis} inputmode="decimal" style="font-size:.72rem;padding:4px 6px;width:90px" placeholder="${['Larg. (m)','Alt. (m)'][i]}" value="${E(it[k]?String(it[k]).replace('.',','):'')}" onchange="gmItem(${ix},'${k}',this.value)">`).join('<span style="font-size:.7rem;color:#94a3b8">×</span>')}<span style="font-size:.68rem;color:#6d28d9;font-weight:700">= ${String(R2(N(it.larg)*N(it.alt))).replace('.',',')} m² × ${R(x.preco)}/m²</span></div>`:`<div style="font-size:.68rem;color:#64748b">${E(medida(x))}</div>`}`:
           `<input class="fc" ${dis} style="font-size:.76rem;font-weight:700;text-transform:uppercase" placeholder="Nome do item avulso *" value="${E(it.nome||'')}" onchange="gmItem(${ix},'nome',this.value.toUpperCase())">
           <input class="fc no-upper" ${dis} style="margin-top:3px;font-size:.72rem" placeholder="Descrição (vai no PDF)" value="${E(it.desc||'')}" onchange="gmItem(${ix},'desc',this.value)">
           <div style="display:flex;gap:4px;margin-top:3px">${['larg','alt','prof'].map((k,i)=>`<input class="fc" ${dis} inputmode="decimal" style="font-size:.72rem;padding:4px 6px" placeholder="${['Larg. (m)','Alt. (m)','Prof. (m)'][i]}" value="${E(it[k]?String(it[k]).replace('.',','):'')}" onchange="gmItem(${ix},'${k}',this.value)">`).join('')}</div>`}
           <input class="fc no-upper" ${dis} style="margin-top:4px;font-size:.7rem;padding:4px 8px" placeholder="Referência do projeto (ex.: O&J-01.0) — opcional" value="${E(it.ref||'')}" onchange="gmItem(${ix},'ref',this.value)">
           ${it.ambiente||it.onde?`<div style="font-size:.66rem;color:#6d28d9;margin-top:2px">${E([it.ambiente,it.onde].filter(Boolean).join(' · '))}</div>`:''}</td>
         <td style="width:80px"><input class="fc" type="number" min="0" step="1" ${dis} value="${E(it.qtd)}" onchange="gmItem(${ix},'qtd',this.value)" style="text-align:center;padding:5px"></td>
-        <td style="text-align:right;white-space:nowrap"><input class="fc" ${dis} inputmode="decimal" value="${E(it.preco?M(it.preco):'')}" placeholder="0,00" onchange="gmItem(${ix},'preco',this.value)" style="width:110px;text-align:right;padding:5px">${x&&Math.abs(N(x.preco)-N(it.preco))>=0.01?`<div style="font-size:.64rem;color:${N(it.preco)<N(x.preco)?'#b45309':'#047857'};margin-top:2px">LPU ${R(x.preco)}</div>`:''}</td>
+        <td style="text-align:right;white-space:nowrap"><input class="fc" ${dis} inputmode="decimal" value="${E(it.preco?M(it.preco):'')}" placeholder="0,00" onchange="gmItem(${ix},'preco',this.value)" style="width:110px;text-align:right;padding:5px">${x&&!ehM2(x)&&Math.abs(N(x.preco)-N(it.preco))>=0.01?`<div style="font-size:.64rem;color:${N(it.preco)<N(x.preco)?'#b45309':'#047857'};margin-top:2px">LPU ${R(x.preco)}</div>`:''}</td>
         <td style="text-align:right;white-space:nowrap;font-weight:800">${R(N(it.qtd)*N(it.preco))}</td>
         <td>${bloq?'':`<button type="button" onclick="gmItemDel(${ix})" title="Tirar do orçamento" style="border:none;background:none;color:#94a3b8;cursor:pointer;font-size:.95rem">✕</button>`}</td></tr>`;}).join('');
     return`<div class="gm-bar" style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:10px 12px">
@@ -84402,7 +84414,8 @@ _pfSalvarEtapas=function(){
   window.gmSetPag=(k,v)=>{if(!GM.doc)return;GM.doc.pag=Object.assign(pagDe(GM.doc),{[k]:k==='n'?parseInt(v)||0:k==='entPct'?N(v):v});sujo();const el=document.getElementById('gm-pag-calc');if(el)el.innerHTML=htmlPagCalc(GM.doc);};
   window.gmSetOpV=(k,v)=>{if(!GM.doc)return;GM.doc.opsValores=Object.assign({},GM.doc.opsValores||{},{[k]:N(v)});sujo();reTot();};
   // itens
-  window.gmItem=(ix,k,v)=>{const it=(GM.doc.itens||[])[ix];if(!it)return;it[k]=k==='qtd'?Math.max(0,N(v)):(k==='preco'||k==='larg'||k==='alt'||k==='prof')?N(v):v;sujo();render();};
+  window.gmItem=(ix,k,v)=>{const it=(GM.doc.itens||[])[ix];if(!it)return;it[k]=k==='qtd'?Math.max(0,N(v)):(k==='preco'||k==='larg'||k==='alt'||k==='prof')?N(v):v;
+    if((k==='larg'||k==='alt')&&it.lpu){const x=cadItem(it.lpu);if(ehM2(x))it.preco=precoM2(x,it);}sujo();render();};
   window.gmItemDel=ix=>{GM.doc.itens.splice(ix,1);sujo();render();};
   window.gmItemAvulso=()=>{GM.doc.itens.push({id:uid('i'),lpu:'',nome:'',desc:'',qtd:1,preco:0});sujo();render();};
   window.gmAddBuscar=function(v){const el=document.getElementById('gm-add-sug');if(!el)return;const q=String(v||'').trim().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
@@ -84410,7 +84423,7 @@ _pfSalvarEtapas=function(){
     const l=cadLista().filter(x=>[x.codigo,x.nome,x.descricao].join(' ').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').includes(q)).slice(0,10);
     el.innerHTML=`<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 30px rgba(15,23,42,.15);max-height:320px;overflow:auto;margin-top:4px">${l.length?l.map(x=>`<div onclick="gmAdd('${x.id}')" style="display:flex;gap:10px;align-items:center;padding:7px 10px;border-bottom:1px solid #f1f5f9;cursor:pointer">${GM_FOTOS[x.codigo]?`<img src="${GM_FOTOS[x.codigo]}" style="width:48px;height:36px;object-fit:contain;border-radius:5px;border:1px solid #e2e8f0">`:''}
       <div style="flex:1;min-width:0"><div style="font-size:.78rem;font-weight:800"><span style="color:#94a3b8">${E(x.codigo)}</span> ${E(x.nome)}</div><div style="font-size:.68rem;color:#64748b">${E(medida(x))}</div></div><b style="font-size:.76rem;white-space:nowrap">${R(x.preco)}</b></div>`).join(''):'<div style="padding:10px;font-size:.76rem;color:#64748b">Nada no caderno com essa busca — use ✍️ Item avulso.</div>'}</div>`;};
-  window.gmAdd=function(id){const x=cadItem(id);if(!x)return;const ja=GM.doc.itens.find(i=>i.lpu===id&&!i.ambiente);if(ja)ja.qtd=N(ja.qtd)+1;else GM.doc.itens.push({id:uid('i'),lpu:id,codigo:x.codigo,nome:x.nome,qtd:1,preco:N(x.preco)});sujo();render();setTimeout(()=>{const b=document.getElementById('gm-add-busca');if(b)b.focus();},30);};
+  window.gmAdd=function(id){const x=cadItem(id);if(!x)return;const ja=GM.doc.itens.find(i=>i.lpu===id&&!i.ambiente);if(ja)ja.qtd=N(ja.qtd)+1;else{const n={id:uid('i'),lpu:id,codigo:x.codigo,nome:x.nome,qtd:1,preco:N(x.preco)};if(ehM2(x)){n.larg=x.larg;n.alt=x.alt;n.preco=precoM2(x,n);}GM.doc.itens.push(n);}sujo();render();setTimeout(()=>{const b=document.getElementById('gm-add-busca');if(b)b.focus();},30);};
   window.gmVincular=function(id){if(!GM.doc)return;GM.doc.crmId=id||'';sujo();
     if(id&&!GM.doc.cliente){const n=cardNome(id);if(n)GM.doc.cliente=String(n).toUpperCase();}render();};
   window.gmAbrirCard=function(id){try{crmAbrirCard(id);}catch(e){toast('Não consegui abrir o card','terr');}};
@@ -84466,6 +84479,7 @@ REGRAS
 - largura_m / altura_m = medidas do móvel no projeto, em metros (cotas em cm → divida por 100). 0 se não houver.
 - NÃO invente: medida ou correspondência deduzida = confianca "media"; sem certeza = "baixa".
 - onde = página e vista (ex.: "pág. 3, planta de layout").
+- LINHA DO TEMPO (painel/parede "linha do tempo" do showroom) = SEMPRE lpu_id "ojm37" (adesivo impresso cobrado por m²), com largura_m e altura_m da parede/painel no projeto.
 
 LPU — GRANDA MOBILIÁRIO OMODA & JAECOO HOMOLOGAÇÃO 2026 VS2 (id | código | nome | medida L × A × P | descrição)
 ${lista}`;
@@ -84529,7 +84543,7 @@ ${lista}`;
       if(!r.ok){const m=(js&&js.error&&js.error.message)||('HTTP '+r.status);throw new Error(r.status===401?'chave da IA inválida':(r.status===429||r.status===529)?'a IA está ocupada, tente de novo em 1 minuto':m);}
       const out=JSON.parse(((js&&js.content)||[]).filter(b=>b.type==='text').map(b=>b.text).join(''));
       const itens=(out.itens||[]).map(it=>{const x=cadItem(String(it.lpu_id||''));const l=Number(it.largura_m)||0,a=Number(it.altura_m)||0;
-        return{sel:true,ref:String(it.referencia||''),descricao:String(it.descricao||''),ambiente:String(it.ambiente||''),qtd:Math.max(1,parseInt(it.quantidade)||1),lpu:x?x.id:'',preco:'',conf:['alta','media','baixa'].includes(it.confianca)?it.confianca:'baixa',onde:String(it.onde||''),obs:String(it.observacao||''),medida:l&&a?String(l).replace('.',',')+' × '+String(a).replace('.',',')+' m':''};});
+        return{sel:true,ref:String(it.referencia||''),descricao:String(it.descricao||''),ambiente:String(it.ambiente||''),qtd:Math.max(1,parseInt(it.quantidade)||1),lpu:x?x.id:'',preco:'',conf:['alta','media','baixa'].includes(it.confianca)?it.confianca:'baixa',onde:String(it.onde||''),obs:String(it.observacao||''),medida:l&&a?String(l).replace('.',',')+' × '+String(a).replace('.',',')+' m':'',larg:l,alt:a};});
       GM.ia={status:'ok',arquivo:rot,resumo:out.resumo||'',itens,paginas:totPag,seg:Math.round((Date.now()-GM.ia.inicio)/1000),cliente:out.cliente,cidade:out.cidade,uf:out.uf};
       const d=GM.doc;if(d){if(!d.cliente&&out.cliente)d.cliente=String(out.cliente).toUpperCase();if(!d.cidade&&out.cidade)d.cidade=String(out.cidade).toUpperCase();if(!d.uf&&out.uf)d.uf=String(out.uf).toUpperCase().slice(0,2);
         d.leituraIA=(d.leituraIA||[]).concat([{em:agora(),por:quem(),arquivo:rot,modelo,itens:itens.length,uso:js.usage||null}]);sujo();}
@@ -84539,7 +84553,7 @@ ${lista}`;
   window.gmIaAdicionar=function(){const ia=GM.ia;if(!ia||!GM.doc)return;const sel=ia.itens.filter(i=>i.sel);
     if(!sel.length){toast('Marque pelo menos um item','terr');return;}
     const faltaPreco=sel.filter(i=>!i.lpu&&!(N(i.preco)>0));if(faltaPreco.length&&!confirm(faltaPreco.length+' '+pl(faltaPreco.length,'item fora da LPU está','itens fora da LPU estão')+' sem preço. Adicionar assim mesmo (preço zero, pra completar depois)?'))return;
-    sel.forEach(i=>{const x=cadItem(i.lpu);GM.doc.itens.push({id:uid('i'),lpu:x?x.id:'',codigo:x?x.codigo:'',nome:x?x.nome:String(i.descricao||'').toUpperCase(),desc:x?'':i.obs||'',qtd:i.qtd,preco:x?N(x.preco):N(i.preco),ref:i.ref||'',ambiente:i.ambiente,onde:i.onde,daIa:true});});
+    sel.forEach(i=>{const x=cadItem(i.lpu);const m2=ehM2(x)?{larg:N(i.larg)||x.larg,alt:N(i.alt)||x.alt}:{};GM.doc.itens.push({id:uid('i'),lpu:x?x.id:'',codigo:x?x.codigo:'',nome:x?x.nome:String(i.descricao||'').toUpperCase(),desc:x?'':i.obs||'',qtd:i.qtd,...m2,preco:ehM2(x)?precoM2(x,m2):x?N(x.preco):N(i.preco),ref:i.ref||'',ambiente:i.ambiente,onde:i.onde,daIa:true});});
     GM.ia=null;sujo();render();toast(sel.length+' '+pl(sel.length,'item adicionado','itens adicionados'),'tok');};
 
   // ══ PDF DO ORÇAMENTO — mesmo padrão dos orçamentos de mobiliário Omoda (planilha → PDF A4 deitado) ══
@@ -84573,11 +84587,11 @@ ${lista}`;
     // ── linhas ──
     const body=[],fotos={};let n=0;
     (d.itens||[]).forEach(it=>{const x=it.lpu?cadItem(it.lpu):null;n++;
-      const L=x?x.larg:it.larg,A=x?x.alt:it.alt,P=x?x.prof:it.prof;
+      const L=x&&!ehM2(x)?x.larg:it.larg,A=x&&!ehM2(x)?x.alt:it.alt,P=x&&!ehM2(x)?x.prof:it.prof;
       const nome=String(it.nome||(x&&x.nome)||'').toUpperCase()+(it.ref?' ('+it.ref+')':'');
-      const desc=it.desc||(x&&x.descricao)||'';
+      const desc=ehM2(x)?'Adesivo impresso para aplicação em parede — '+String(R2(N(it.larg)*N(it.alt))).replace('.',',')+' m² × '+R(x.preco)+'/m²':(it.desc||(x&&x.descricao)||'');
       if(x&&GM_FOTOS[x.codigo])fotos[body.length]=GM_FOTOS[x.codigo];
-      body.push([String(n),'',nome,desc,F1(L),L&&A?'X':'',F1(A),F1(P),String((x&&x.un)||'UND.'),'R$',F2(it.preco),String(R2(it.qtd)).replace('.',','),'R$',F2(N(it.qtd)*N(it.preco))]);});
+      body.push([String(n),'',nome,desc,F1(L),L&&A?'X':'',F1(A),F1(P),String((x&&!ehM2(x)&&x.un)||'UND.'),'R$',F2(it.preco),String(R2(it.qtd)).replace('.',','),'R$',F2(N(it.qtd)*N(it.preco))]);});
     const opL=(nome,un,unit,qtd,tot)=>{n++;body.push([String(n),'',nome,'','','','','',un,'R$',F2(unit),String(R2(qtd)).replace('.',','),'R$',F2(tot)]);};
     if(N(op.kmFrete)>0)opL('FRETE','KM',o.frete,N(op.kmFrete),t.frete);
     if(N(op.kmMob)>0)opL('MOBILIZAÇÃO DE EQUIPE','KM',o.mob,N(op.kmMob),t.mob);
@@ -85715,6 +85729,17 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
     if(key==='fachada'||mv==='e:fachada'||/\bACM\b/.test(R))out.acm=true;
     if(mod==='acril'||/ACR[IÍ]LIC|POLICARBONATO/.test(R))out.acril=true;
     if(key==='letra'||/PINT|GALVANIZ/.test(R))out.tinta=mod==='acril'?'acril':(mod==='pvc10'||mod==='pvc20')?'pvc':'letra';
+    // (2026-11-10, Guilherme: "nas letras com iluminação não aparece pro usuário escolher o LED") — halo e frente acrílico
+    if(mod==='halo'||mod==='acril'||(!mod&&/ILUMIN|\bLED\b|HALO|BACKLIGHT|LUMINOSO/.test(R)&&!/NEON/.test(R)))out.led=true;
+    // (2026-11-10, Guilherme: "os outros itens quando pedir pra orçar têm que pedir estas informações também, não pode
+    // deixar sem pedir") — placa, totem, cavalete, fachada, neon e o resto
+    if(key!=='letra'){
+      if(/\bPVC\b/.test(R))out.tinta=out.tinta||'pvc';
+      if(key==='cavalete'||/PINT|METALON|ESTRUTURA|GALVANIZ|CAVALETE|FERRO|A[CÇ]O\b/.test(R))out.tinta=out.tinta||'estrutura';
+    }
+    if(key==='neon'||/NEON/.test(R))out.neon=true;
+    if(/LONA|ADESIV|IMPRESS|VINIL|ENVELOP|BANNER/.test(R))out.impr=true;
+    if(!Object.keys(out).length)out.mat=true;   // nenhuma regra: pede material, cor e acabamento por escrito
     return out;
   }
   window._ckPrecisa=_ckPrecisa;
@@ -85730,8 +85755,8 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
       <select class="crm-ck-mat-sel" onchange="_ckMatSel(this)" style="${inp}"><option value="">Escolha…</option>${extra}${ops.map(o=>`<option value="${esc(o.v)}" ${v===o.v?'selected':''}>${esc(o.l)}</option>`).join('')}<option value="__outro" ${v==='__outro'?'selected':''}>✍️ OUTRO (digitar)</option></select>
       <div class="crm-ck-mat-outro" style="display:${ehOutro?'flex':'none'};gap:6px;align-items:center;margin-top:6px">
         <span class="crm-ck-mat-sw" style="width:26px;height:26px;border-radius:6px;flex-shrink:0;border:1px solid #cbd5e1;${sw?'background:#'+sw:'background:repeating-linear-gradient(45deg,#f1f5f9,#f1f5f9 4px,#fff 4px,#fff 8px)'}"></span>
-        <input type="text" class="crm-ck-mat-txt no-upper" value="${esc(atual.outro||'')}" oninput="_ckMatTxt(this)" placeholder="${tipo==='acril'?'Qual acrílico? (cor, espessura)':'Qual cor? Digite ou escolha na tabela →'}" style="${inp};flex:1">
-        ${tipo!=='acril'?`<button type="button" onclick="_ckCoresAbrir(this)" title="Escolher na tabela RAL / Pantone" style="flex-shrink:0;background:#fff;border:1.5px solid #c7d2fe;color:#4338ca;border-radius:8px;padding:7px 10px;font-size:.74rem;font-weight:800;cursor:pointer;white-space:nowrap;font-family:inherit">🎨 RAL / Pantone</button>`:''}
+        <input type="text" class="crm-ck-mat-txt no-upper" value="${esc(atual.outro||'')}" oninput="_ckMatTxt(this)" placeholder="${tipo==='acril'?'Qual acrílico? (cor, espessura)':tipo==='led'?'Qual LED? (ex.: 4.000K, RGB, cor especial)':tipo==='impr'?'Qual acabamento?':'Qual cor? Digite ou escolha na tabela →'}" style="${inp};flex:1">
+        ${!['acril','led','impr'].includes(tipo)?`<button type="button" onclick="_ckCoresAbrir(this)" title="Escolher na tabela RAL / Pantone" style="flex-shrink:0;background:#fff;border:1.5px solid #c7d2fe;color:#4338ca;border-radius:8px;padding:7px 10px;font-size:.74rem;font-weight:800;cursor:pointer;white-space:nowrap;font-family:inherit">🎨 RAL / Pantone</button>`:''}
       </div>
       ${dica?`<div style="font-size:.68rem;color:#64748b;margin-top:4px">${dica}</div>`:''}
     </div>`;
@@ -85741,8 +85766,18 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
     if(p.acm){const a=mats.acm||{};h+=campo('acm','Cor do ACM','',acmCores().map(c=>({v:c,l:'ACM '+_tit(c)+' · 3 mm'})),a.outro?{outro:a.outro}:{v:a.cor||''});}
     if(p.acril){const a=mats.acril||{};const ga=a.key?acrilDoValor(a.key):a.cod?acrilDoValor(a.cod):null;
       h+=campo('acril','Acrílico da frente','',acrilGrupos().map(x=>({v:x.key,l:x.nome})),a.outro?{outro:a.outro}:{v:ga?ga.key:''});}
+    if(p.neon){const a=mats.neon||{};
+      h+=campo('neon','Cor do neon','',['Branco frio','Branco quente','Vermelho','Azul','Verde','Amarelo','Laranja','Rosa','Roxo','RGB (muda de cor)'].map(c=>({v:c,l:c})),a.outro?{outro:a.outro}:{v:a.cor||''});}
+    if(p.impr){const a=mats.impr||{};
+      h+=campo('impr','Acabamento da impressão','',['Impressão fosca','Impressão brilho','Impressão + laminação fosca','Impressão + laminação brilho','Recorte eletrônico (sem impressão)'].map(c=>({v:c,l:c})),a.outro?{outro:a.outro}:{v:a.v||''});}
+    if(p.mat){const a=mats.mat||{};
+      h+=`<div class="crm-ck-mat" data-tipo="mat" style="margin-top:8px"><label style="${lbl}">Material, cor e acabamento *</label>
+        <input type="text" class="crm-ck-mat-txt no-upper" value="${esc(a.outro||'')}" oninput="this.style.borderColor='#e5e7eb'" placeholder="Ex.: ACM branco 3 mm com adesivo impresso, estrutura pintada preto fosco, iluminado com LED 6.500K" style="${inp}"></div>`;}
+    if(p.led){const a=mats.led||{};
+      const leds=(()=>{try{return ORC_LED_HALO.map(([c,n])=>({v:c,l:'LED '+String(n).split(' — ')[0]+(/10\.000/.test(n)?' (branco azulado)':/6\.?500/.test(n)?' (branco frio)':/3\.?500/.test(n)?' (branco quente)':'')}));}catch(e){return[];}})();
+      h+=campo('led','LED da iluminação','Temperatura de cor do LED que vai dentro da letra.',leds,a.outro?{outro:a.outro}:{v:a.cod||''});}
     if(p.tinta){const a=mats.tinta||{};
-      const tit=p.tinta==='acril'?'Pintura de fora da letra':p.tinta==='pvc'?'Cor da pintura PU':'Cor da pintura da letra';
+      const tit=p.tinta==='acril'?'Pintura de fora da letra':p.tinta==='pvc'?'Cor da pintura PU':p.tinta==='estrutura'?'Cor da pintura da estrutura':'Cor da pintura da letra';
       const dica=p.tinta==='acril'?'A chapa galvanizada é pintada por dentro de branco fosco — aqui é a cor de fora (laterais).':'';
       h+=campo('tinta',tit,dica,[],a.outro?{outro:a.outro}:a.nome?{outro:a.nome}:{});}
     return h;
@@ -85770,12 +85805,16 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
     const out={},faltas=[];
     row.querySelectorAll('.crm-ck-mat').forEach(w=>{
       const tipo=w.dataset.tipo,sel=w.querySelector('.crm-ck-mat-sel'),v=sel?sel.value:'',txt=(w.querySelector('.crm-ck-mat-txt')?.value||'').trim();
-      const nomes={acm:'a cor do ACM',acril:'o acrílico da frente',tinta:'a cor da pintura'};
+      const nomes={acm:'a cor do ACM',acril:'o acrílico da frente',tinta:'a cor da pintura',led:'o LED',neon:'a cor do neon',impr:'o acabamento da impressão',mat:'o material, a cor e o acabamento'};
+      if(tipo==='mat'){const i=w.querySelector('.crm-ck-mat-txt');if(!txt){faltas.push(nomes.mat);if(i)i.style.borderColor='#dc2626';return;}out.mat={outro:txt};return;}
       const livre=v==='__outro'||v==='__ral'||v==='__pc';
       if(!v||(livre&&!txt)){faltas.push(nomes[tipo]);w.querySelector(livre?'.crm-ck-mat-txt':'.crm-ck-mat-sel').style.borderColor='#dc2626';return;}
       w.querySelectorAll('select,input').forEach(x=>x.style.borderColor='#e5e7eb');
       if(livre){out[tipo]={outro:txt};return;}
       if(tipo==='acm')out.acm={cor:v};
+      else if(tipo==='neon')out.neon={cor:v};
+      else if(tipo==='impr')out.impr={v};
+      else if(tipo==='led'){let n='';try{const x=ORC_LED_HALO.find(y=>y[0]===v);n=x?'LED '+String(x[1]).split(' — ')[0]:'';}catch(e){}out.led={cod:v,nome:n};}
       else if(tipo==='acril'){const a=acrilDoValor(v);out.acril=a?{key:a.key,cod:a.cod,nome:a.nome,cor:a.cor,esp:a.esp}:{key:v,nome:v};}
       else{const t=tintas().find(x=>x.key===v);out.tinta=t?{key:t.key,cod:t.cod||'',nome:t.nome}:{key:v,nome:v.replace(/^(cod|nova):/,'')};}
     });
@@ -85833,6 +85872,10 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
   const matsTxt=m=>{if(!m)return'';const p=[];
     if(m.acm)p.push('ACM '+(m.acm.outro?m.acm.outro:m.acm.cor));
     if(m.acril)p.push('Acrílico: '+(m.acril.outro||m.acril.nome||m.acril.cod));
+    if(m.led)p.push('LED: '+(m.led.outro||m.led.nome||m.led.cod));
+    if(m.neon)p.push('Neon: '+(m.neon.outro||m.neon.cor));
+    if(m.impr)p.push(m.impr.outro||m.impr.v);
+    if(m.mat)p.push(m.mat.outro);
     if(m.tinta)p.push('Pintura: '+(m.tinta.outro||m.tinta.nome));
     return p.join(' · ');};
   window._ckMatsTxt=matsTxt;
@@ -85847,6 +85890,7 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
       const avisos=[];
       if(orc2.prodTipo==='letra'&&orc2.letra){
         if(m.acril&&m.acril.cod)orc2.letra.acrilCod=String(m.acril.cod);else if(m.acril&&m.acril.outro)avisos.push('acrílico pedido: '+m.acril.outro);
+        if(m.led&&m.led.cod)orc2.letra.ledCod=String(m.led.cod);else if(m.led&&m.led.outro)avisos.push('LED pedido: '+m.led.outro);
         if(m.tinta&&!m.tinta.outro){const t=tintas().find(x=>x.key===m.tinta.key||(m.tinta.cod&&String(x.cod)===String(m.tinta.cod)));if(t)orc2.letra.tinta={cod:t.cod||'',nome:t.nome,precoL:t.precoL,nova:!!t.nova};}
         else if(m.tinta&&m.tinta.outro)avisos.push('pintura pedida: '+m.tinta.outro);
       }
@@ -86003,6 +86047,78 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
       </div>`;
     }catch(err){console.error('_lpTimelinePedidoHtml novo',err);return'';}
   };
+})();
+
+// ── CARD DO CRM → ABA "ORÇAMENTO" (2026-11-10, pedido do Guilherme: "criar um menu orçamento no card
+// ... deixa o geral pra tipo de negócio e decisor e daí tudo de orçamento fica no menu orçamento") ──────────
+// Nova aba entre Geral e Processo. Vão pra ela: "O que orçar", "Avaliação do orçamento", JOB, Onde será a
+// instalação e Caminho da pasta. O Geral fica com Tipo de negócio + Decisores. Só move os blocos já
+// montados pelas outras partes do card (mesmas funções, mesmos ids) — nada de regra muda.
+(function(){
+  try{const st=document.createElement('style');st.textContent=`
+  @media(max-width:600px){#mo-crm-card .crm-card-tab{min-width:0;font-size:.7rem;padding-left:2px;padding-right:2px}}
+  `;document.head.appendChild(st);}catch(e){}
+  const TABS=['geral','orcamento','inteligencia','proposta','fechamento'];
+  _crmCardSetTab=function(tab){
+    if(TABS.indexOf(tab)<0)tab='geral';
+    _crmCardTabAtiva=tab;
+    // aba Orçamento ainda não montada (card no meio do redesenho): mostra o Geral só por ora, sem
+    // esquecer que o usuário está na aba Orçamento — o redesenho termina e volta pra ela.
+    if(tab==='orcamento'&&!document.getElementById('crm-tab-orcamento'))tab='geral';
+    TABS.forEach(t=>{
+      const painel=document.getElementById('crm-tab-'+t);
+      if(painel){
+        painel.style.display=t===tab?'':'none';
+        if(t===tab){painel.classList.remove('crm-emp-wstep-in');void painel.offsetWidth;painel.classList.add('crm-emp-wstep-in');}
+      }
+      const btn=document.getElementById('crm-tabbtn-'+t);
+      if(btn)btn.classList.toggle('active',t===tab);
+    });
+  };
+  function montarAba(e){
+    const geral=document.getElementById('crm-tab-geral');if(!geral)return;
+    const barra=document.querySelector('#crm-card-body .crm-card-tabs');
+    const bGeral=document.getElementById('crm-tabbtn-geral');
+    let bOrc=document.getElementById('crm-tabbtn-orcamento');
+    if(!bOrc&&barra&&bGeral){
+      bOrc=document.createElement('button');bOrc.type='button';bOrc.id='crm-tabbtn-orcamento';bOrc.className='crm-card-tab';
+      bOrc.onclick=function(){_crmCardSetTab('orcamento');};
+      bGeral.insertAdjacentElement('afterend',bOrc);
+    }
+    let painel=document.getElementById('crm-tab-orcamento');
+    if(!painel){painel=document.createElement('div');painel.id='crm-tab-orcamento';painel.className='dash-card';geral.insertAdjacentElement('afterend',painel);}
+    painel.innerHTML='';
+    const ck=document.getElementById('crm-ck-bloco'),av=document.getElementById('orcav-bloco');
+    if(ck)painel.appendChild(ck);
+    if(av)painel.appendChild(av);
+    const fgs=Array.from(geral.querySelectorAll(':scope > .fg'));
+    const lab=fg=>{const l=fg.querySelector('label');return l?(l.textContent||'').trim():'';};
+    const job=fgs.find(fg=>/^JOB$/i.test(lab(fg).replace(/^\W+/,'')));
+    const inst=fgs.find(fg=>/Onde será a instalação/i.test(lab(fg)));
+    const cam=fgs.find(fg=>fg.querySelector('#crm-card-caminho-pasta'));
+    [job,inst,cam].forEach(fg=>{if(fg)painel.appendChild(fg);});
+    if(cam)cam.style.marginBottom='0';
+    // Geral: Tipo de negócio em cima dos decisores
+    const velho=document.getElementById('crm-geral-tipo');if(velho)velho.remove();
+    const tipo=String((e&&e.tipoNegocio)||'Venda').replace(/</g,'&lt;');
+    const dec=document.getElementById('crm-card-decisores-lista');
+    const fgDec=dec&&dec.closest('.fg');
+    const htmlTipo=`<div class="fg" id="crm-geral-tipo"><label>Tipo de negócio</label><div style="font-size:.85rem;font-weight:700;color:var(--ink)">${tipo}</div></div>`;
+    if(fgDec&&fgDec.parentElement===geral)fgDec.insertAdjacentHTML('beforebegin',htmlTipo);else geral.insertAdjacentHTML('afterbegin',htmlTipo);
+    // rótulo da aba (ponto laranja quando tem avaliação esperando o admin)
+    if(bOrc){
+      const pend=!!(av&&Array.from(av.querySelectorAll('button')).some(b=>/Avaliar|Aprovar/i.test(b.textContent||'')));
+      bOrc.innerHTML='Orçamento'+(pend?'<span class="crmz-dot" title="Orçamento esperando avaliação"></span>':'');
+    }
+  }
+  if(typeof _crmRenderCard==='function'){
+    const _o=_crmRenderCard;
+    _crmRenderCard=function(e){
+      const r=_o.apply(this,arguments);
+      try{montarAba(e);_crmCardSetTab(_crmCardTabAtiva);}catch(err){console.error('aba orçamento card',err);}
+      return r;
+    };
+  }
 })();
 
 </script>
