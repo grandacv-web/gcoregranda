@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-10.11';</script>
+<script>const APP_BUILD_VERSION='2026-11-10.12';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -86047,6 +86047,104 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
       </div>`;
     }catch(err){console.error('_lpTimelinePedidoHtml novo',err);return'';}
   };
+})();
+
+// ── CARD DO CRM → "O QUE ORÇAR" COM ITENS NUMERADOS E AGRUPADOS (2026-11-10, pedido do Guilherme: "melhore a
+// visualização dos itens de orçamento no card, tipo item 1, item 2... e agrupe melhor") ────────────────────────
+// Só muda a VISUALIZAÇÃO do bloco no card. Cada item vira uma linha "Item N" com o nome do produto em destaque,
+// o código numa etiqueta e as medidas / materiais / detalhe em etiquetas embaixo. Itens de caderno ficam
+// agrupados pelo caderno (ex.: Bob's) e, dentro dele, em ordem de código (mesmo produto fica junto). O texto
+// vem do mesmo _crmCkTextoItem de sempre (com caderno, materiais etc.), então nada do que já existe se perde.
+(function(){
+  try{const st=document.createElement('style');st.textContent=`
+  #crm-ck-bloco .ckv-grp{margin-top:10px}
+  #crm-ck-bloco .ckv-grp-h{display:flex;align-items:center;gap:8px;font-size:.7rem;font-weight:800;color:#9d174d;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px}
+  #crm-ck-bloco .ckv-grp-h .n{background:#fbcfe8;color:#9d174d;border-radius:999px;padding:1px 8px;font-size:.64rem;letter-spacing:0;text-transform:none}
+  #crm-ck-bloco .ckv-lista{display:flex;flex-direction:column;background:#fff;border:1px solid #fbcfe8;border-radius:10px;overflow:hidden}
+  #crm-ck-bloco .ckv-it{display:grid;grid-template-columns:auto 1fr;gap:10px;padding:8px 12px;align-items:start}
+  #crm-ck-bloco .ckv-it+.ckv-it{border-top:1px solid #fce7f3}
+  #crm-ck-bloco .ckv-num{font-size:.64rem;font-weight:800;color:#9d174d;background:#fdf2f8;border:1px solid #fbcfe8;border-radius:6px;padding:2px 7px;white-space:nowrap;margin-top:1px}
+  #crm-ck-bloco .ckv-c{min-width:0}
+  #crm-ck-bloco .ckv-t{font-size:.8rem;font-weight:700;color:#1e293b;line-height:1.3}
+  #crm-ck-bloco .ckv-sub{font-size:.7rem;color:#64748b;margin-top:2px;line-height:1.3}
+  #crm-ck-bloco .ckv-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
+  #crm-ck-bloco .ckv-tag{font-size:.66rem;font-weight:700;border-radius:6px;padding:2px 7px;white-space:nowrap;background:#f1f5f9;color:#334155}
+  #crm-ck-bloco .ckv-tag.cod{background:#eef2ff;color:#3730a3}
+  #crm-ck-bloco .ckv-tag.med{background:#ecfeff;color:#0e7490}
+  #crm-ck-bloco .ckv-tag.qtd{background:#fef3c7;color:#92400e}
+  #crm-ck-bloco .ckv-tag.obs{white-space:normal;background:#fff7ed;color:#9a3412;font-weight:600}
+  #crm-ck-bloco .ckv-tag.mat{white-space:normal;background:#f5f3ff;color:#5b21b6;font-weight:600}
+  `;document.head.appendChild(st);}catch(e){}
+  const esc=s=>_crmCkEsc(s);
+  const M=v=>{try{return _crmCkCm2M(v);}catch(e){return'';}};
+  const zero=v=>v==null||v===''||Number(v)===0;
+  function medida(it){
+    if(it.larg==null||it.alt==null)return'';
+    return M(it.larg)+' × '+M(it.alt)+(zero(it.prof)?'':' × '+M(it.prof))+' m';
+  }
+  function medOriginal(it){
+    if(it.larg==null||it.alt==null)return'';
+    return`${M(it.larg)} × ${M(it.alt)}${it.prof!=null?' × '+M(it.prof):''} m (L×A×P)`;
+  }
+  const tira=(t,pedaco)=>{if(!pedaco)return t;const k=t.lastIndexOf(pedaco);return k>=0?t.slice(0,k)+t.slice(k+pedaco.length):t;};
+  // Desmonta o texto do item em partes pra mostrar organizado
+  function partes(it){
+    let t='';try{t=String(_crmCkTextoItem(it)||'');}catch(e){t='';}
+    let mats='';try{mats=window._ckMatsTxt?window._ckMatsTxt(it.mats):'';}catch(e){}
+    if(mats)t=tira(t,' — '+mats);
+    if(it.obs)t=tira(t,' — '+it.obs);
+    const mo=medOriginal(it);if(mo)t=tira(t,' — '+mo);
+    if(it.qtd>1)t=tira(t,' ×'+it.qtd);
+    t=t.replace(/^[^\p{L}\p{N}]+/u,'').trim(); // ícone do começo
+    let grupo='',cod='',titulo=t,sub='';
+    if(it.key==='caderno'){
+      const ps=t.split(' · ');
+      if(ps.length>=3){grupo=ps.shift();}
+      if(ps.length>=2&&/^[A-Z0-9]{1,6}-[0-9]/i.test(ps[0]))cod=ps.shift();
+      titulo=ps.join(' · ');
+    }
+    const k=titulo.indexOf(' — ');
+    if(k>0){sub=titulo.slice(k+3);titulo=titulo.slice(0,k);}
+    return{grupo,cod,titulo:titulo||'Item',sub,med:medida(it),qtd:it.qtd>1?it.qtd:0,obs:it.obs||'',mats};
+  }
+  function linha(n,x){
+    const tags=[];
+    if(x.cod)tags.push(`<span class="ckv-tag cod">${esc(x.cod)}</span>`);
+    if(x.med)tags.push(`<span class="ckv-tag med">${esc(x.med)}</span>`);
+    if(x.qtd)tags.push(`<span class="ckv-tag qtd">${x.qtd} unidades</span>`);
+    if(x.mats)x.mats.split(' · ').forEach(m=>{if(m.trim())tags.push(`<span class="ckv-tag mat">${esc(m.trim())}</span>`);});
+    if(x.obs)tags.push(`<span class="ckv-tag obs">${esc(x.obs)}</span>`);
+    return`<div class="ckv-it"><span class="ckv-num">Item ${n}</span><div class="ckv-c">
+      <div class="ckv-t">${esc(x.titulo)}</div>${x.sub?`<div class="ckv-sub">${esc(x.sub)}</div>`:''}
+      ${tags.length?`<div class="ckv-tags">${tags.join('')}</div>`:''}</div></div>`;
+  }
+  function listaHtml(itens){
+    const grupos=[],porNome={};
+    itens.forEach(it=>{const x=partes(it||{});const g=x.grupo||(it&&it.key==='caderno'?'Produtos de caderno':'Outros itens');
+      if(!porNome[g]){porNome[g]={nome:g,l:[]};grupos.push(porNome[g]);}porNome[g].l.push(x);});
+    grupos.forEach(g=>g.l.sort((a,b)=>a.cod&&b.cod?a.cod.localeCompare(b.cod,'pt-BR',{numeric:true}):0));
+    const so1=grupos.length===1&&grupos[0].nome==='Outros itens';
+    let n=0;
+    return grupos.map(g=>`<div class="ckv-grp">${so1?'':`<div class="ckv-grp-h">${esc(g.nome)}<span class="n">${g.l.length} ${g.l.length===1?'item':'itens'}</span></div>`}
+      <div class="ckv-lista">${g.l.map(x=>linha(++n,x)).join('')}</div></div>`).join('');
+  }
+  const _orig=_crmCkBlocoCard;
+  _crmCkBlocoCard=function(e){
+    try{
+      const itens=_crmCkItens(e);
+      if(!itens.length||_crmCkCaderno(e))return _orig.apply(this,arguments);
+      const c=e.orcChecklist||{};
+      return`<div id="crm-ck-bloco" style="background:#fdf2f8;border:1.5px solid #fbcfe8;border-radius:10px;padding:10px 12px;margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap">
+          <div style="font-size:.74rem;font-weight:800;color:#9d174d;text-transform:uppercase;letter-spacing:.04em">O que orçar <span style="font-weight:700;color:#be185d;text-transform:none;letter-spacing:0">· ${itens.length} ${itens.length===1?'item':'itens'}</span></div>
+          ${e.fechamento?'':`<button type="button" onclick="crmEditarChecklistOrc('${e.id}')" style="background:#fff;border:1px solid #f9a8d4;color:#9d174d;border-radius:8px;padding:4px 10px;font-size:.7rem;font-weight:700;cursor:pointer">Editar</button>`}
+        </div>
+        ${listaHtml(itens)}
+        <div style="font-size:.66rem;color:#94a3b8;margin-top:8px">Por ${esc(c.por||'—')} · ${c.em?_fmtDataHora(c.em):''}</div>
+      </div>`;
+    }catch(err){console.error('ck visual',err);return _orig.apply(this,arguments);}
+  };
+  window._ckvPartes=partes;
 })();
 
 // ── CARD DO CRM → ABA "ORÇAMENTO" (2026-11-10, pedido do Guilherme: "criar um menu orçamento no card
