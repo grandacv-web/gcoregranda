@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-11.6';</script>
+<script>const APP_BUILD_VERSION='2026-11-11.13';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -2832,6 +2832,7 @@ select.fc{cursor:pointer}
           <option value="emissao">Data de Emissão/Venda</option>
           <option value="etapas">Prazo do Projeto</option>
           <option value="final">Data de Finalização (Prazo Final)</option>
+          <option value="real">Data real de finalização do projeto</option>
         </select>
         <label style="font-size:.76rem;color:var(--ink4);display:flex;align-items:center;gap:6px">De
           <input type="date" id="proj-fil-data-de" onchange="projRenderAtivo()" style="padding:7px 9px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.8rem;font-family:inherit">
@@ -6316,6 +6317,8 @@ window._fbSeqProx=(nome)=>runTransaction(db,async(tx)=>{const ref=doc(db,'sistem
 window._fbChWatch=(nome,cb,errCb)=>onSnapshot(doc(db,'sistema',nome),s=>cb(s.exists()?(s.data().itens||{}):{}),errCb||(e=>console.warn('chamados watch',e)));
 window._fbChTx=(nome,fn)=>runTransaction(db,async(tx)=>{const ref=doc(db,'sistema',nome);const snap=await tx.get(ref);const itens=snap.exists()?JSON.parse(JSON.stringify(snap.data().itens||{})):{};const r=fn(itens);if(!r)return null;tx.update(ref,new FieldPath('itens',r.id),r.obj);return r;});
 window._fbChCriar=(nome,lista)=>runTransaction(db,async(tx)=>{const sref=doc(db,'sistema','chamadosSeq');const ref=doc(db,'sistema',nome);const ss=await tx.get(sref);const ms=await tx.get(ref);const n=Math.max(parseInt(ss.exists()&&ss.data().proximo)||1,1);const ids=[],itens={};lista.forEach(c=>{const id='c'+n+(c.sufixo?String(c.sufixo).toLowerCase():'');ids.push(id);itens[id]=Object.assign({},c,{id,num:n});});tx.set(sref,{proximo:n+1,em:new Date().toISOString()},{merge:true});if(ms.exists()){const args=[];ids.forEach(id=>{args.push(new FieldPath('itens',id),itens[id]);});tx.update(ref,...args);}else tx.set(ref,{itens});return{ids,num:n};});
+// Chamados internos de Projetos (2026-11-11): sistema/chamadosProj_AAAA_MM + sistema/chamadosProjSeq.
+window._fbChCriarSeq=(seq,nome,lista)=>runTransaction(db,async(tx)=>{const sref=doc(db,'sistema',seq);const ref=doc(db,'sistema',nome);const ss=await tx.get(sref);const ms=await tx.get(ref);const n=Math.max(parseInt(ss.exists()&&ss.data().proximo)||1,1);const ids=[],itens={};lista.forEach(c=>{const id='c'+n+(c.sufixo?String(c.sufixo).toLowerCase():'');ids.push(id);itens[id]=Object.assign({},c,{id,num:n});});tx.set(sref,{proximo:n+1,em:new Date().toISOString()},{merge:true});if(ms.exists()){const args=[];ids.forEach(id=>{args.push(new FieldPath('itens',id),itens[id]);});tx.update(ref,...args);}else tx.set(ref,{itens});return{ids,num:n};});
 const _BACKUP_COLS=['sistema','pedidos','crmEmpresas','prospEmpresas','contasPagar','contasReceberManual','simReservas','lixeira','rhPonto','rhAtestadosAnexos','dreCongelado','produtosFicha','portalObras','pesagens','rhVagas'];
 window._fbBackupLerAtual=async()=>{
   const out={geradoEm:new Date().toISOString(),origem:'navegador',colecoes:{}};
@@ -9842,6 +9845,9 @@ const _CQG_PRODUTOS=[['TOTEM',/TOTEM/],['LETREIRO / LETRA CAIXA',/LETREIRO|LETRA
   ['ADESIVO / ENVELOPAMENTO',/ADESIV|ENVELOP|PELICULA|PELÍCULA|LONA|IMPRESS/],['MOBILIÁRIO',/MOBILI|BALC|MESA|ARMARIO|ARMÁRIO|PRATELEIRA/],
   ['ESTRUTURA METÁLICA',/ESTRUTURA|METALIC|METÁLIC|TUBO|POSTE/]];
 const _CQG_COM_PREVIA=new Set(['inst','frete','munque','medicao','art','laudo']);
+const _CQG_EDIT_KEYS=['inst','frete','munque','medicao','art','laudo'];
+const _cqgNum=t=>{const x=String(t||'').trim().replace(/^R\$\s*/,'');return /^\d{1,3}(\.\d{3})+$/.test(x)?Number(x.replace(/\./g,'')):moneyToNum(x);};
+const _cqgValorOk=t=>!t||/^(R\$\s*)?\d{1,3}(\.\d{3})*(,\d{1,2})?$|^(R\$\s*)?\d+([.,]\d{1,2})?$/.test(String(t).trim());
 const _cqgEscH=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 function _cqgEhGarantia(p){try{return _pedTipoTxt(p)==='GARANTIA';}catch(e){return false;}}
 function _cqgPodeEditar(){try{return _getUserCat().isAdm||_isSetorUser('QUALIDADE');}catch(e){return false;}}
@@ -9877,7 +9883,11 @@ function _cqgLinha(p,ctx){
   const forn={inst:_cqgFornNome(fg.instalador),frete:_cqgFornNome(fg.transportadora),munque:_cqgFornNome(fg.munque),
     medicao:(sv.medicao&&sv.medicao.forn)||'',art:(sv.art&&sv.art.forn)||'',laudo:(sv.laudo&&sv.laudo.forn)||'',
     producao:(prodMat||prodMo)?`Material ${fmtR(prodMat)} · Mão de obra ${fmtR(prodMo)}`:''};
-  const lancado=!!(fg.instalador||fg.transportadora||fg.munque||forn.medicao||forn.art||forn.laudo||(fg.gastosExtras||[]).length);
+  // (2026-11-11, Guilherme) A Qualidade pode informar o valor realizado de cada operacional (ART, Instalação,
+  // Frete, Elevações...) — p.qualCustos.real[k]. Preenchido = vale o da Qualidade; em branco = vale o do Planejamento.
+  const vPlan=Object.assign({},v),qReal=qc.real||{},qOver={};
+  _CQG_EDIT_KEYS.forEach(k=>{const t=qReal[k];if(t!=null&&String(t).trim()!==''){v[k]=moneyToNum(t)||0;qOver[k]=true;}});
+  const lancado=!!(fg.instalador||fg.transportadora||fg.munque||forn.medicao||forn.art||forn.laudo||(fg.gastosExtras||[]).length||Object.keys(qOver).length);
   const noPlan=ctx.elegPlan?ctx.elegPlan.has(p.id):true;
   // Prévia (2026-11-09): valores operacionais informados no pedido — a mesma base que o Planejamento
   // usa como previsto (Budget) no lançamento de Fornecedores, aqui no valor cheio.
@@ -9886,7 +9896,7 @@ function _cqgLinha(p,ctx){
   const totalPrev=_CQG_CATS.reduce((s,x)=>s+(prev[x.k]||0),0);
   const total=_CQG_CATS.reduce((s,x)=>s+(v[x.k]||0),0);
   let marca='—';try{marca=_fatClienteGrupoNome({cl:p.cliente||_pedCliExib(p),job:p.job||'',p:p.os})||'—';}catch(e){}
-  return{p,os:p.os||'',nome:_pedNome(p),em:_cqgEmIso(p),v,prev,totalPrev,forn,total,lancado,noPlan,
+  return{p,os:p.os||'',nome:_pedNome(p),em:_cqgEmIso(p),v,vPlan,qOver,prev,totalPrev,forn,total,lancado,noPlan,
     extrasLista:Array.isArray(fg.gastosExtras)?fg.gastosExtras:[],
     origem:_cqgOrigemInfo(p,ctx.rowsVenda),setor:String(p.rncSetor||'').trim()||'',setorLbl:_cqgSetorLbl(p),
     marca,produtos:_cqgTiposProduto(p),prodInformado:!!(qc.material||qc.maoObra),qc,
@@ -10094,7 +10104,7 @@ function renderCustosQualidade(){
       <td>${statusTxt(l)}</td></tr>`).join('')}</tbody>
     <tfoot><tr><td colspan="3">TOTAL · ${L.length} ${L.length===1?'pedido':'pedidos'}</td><td style="text-align:right"><div class="cqx-k">Prévia</div><div class="cqx-pv">${fmtR(totalPrevGeral)}</div><div class="cqx-k">Realizado</div><div class="cqx-rv">${fmtR(totalGeral)}</div></td><td></td></tr></tfoot>
     </table>
-    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">Prévia = valores operacionais informados no pedido (a base do previsto do Planejamento). Realizado = o que o Planejamento lança em Fornecedores — em vermelho quando passa da prévia, em verde quando fica dentro. Instalação inclui mobilização, remoção e pintura de tubo. Produção = material e mão de obra informados pela Qualidade. Clique no pedido para ver o detalhe${podeEd?' e informar setor e produção':''}.</div></div>`
+    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px;line-height:1.5">Prévia = valores operacionais informados no pedido (a base do previsto do Planejamento). Realizado = o que o Planejamento lança em Fornecedores ou o valor informado pela Qualidade no pedido — em vermelho quando passa da prévia, em verde quando fica dentro. Instalação inclui mobilização, remoção e pintura de tubo. Produção = material e mão de obra informados pela Qualidade. Clique no pedido para ver o detalhe${podeEd?' e informar setor e produção':''}.</div></div>`
     :`<div class="dash-card"><div style="padding:24px;text-align:center;color:var(--ink4);font-size:.84rem">Nenhum pedido de Garantia/Retrabalho emitido em ${periodo}.</div></div>`;
   let ind='';try{ind=_cqgIndHtml(L,T,ctx,totalGeral);}catch(e){console.error('indicadores garantia',e);}
   let painelSet='';try{painelSet=L.length?_cqgSetoresPainelHtml(L):'';}catch(e){console.error('painel setores',e);}
@@ -10109,7 +10119,14 @@ function cqgAbrirDetalhe(id){
   const modal=document.createElement('div');modal.id='cqg-det-modal';
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
   try{_dynModalSemFechaClique(modal);}catch(e){}
-  const linhas=_CQG_CATS.filter(x=>x.k!=='extras'&&x.k!=='producao').map(x=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-lt)">
+  const qr=qc.real||{};
+  const linhaEd=x=>{const k=x.k,pl=l.vPlan[k]||0,pv=l.prev[k]||0;
+    const planTxt=pl>0.005?`Planejamento: ${fmtR(pl)}${l.forn[k]?' · '+esc(l.forn[k]):''}`:(l.forn[k]?`Planejamento: ${esc(l.forn[k])}`:'Planejamento: não lançado');
+    return`<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-lt)">
+    <div style="min-width:0"><div style="font-weight:800;font-size:.82rem">${x.l}</div><div style="font-size:.68rem;color:${l.qOver[k]?'#b45309':'var(--ink4)'}">${l.qOver[k]?'Informado pela Qualidade · '+planTxt:planTxt}</div></div>
+    <div style="text-align:right;flex-shrink:0"><input class="fc cqg-ed-real" data-k="${k}" id="cqg-ed-real-${k}" inputmode="decimal" value="${esc(qr[k]||'')}" placeholder="${pl>0.005?fmtR(pl):'R$ 0,00'}" style="width:140px;text-align:right;padding:6px 9px;font-weight:700">
+    <div style="font-size:.66rem;color:var(--ink4);white-space:nowrap;margin-top:2px">prévia ${pv>0.005?fmtR(pv):'—'}</div></div></div>`;};
+  const linhas=podeEd?_CQG_CATS.filter(x=>_CQG_EDIT_KEYS.includes(x.k)).map(linhaEd).join(''):_CQG_CATS.filter(x=>x.k!=='extras'&&x.k!=='producao').map(x=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-lt)">
     <div><div style="font-weight:800;font-size:.82rem">${x.l}</div>${l.forn[x.k]?`<div style="font-size:.68rem;color:var(--ink4)">${esc(l.forn[x.k])}</div>`:'<div style="font-size:.68rem;color:#cbd5e1">Não lançado</div>'}</div>
     <div style="text-align:right"><div style="font-weight:800;white-space:nowrap;${l.v[x.k]>0.005?'color:#0f172a':'color:#cbd5e1'}">${l.v[x.k]>0.005?fmtR(l.v[x.k]):'—'}</div><div style="font-size:.66rem;color:var(--ink4);white-space:nowrap">prévia ${l.prev[x.k]>0.005?fmtR(l.prev[x.k]):'—'}</div></div></div>`).join('');
   const extras=l.extrasLista.length?l.extrasLista.map(e=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px dashed var(--border-lt);font-size:.78rem">
@@ -10137,7 +10154,8 @@ function cqgAbrirDetalhe(id){
       <div style="font-size:.72rem;color:var(--ink4);margin-top:2px">🔗 Origem: ${origemHtml}</div></div>
       <button type="button" onclick="document.getElementById('cqg-det-modal').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--ink4)">✕</button>
     </div>
-    <div style="margin-top:12px;font-weight:800;font-size:.82rem">🏗️ Operacionais (Planejamento)</div>
+    <div style="margin-top:12px;font-weight:800;font-size:.82rem">🏗️ Operacionais${podeEd?' — valores realizados':' (Planejamento)'}</div>
+    ${podeEd?'<div style="font-size:.7rem;color:var(--ink4);margin-top:2px">Digite o valor realizado de cada item. Campo em branco usa o valor lançado pelo Planejamento.</div>':''}
     <div>${linhas}</div>
     <div style="font-weight:800;font-size:.82rem;margin-top:14px">🧾 Gastos extras</div>${extras}
     ${qualHtml}
@@ -10156,13 +10174,18 @@ async function cqgSalvarQualidade(id){
   const matTxt=((document.getElementById('cqg-ed-mat')||{}).value||'').trim(),moTxt=((document.getElementById('cqg-ed-mo')||{}).value||'').trim();
   const mat=moneyToNum(matTxt),mo=moneyToNum(moTxt);
   if((matTxt&&!(mat>=0))||(moTxt&&!(mo>=0))){toast('Valor inválido','terr');return;}
+  const real={};let realErr='';
+  _CQG_EDIT_KEYS.forEach(k=>{const el=document.getElementById('cqg-ed-real-'+k);if(!el)return;const t=String(el.value||'').trim();if(!t)return;
+    if(!_cqgValorOk(t)){if(!realErr)realErr=(_CQG_CATS.find(x=>x.k===k)||{}).c||k;return;}real[k]=fmtR(_cqgNum(t));});
+  if(realErr){toast('Valor inválido em '+realErr,'terr');return;}
   const btn=document.getElementById('cqg-ed-salvar');if(btn){btn.disabled=true;btn.textContent='Salvando...';}
   const quem=usuarioLogado?.nomeExibicao||usuarioLogado?.email||'';
   const ant={s:p.rncSetor,o:p.rncSetorOutro,q:p.qualCustos};
   p.rncSetor=setor;p.rncSetorOutro=setor==='OUTRO'?outro:'';
   const qcAnt=p.qualCustos||{};
-  const mudouValor=String(qcAnt.material||'')!==(matTxt?fmtR(mat):'')||String(qcAnt.maoObra||'')!==(moTxt?fmtR(mo):'');
-  p.qualCustos={material:matTxt?fmtR(mat):'',maoObra:moTxt?fmtR(mo):'',por:mudouValor?quem:(qcAnt.por||quem),em:mudouValor?new Date().toISOString():(qcAnt.em||new Date().toISOString())};
+  const mudouValor=String(qcAnt.material||'')!==(matTxt?fmtR(mat):'')||String(qcAnt.maoObra||'')!==(moTxt?fmtR(mo):'')||
+    _CQG_EDIT_KEYS.some(k=>String((qcAnt.real||{})[k]||'')!==String(real[k]||''));
+  p.qualCustos={material:matTxt?fmtR(mat):'',maoObra:moTxt?fmtR(mo):'',real,por:mudouValor?quem:(qcAnt.por||quem),em:mudouValor?new Date().toISOString():(qcAnt.em||new Date().toISOString())};
   try{await savePedidoFS(p);toast('Salvo ✅','tok');const m=document.getElementById('cqg-det-modal');if(m)m.remove();renderCustosQualidade();}
   catch(e){console.error('cqgSalvarQualidade',e);p.rncSetor=ant.s;p.rncSetorOutro=ant.o;p.qualCustos=ant.q;toast('Não consegui salvar — tente de novo','terr');if(btn){btn.disabled=false;btn.textContent='💾 Salvar';}}
 }
@@ -36581,8 +36604,8 @@ function _projxDiasPausa(p,de,ate){
 // Filtros próprios — só na aba Lista (Kanban/Calendário/exportações continuam iguais)
 function _projxAplicarFiltros(infos,hoje){
   if(typeof _projTabAtiva!=='undefined'&&_projTabAtiva!=='lista')return infos;
-  if(_projxResp==='__sem')infos=infos.filter(x=>!x.p.projResponsavel);
-  else if(_projxResp)infos=infos.filter(x=>(x.p.projResponsavel||'')===_projxResp);
+  if(_projxResp==='__sem')infos=infos.filter(x=>!_projxProjetistaDe(x.p));
+  else if(_projxResp)infos=infos.filter(x=>_projxProjetistaDe(x.p)===_projxResp);
   if(_projxFila){const lim2=_projxLim2(hoje);infos=infos.filter(x=>_projxClasse(x,hoje,lim2)===_projxFila);}
   return infos;
 }
@@ -36603,7 +36626,7 @@ function _projxTagsLinha(p){
     const t=[];
     try{const b=_lpTipoBadge(p);if(b)t.push(b);}catch(e){}
     try{if(_projx2Mudou(p))t.push(`<span class="projx-tag" style="background:#ffedd5;color:#c2410c" title="O comercial alterou o pedido depois que o projeto foi visto">🔔 pedido atualizado</span>`);}catch(e){}
-    t.push(p.projResponsavel?`<span class="projx-tag resp">👤 ${_projxEsc(p.projResponsavel)}</span>`:`<span class="projx-tag semresp">👤 sem projetista</span>`);
+    {const pj=_projxProjetistaDe(p);t.push(p.projResponsavel?`<span class="projx-tag resp">👤 ${_projxEsc(p.projResponsavel)}</span>`:pj?`<span class="projx-tag resp" title="Concluído por ${_projxEsc(pj)}">👤 ${_projxEsc(pj)}</span>`:`<span class="projx-tag semresp">👤 sem projetista</span>`);}
     if(_projxPausado(p))t.push(`<span class="projx-tag pausa" title="${_projxEsc(p.projPausa.motivo||'')}">⏸️ Aguardando · ${_projxDiasEntre(p.projPausa.desde,new Date().toISOString())}d</span>`);
     const nr=(p.projRevisoes||[]).length;if(nr)t.push(`<span class="projx-tag rev">🔁 ${nr} rev.</span>`);
     const na=(p.projArquivos||[]).length;if(na)t.push(`<span class="projx-tag arq">📎 ${na}</span>`);
@@ -37185,6 +37208,31 @@ function _projRmMensalHtml(){
   </div>`;
 }
 
+// (2026-11-11, pedido do time de Projetos) Data REAL em que o projeto foi finalizado — não o prazo
+// ideal do pedido. Com a revisão do supervisor, é a data da aprovação (a baixa é regravada nela).
+// Projeto em revisão/devolvido ainda não tem data real. Sem baixa (checklist todo resolvido sem
+// RM), usa o último item marcado.
+function _projDataRealConclusao(p){
+  try{
+    if(!p)return'';
+    try{const rs=window._projRevStatus&&window._projRevStatus(p);if(rs==='aguardando'||rs==='devolvido')return'';}catch(e){}
+    const b=p.lpBaixas&&p.lpBaixas.projeto;
+    if(b&&b.na)return'';
+    if(b){if(b.data)return String(b.data).slice(0,10);if(b.dataHora)return _isoLocal(new Date(b.dataHora));}
+    const ck=p.projChecklist&&p.projChecklist.itens;if(!ck)return'';
+    if(PROJ_CHECKLIST_ITENS.some(it=>!_projItemOk(ck[it.key])))return'';
+    let ult='';PROJ_CHECKLIST_ITENS.forEach(it=>{const q=ck[it.key]&&ck[it.key].quando;if(q&&q>ult)ult=q;});
+    return ult?_isoLocal(new Date(ult)):'';
+  }catch(e){return'';}
+}
+// Projetista "efetivo": o atribuído; se o projeto foi concluído sem ninguém atribuído, quem concluiu.
+function _projxProjetistaDe(p){
+  if(!p)return'';
+  if(p.projResponsavel)return p.projResponsavel;
+  const b=p.lpBaixas&&p.lpBaixas.projeto;
+  const por=b&&!b.na&&b.por&&b.por!=='—'?b.por:'';
+  return por||'';
+}
 function _projStatusPedido(p,etapa,hojeIso,itensFeitos){
   const concluido=_lpEtapaConcluida(p,'projeto');
   if(concluido)return 'concluido';
@@ -37232,9 +37280,10 @@ function _projListaFiltrada(ignorarPadraoOcultarConcluido){
     if(filDataCampo==='emissao')infos=infos.filter(x=>_lpDataNoIntervalo(x.calc.emissaoIso,filDataDe,filDataAte));
     else if(filDataCampo==='final')infos=infos.filter(x=>_lpDataNoIntervalo(x.calc.prazoIso,filDataDe,filDataAte));
     else if(filDataCampo==='etapas')infos=infos.filter(x=>_lpDataNoIntervalo(x.etapa.iso,filDataDe,filDataAte));
+    else if(filDataCampo==='real')infos=infos.filter(x=>{const d=_projDataRealConclusao(x.p);return !!d&&_lpDataNoIntervalo(d,filDataDe,filDataAte);});
   }
   if(filStatus)infos=infos.filter(x=>x.statusPedido===filStatus);
-  else if(!ignorarPadraoOcultarConcluido)infos=infos.filter(x=>x.statusPedido!=='concluido');
+  else if(!ignorarPadraoOcultarConcluido&&!(temFiltroData&&filDataCampo==='real'))infos=infos.filter(x=>x.statusPedido!=='concluido');
   const ordem={atrasado:0,andamento:1,nao_iniciado:2,concluido:3};
   infos.sort((a,b)=>(a.statusPedido==='concluido')-(b.statusPedido==='concluido')||String(a.etapa.iso||'9999').localeCompare(b.etapa.iso||'9999')||ordem[a.statusPedido]-ordem[b.statusPedido]||String(a.p.os||'').localeCompare(String(b.p.os||''),undefined,{numeric:true}));
   return infos;
@@ -44005,8 +44054,8 @@ function renderProjLista(){
         <td style="padding:8px 10px;${corLinha}">${p.emissaoEm?fmtD(p.emissaoEm):'—'}</td>
         <td style="padding:8px 10px;${corLinha}">${fmtD(etapa.iso)}${(function(){try{const t=_projxProxTxt(x.calc);return t?'<div class="projx-prox-l">'+t+'</div>':'';}catch(e){return'';}})()}</td>
         <td style="padding:8px 10px;min-width:170px">${(function(){try{return _projx2CelChecklist(x);}catch(e){return itensFeitos+"/"+totalItens;}})()}</td>
-        <td style="padding:8px 10px;font-weight:700;color:${_projStatusCor(statusPedido)}">${_projStatusLabel(statusPedido)}</td>
-        <td style="padding:8px 10px;text-align:right"><button onclick="event.stopPropagation();projIniciarOuAbrirChecklist('${p.id}')" class="dash-btn-conf" style="${_acaoBtnSt(statusPedido==='concluido'?'ver':itensFeitos>0?'continuar':'iniciar')};white-space:nowrap">${acaoLbl}</button></td>
+        <td style="padding:8px 10px;font-weight:700;color:${_projStatusCor(statusPedido)}">${_projStatusLabel(statusPedido)}${(function(){if(statusPedido!=='concluido')return'';const d=_projDataRealConclusao(p);return d?`<div style="font-size:.7rem;font-weight:600;color:#64748b;white-space:nowrap">em ${fmtD(d)}</div>`:'';})()}</td>
+        <td style="padding:8px 10px;text-align:right;white-space:nowrap"><button onclick="event.stopPropagation();projIniciarOuAbrirChecklist('${p.id}')" class="dash-btn-conf" style="${_acaoBtnSt(statusPedido==='concluido'?'ver':itensFeitos>0?'continuar':'iniciar')};white-space:nowrap">${acaoLbl}</button>${p.arq_os_url?`<a href="${String(p.arq_os_url).replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir a Ordem de Serviço (PDF) do pedido" style="${_acaoBtnSt('ver')};display:inline-block;text-decoration:none;border-radius:8px;padding:7px 12px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;margin-left:6px">📄 Pedido (PDF)</a>`:`<span title="Este pedido não tem a Ordem de Serviço em PDF anexada" style="display:inline-block;margin-left:6px;font-size:.7rem;color:#94a3b8;white-space:nowrap">sem PDF</span>`}</td>
       </tr>`;
     }).join('')}
     </tbody></table></div>`;
@@ -57308,7 +57357,7 @@ function _vndFilteredRows(){
   // Busca livre: OS, cliente, JOB, cidade, vendedor, categoria e Nº de OC — tudo num campo só,
   // sem acento/maiúsculas (norm()) pra não depender de digitar exatamente igual.
   const _buscaMatch=r=>!filBusca||[r.p,r.cl,r.job,r.cidade,r.v,r.cat,r.numOC].some(v=>v&&norm(String(v)).includes(filBusca));
-  let rows2=allRowsForFil.filter(r=>_vrAno(r)===_anoRef&&(!filMes||r.mes===filMes)&&(!filVend||r.v===filVend)&&(!filCat||r.cat===filCat)&&_buscaMatch(r));
+  let rows2=allRowsForFil.filter(r=>_vrAno(r)===_anoRef&&(!filMes||r.mes===filMes)&&(filMes||!_vndPer||(r.m>=_vndPer.de&&r.m<=_vndPer.ate))&&(!filVend||r.v===filVend)&&(!filCat||r.cat===filCat)&&_buscaMatch(r));
   rows2=rows2.map(r=>({...r,rem:r.rem||0,med:r.med||0,opAdj:(r.op||0),lqAdj:(r.lq||0)}));
   // (2026-10-29, a pedido do Guilherme) dentro de cada mês, ordem pela data da venda (emissão,
   // com hora quando tem); vendas sem data (planilha antiga) vão pro fim do mês, por cliente.
@@ -57342,6 +57391,7 @@ async function gerarPDFVendas(){
   const filBusca=(document.getElementById('vnd-fil-busca')||{}).value||'';
   const filtrosAtivos=[];
   if(filMes)filtrosAtivos.push('Mês: '+filMes);
+  else if(_vndPer)filtrosAtivos.push('Período: '+MESES_PT[_vndPer.de]+' a '+MESES_PT[_vndPer.ate]+' de '+_anoRef);
   if(filVend)filtrosAtivos.push('Vendedor: '+filVend);
   if(filCat)filtrosAtivos.push('Categoria: '+filCat);
   if(filBusca)filtrosAtivos.push('Busca: "'+filBusca+'"');
@@ -57827,7 +57877,7 @@ function getFaturadoMesReal(y,m,vendedor){
     if(i.status!=='confirmado')return false;
     if(vendedor&&!vendedorMatch(i.nomeVend,vendedor))return false;
     const rm=_dreMesRealItem(i);
-    return m?(rm.y===y&&rm.m===m):rm.y===y;
+    return m?(rm.y===y&&rm.m===m):(rm.y===y&&_gcPerMesOk(y,m,rm.m));
   }).reduce((s,i)=>s+(i.valor||0),0);
 }
 
@@ -57860,21 +57910,21 @@ function gcAbrirDetalheVendasBrutas(y,m,vendedor){
   const total=rows.reduce((s,r)=>s+(r.br||0),0);
   const headers=vendedor?[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'valor',l:'Valor Bruto',num:true}]:[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'vendedor',l:'Vendedor'},{k:'valor',l:'Valor Bruto',num:true}];
   const linhas=rows.map(r=>({os:r.p||'—',cliente:r.fant||r.cl||'—',job:r.job||'—',vendedor:r.v||'—',valor:fmtR(r.br||0)}));
-  _gcAbrirModalKpi('💰 Vendas Brutas do Mês',_gcPeriodoLabel(y,m,vendedor),headers,linhas,fmtR(total));
+  _gcAbrirModalKpi('💰 Vendas Brutas '+_gcSuf(m),_gcPeriodoLabel(y,m,vendedor),headers,linhas,fmtR(total));
 }
 function gcAbrirDetalheVendasLiquidas(y,m,vendedor){
   const rows=getVendaRowsMerged().filter(r=>_vrNoPeriodo(r,y,m)&&vendedorMatch(r.v,vendedor)).sort((a,b)=>(b.lq||0)-(a.lq||0));
   const total=rows.reduce((s,r)=>s+(r.lq||0),0);
   const headers=vendedor?[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'valor',l:'Valor Líquido',num:true}]:[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'vendedor',l:'Vendedor'},{k:'valor',l:'Valor Líquido',num:true}];
   const linhas=rows.map(r=>({os:r.p||'—',cliente:r.fant||r.cl||'—',job:r.job||'—',vendedor:r.v||'—',valor:fmtR(r.lq||0)}));
-  _gcAbrirModalKpi('📈 Vendas Líquidas do Mês',_gcPeriodoLabel(y,m,vendedor),headers,linhas,fmtR(total));
+  _gcAbrirModalKpi('📈 Vendas Líquidas '+_gcSuf(m),_gcPeriodoLabel(y,m,vendedor),headers,linhas,fmtR(total));
 }
 function gcAbrirDetalheFaturado(y,m,vendedor){
   const rows=getComissaoItemsAll().filter(i=>{
     if(i.status!=='confirmado')return false;
     if(vendedor&&!vendedorMatch(i.nomeVend,vendedor))return false;
     const rm=_dreMesRealItem(i);
-    return m?(rm.y===y&&rm.m===m):rm.y===y;
+    return m?(rm.y===y&&rm.m===m):(rm.y===y&&_gcPerMesOk(y,m,rm.m));
   }).sort((a,b)=>(b.valor||0)-(a.valor||0));
   const total=rows.reduce((s,r)=>s+(r.valor||0),0);
   const headers=vendedor?[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'parcela',l:'Parcela'},{k:'data',l:'Data'},{k:'valor',l:'Valor',num:true}]:[{k:'os',l:'OS'},{k:'cliente',l:'Cliente'},{k:'job',l:'JOB'},{k:'vendedor',l:'Vendedor'},{k:'parcela',l:'Parcela'},{k:'data',l:'Data'},{k:'valor',l:'Valor',num:true}];
@@ -58293,7 +58343,7 @@ function gcRenderGeralExtras(y,m,todos){
   let ref25=null;
   if(typeof VENDAS_2025_REF!=='undefined'){
     if(m&&VENDAS_2025_REF[m])ref25={lq:VENDAS_2025_REF[m].lq,mg:VENDAS_2025_REF[m].br>0?VENDAS_2025_REF[m].lq/VENDAS_2025_REF[m].br*100:null};
-    else if(!m){let a=0,b=0;for(let i=1;i<=12;i++){if(VENDAS_2025_REF[i]){a+=VENDAS_2025_REF[i].lq;b+=VENDAS_2025_REF[i].br;}}ref25={lq:a,mg:b>0?a/b*100:null};}
+    else if(!m){let a=0,b=0;for(let i=1;i<=12;i++){if(VENDAS_2025_REF[i]&&_gcPerMesOk(y,m,i)){a+=VENDAS_2025_REF[i].lq;b+=VENDAS_2025_REF[i].br;}}ref25={lq:a,mg:b>0?a/b*100:null};}
   }
   const pv=_gxPrevisao(y,m,todos);
   // ── 1) Resumo executivo ──
@@ -58495,10 +58545,10 @@ function gcRenderGeralPaineis(y,m,todos){
   // KPIs topo (6 cards)
   const kTop=document.getElementById('gc-kpis-top');
   if(kTop)kTop.innerHTML=[
-    {cls:'az',l:'Vendas Brutas do Mês',v:fmtR(brMes),s:'',click:`gcAbrirDetalheVendasBrutas(${y},${m},null)`},
-    {cls:'ro',l:'Vendas Líquidas do Mês',v:fmtR(lqMes),s:metaMes>0?'Meta: '+fmtR(metaMes):'Meta não definida',click:`gcAbrirDetalheVendasLiquidas(${y},${m},null)`},
+    {cls:'az',l:'Vendas Brutas '+_gcSuf(m),v:fmtR(brMes),s:'',click:`gcAbrirDetalheVendasBrutas(${y},${m},null)`},
+    {cls:'ro',l:'Vendas Líquidas '+_gcSuf(m),v:fmtR(lqMes),s:metaMes>0?'Meta: '+fmtR(metaMes):'Meta não definida',click:`gcAbrirDetalheVendasLiquidas(${y},${m},null)`},
     {cls:'vd',l:'Faturado Confirmado',v:fmtR(ftMes),s:'Parcelas confirmadas',click:`gcAbrirDetalheFaturado(${y},${m},null)`},
-    {cls:'wn',l:'Meta do Mês',v:metaMes>0?fmtR(metaMes):'—',s:'Soma das metas individuais'},
+    {cls:'wn',l:'Meta '+_gcSuf(m),v:metaMes>0?fmtR(metaMes):'—',s:'Soma das metas individuais'},
     {cls:'dk',l:'Orçamentos em Aberto',v:fmtR(orcAbertoMes),s:'Líquido · automático do CRM (tempo real)'},
     {cls:'la',l:'Falta Vender por Dia Útil',v:!fpdMes.isMesAtual?'—':(metaMes<=0?'—':(faltaMes<=0?'✅ Meta batida':fmtR(fpdMes.porDia))),s:!fpdMes.isMesAtual?'Só disponível no mês corrente':(faltaMes<=0?'':fpdMes.dias+' dia'+(fpdMes.dias===1?'':'s')+(fpdMes.dias===1?' útil':' úteis')+' restante'+(fpdMes.dias===1?'':'s'))},
   ].map(k=>`<div class="gc-kp ${k.cls}"${k.click?` onclick="${k.click}" style="cursor:pointer" title="Clique para ver o detalhamento"`:''}><div class="gc-kl">${k.l}</div><div class="gc-kv">${k.v}</div><div class="gc-ks">${k.s}</div></div>`).join('');
@@ -58506,7 +58556,7 @@ function gcRenderGeralPaineis(y,m,todos){
   // KPIs bot (3 cards)
   const kBot=document.getElementById('gc-kpis-bot');
   if(kBot)kBot.innerHTML=[
-    {st:'background:#1a2b5e;border:1px solid #2d4180',l:'Falta para Meta do Mês',v:metaMes>0?(faltaMes>0?fmtR(faltaMes):'✅ Meta atingida!'):'—',s:''},
+    {st:'background:#1a2b5e;border:1px solid #2d4180',l:'Falta para Meta '+_gcSuf(m),v:metaMes>0?(faltaMes>0?fmtR(faltaMes):'✅ Meta atingida!'):'—',s:''},
     {st:'background:#0d3347;border:1px solid #1a5270',l:'Acumulado do Ano — Líquidas',v:fmtR(acumLq),s:'Bruto: '+fmtR(acumBr)+(metaAnoLq>0?' · Meta: '+fmtR(metaAnoLq):'')},
     {st:faltaAno===0&&metaAnoLq>0?'background:#059669;border:1px solid #047857':'background:#e0245e;border:1px solid #c01a4e',l:'Falta para Meta do Ano (Líq.)',v:metaAnoLq>0?(faltaAno>0?fmtR(faltaAno):'✅ Meta anual atingida!'):'Defina nas configs',s:metaAnoLq>0?(acumLq/metaAnoLq*100).toFixed(1)+'% da meta · '+fmtR(metaAnoLq):''},
   ].map(k=>`<div class="gc-kp" style="${k.st}"><div class="gc-kl" style="color:rgba(255,255,255,.55)">${k.l}</div><div class="gc-kv" style="color:#fff;font-size:16px">${k.v}</div><div class="gc-ks" style="color:rgba(255,255,255,.45)">${k.s}</div></div>`).join('');
@@ -58727,18 +58777,18 @@ function gcRenderVendPaineis(){
   const kTopV=document.getElementById('gc-vend-kpis-top');
   const vEscKpi=_escJs(v);
   if(kTopV)kTopV.innerHTML=[
-    {cls:'az',l:'Vendas Brutas do Mês',v:fmtR(brMes),s:'',click:`gcAbrirDetalheVendasBrutas(${y},${m},'${vEscKpi}')`},
-    {cls:'ro',l:'Vendas Líquidas do Mês',v:fmtR(lqMes),s:metaMes>0?'Meta: '+fmtR(metaMes):'Sem meta',click:`gcAbrirDetalheVendasLiquidas(${y},${m},'${vEscKpi}')`},
+    {cls:'az',l:'Vendas Brutas '+_gcSuf(m),v:fmtR(brMes),s:'',click:`gcAbrirDetalheVendasBrutas(${y},${m},'${vEscKpi}')`},
+    {cls:'ro',l:'Vendas Líquidas '+_gcSuf(m),v:fmtR(lqMes),s:metaMes>0?'Meta: '+fmtR(metaMes):'Sem meta',click:`gcAbrirDetalheVendasLiquidas(${y},${m},'${vEscKpi}')`},
     {cls:'vd',l:'Faturado Confirmado',v:fmtR(ftMes),s:'Parcelas confirmadas',click:`gcAbrirDetalheFaturado(${y},${m},'${vEscKpi}')`},
     {cls:'la',l:'Falta Vender por Dia Útil',v:!fpdVend.isMesAtual?'—':(metaMes<=0?'—':(faltaMes<=0?'✅ Meta batida':fmtR(fpdVend.porDia))),s:!fpdVend.isMesAtual?'Só disponível no mês corrente':(faltaMes<=0?'':fpdVend.dias+' dia'+(fpdVend.dias===1?'':'s')+(fpdVend.dias===1?' útil':' úteis')+' restante'+(fpdVend.dias===1?'':'s'))},
-    {cls:'wn',l:'Pedidos no Mês',v:String(nPeds),s:'pedidos emitidos'},
+    {cls:'wn',l:'Pedidos '+_gcSuf(m,'no'),v:String(nPeds),s:'pedidos emitidos'},
   ].map(k=>`<div class="gc-kp ${k.cls}"${k.click?` onclick="${k.click}" style="cursor:pointer" title="Clique para ver o detalhamento"`:''}><div class="gc-kl">${k.l}</div><div class="gc-kv">${k.v}</div><div class="gc-ks">${k.s}</div></div>`).join('');
 
   // KPIs bot
   const kBotV=document.getElementById('gc-vend-kpis-bot');
   if(kBotV)kBotV.innerHTML=[
     {st:'background:#1a2b5e;border:1px solid #2d4180',l:'Falta para Meta',v:metaMes>0?(faltaMes>0?fmtR(faltaMes):'✅ Meta atingida!'):'—',s:''},
-    {st:'background:#0d3347;border:1px solid #1a5270',l:'Projeção do Mês',v:tend>0?fmtR(tend):'—',s:crmAberto>0?'Aberto: '+fmtR(crmAberto)+(cv>0?' × '+cv.toFixed(1).replace('.',',')+'%':''):''},
+    {st:'background:#0d3347;border:1px solid #1a5270',l:'Projeção '+_gcSuf(m),v:tend>0?fmtR(tend):'—',s:crmAberto>0?'Aberto: '+fmtR(crmAberto)+(cv>0?' × '+cv.toFixed(1).replace('.',',')+'%':''):''},
     {st:'background:'+(gap>0?'#e0245e':'#059669')+';border:1px solid '+(gap>0?'#c01a4e':'#047857'),l:'Gap para Meta',v:gap>0?fmtR(gap):'ok',s:metaMes>0?'Meta: '+fmtR(metaMes):''}
   ].map(k=>`<div style="${k.st};border-radius:10px;padding:10px 14px;flex:1;min-width:140px"><div class="gc-kl">${k.l}</div><div class="gc-kv" style="color:#fff;font-size:1rem;font-weight:800;margin:4px 0">${k.v}</div><div class="gc-ks" style="color:rgba(255,255,255,.55);font-size:.68rem">${k.s||''}</div></div>`).join('');
   // Evolução do vendedor (12 meses)
@@ -77631,31 +77681,37 @@ function _cqxCss(){
     await savePedidoFS(p);
     toast('✅ Projeto da OS '+(p.os||'—')+' aprovado','tok');rerender(id);
   };
-  window.prvDevolverAbrir=function(id){
+  window.prvDevolverAbrir=function(id,editar){
     const p=ped(id);if(!p)return;
     if(!possoRevisar(p)){toast('Só o supervisor de Projetos (ou o administrador) devolve — e ninguém revisa o próprio projeto','terr');return;}
+    // (2026-11-11) devolução já salva pode ser editada enquanto o projeto está devolvido
+    let uEd=null;
+    if(editar){if(status(p)!=='devolvido'){toast('Só dá para editar a devolução enquanto o projeto está devolvido (antes do reenvio)','twar');return;}const r0=rodadas(p);uEd=r0[r0.length-1];if(!uEd)return;}
     const old=document.getElementById('prv-dev');if(old)old.remove();
-    const m=document.createElement('div');m.id='prv-dev';m.dataset.id=id;
+    const m=document.createElement('div');m.id='prv-dev';m.dataset.id=id;if(uEd)m.dataset.edit='1';
     m.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10080;display:flex;align-items:center;justify-content:center;padding:16px';
     m.innerHTML=`<div style="background:#fff;border-radius:14px;max-width:760px;width:100%;max-height:92vh;overflow:auto;padding:18px 20px">
-      <div style="display:flex;align-items:center;gap:8px"><b style="flex:1;color:#1a2b5e">↩️ Devolver projeto com não conformidades</b><button type="button" onclick="document.getElementById('prv-dev').remove()" style="border:none;background:none;font-size:1.2rem;cursor:pointer;color:#94a3b8">✕</button></div>
-      <div style="font-size:.78rem;color:#475569;margin:4px 0 12px">OS ${esc(p.os||'—')} · ${esc(nomePed(p))} · projetista <b>${esc(p.projResponsavel||'—')}</b> · rodada ${nRodada(p)}</div>
+      <div style="display:flex;align-items:center;gap:8px"><b style="flex:1;color:#1a2b5e">${uEd?'✏️ Editar devolução':'↩️ Devolver projeto com não conformidades'}</b><button type="button" onclick="document.getElementById('prv-dev').remove()" style="border:none;background:none;font-size:1.2rem;cursor:pointer;color:#94a3b8">✕</button></div>
+      <div style="font-size:.78rem;color:#475569;margin:4px 0 12px">OS ${esc(p.os||'—')} · ${esc(nomePed(p))} · projetista <b>${esc(p.projResponsavel||'—')}</b> · rodada ${uEd?uEd.n:nRodada(p)}</div>
       <div id="prv-nc-l"></div>
       <button type="button" class="projx-mini" onclick="prvNcLinha()" style="margin:6px 0 12px">➕ Adicionar não conformidade</button>
-      <label style="display:block;font-size:.74rem;font-weight:700;color:#64748b">Observação geral (opcional)<textarea id="prv-dev-obs" rows="2" style="width:100%;margin-top:4px;border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font:inherit;font-size:.8rem"></textarea></label>
-      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button type="button" class="dash-btn-conf" style="background:#64748b" onclick="document.getElementById('prv-dev').remove()">Cancelar</button><button type="button" id="prv-dev-ok" class="dash-btn-conf" style="background:#b91c1c" onclick="prvDevolver()">↩️ Devolver ao projetista</button></div></div>`;
-    document.body.appendChild(m);prvNcLinha();
+      <label style="display:block;font-size:.74rem;font-weight:700;color:#64748b">Observação geral (opcional)<textarea id="prv-dev-obs" rows="2" style="width:100%;margin-top:4px;border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font:inherit;font-size:.8rem">${uEd&&uEd.obs?esc(uEd.obs):''}</textarea></label>
+      ${uEd?`<div style="font-size:.72rem;color:#64748b;margin-top:6px">Itens que o projetista já marcou como corrigidos continuam marcados. Item novo entra como não corrigido.</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end"><button type="button" class="dash-btn-conf" style="background:#64748b" onclick="document.getElementById('prv-dev').remove()">Cancelar</button><button type="button" id="prv-dev-ok" class="dash-btn-conf" style="background:${uEd?'#0284c7':'#b91c1c'}" onclick="prvDevolver()">${uEd?'💾 Salvar alterações':'↩️ Devolver ao projetista'}</button></div></div>`;
+    document.body.appendChild(m);if(uEd&&(uEd.ncs||[]).length)uEd.ncs.forEach(n=>prvNcLinha(n));else prvNcLinha();
   };
-  window.prvNcLinha=function(){
+  window.prvNcLinha=function(pre){
     const l=document.getElementById('prv-nc-l');if(!l)return;
-    const d=document.createElement('div');d.className='prv-nc';
+    const d=document.createElement('div');d.className='prv-nc';if(pre&&pre.id){d.dataset.ncid=pre.id;d.dataset.foto=pre.foto||'';}
     d.style.cssText='display:grid;grid-template-columns:1fr 170px 100px 34px;gap:6px;align-items:start;padding:8px;border:1px solid #fecaca;background:#fff7f7;border-radius:10px;margin-bottom:6px';
     d.innerHTML=`<textarea class="prv-nc-desc" rows="2" placeholder="O que está errado / o que precisa corrigir" style="border:1px solid #cbd5e1;border-radius:8px;padding:6px 8px;font:inherit;font-size:.8rem;width:100%"></textarea>
       <select class="prv-nc-tipo" style="border:1px solid #cbd5e1;border-radius:8px;padding:6px;font-size:.78rem">${TIPOS.map(t=>`<option value="${t[0]}">${t[1]}</option>`).join('')}</select>
       <select class="prv-nc-grav" style="border:1px solid #cbd5e1;border-radius:8px;padding:6px;font-size:.78rem"><option value="leve">🟡 Leve</option><option value="grave">🔴 Grave</option></select>
       <button type="button" title="Remover" onclick="this.closest('.prv-nc').remove()" style="border:none;background:none;cursor:pointer;font-size:1rem;color:#94a3b8">🗑</button>
-      <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;font-size:.72rem;color:#64748b">📷 Foto/print (opcional) <input type="file" class="prv-nc-foto" accept="image/*" style="font-size:.72rem"></div>`;
-    l.appendChild(d);try{d.querySelector('textarea').focus();}catch(e){}
+      <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;font-size:.72rem;color:#64748b;flex-wrap:wrap">📷 Foto/print (opcional) <input type="file" class="prv-nc-foto" accept="image/*" style="font-size:.72rem">${pre&&pre.foto?`<span class="prv-nc-foto-at">· já tem foto <a href="${esc(pre.foto)}" target="_blank">ver</a> <button type="button" onclick="this.closest('.prv-nc').dataset.foto='';this.parentNode.remove()" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:.72rem;padding:0">tirar</button></span>`:''}${pre&&pre.corrigido?'<span style="color:#16a34a">· ✔ já corrigida pelo projetista</span>':''}</div>`;
+    l.appendChild(d);
+    if(pre){d.querySelector('.prv-nc-desc').value=pre.desc||'';d.querySelector('.prv-nc-tipo').value=pre.tipo||d.querySelector('.prv-nc-tipo').value;d.querySelector('.prv-nc-grav').value=pre.grav||'leve';}
+    else{try{d.querySelector('textarea').focus();}catch(e){}}
   };
   async function subirFoto(f){
     if(!f)return'';
@@ -77679,6 +77735,16 @@ function _cqxCss(){
     try{
       for(let i=0;i<ncs.length;i++){const f=ncs[i].el.querySelector('.prv-nc-foto');const arq=f&&f.files&&f.files[0];
         if(arq){if(bt)bt.textContent=`Enviando foto ${i+1}…`;try{ncs[i].foto=await subirFoto(arq);}catch(e){toast('Foto não enviada: '+e.message,'twar');}}}
+      if(m.dataset.edit==='1'){
+        if(status(p)!=='devolvido'){toast('O projeto já foi reenviado — não dá mais para editar esta devolução','twar');m.remove();return;}
+        const rr=rodadas(p);const u=rr[rr.length-1];const ant={};(u.ncs||[]).forEach(n=>{ant[n.id]=n;});
+        const obsE=(document.getElementById('prv-dev-obs')||{}).value||'';
+        u.ncs=ncs.map((n,i)=>{const oid=n.el.dataset.ncid,o=oid&&ant[oid];const x={id:oid||(Date.now().toString(36)+i),desc:n.desc,tipo:n.tipo,grav:n.grav,foto:n.foto||(n.el.dataset.foto||'')};if(o&&o.corrigido)x.corrigido=o.corrigido;return x;});
+        if(obsE.trim())u.obs=obsE.trim();else delete u.obs;
+        u.editadoEm=new Date().toISOString();u.editadoPor=quem();
+        await savePedidoFS(p);
+        m.remove();toast('✏️ Devolução atualizada','tok');rerender(id);return;
+      }
       if(status(p)!=='aguardando'){toast('Este projeto não está aguardando revisão','twar');m.remove();return;}
       const r=rodadaAtual(p);const agora=new Date().toISOString();
       r.resultado='devolvido';r.decididoEm=agora;r.decididoPor=quem();
@@ -77695,6 +77761,29 @@ function _cqxCss(){
     if(ok){const obs=(document.getElementById('prv-cor-'+ncId)||{}).value||'';n.corrigido={em:new Date().toISOString(),por:quem(),obs:obs.trim()};}
     else delete n.corrigido;
     await savePedidoFS(p);rerender(id);
+  };
+  window.prvNcEditarObs=function(id,ncId){
+    const el=document.getElementById('prv-corok-'+ncId);if(!el)return;
+    const p=ped(id);const rr=rodadas(p);const u=rr[rr.length-1];const n=u&&(u.ncs||[]).find(x=>x.id===ncId);if(!n||!n.corrigido)return;
+    el.innerHTML=`<div style="display:flex;gap:6px;margin-top:4px"><input id="prv-cored-${ncId}" value="${esc(n.corrigido.obs||'')}" placeholder="O que foi feito" style="flex:1;border:1px solid #cbd5e1;border-radius:6px;padding:4px 6px;font-size:.74rem"><button type="button" class="dash-btn-conf" style="background:#0284c7;padding:4px 10px;font-size:.72rem" onclick="prvNcSalvarObs('${id}','${ncId}')">💾 Salvar</button></div>`;
+    try{document.getElementById('prv-cored-'+ncId).focus();}catch(e){}
+  };
+  window.prvNcSalvarObs=async function(id,ncId){
+    const p=ped(id);if(!p)return;const rr=rodadas(p);const u=rr[rr.length-1];const n=u&&(u.ncs||[]).find(x=>x.id===ncId);if(!n||!n.corrigido)return;
+    n.corrigido.obs=((document.getElementById('prv-cored-'+ncId)||{}).value||'').trim();n.corrigido.editadoEm=new Date().toISOString();n.corrigido.editadoPor=quem();
+    await savePedidoFS(p);toast('Correção atualizada ✅','tok');rerender(id);
+  };
+  // comentário da aprovação editável depois de salvo
+  window.prvObsAprovEditar=function(id){
+    const el=document.getElementById('prv-aprobs-'+id);const p=ped(id);if(!el||!p)return;
+    const rr=rodadas(p);const u=rr[rr.length-1]||{};
+    el.innerHTML=`<div style="display:flex;gap:6px;margin-top:6px"><input id="prv-aprobs-in-${id}" value="${esc(u.obs||'')}" placeholder="Comentário da aprovação" style="flex:1;border:1px solid #86efac;border-radius:6px;padding:4px 6px;font-size:.76rem"><button type="button" class="dash-btn-conf" style="background:#16a34a;padding:4px 10px;font-size:.72rem" onclick="prvObsAprovSalvar('${id}')">💾 Salvar</button></div>`;
+  };
+  window.prvObsAprovSalvar=async function(id){
+    const p=ped(id);if(!p)return;if(!possoRevisar(p)){toast('Só o supervisor de Projetos (ou o administrador) altera a revisão','terr');return;}
+    const rr=rodadas(p);const u=rr[rr.length-1];if(!u||u.resultado!=='aprovado')return;
+    const v=((document.getElementById('prv-aprobs-in-'+id)||{}).value||'').trim();if(v)u.obs=v;else delete u.obs;u.editadoEm=new Date().toISOString();u.editadoPor=quem();
+    await savePedidoFS(p);toast('Comentário da aprovação atualizado ✅','tok');rerender(id);
   };
   window.prvReenviar=async function(id){
     const p=ped(id);if(!p)return;
@@ -77715,7 +77804,7 @@ function _cqxCss(){
       ${r.map(x=>`<div style="margin-top:6px;padding:6px 8px;border-left:3px solid ${x.resultado==='aprovado'?'#16a34a':x.resultado==='devolvido'?'#dc2626':'#f59e0b'};background:#f8fafc;font-size:.74rem">
         <b>Rodada ${x.n}</b> · enviado ${dtH(x.enviadoEm)} por ${esc(x.enviadoPor||'—')}
         ${x.resultado?` · ${x.resultado==='aprovado'?'✅ aprovado':'↩️ devolvido'} ${dtH(x.decididoEm)} por ${esc(x.decididoPor||'—')}`:' · 🔍 aguardando'}
-        ${x.obs?`<div style="color:#475569">💬 ${esc(x.obs)}</div>`:''}
+        ${x.obs?`<div style="color:#475569">💬 ${esc(x.obs)}</div>`:''}${x.editadoEm?`<div style="color:#64748b">✏️ editado ${dtH(x.editadoEm)} por ${esc(x.editadoPor||'—')}</div>`:''}
         ${(x.ncs||[]).map(n=>`<div style="margin-left:10px">${n.corrigido?'☑️':'⬜'} ${n.grav==='grave'?'🔴':'🟡'} ${esc(tipoLbl(n.tipo))}: ${esc(n.desc)}${n.foto?` <a href="${esc(n.foto)}" target="_blank">📷</a>`:''}${n.corrigido?` <span style="color:#16a34a">— corrigido ${dtH(n.corrigido.em)} ${esc(n.corrigido.por||'')}${n.corrigido.obs?': '+esc(n.corrigido.obs):''}</span>`:''}</div>`).join('')}
       </div>`).join('')}</details>`;
   }
@@ -77736,17 +77825,20 @@ function _cqxCss(){
       const r=rodadas(p);const u=r[r.length-1]||{};const ab=ncsAbertas(p).length;const tot=(u.ncs||[]).length;
       return`<div class="prv-faixa" style="margin:8px 0;padding:10px 12px;border-radius:10px;background:#fef2f2;border:1px solid #fca5a5">
         <div style="font-size:.82rem;font-weight:800;color:#991b1b">↩️ Devolvido pela revisão — ${tot-ab}/${tot} ${tot===1?'corrigida':'corrigidas'}</div>
-        <div style="font-size:.74rem;color:#7f1d1d;margin-top:2px">Devolvido ${dtH(u.decididoEm)} por ${esc(u.decididoPor||'—')}. Corrija, marque cada item e reenvie.${u.obs?`<br>💬 ${esc(u.obs)}`:''}</div>
+        <div style="font-size:.74rem;color:#7f1d1d;margin-top:2px">Devolvido ${dtH(u.decididoEm)} por ${esc(u.decididoPor||'—')}${u.editadoEm?` · editado ${dtH(u.editadoEm)} por ${esc(u.editadoPor||'—')}`:''}. Corrija, marque cada item e reenvie.${u.obs?`<br>💬 ${esc(u.obs)}`:''}</div>
+        ${possoRevisar(p)?`<button type="button" class="projx-mini" onclick="prvDevolverAbrir('${id}',true)" style="margin-top:6px">✏️ Editar devolução</button>`:''}
         <div style="margin-top:8px">${(u.ncs||[]).map(n=>`<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 8px;background:#fff;border:1px solid #fecaca;border-radius:8px;margin-bottom:5px;font-size:.78rem">
           <input type="checkbox" ${n.corrigido?'checked':''} onchange="prvNcCorrigir('${id}','${n.id}',this.checked)" style="margin-top:3px;width:16px;height:16px;cursor:pointer" title="Marcar como corrigida">
           <div style="flex:1"><b>${n.grav==='grave'?'🔴 Grave':'🟡 Leve'} · ${esc(tipoLbl(n.tipo))}</b><div>${esc(n.desc)}</div>${n.foto?`<a href="${esc(n.foto)}" target="_blank"><img src="${esc(n.foto)}" style="max-height:90px;max-width:160px;border-radius:6px;margin-top:4px;border:1px solid #e2e8f0"></a>`:''}
-          ${n.corrigido?`<div style="color:#16a34a;font-size:.72rem">✔ corrigido ${dtH(n.corrigido.em)} por ${esc(n.corrigido.por||'')}${n.corrigido.obs?': '+esc(n.corrigido.obs):''}</div>`:`<input id="prv-cor-${n.id}" placeholder="O que foi feito (opcional)" style="width:100%;margin-top:4px;border:1px solid #e2e8f0;border-radius:6px;padding:4px 6px;font-size:.74rem">`}</div></div>`).join('')}</div>
+          ${n.corrigido?`<div id="prv-corok-${n.id}" style="color:#16a34a;font-size:.72rem">✔ corrigido ${dtH(n.corrigido.em)} por ${esc(n.corrigido.por||'')}${n.corrigido.obs?': '+esc(n.corrigido.obs):''}${n.corrigido.editadoEm?` <span style="color:#64748b">(editado ${dtH(n.corrigido.editadoEm)})</span>`:''} <button type="button" onclick="prvNcEditarObs('${id}','${n.id}')" style="border:none;background:none;color:#0284c7;cursor:pointer;font-size:.72rem;font-weight:700;padding:0 0 0 4px">✏️ editar</button></div>`:`<input id="prv-cor-${n.id}" placeholder="O que foi feito (opcional)" style="width:100%;margin-top:4px;border:1px solid #e2e8f0;border-radius:6px;padding:4px 6px;font-size:.74rem">`}</div></div>`).join('')}</div>
         <button type="button" class="dash-btn-conf" style="background:${ab?'#94a3b8':'#0284c7'}" onclick="prvReenviar('${id}')" ${ab?'title="Marque todas como corrigidas"':''}>📤 Reenviar para revisão</button>
         ${histHtml(p)}</div>`;
     }
     if(s==='aprovado'){
       const A=p.projAprov||{};const r=rodadas(p);
-      return`<div class="prv-faixa" style="margin:8px 0;padding:8px 12px;border-radius:10px;background:#f0fdf4;border:1px solid #86efac;font-size:.78rem;color:#166534">✅ <b>Projeto aprovado</b> ${dtH(A.aprovadoEm)} por ${esc(A.aprovadoPor||'—')}${r.length>1?` · ${r.length} rodadas`:' · aprovado de primeira'}${histHtml(p)}</div>`;
+      const uA=r[r.length-1]||{};
+      return`<div class="prv-faixa" style="margin:8px 0;padding:8px 12px;border-radius:10px;background:#f0fdf4;border:1px solid #86efac;font-size:.78rem;color:#166534">✅ <b>Projeto aprovado</b> ${dtH(A.aprovadoEm)} por ${esc(A.aprovadoPor||'—')}${r.length>1?` · ${r.length} rodadas`:' · aprovado de primeira'}
+        <div id="prv-aprobs-${id}">${uA.obs?`<div style="margin-top:4px">💬 ${esc(uA.obs)}${uA.editadoEm?` <span style="color:#64748b">(editado ${dtH(uA.editadoEm)})</span>`:''}</div>`:''}${possoRevisar(p)&&uA.resultado==='aprovado'?`<button type="button" onclick="prvObsAprovEditar('${id}')" style="border:none;background:none;color:#0284c7;cursor:pointer;font-size:.72rem;font-weight:700;padding:0;margin-top:4px">✏️ ${uA.obs?'Editar comentário da aprovação':'Adicionar comentário da aprovação'}</button>`:''}</div>${histHtml(p)}</div>`;
     }
     if(!baseConcluido(p)&&!(p.lpBaixas&&p.lpBaixas.projeto&&p.lpBaixas.projeto.na))
       return`<div class="prv-faixa" style="margin:6px 0;font-size:.72rem;color:#64748b">🔍 Ao concluir, o projeto vai para a revisão de ${esc(revisoresNomes().join(', ')||'o supervisor de Projetos')}. Só conta como concluído depois da aprovação.</div>`;
@@ -77758,6 +77850,35 @@ function _cqxCss(){
         if(h){const a=box.querySelector('.projx2-nav')||box.querySelector('.fp-barra')||box.firstElementChild;if(a)a.insertAdjacentHTML('afterend',h);else box.insertAdjacentHTML('afterbegin',h);}}
     }catch(e){console.warn('revisão projetos (checklist)',e);}
     return r;};}catch(e){console.warn('revisão projetos',e);}
+
+  // ── aba 🔁 Revisões do checklist: o que o supervisor pediu pra alterar (2026-11-11, pedido do time de
+  // Projetos: "ver quais foram as solicitações de alteração na revisão") ──
+  function ncsRevHtml(p){
+    const r=rodadas(p).filter(x=>x.resultado==='devolvido'&&(x.ncs||[]).length);
+    if(!r.length)return'';
+    const tot=r.reduce((s,x)=>s+(x.ncs||[]).length,0);
+    return`<div class="prv-ncs-rev" style="margin-bottom:12px">
+      <div style="font-size:.8rem;font-weight:800;color:#1a2b5e;margin-bottom:6px">🔍 Solicitações de alteração da revisão · ${tot} ${tot===1?'item':'itens'} em ${r.length} ${r.length===1?'devolução':'devoluções'}</div>
+      ${r.map(x=>`<div style="padding:8px 10px;border:1px solid #fecaca;border-left:4px solid #dc2626;background:#fff7f7;border-radius:8px;margin-bottom:6px">
+        <div style="font-size:.74rem;color:#7f1d1d;font-weight:700">Rodada ${x.n} · devolvida ${dtH(x.decididoEm)} por ${esc(x.decididoPor||'—')}</div>
+        ${x.obs?`<div style="font-size:.74rem;color:#475569;margin-top:2px">💬 ${esc(x.obs)}</div>`:''}
+        ${(x.ncs||[]).map(n=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-top:6px;padding:6px 8px;background:#fff;border:1px solid #fee2e2;border-radius:6px;font-size:.78rem">
+          <div style="flex:1;min-width:0"><b>${n.grav==='grave'?'🔴 Grave':'🟡 Leve'} · ${esc(tipoLbl(n.tipo))}</b><div style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(n.desc)}</div>
+          ${n.corrigido?`<div style="color:#15803d;font-size:.72rem;margin-top:2px">✔ Corrigida ${dtH(n.corrigido.em)} por ${esc(n.corrigido.por||'—')}${n.corrigido.obs?' — '+esc(n.corrigido.obs):''}</div>`:`<div style="color:#b91c1c;font-size:.72rem;margin-top:2px">⬜ Ainda não corrigida</div>`}</div>
+          ${n.foto?`<a href="${esc(n.foto)}" target="_blank" style="flex-shrink:0"><img src="${esc(n.foto)}" style="max-height:70px;max-width:120px;border-radius:6px;border:1px solid #e2e8f0"></a>`:''}
+        </div>`).join('')}
+      </div>`).join('')}
+    </div>`;
+  }
+  try{const _ck2=projAbrirChecklist;projAbrirChecklist=function(pid){const r=_ck2.apply(this,arguments);
+    try{const md=document.getElementById('proj-check-modal'),p=ped(pid);
+      const pn=md&&md.querySelector('.projx2-pane[data-k="rev"]');
+      if(pn&&p){pn.querySelectorAll('.prv-ncs-rev').forEach(x=>x.remove());const h=ncsRevHtml(p);
+        if(h){[...pn.children].forEach(c=>{if(c.textContent==='Nenhuma revisão registrada.')c.remove();});pn.insertAdjacentHTML('afterbegin',h);
+          const nNc=rodadas(p).reduce((s,x)=>s+(x.resultado==='devolvido'?(x.ncs||[]).length:0),0);
+          const bt=md.querySelector('.projx2-tabs button[data-k="rev"]');if(bt)bt.textContent='🔁 Revisões ('+((p.projRevisoes||[]).length+nNc)+')';}}
+    }catch(e){console.warn('revisão projetos (aba revisões)',e);}
+    return r;};}catch(e){}
 
   // ── etiquetas na lista/kanban ──
   try{const _tg=_projxTagsLinha;_projxTagsLinha=function(p){let h=_tg.apply(this,arguments);
@@ -77871,7 +77992,7 @@ function _cqxCss(){
     const medR=aprov.length?aprov.reduce((s,p)=>s+p.projAprov.rodadas.length,0)/aprov.length:0;
     const decs=[];todos.forEach(p=>p.projAprov.rodadas.forEach(r=>{if(r.resultado&&noPer(r.decididoEm))decs.push({p,r});}));
     const dev=decs.filter(x=>x.r.resultado==='devolvido');
-    const ncs=[];dev.forEach(x=>(x.r.ncs||[]).forEach(n=>ncs.push({p:x.p,n})));
+    const ncs=[];dev.forEach(x=>(x.r.ncs||[]).forEach(n=>ncs.push({p:x.p,n,r:x.r})));
     let hRev=[];decs.forEach(x=>{try{const h=_horasUteisEntre(new Date(x.r.enviadoEm),new Date(x.r.decididoEm));if(h>=0)hRev.push(h);}catch(e){}});
     const media=a=>a.length?a.reduce((s,v)=>s+v,0)/a.length:null;
     const f1=v=>v==null?'—':v.toFixed(1).replace('.',',');
@@ -77897,6 +78018,15 @@ function _cqxCss(){
       ${tiposOrd.length?`<div style="margin-top:12px;font-size:.78rem"><b style="color:#475569">Não conformidades por tipo</b>${tiposOrd.map(([k,n])=>`<div style="display:flex;align-items:center;gap:8px;margin-top:4px"><span style="width:190px">${esc(tipoLbl(k))}</span><div style="flex:1;background:#e2e8f0;border-radius:6px;height:10px;overflow:hidden"><div style="width:${Math.round(n/ncs.length*100)}%;height:100%;background:#dc2626"></div></div><b style="width:70px;text-align:right">${n} · ${pct(n,ncs.length)}</b></div>`).join('')}</div>`:''}
       ${Object.keys(porProj).length?`<div style="margin-top:12px;overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.78rem;background:#fff;border-radius:8px"><thead><tr style="text-align:left;border-bottom:2px solid #e2e8f0;color:#475569"><th style="padding:6px 8px">Projetista</th><th style="padding:6px 8px">Aprovados</th><th style="padding:6px 8px">De primeira</th><th style="padding:6px 8px">Devoluções</th><th style="padding:6px 8px">Não conformidades</th></tr></thead><tbody>
         ${Object.entries(porProj).sort((a,b)=>b[1].a-a[1].a).map(([n,o])=>`<tr style="border-bottom:1px solid #eef2f7"><td style="padding:6px 8px">${esc(n)}</td><td style="padding:6px 8px">${o.a}</td><td style="padding:6px 8px">${pct(o.p1,o.a)}</td><td style="padding:6px 8px">${o.dev}</td><td style="padding:6px 8px">${o.nc}</td></tr>`).join('')}</tbody></table></div>`:''}
+      ${ncs.length?`<details style="margin-top:12px"><summary style="cursor:pointer;font-size:.78rem;font-weight:800;color:#475569">📝 Ver as ${ncs.length} ${ncs.length===1?'solicitação de alteração':'solicitações de alteração'} do período</summary>
+        <table style="width:100%;border-collapse:collapse;font-size:.76rem;background:#fff;margin-top:6px;table-layout:fixed"><thead style="position:sticky;top:0;background:#fff"><tr style="text-align:left;border-bottom:2px solid #e2e8f0;color:#475569"><th style="padding:6px 8px;width:24%">Pedido</th><th style="padding:6px 8px;width:14%">Projetista</th><th style="padding:6px 8px">O que pediu pra alterar</th><th style="padding:6px 8px;width:16%">Pedido por</th><th style="padding:6px 8px;width:16%">Correção</th></tr></thead><tbody>
+        ${ncs.slice().sort((a,b)=>String(b.r.decididoEm||'').localeCompare(String(a.r.decididoEm||''))).map(x=>`<tr style="border-bottom:1px solid #eef2f7;cursor:pointer;vertical-align:top" onclick="projIniciarOuAbrirChecklist('${x.p.id}')">
+          <td style="padding:6px 8px;overflow-wrap:anywhere"><b>OS ${esc(x.p.os||'—')}</b><div style="color:#64748b">${esc(nomePed(x.p))}</div></td>
+          <td style="padding:6px 8px;overflow-wrap:anywhere">${esc(x.r.enviadoPor||x.p.projResponsavel||'—')}</td>
+          <td style="padding:6px 8px;overflow-wrap:anywhere"><b>${x.n.grav==='grave'?'🔴':'🟡'} ${esc(tipoLbl(x.n.tipo))}</b><div style="white-space:pre-wrap">${esc(x.n.desc)}</div>${x.r.obs?`<div style="color:#64748b">💬 ${esc(x.r.obs)}</div>`:''}</td>
+          <td style="padding:6px 8px">${esc(x.r.decididoPor||'—')}<div style="color:#64748b">${dtH(x.r.decididoEm)}</div></td>
+          <td style="padding:6px 8px">${x.n.corrigido?`<span style="color:#15803d">✔ ${esc(x.n.corrigido.por||'—')}</span><div style="color:#64748b">${dtH(x.n.corrigido.em)}</div>${x.n.corrigido.obs?`<div style="color:#475569;overflow-wrap:anywhere">${esc(x.n.corrigido.obs)}</div>`:''}`:'<span style="color:#b91c1c">⬜ pendente</span>'}</td></tr>`).join('')}
+        </tbody></table></details>`:''}
       ${!todos.length?`<div style="font-size:.76rem;color:#94a3b8;margin-top:8px">Ainda não há projetos revisados. Os números aparecem conforme o supervisor aprova ou devolve.</div>`:''}
     </div>`;
   }
@@ -79405,6 +79535,124 @@ function _cqxCss(){
       S.desc=(n&&n.m3dPecas)||{};S.editando=false;painel();toast('Observação salva ✅','tok');
     }catch(e){console.error(e);toast('Não foi possível salvar: '+e.message,'terr');}
   };
+})();
+// ══ FILTRO DE PERÍODO — Indicadores (Gráficos) e Vendas do Mês (build 2026-11-11.10) ══════════════
+// Guilherme (11/11): "outro filtro que precisa ter aqui e no vendas do mes é de periodo do lado de TODOS
+// OS MESES pra gente selecionar um periodo especifico de tempo". Padrão: [ MÊS ▾ ] [ ANO ▾ ]
+// [ 📅 TODOS OS MESES ] [ 📆 PERÍODO ] — o período é "de [mês] até [mês]" dentro do ano escolhido.
+// Por MÊS (não por dia) de propósito: a venda conta pelo MÊS DA VENDA (r.m) — o dia exato só existe pra
+// pedido emitido no sistema e o mês pode ser alterado em Editar Valores; filtrar por dia faria o número
+// não bater com Metas/Comissões. O ano fica separado (2026 e 2027 nunca se misturam).
+// Gráficos: estado em gcMes.de/gcMes.ate (com m=null). As funções de soma "todos os meses" só passam a
+// respeitar o período DENTRO das telas de Gráficos (_gcPerScope), pra não mexer em nenhuma outra tela.
+// Vendas do Mês: _vndPer={de,ate}, aplicado em _vndFilteredRows (lista, totais, Excel e PDF).
+var _vndPer=null;
+var _gcPerScope=0;
+function _gcPerTem(){return typeof gcMes!=='undefined'&&gcMes&&!gcMes.m&&gcMes.de&&gcMes.ate;}
+function _gcPerAtivo(y,m){return _gcPerScope>0&&!m&&_gcPerTem()&&(y==null||_anoEf(y)===_anoEf(gcMes.y));}
+function _gcPerMesOk(y,m,mes){return !_gcPerAtivo(y,m)||(mes>=gcMes.de&&mes<=gcMes.ate);}
+function _gcSuf(m,pre){pre=pre||'do';return m?pre+' Mês':(_gcPerTem()?pre+' Período':pre+' Ano');}
+function _perMesCap(m){const t=MESES_PT[m]||'';return t.charAt(0)+t.slice(1).toLowerCase();}
+(function(){
+  const comEscopo=fn=>function(){
+    _gcPerScope++;let r;
+    try{r=fn.apply(this,arguments);}catch(e){_gcPerScope--;throw e;}
+    if(r&&typeof r.then==='function')return r.finally(()=>{_gcPerScope--;});
+    _gcPerScope--;return r;
+  };
+  try{
+    renderDashGraficos=comEscopo(renderDashGraficos);
+    gcAbrirDetalheVendasBrutas=comEscopo(gcAbrirDetalheVendasBrutas);
+    gcAbrirDetalheVendasLiquidas=comEscopo(gcAbrirDetalheVendasLiquidas);
+    gcAbrirDetalheFaturado=comEscopo(gcAbrirDetalheFaturado);
+    _gcDadosRelatorio=comEscopo(_gcDadosRelatorio);
+    gerarPDFGraficos=comEscopo(gerarPDFGraficos);
+    exportarExcelGraficos=comEscopo(exportarExcelGraficos);
+  }catch(e){console.error('período gráficos (escopo)',e);}
+  try{
+    const o1=_vrNoPeriodo;
+    _vrNoPeriodo=function(r,y,m){if(_gcPerAtivo(y,m))return _vrAno(r)===_anoEf(y)&&r.m>=gcMes.de&&r.m<=gcMes.ate;return o1.apply(this,arguments);};
+    const o2=_gxNoPeriodo;
+    _gxNoPeriodo=function(iso,y,m){if(_gcPerAtivo(y,m)){if(!o2(iso,y,null))return false;const d=new Date(iso);const mm=d.getMonth()+1;return mm>=gcMes.de&&mm<=gcMes.ate;}return o2.apply(this,arguments);};
+    const soma=(orig,mensal)=>function(y,m,v){if(_gcPerAtivo(y,m)){let s=0;for(let i=gcMes.de;i<=gcMes.ate;i++)s+=mensal(y,i,v);return s;}return orig.apply(this,arguments);};
+    getVendasMesTodos=soma(getVendasMesTodos,(y,i,v)=>getVendasMes(y,i,v));
+    getVendasBrutoMesTodos=soma(getVendasBrutoMesTodos,(y,i,v)=>getVendasBrutoMes(y,i,v));
+    getMetaMesTodos=soma(getMetaMesTodos,(y,i,v)=>getMetaMes(y,i,v));
+    const o3=_gcPeriodoLabel;
+    _gcPeriodoLabel=function(y,m,vendedor){
+      if(!m&&_gcPerTem()&&_anoEf(y)===_anoEf(gcMes.y))return MESES_PT[gcMes.de]+' A '+MESES_PT[gcMes.ate]+'/'+y+(vendedor?' · '+vendedor:'');
+      return o3.apply(this,arguments);
+    };
+    const o4=_gxPeriodoTxt;
+    _gxPeriodoTxt=function(y,m){if(!m&&_gcPerTem()&&_anoEf(y)===_anoEf(gcMes.y))return _perMesCap(gcMes.de)+' a '+_perMesCap(gcMes.ate)+'/'+y;return o4.apply(this,arguments);};
+  }catch(e){console.error('período gráficos (somas)',e);}
+  try{const o5=vndMostrarTodas;vndMostrarTodas=function(){_vndPer=null;return o5.apply(this,arguments);};}catch(e){}
+
+  // ── visual: botão 📆 PERÍODO dentro do componente padrão de mês ──
+  if(!document.getElementById('perx-css')){
+    const st=document.createElement('style');st.id='perx-css';
+    st.textContent=`.perx-pop{position:fixed;z-index:10060;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.18);padding:14px;width:300px;font-family:inherit}
+    .perx-pop .perx-t{font-size:.74rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:10px}
+    .perx-pop .perx-l{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .perx-pop label{display:block;font-size:.7rem;font-weight:700;color:#475569;margin-bottom:4px}
+    .perx-pop select{width:100%;height:38px;padding:0 10px;border-radius:8px;border:1.5px solid #cbd5e1;background:#fff;font-size:.78rem;font-weight:700;color:#0f172a;font-family:inherit;text-transform:uppercase;box-sizing:border-box}
+    .perx-pop .perx-ok{margin-top:12px;width:100%;height:38px;border:none;border-radius:8px;background:#101B3D;color:#fff;font-size:.78rem;font-weight:800;cursor:pointer;font-family:inherit;text-transform:uppercase}
+    .perx-pop .perx-err{color:#dc2626;font-size:.72rem;font-weight:700;margin-top:8px;display:none}`;
+    document.head.appendChild(st);
+  }
+  const fechar=()=>{const o=document.getElementById('perx-pop');if(o)o.remove();};
+  function abrir(btn,cfg){
+    const old=document.getElementById('perx-pop');if(old){old.remove();if(old._btn===btn)return;}
+    const atual=cfg.get()||{de:1,ate:new Date().getMonth()+1};
+    const r=btn.getBoundingClientRect(),p=document.createElement('div');p.id='perx-pop';p.className='perx-pop';p._btn=btn;
+    p.style.top=(r.bottom+6)+'px';p.style.left=Math.max(8,Math.min(innerWidth-308,r.left))+'px';
+    const ops=sel=>_MESX_MESES.slice(1).map((n,i)=>`<option value="${i+1}"${sel===i+1?' selected':''}>${n}</option>`).join('');
+    p.innerHTML=`<div class="perx-t">📆 Período em ${cfg.ano()}</div>
+      <div class="perx-l"><div><label>De</label><select id="perx-de">${ops(atual.de)}</select></div><div><label>Até</label><select id="perx-ate">${ops(atual.ate)}</select></div></div>
+      <div class="perx-err" id="perx-err">O mês final precisa ser igual ou depois do mês inicial.</div>
+      <button type="button" class="perx-ok" id="perx-ok">Aplicar período</button>`;
+    document.body.appendChild(p);
+    p.querySelector('#perx-ok').onclick=()=>{
+      const de=+p.querySelector('#perx-de').value,ate=+p.querySelector('#perx-ate').value;
+      if(ate<de){p.querySelector('#perx-err').style.display='block';return;}
+      fechar();cfg.set(de,ate);setTimeout(_mesxSync,0);
+    };
+    setTimeout(()=>document.addEventListener('mousedown',function f(ev){if(!p.isConnected){document.removeEventListener('mousedown',f);return;}if(!p.contains(ev.target)&&ev.target!==btn){p.remove();document.removeEventListener('mousedown',f);}}),0);
+  }
+  const CFGS=[
+    {w:()=>{const l=document.getElementById('gc-mes-lbl');return l&&l.parentElement&&l.parentElement._mesx;},
+     ano:()=>gcMes.y,get:()=>_gcPerTem()?{de:gcMes.de,ate:gcMes.ate}:null,
+     set:(de,ate)=>{gcMes=de===ate?{y:gcMes.y,m:de}:{y:gcMes.y,m:null,de,ate};renderDashGraficos();},
+     limparAntes:null},
+    {w:()=>{const s=document.getElementById('vnd-fil-mes');return s&&s._mesx;},
+     ano:()=>_anoRef,get:()=>{const s=document.getElementById('vnd-fil-mes');return(_vndPer&&s&&!s.value)?_vndPer:null;},
+     set:(de,ate)=>{const s=document.getElementById('vnd-fil-mes');
+       if(de===ate){_vndPer=null;if(s)s.value=MESES_PT[de];}else{_vndPer={de,ate};if(s)s.value='';}
+       renderDashVendas();},
+     limparAntes:()=>{_vndPer=null;}}
+  ];
+  function perxSync(){
+    CFGS.forEach(cfg=>{try{
+      const W=cfg.w();if(!W||!W.w||!W.w.isConnected)return;
+      let b=W.perx;
+      if(!b||!b.isConnected){
+        b=document.createElement('button');b.type='button';b.className='mesx-todos';b.title='Escolher um período de meses';
+        b.addEventListener('click',()=>abrir(b,cfg));
+        W.w.appendChild(b);W.perx=b;
+        // escolher um mês ou "Todos os meses" desliga o período
+        if(cfg.limparAntes)W.w.addEventListener('click',ev=>{if(ev.target===W.bt)cfg.limparAntes();},true);
+        if(cfg.limparAntes)W.sm.addEventListener('change',()=>cfg.limparAntes(),true);
+      }
+      const per=cfg.get();
+      const txt=per?'📆 '+_MESX_MESES[per.de].slice(0,3)+' A '+_MESX_MESES[per.ate].slice(0,3):'📆 Período';
+      if(b.textContent!==txt)b.textContent=txt;
+      if(b.classList.contains('on')!==!!per)b.classList.toggle('on',!!per);
+      if(per&&W.bt&&W.bt.classList.contains('on'))W.bt.classList.remove('on');
+      if(per&&W.sm&&!W.sm.classList.contains('mesx-vazio'))W.sm.classList.add('mesx-vazio');
+    }catch(e){console.error('período sync',e);}});
+  }
+  try{const _s=_mesxSync;_mesxSync=function(){const r=_s.apply(this,arguments);perxSync();return r;};}catch(e){console.warn('período',e);}
+  try{_mesxAgendar();}catch(e){}
 })();
 </script>
 <script>
@@ -87006,6 +87254,751 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
       return r;
     };
   }
+})();
+
+</script>
+<script>
+// ══ ORÇAMENTOS — IA: PLANILHA DO CLIENTE + PROJETO (2026-11-11, pedido do Clabonde: "consegue treinar pra ler
+// planilha do BK também? eu mando a planilha do BK que é o que o cliente pediu e mando os pdfs também, tem coisa
+// que não tem medida na planilha daí você acha no projeto e faz a compatibilidade entre os dois documentos")
+// Testado com o caso BK Osasco Plaza (planilha CV + 16 pranchas).
+// - "Ler projeto com IA" passa a aceitar planilha (.xlsx/.xls/.csv) junto com os PDFs/imagens. A planilha vira
+//   texto (linha a linha) e as imagens coladas nela vão como referência.
+// - Regra: a PLANILHA decide QUAIS itens entram e a QUANTIDADE; o PROJETO decide a MEDIDA. Divergência mostra as
+//   duas e o orçamentista escolhe (botões "usar planilha"/"usar projeto").
+// - Conferência ganha a origem da medida por item (✅ bate / 📐 do projeto / 📋 só planilha / ⚠️ divergente /
+//   ❌ sem medida / ➕ só no projeto) e a lista "Pedir ao cliente" com botão de copiar.
+// - Muitas pranchas: as de comunicação visual (FAC, CV, DET...) vão primeiro e com imagem; as outras (demolição,
+//   civil, forro...) vão só com o texto — assim o limite de imagens não é gasto em prancha que não importa.
+(function(){
+  // ── schema ────────────────────────────────────────────────────────────────────────────────────
+  const S=ORC2_IA_SCHEMA.properties.itens.items;
+  Object.assign(S.properties,{
+    linha_planilha:{type:'string',description:'nome do item exatamente como na planilha do cliente; "" se não veio planilha ou se o item só existe no projeto'},
+    medida_planilha:{type:'string',description:'medida como está na planilha, convertida em metros, texto curto; "" se não veio planilha'},
+    medida_projeto:{type:'string',description:'medida achada no projeto, com o código do item, texto curto; "" se não achou'},
+    planilha_largura_m:{type:'number'},planilha_altura_m:{type:'number'},
+    origem_medida:{type:'string',enum:['planilha_e_projeto','divergente','projeto','planilha','estimada','nao_encontrada']},
+    pedir_cliente:{type:'string',description:'pergunta curta para mandar ao cliente, ou ""'}});
+  S.required=S.required.concat(['linha_planilha','medida_planilha','medida_projeto','planilha_largura_m','planilha_altura_m','origem_medida','pedir_cliente']);
+})();
+function _orc13EhPlanilha(f){return /\.(xlsx|xlsm|xls|csv)$/i.test(f.name||'')||/spreadsheet|ms-excel|text\/csv/i.test(f.type||'');}
+function _orc13Fm(n){return(Math.round(Number(n)*100)/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
+// Planilha → texto (linha a linha, com a letra da coluna) + imagens coladas nela (PNG/JPG)
+async function _orc13LerPlanilha(f){
+  if(!window.XLSX)throw new Error('a leitura de Excel ainda está carregando — tente de novo em alguns segundos');
+  const buf=new Uint8Array(await f.arrayBuffer());
+  const wb=XLSX.read(buf,{type:'array'});const partes=[];
+  wb.SheetNames.forEach(nm=>{
+    const ws=wb.Sheets[nm];if(!ws)return;
+    const rows=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:''});
+    const lin=[];rows.forEach((r,ix)=>{const cel=r.map((v,c)=>[c,String(v==null?'':v).replace(/\s+/g,' ').trim()]).filter(x=>x[1]);
+      if(cel.length)lin.push('Linha '+(ix+1)+': '+cel.map(([c,v])=>XLSX.utils.encode_col(c)+'='+v).join(' | '));});
+    const mg=(ws['!merges']||[]).map(m=>XLSX.utils.encode_range(m));
+    if(lin.length)partes.push('--- Aba "'+nm+'" ---\n'+lin.join('\n')+(mg.length?'\n(Células mescladas: '+mg.join(', ')+' — o valor vale pra todas as linhas da mescla.)':''));
+  });
+  const imgs=[];
+  try{const cfb=XLSX.CFB.read(buf,{type:'array'});
+    cfb.FullPaths.forEach((p,i)=>{const fi=cfb.FileIndex[i];const m=/\/xl\/media\/[^/]+\.(png|jpe?g)$/i.exec(p);
+      if(m&&fi&&fi.content&&fi.content.length>8000&&imgs.length<4){const png=/png/i.test(m[1]);
+        imgs.push(new File([fi.content instanceof Uint8Array?fi.content:new Uint8Array(fi.content)],'Planilha '+f.name.replace(/\.[^.]+$/,'')+' — imagem '+(imgs.length+1)+(png?'.png':'.jpg'),{type:png?'image/png':'image/jpeg'}));}});
+  }catch(e){console.warn('orc13 imagens da planilha',e);}
+  return{texto:partes.join('\n\n').slice(0,20000),imgs};
+}
+// prancha de comunicação visual pelo nome do arquivo (FAC, FACHADA, CV, CVI, CVE, COMUNICAÇÃO, LETREIRO, DET...)
+function _orc13Relevante(f){
+  const t=_orc2BkNorm(String(f.name||'').replace(/\.[^.]+$/,'')).split(/[^A-Z0-9]+/).filter(Boolean);
+  return t.some(w=>w==='FAC'||w.indexOf('FACHAD')===0||/^CV[IE]?\d*$/.test(w)||w.indexOf('COMUNIC')===0||w.indexOf('LETREIR')===0||w.indexOf('SINALIZ')===0||w==='DET'||w.indexOf('DETALH')===0||w.indexOf('TOTEM')===0);
+}
+function _orc13PromptPlanilha(nomes,texto,nImgs){
+  return`
+
+PLANILHA DO CLIENTE (o que o cliente pediu) — ${nomes.join(', ')}
+${texto}
+${nImgs?`(A planilha também tem ${nImgs} ${nImgs===1?'imagem colada, enviada':'imagens coladas, enviadas'} logo abaixo como "Planilha … imagem N": são referências do cliente, ex.: opções de quadros. Use para identificar o item e o tamanho.)`:''}
+
+COMO COMPATIBILIZAR PLANILHA × PROJETO (obrigatório nesta leitura)
+- A PLANILHA define QUAIS itens entram e a QUANTIDADE. Cada linha com nome de item é UM item da resposta, na mesma ordem da planilha — não pule nenhuma e não junte linhas diferentes. Linha que só traz medida (sem nome de item), logo abaixo de outra, é continuação do item de cima. Linha com nome de item e quantidade é item, mesmo sem os outros campos preenchidos.
+- A planilha NÃO é confiável nas medidas: tem erro de unidade/digitação (ex.: 1500 × 33 num letreiro de 1,50 m), "tamanho padrão" genérico que não é o da loja e "conforme projeto". Para CADA item procure a medida no PROJETO: código do item no quadro "COMUNICAÇÃO VISUAL" (CV01, CV02...), detalhes "DET. CVxx", elevação da fachada (testeira por módulo), quadro de acabamentos (revestimentos em m², ex.: ACM), detalhes de balcão.
+- largura_m/altura_m/profundidade_m = a medida que vai pro orçamento: a do PROJETO quando existir; se o projeto não tiver, a da planilha (em metros; planilha em cm salvo indicação; corrija erro óbvio de digitação e diga na observacao); se não houver em nenhum, 0. Revestimento cotado só em m²: ponha a área em observacao e em medida_projeto.
+- Quando o próprio projeto tem medidas diferentes para o mesmo item (ex.: detalhe genérico × elevação/planta da loja), prefira a vista específica da loja e cite o conflito na observacao.
+- planilha_largura_m/planilha_altura_m = medida da planilha em metros (0 se não tem, "-" ou "conforme projeto").
+- medida_planilha: curta, em metros (ex.: "1,49 × 0,60 m", "conforme projeto", "sem medida"). medida_projeto: curta, com o código (ex.: "CV01 4,18 × 0,50 × 0,08 m") ou "".
+- origem_medida: "planilha_e_projeto" (as duas existem e diferem no máximo 5%), "divergente" (diferem mais de 5%), "projeto" (planilha sem medida, achada no projeto), "planilha" (só a planilha tem), "estimada" (sem cota, deduzida pela escala do desenho — confianca "media"), "nao_encontrada" (nenhum dos dois).
+- quantidade = a da planilha. Se a linha for um conjunto (ex.: "quadros conforme OP4" = 4 quadros) ou o projeto mostrar outra quantidade, use a quantidade real de peças e explique em observacao.
+- pedir_cliente: pergunta curta e educada para mandar ao cliente quando falta medida ou quando há divergência que só ele resolve (ex.: "Letreiro Sobremesas: qual a medida? Não consta no projeto."); senão "".
+- linha_planilha: o nome do item como está na planilha. Itens que aparecem no projeto e NÃO estão na planilha: inclua no fim, com linha_planilha "" e a quantidade do projeto (o orçamentista decide se entra).
+- "onde": linha da planilha + arquivo/prancha do projeto (ex.: "planilha linha 11; arquivo 3 (…12_CVI…), DET. CV01").`;
+}
+const _ORC13_SEM_PLANILHA=`
+
+SEM PLANILHA DO CLIENTE nesta leitura: linha_planilha, medida_planilha e pedir_cliente = ""; planilha_largura_m e planilha_altura_m = 0; origem_medida = "projeto", "estimada" ou "nao_encontrada"; medida_projeto = medida achada com o código do item, ou "".`;
+
+// ── botão: aceita planilha ────────────────────────────────────────────────────────────────────────
+{const _b=_orc2IaHtmlBotao;_orc2IaHtmlBotao=function(){return _b.apply(this,arguments)
+  .replace('accept="application/pdf,.pdf,image/jpeg,image/png,.jpg,.jpeg,.png"','accept="application/pdf,.pdf,image/jpeg,image/png,.jpg,.jpeg,.png,.xlsx,.xlsm,.xls,.csv"')
+  .replace('Suba o projeto (um ou vários PDFs, JPG ou PNG — pode selecionar todas as pranchas de uma vez): a IA lista os itens com as medidas e você confere antes de entrar no orçamento.',
+    'Suba o projeto (PDFs, JPG ou PNG — pode selecionar todas as pranchas de uma vez) e, se tiver, a planilha do cliente (Excel) junto: a IA cruza o que o cliente pediu com as medidas do projeto e você confere antes de entrar no orçamento.');};}
+
+// ── leitura (substitui a de 2026-10-08, mesmo comportamento quando não há planilha nem prancha a economizar) ──
+orc2IaLerArquivo=async function(inp){
+  const todos=[...((inp&&inp.files)||[])];if(!todos.length||!orc2.doc)return;
+  if(!_orc2IaTemChave()){toast('A leitura de projeto não está configurada','terr');return;}
+  const planilhas=todos.filter(_orc13EhPlanilha);let files=todos.filter(f=>!_orc13EhPlanilha(f));
+  const ruins=files.filter(f=>!_orc2IaEhPdf(f)&&!_orc2IaEhImagem(f));
+  if(ruins.length){toast('Só dá pra ler PDF, JPG, PNG ou planilha do Excel ('+ruins.map(f=>f.name).join(', ')+')','terr');return;}
+  if(planilhas.length&&!files.length){toast('Suba a planilha junto com os arquivos do projeto (PDF/JPG/PNG) — a medida sai do projeto','terr');return;}
+  const grandes=todos.filter(f=>f.size>60*1024*1024);
+  if(grandes.length){toast('Arquivo grande demais (máx. 60 MB cada): '+grandes.map(f=>f.name).join(', '),'terr');return;}
+  const nomesTodos=todos.map(f=>f.name);
+  const nProj=todos.length-planilhas.length;
+  const rotulo=planilhas.length?'Planilha '+planilhas.map(p=>p.name).join(', ')+' + '+nProj+(nProj===1?' arquivo do projeto':' arquivos do projeto')
+    :todos.length===1?todos[0].name:todos.length+' arquivos ('+nomesTodos.join(', ')+')';
+  orc2.ia={status:'lendo',arquivo:rotulo,msg:'Abrindo '+(todos.length===1?'o arquivo':'os arquivos')+'…',itens:[],inicio:Date.now()};
+  _orc2ReRenderProdutos();
+  try{
+    // planilha(s) → texto + imagens
+    let plTexto='',plImgs=[];
+    for(const p of planilhas){_orc2IaProgresso('Lendo a planilha '+p.name+'…');const r=await _orc13LerPlanilha(p);plTexto+=(plTexto?'\n\n':'')+r.texto;plImgs=plImgs.concat(r.imgs);}
+    if(planilhas.length&&!plTexto.trim())throw new Error('a planilha '+planilhas.map(p=>p.name).join(', ')+' está vazia');
+    // pranchas de comunicação visual primeiro e com imagem; as demais só com texto (quando há das duas)
+    const pdfs=files.filter(_orc2IaEhPdf),rel=files.filter(f=>_orc2IaEhImagem(f)||_orc13Relevante(f));
+    const economizar=files.length>=4&&pdfs.length>=2&&rel.some(f=>_orc2IaEhPdf(f))&&rel.length<files.length;
+    if(economizar)files=rel.concat(files.filter(f=>rel.indexOf(f)<0));
+    files=plImgs.concat(files);
+    const soTexto=f=>economizar&&_orc2IaEhPdf(f)&&!_orc13Relevante(f);
+    const varios=files.length>1;
+    const content=[{type:'text',text:_orc2IaPrompt()+(varios?`
+
+VÁRIOS ARQUIVOS
+- Este projeto veio em ${files.length} arquivos (pranchas separadas, fotos ou desenhos). Trate tudo como UM projeto só.
+- O mesmo item costuma aparecer em mais de uma prancha (planta, elevação, detalhe, quadro de quantidades): NÃO repita — junte as informações num item só.
+- Em "onde", diga o arquivo e a página (ex.: "arquivo 2 (FACHADAS.pdf), pág. 1, Fachada C").`:'')
+      +(economizar?`
+- As pranchas que não são de comunicação visual (demolição, civil, layout, forro, cortes etc.) foram enviadas só com o TEXTO extraído, sem imagem; as de comunicação visual (fachada, CV, detalhes) vêm com imagem.`:'')
+      +(planilhas.length?_orc13PromptPlanilha(planilhas.map(p=>p.name),plTexto,plImgs.length):_ORC13_SEM_PLANILHA)}];
+    let restImg=ORC2_IA_MAX_IMG,restPag=ORC2_IA_MAX_PAG,totPag=0,totImg=0,cortados=[];orc2._iaCapa=null;
+    for(let k=0;k<files.length;k++){
+      const f=files[k];const rot=varios?'Arquivo '+(k+1)+' de '+files.length+' ('+f.name+')':'';
+      if(restPag<=0||(restImg<=0&&!soTexto(f))){cortados.push(f.name);continue;}
+      // reserva 1 imagem pra cada próximo arquivo que vai com imagem
+      const reservar=files.slice(k+1).filter(x=>!soTexto(x)).length;
+      const lim={img:soTexto(f)?0:Math.max(1,restImg-reservar),pag:restPag,rot};
+      let pg;
+      if(_orc2IaEhImagem(f)){_orc2IaProgresso((rot?rot+' — ':'')+'Preparando imagem…');pg=await _orc2IaImagemArq(f,lim.img);}
+      else pg=await _orc2IaPaginas(await f.arrayBuffer(),lim);
+      if(!orc2._iaCapa&&plImgs.indexOf(f)<0){try{orc2._iaCapa=(pg.paginas[0]&&pg.paginas[0].imgs[0]&&pg.paginas[0].imgs[0].data)||null;}catch(e){}}
+      if(varios)content.push({type:'text',text:`##### ARQUIVO ${k+1} de ${files.length}: ${f.name}${_orc2IaEhImagem(f)?' (imagem)':' ('+pg.total+(pg.total===1?' página':' páginas')+(soTexto(f)?', só o texto':'')+')'}`});
+      pg.paginas.forEach(p=>{
+        const pre=varios?'Arquivo '+(k+1)+', ':'';
+        if(!_orc2IaEhImagem(f))content.push({type:'text',text:`=== ${pre}PÁGINA ${p.n} de ${pg.total} — texto extraído: ${p.texto||'(sem texto)'}`});
+        p.imgs.forEach(im=>{content.push({type:'text',text:`${pre}${_orc2IaEhImagem(f)?'Imagem':'Página '+p.n}${im.rot?' — '+im.rot:''}:`});content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:im.data}});});
+      });
+      if(pg.total>pg.lidas)content.push({type:'text',text:`(O arquivo ${f.name} tem ${pg.total} páginas; só as ${pg.lidas} primeiras foram enviadas.)`});
+      restImg-=pg.nImg;restPag-=pg.lidas;totPag+=pg.lidas;totImg+=pg.nImg;
+    }
+    if(cortados.length)content.push({type:'text',text:`(Por limite de tamanho, estes arquivos não foram enviados: ${cortados.join(', ')}.)`});
+    content.push({type:'text',text:planilhas.length?'Liste agora todos os itens da planilha do cliente, compatibilizados com o projeto, e depois os itens que só existem no projeto, seguindo as regras.':'Liste agora todos os itens de comunicação visual do projeto, seguindo as regras.'});
+    const modelo=(orc2.iaCfg&&orc2.iaCfg.modelo)||ORC2_IA_MODELOS[0][0];
+    _orc2IaProgresso('A IA está lendo '+(planilhas.length?'a planilha e ':'')+(varios?files.length+' arquivos, ':'')+totPag+(totPag===1?' página':' páginas')+' ('+totImg+' imagens)… isso leva de 30 segundos a 3 minutos.');
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':orc2.iaCfg.chave,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:modelo,max_tokens:24000,messages:[{role:'user',content}],output_config:{format:{type:'json_schema',schema:ORC2_IA_SCHEMA}}})});
+    const js=await r.json().catch(()=>null);
+    if(!r.ok){const m=(js&&js.error&&js.error.message)||('HTTP '+r.status);
+      throw new Error(r.status===401?'chave da IA inválida — confira em ⚙️':r.status===413?'arquivos grandes demais pra ler de uma vez — tente mandar menos pranchas':(r.status===429||r.status===529)?'a IA está ocupada agora, tente de novo em 1 minuto':m);}
+    const txt=((js&&js.content)||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+    let out;try{out=JSON.parse(txt);}catch(e){throw new Error('a resposta da IA veio num formato inesperado'+(js&&js.stop_reason==='max_tokens'?' (resposta longa demais — tente com menos pranchas)':''));}
+    const itens=(out.itens||[]).map(it=>_orc2IaNormItem(it));
+    itens.forEach(it=>{if(it.tipo==='manual'&&!it.preco){const sg=_orc2SugestaoAvulso(it.descricao);if(sg){it.preco=String(sg.preco);it.obs=(it.obs?it.obs+' · ':'')+'preço do último orçamento ("'+sg.nome+'")';}}});
+    orc2.ia={status:'ok',arquivo:rotulo,modelo,cliente:out.cliente||'',cidade:out.cidade||'',uf:String(out.uf||'').toUpperCase().slice(0,2),resumo:out.resumo||'',itens,bruto:out,uso:js.usage||null,paginas:totPag,imagens:totImg,seg:Math.round((Date.now()-orc2.ia.inicio)/1000),
+      temPlanilha:planilhas.length>0,planilha:planilhas.map(p=>p.name).join(', ')};
+    _orc2IaPreencherProjeto();
+    _orc2ReRenderProdutos();
+    toast((planilhas.length?'Planilha e projeto lidos: ':'Projeto lido: ')+itens.length+' itens pra conferir'+(cortados.length?' (alguns arquivos ficaram de fora pelo limite)':''),'tok');
+  }catch(e){console.error('orc2 IA',e);orc2.ia={status:'erro',arquivo:rotulo,erro:e.message||String(e),itens:[]};_orc2ReRenderProdutos();toast('Não consegui ler o projeto: '+(e.message||e),'terr');}
+};
+
+// ── normalização ──────────────────────────────────────────────────────────────────────────────────
+{const _n=_orc2IaNormItem;_orc2IaNormItem=function(raw){const r=_n(raw);raw=raw||{};
+  const og=['planilha_e_projeto','divergente','projeto','planilha','estimada','nao_encontrada'];
+  r.plLinha=String(raw.linha_planilha||'').trim();r.plMed=String(raw.medida_planilha||'').trim();r.prMed=String(raw.medida_projeto||'').trim();
+  r.origem=og.indexOf(raw.origem_medida)>=0?raw.origem_medida:'';r.pedir=String(raw.pedir_cliente||'').trim();
+  const pl=Number(raw.planilha_largura_m)||0,pa=Number(raw.planilha_altura_m)||0;
+  r.plL=pl>0?String(_orcxArred(pl,3)):'';r.plA=pa>0?String(_orcxArred(pa,3)):'';r.prL=r.largura;r.prA=r.altura;
+  return r;};}
+
+// ── conferência ───────────────────────────────────────────────────────────────────────────────────
+const ORC13_ORIGEM={planilha_e_projeto:['✅','planilha e projeto batem','#15803d','#f0fdf4'],divergente:['⚠️','planilha ≠ projeto — confira','#b45309','#fffbeb'],
+  projeto:['📐','medida do projeto','#1d4ed8','#eff6ff'],planilha:['📋','medida só da planilha','#475569','#f1f5f9'],
+  estimada:['📐','estimada pela escala — confira','#b45309','#fffbeb'],nao_encontrada:['❌','sem medida — pedir ao cliente','#b91c1c','#fef2f2'],
+  so_projeto:['➕','só no projeto (não está na planilha)','#7c3aed','#f5f3ff']};
+function _orc13Chave(it){return!orc2.ia||!orc2.ia.temPlanilha?'':!it.plLinha?'so_projeto':(it.origem||'');}
+function _orc13Faixa(it,i){
+  const k=_orc13Chave(it);if(!k||!ORC13_ORIGEM[k])return'';const[ic,txt,cor,bg]=ORC13_ORIGEM[k];
+  const nw='white-space:nowrap';
+  const usar=(it.plL&&it.plA&&it.prL&&it.prA&&(it.plL!==it.prL||it.plA!==it.prA))?` <button type="button" class="orcx-link" style="font-size:.64rem;${nw}" onclick="orc13UsarMedida(${i},'pl')">usar planilha</button> <button type="button" class="orcx-link" style="font-size:.64rem;${nw}" onclick="orc13UsarMedida(${i},'pr')">usar projeto</button>`:'';
+  return`<div style="margin-top:4px;padding:4px 7px;border-radius:7px;background:${bg};font-size:.66rem;line-height:1.45;color:#334155">
+    <b style="color:${cor};${nw}">${ic} ${txt}</b>${it.plLinha?`<br><span style="color:#64748b">📋 Planilha:</span> ${_orcxEsc(it.plLinha)}${it.plMed?` · <span style="${nw}">${_orcxEsc(it.plMed)}</span>`:''}`:''}${it.prMed?`<br><span style="color:#64748b">📐 Projeto:</span> <span style="${nw}">${_orcxEsc(it.prMed)}</span>`:''}${usar}
+    ${it.pedir?`<br><span style="color:#b91c1c">💬 ${_orcxEsc(it.pedir)}</span>`:''}</div>`;
+}
+{const _l=_orc2IaHtmlLinha;_orc2IaHtmlLinha=function(it,i){
+  const h=_l.apply(this,arguments);const f=_orc13Faixa(it,i);if(!f)return h;
+  const marca=`oninput="orc2IaCampo(${i},'descricao',this.value)">`;const p=h.indexOf(marca);if(p<0)return h;
+  const fim=h.indexOf('</td>',p);return fim<0?h:h.slice(0,fim)+f+h.slice(fim);};}
+function orc13UsarMedida(i,de){
+  const it=orc2.ia&&orc2.ia.itens[i];if(!it)return;
+  it.largura=de==='pl'?it.plL:it.prL;it.altura=de==='pl'?it.plA:it.prA;
+  const tr=document.getElementById('orc2-ia-l-'+i);if(tr)tr.outerHTML=_orc2IaHtmlLinha(it,i);
+  const t=document.getElementById('orc2-ia-total');if(t)t.textContent=_orcxBRL(_orc2IaTotal());
+  toast('Medida '+(de==='pl'?'da planilha':'do projeto')+': '+_orc13Fm(it.largura)+' × '+_orc13Fm(it.altura)+' m','tok');
+}
+function _orc13ListaPedir(){
+  const ia=orc2.ia;if(!ia)return[];
+  return ia.itens.filter(it=>it.pedir||(ia.temPlanilha&&it.plLinha&&it.origem==='nao_encontrada')).map(it=>{
+    const nm=it.plLinha||it.descricao||'Item';return it.pedir||(nm+': qual a medida? Não consta no projeto.');});
+}
+function _orc13Resumo(){
+  const ia=orc2.ia;if(!ia||!ia.temPlanilha)return'';
+  const cont={};ia.itens.forEach(it=>{const k=_orc13Chave(it);if(k)cont[k]=(cont[k]||0)+1;});
+  const rot={planilha_e_projeto:['batendo','batendo'],projeto:['medida do projeto','medidas do projeto'],planilha:['medida só da planilha','medidas só da planilha'],estimada:['estimada','estimadas'],
+    divergente:['divergente','divergentes'],nao_encontrada:['sem medida','sem medida'],so_projeto:['só no projeto','só no projeto']};
+  const chips=['planilha_e_projeto','projeto','planilha','estimada','divergente','nao_encontrada','so_projeto'].filter(k=>cont[k]).map(k=>{const[ic,,cor,bg]=ORC13_ORIGEM[k];
+    return`<span style="display:inline-block;white-space:nowrap;background:${bg};color:${cor};border-radius:999px;padding:2px 9px;margin:0 4px 4px 0;font-size:.7rem;font-weight:700">${ic} ${cont[k]} ${rot[k][cont[k]===1?0:1]}</span>`;}).join('');
+  const ped=_orc13ListaPedir();
+  return`<div style="margin:0 0 10px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;background:#fff">
+    <div style="font-size:.76rem;color:#0f172a;margin-bottom:6px"><b>📋 Planilha × 📐 Projeto</b> <span style="color:#64748b">— ${_orcxEsc(ia.planilha)}: a planilha define os itens e a quantidade; a medida sai do projeto.</span></div>
+    <div>${chips}</div>
+    ${ped.length?`<div style="margin-top:6px;padding:8px 10px;background:#fef2f2;border-radius:8px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><b style="font-size:.74rem;color:#b91c1c;flex:1">💬 Pedir ao cliente (${ped.length})</b><button type="button" class="orc2-btn sec" style="padding:4px 10px;font-size:.72rem" onclick="orc13CopiarPedir()">📋 Copiar lista</button></div>
+      <ul style="margin:0;padding-left:18px;font-size:.72rem;color:#334155">${ped.map(p=>`<li>${_orcxEsc(p)}</li>`).join('')}</ul></div>`:''}
+  </div>`;
+}
+function orc13CopiarPedir(){
+  const ped=_orc13ListaPedir();if(!ped.length)return;
+  const cli=(orc2.ia&&orc2.ia.cliente)||'';
+  const txt='Olá! Para fecharmos o orçamento'+(cli?' da loja '+cli:'')+', precisamos confirmar:\n'+ped.map(p=>'- '+p).join('\n')+'\n\nObrigado!';
+  const ok=()=>toast('Lista copiada — é só colar no e-mail ou WhatsApp','tok');
+  try{navigator.clipboard.writeText(txt).then(ok,()=>{prompt('Copie a lista:',txt);});}catch(e){prompt('Copie a lista:',txt);}
+}
+{const _b=_orc2IaHtmlBox;_orc2IaHtmlBox=function(){const h=_b.apply(this,arguments);const r=_orc13Resumo();if(!r)return h;
+  const m='<div class="orcx-hint" style="margin:0 0 10px">';return h.indexOf(m)>=0?h.replace(m,r+m):h;};}
+// ══ fim IA planilha do cliente ══
+</script>
+<script>
+// ══ CHAMADOS INTERNOS DE PROJETOS (build 2026-11-11.12, a pedido do Guilherme) ══════════════════════
+// "ter uma janela de chamados igual ao que você criou entre setores, mas pra eu passar demanda para eles
+// aqui interno no setor de projetos. Ex.: entreguei o pedido X mas preciso passar para o Leonardo fazer uma
+// alteração de algum BO que deu durante a produção. Aí eu abro chamado interno no setor e quando ele tiver
+// tempo ele vai e resolve."
+// Mesmo visual e mesmo fluxo dos Chamados entre setores (classes .chx-*), só que de PESSOA para PESSOA
+// dentro de Projetos:
+//  - Abre: Supervisor ou acima de Projetos, Diretoria e administrador. Vai para UM projetista.
+//  - Prioridade com prazo padrão: Urgente 2 du · Normal 5 du · Não urgente 10 du (igual entre setores).
+//  - Projetista: ▶️ Começar → 🛠️ Resolvido (comprovação: texto OU foto/PDF) · ⏳ pede mais prazo.
+//  - Quem abriu: aprova/recusa prazo, 🏁 confirma e avalia (Atendida / Atendida em parte) ou 🔁 reabre,
+//    ou encerra se não precisar mais. Nada encerra sozinho. Excluir: só administrador.
+//  - Pode ligar a um pedido (aparece nome fantasia + JOB, botão do PDF e do checklist do projeto).
+//  - Avisos no sino. Sem e-mail (é dentro do setor).
+// Gravação: sistema/chamadosProj_AAAA_MM (um doc por mês) + sistema/chamadosProjSeq — por transação.
+(function(){
+const PRIO={URGENTE:{l:'Urgente',d:2,cor:'#b91c1c',bg:'#fee2e2'},NORMAL:{l:'Normal',d:5,cor:'#1d4ed8',bg:'#dbeafe'},NAO_URGENTE:{l:'Não urgente',d:10,cor:'#475569',bg:'#f1f5f9'}};
+const TIPOS=['Alteração no projeto','Problema na produção','Correção de FP / RM / LM','Informação faltando','Outro'];
+const STATUS={ABERTO:'Aguardando o projetista começar',ANDAMENTO:'Em andamento',RESOLVIDO:'Resolvido — aguardando confirmação',ENCERRADO:'Encerrado'};
+const AVAL={TOTAL:{l:'Atendida',cor:'#15803d',bg:'#dcfce7'},PARCIAL:{l:'Atendida em parte',cor:'#b45309',bg:'#fef3c7'}};
+const INICIO='2026_11',SEQ='chamadosProjSeq',PREF='chamadosProj_';
+const MAX_ARQ=5,MAX_MB=10;
+let _itens={},_porDoc={},_watching={},_aba='meus',_busca='',_arqs={},_pedSel=null;
+const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const hoje=()=>_hojeIso();
+const agora=()=>new Date().toISOString();
+const _ul=()=>(typeof usuarioLogado!=='undefined'&&usuarioLogado)||null;
+const meuEmail=()=>{try{return _getUserCat().email||'';}catch(e){return'';}};
+const meuNome=()=>(_ul()&&_ul().nomeExibicao)||meuEmail()||'—';
+const fmtDH=iso=>{if(!iso)return'';const d=new Date(iso);if(isNaN(d))return'';return d.toLocaleDateString('pt-BR')+' às '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});};
+const duTxt=n=>n+' '+(n===1?'dia útil':'dias úteis');
+const numTxt=c=>'CI-'+String(c.num||0).padStart(4,'0');
+const pill=(t,cor,bg)=>`<span class="chx-pill" style="color:${cor};background:${bg}">${esc(t)}</span>`;
+const nomeDe=em=>{const n=((cfg&&cfg.usuarioNomes)||{})[em];return String(n||em||'—').trim();};
+
+// ── Quem pode o quê ──
+function isAdm(){try{return!!_getUserCat().isAdm;}catch(e){return false;}}
+function rank(){try{if(isAdm())return 99;return _nivelRank(_nivelDe(meuEmail()));}catch(e){return 0;}}
+function souProjetos(){try{return _minhasCats().includes('PROJETOS');}catch(e){return false;}}
+function podeAbrir(){try{if(!_ul())return false;if(isAdm())return true;if(_nivelDe(meuEmail())==='DIRETORIA')return true;return souProjetos()&&rank()>=2;}catch(e){return false;}}
+function temAcesso(){try{return!!_ul()&&(_isSetorUser('PROJETOS')||podeAbrir());}catch(e){return false;}}
+const veTudo=podeAbrir;
+const souDest=c=>!!c&&c.destEmail===meuEmail();
+const souOrig=c=>!!c&&c.criadoPorEmail===meuEmail();
+const ageDest=c=>souDest(c)||isAdm();
+const ageOrig=c=>souOrig(c)||isAdm();
+const visivel=c=>!!c&&!c.excluido&&(veTudo()||souDest(c)||souOrig(c));
+// Projetistas = usuários com setor PROJETOS (principal ou extra)
+function projetistas(){
+  const cats=cfg.usuarioCats||{},ext=cfg.usuarioCatsExtras||{},out=new Set();
+  new Set([...Object.keys(cats),...Object.keys(ext)]).forEach(em=>{
+    const e=String(em||'').toLowerCase();if(!e.includes('@'))return;
+    const l=[cats[em]].concat(Array.isArray(ext[em])?ext[em]:[]);
+    if(l.includes('PROJETOS'))out.add(e);
+  });
+  return[...out].sort((a,b)=>nomeDe(a).localeCompare(nomeDe(b)));
+}
+
+// ── Prazo / situação ──
+const prazoDe=(prio,base)=>_isoLocal(_addDiasUteis(base||hoje(),(PRIO[prio]||PRIO.NORMAL).d));
+const diasAtraso=c=>c.prazo&&c.prazo<hoje()?_lpDuEntre(c.prazo,hoje()):0;
+const atrasado=c=>c.status!=='ENCERRADO'&&c.status!=='RESOLVIDO'&&!c.excluido&&!!c.prazo&&c.prazo<hoje();
+function situacao(c){
+  if(c.status==='ENCERRADO')return{k:'enc',txt:c.encerradoTipo==='SEM_NECESSIDADE'?'Encerrado por quem abriu':'Encerrado',cor:'#16a34a',bg:'#dcfce7'};
+  if(c.status==='RESOLVIDO')return{k:'res',txt:'Aguardando confirmação',cor:'#0369a1',bg:'#e0f2fe'};
+  const h=hoje();
+  if(c.prazo<h){const n=_lpDuEntre(c.prazo,h);return{k:'atr',txt:'🔴 Atrasado'+(n?' '+duTxt(n):''),cor:'#b91c1c',bg:'#fee2e2'};}
+  if(c.prazo===h)return{k:'hoje',txt:'Vence hoje',cor:'#c2410c',bg:'#ffedd5'};
+  const n=_lpDuEntre(h,c.prazo);
+  if(n<=1)return{k:'amanha',txt:'Vence amanhã',cor:'#c2410c',bg:'#ffedd5'};
+  return{k:'ok',txt:'Faltam '+duTxt(n),cor:'#475569',bg:'#f1f5f9'};
+}
+function minhaAcao(c){
+  if(!c||c.excluido||c.status==='ENCERRADO')return'';
+  if(souOrig(c)&&c.pedidoPrazo)return'Responder pedido de mais prazo';
+  if(souOrig(c)&&c.status==='RESOLVIDO')return'Confirmar a solução';
+  if(souDest(c)&&c.status==='ABERTO')return'Começar o chamado';
+  if(souDest(c)&&c.status==='ANDAMENTO'&&!c.pedidoPrazo){const s=situacao(c);if(s.k==='atr')return'Resolver — está atrasado';if(s.k==='hoje'||s.k==='amanha')return'Resolver — '+s.txt.toLowerCase();}
+  return'';
+}
+
+// ── Banco ──
+const docNome=mes=>PREF+mes;
+function mesesAteHoje(){const out=[];let[y,m]=INICIO.split('_').map(Number);const d=new Date(),yf=d.getFullYear(),mf=d.getMonth()+1;while(y<yf||(y===yf&&m<=mf)){out.push(y+'_'+String(m).padStart(2,'0'));m++;if(m>12){m=1;y++;}}return out;}
+function iniciarWatch(){
+  if(!window._fbChWatch||!temAcesso())return;
+  mesesAteHoje().forEach(mes=>{
+    const nome=docNome(mes);if(_watching[nome])return;_watching[nome]=true;
+    window._fbChWatch(nome,itens=>{_porDoc[nome]=itens||{};const t={};Object.values(_porDoc).forEach(o=>Object.assign(t,o||{}));_itens=t;aoMudar();},e=>{console.warn('chamados projetos watch',e);_watching[nome]=false;});
+  });
+}
+setInterval(()=>{iniciarWatch();try{atualizarBadge();}catch(e){}},4000);
+function aoMudar(){
+  try{atualizarBadge();}catch(e){}
+  try{const s=document.getElementById('proj-sec-chamados');if(s&&s.style.display!=='none'&&s.offsetParent!==null)render();}catch(e){}
+  try{const m=document.getElementById('mo-cip');if(m&&m.classList.contains('open')&&m.dataset.id)renderDetalhe(m.dataset.id);}catch(e){}
+  try{if(typeof _atualizarBadgeAvisos==='function')_atualizarBadgeAvisos();}catch(e){}
+}
+async function alterar(id,fn){
+  const c0=_itens[id];if(!c0)throw new Error('Chamado não encontrado');
+  return window._fbChTx(docNome(c0.mes),itens=>{
+    const c=itens[id];if(!c)throw new Error('Chamado não encontrado no servidor');
+    if(fn(c)===false)return null;c.atualizadoEm=agora();return{id,obj:c};
+  });
+}
+function hist(c,tipo,txt,anexos){c.hist=Array.isArray(c.hist)?c.hist:[];const h={em:agora(),por:meuNome(),tipo,txt:String(txt||'').slice(0,1500)};if(anexos&&anexos.length)h.anexos=anexos;c.hist.push(h);}
+
+// ── Anexos (mesmo Cloudinary dos Chamados entre setores) ──
+window.cipArqEscolher=function(campo,input){
+  const at=_arqs[campo]||[];const novos=[...(input.files||[])];input.value='';
+  for(const f of novos){
+    const ok=/^image\//.test(f.type)||f.type==='application/pdf'||/\.pdf$/i.test(f.name);
+    if(!ok){toast(`"${f.name}" não é foto nem PDF`,'terr');continue;}
+    if(f.size>MAX_MB*1024*1024){toast(`"${f.name}" passa de ${MAX_MB} MB`,'terr');continue;}
+    if(at.length>=MAX_ARQ){toast(`Máximo de ${MAX_ARQ} arquivos`,'twar');break;}
+    at.push(f);
+  }
+  _arqs[campo]=at;arqLista(campo);
+};
+window.cipArqTirar=function(campo,i){(_arqs[campo]||[]).splice(i,1);arqLista(campo);};
+function arqLista(campo){const el=document.getElementById(campo+'-lista');if(!el)return;el.innerHTML=(_arqs[campo]||[]).map((f,i)=>`<span class="chx-arq">${/^image\//.test(f.type)?'🖼️':'📄'} ${esc(f.name)} <button type="button" onclick="cipArqTirar('${campo}',${i})" title="Tirar">✕</button></span>`).join('');}
+function arqCampo(campo,label){_arqs[campo]=[];return`<div class="fg"><label>${label}</label><label class="chx-arq-bt">📎 Anexar foto ou PDF<input type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="cipArqEscolher('${campo}',this)"></label><span class="chx-sub" style="margin-left:8px">até ${MAX_ARQ} arquivos de ${MAX_MB} MB</span><div id="${campo}-lista" class="chx-arqs"></div></div>`;}
+async function subirArqs(campo){
+  const fs=_arqs[campo]||[];if(!fs.length)return[];
+  if(!(cfg.cld_cloud&&cfg.cld_preset))throw new Error('o envio de arquivos não está configurado (Cloudinary)');
+  const out=[];
+  for(const f of fs){
+    const img=/^image\//.test(f.type);
+    const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_chamados');
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/${img?'image':'raw'}/upload`,{method:'POST',body:fd});
+    const d=await r.json();if(!d.secure_url)throw new Error(`não consegui enviar "${f.name}"`);
+    try{if(typeof _cldRegistrarUpload==='function')_cldRegistrarUpload(f.size);}catch(e){}
+    out.push({nome:f.name,url:d.secure_url,img,tam:f.size});
+  }
+  return out;
+}
+const anexosHtml=l=>(!l||!l.length)?'':`<div class="chx-anx">${l.map(a=>a.img?`<a href="${esc(a.url)}" target="_blank" title="${esc(a.nome)}"><img src="${esc(a.url)}" alt="${esc(a.nome)}"></a>`:`<a class="chx-arq" href="${esc(a.url)}" target="_blank">📄 ${esc(a.nome)}</a>`).join('')}</div>`;
+
+// ── Pedido ligado ──
+const pedidoDe=c=>c&&c.pedidoId&&typeof pedidos!=='undefined'?pedidos.find(x=>x.id===c.pedidoId):null;
+const pedLbl=p=>`OS ${p.os||'—'} · ${_pedNome(p)}`;
+function pedTxt(c){const p=pedidoDe(c);return p?pedLbl(p):(c.pedidoLbl||'');}
+
+// ── Aba dentro de Projetos ──
+function garantirAba(){
+  const tabs=document.getElementById('proj-main-tabs');if(!tabs)return false;
+  if(!document.getElementById('cip-tab-btn')){
+    const b=document.createElement('button');b.type='button';b.id='cip-tab-btn';b.className='dash-tab proj-main-tab';
+    b.innerHTML='📣 Chamados internos <span id="cip-tab-badge" class="chx-n al" style="display:none"></span>';
+    b.onclick=function(){projSetTab('chamados',this);};
+    const all=[...tabs.querySelectorAll('.proj-main-tab')];const last=all[all.length-1];
+    if(last)last.insertAdjacentElement('afterend',b);else tabs.appendChild(b);
+  }
+  // botões de ação (+ Gerar FP) ficam sempre depois das abas
+  try{const me=document.getElementById('cip-tab-btn');tabs.querySelectorAll('.fp-av-bt').forEach(fp=>{if(me&&(me.compareDocumentPosition(fp)&Node.DOCUMENT_POSITION_PRECEDING))me.insertAdjacentElement('afterend',fp);});}catch(e){}
+  if(!document.getElementById('cip-css')){const st=document.createElement('style');st.id='cip-css';st.textContent=
+    '@media(max-width:760px){.cip-t{table-layout:auto}.cip-t thead{display:none}.cip-t,.cip-t tbody,.cip-t tr,.cip-t td{display:block;width:auto}.cip-t tr{border:1px solid #e2e8f0;border-radius:10px;margin-bottom:8px;padding:4px 0}.cip-t td{border:none!important;padding:3px 10px!important}.cip-t .chx-1l{white-space:normal}}';
+    document.head.appendChild(st);}
+  if(!document.getElementById('proj-sec-chamados')){
+    const ref=document.getElementById('proj-sec-produtos')||document.getElementById('proj-sec-indicadores');
+    const s=document.createElement('div');s.id='proj-sec-chamados';s.style.display='none';
+    if(ref&&ref.parentNode)ref.parentNode.insertBefore(s,ref.nextSibling);else{const sec=document.getElementById('sec-cat-PROJETOS');if(!sec)return false;sec.appendChild(s);}
+  }
+  return true;
+}
+function atualizarBadge(){
+  garantirAba();
+  const sp=document.getElementById('cip-tab-badge');if(!sp)return;
+  const n=Object.values(_itens).filter(c=>visivel(c)&&minhaAcao(c)).length;
+  sp.textContent=n?String(n):'';sp.style.display=n?'':'none';
+}
+{let n=0;const t=setInterval(()=>{n++;if(garantirAba()||n>60)clearInterval(t);},1000);}
+const _stOrig=projSetTab;
+projSetTab=function(tab,btn){
+  garantirAba();
+  const sc=document.getElementById('proj-sec-chamados');
+  if(sc)sc.style.display='none';
+  const r=_stOrig.apply(this,arguments);
+  if(tab==='chamados'){
+    if(!btn){const b=document.getElementById('cip-tab-btn');if(b){document.querySelectorAll('.proj-main-tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');}}
+    ['proj-sec-lista','proj-sec-kanban','proj-sec-calendario','proj-sec-indicadores','proj-sec-produtos','proj-sec-fps','proj-info-banner','proj-filtros-wrap'].forEach(id=>{const e=document.getElementById(id);if(e)e.style.display='none';});
+    if(sc)sc.style.display='';
+    iniciarWatch();render();
+  }
+  return r;
+};
+const _raOrig=projRenderAtivo;
+projRenderAtivo=function(){if(_projTabAtiva==='chamados'){render();return;}return _raOrig.apply(this,arguments);};
+
+// ── Lista ──
+window.cipSetAba=function(a){_aba=a;render();};
+window.cipBuscar=function(v){_busca=String(v||'');render(true);};
+function listaDaAba(){
+  const todos=Object.values(_itens).filter(visivel);const b=_busca.trim().toLowerCase();
+  let l;
+  if(_aba==='meus')l=todos.filter(c=>c.status!=='ENCERRADO'&&souDest(c));
+  else if(_aba==='abertos')l=todos.filter(c=>c.status!=='ENCERRADO'&&souOrig(c));
+  else if(_aba==='todos')l=todos.filter(c=>c.status!=='ENCERRADO');
+  else if(_aba==='atrasados')l=todos.filter(atrasado);
+  else l=todos.filter(c=>c.status==='ENCERRADO');
+  if(b)l=l.filter(c=>[numTxt(c),c.titulo,c.descricao,c.destNome,c.criadoPor,c.tipo,pedTxt(c)].join(' ').toLowerCase().includes(b));
+  if(_aba==='encerrados')l.sort((x,y)=>String(y.encerradoEm||'').localeCompare(String(x.encerradoEm||'')));
+  else if(_aba==='atrasados')l.sort((x,y)=>diasAtraso(y)-diasAtraso(x));
+  else l.sort((x,y)=>((minhaAcao(x)?0:1)-(minhaAcao(y)?0:1))||String(x.prazo).localeCompare(String(y.prazo))||((x.num||0)-(y.num||0)));
+  return l;
+}
+function render(soLista){
+  const el=document.getElementById('proj-sec-chamados');if(!el)return;
+  if(!temAcesso()){el.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700;font-size:.85rem">🔒 ACESSO NÃO PERMITIDO — apenas Projetos ou Administrador.</div>';return;}
+  try{atualizarBadge();}catch(e){}
+  const todos=Object.values(_itens).filter(visivel);
+  const ve=veTudo(),abre=podeAbrir();
+  if(!ve&&_aba==='todos')_aba='meus';
+  const nMeus=todos.filter(c=>c.status!=='ENCERRADO'&&souDest(c)).length;
+  const nAb=todos.filter(c=>c.status!=='ENCERRADO'&&souOrig(c)).length;
+  const nAtr=todos.filter(atrasado).length;
+  const aMeus=todos.filter(c=>souDest(c)&&minhaAcao(c)).length;
+  const aAb=todos.filter(c=>souOrig(c)&&!souDest(c)&&minhaAcao(c)).length;
+  if(!abre&&!nAb&&_aba==='abertos')_aba='meus';
+  const tab=(k,txt,n,al)=>`<button class="dash-tab${_aba===k?' active':''}" onclick="cipSetAba('${k}')">${txt}${n?` <span class="chx-n${al?' al':''}">${n}</span>`:''}</button>`;
+  const l=listaDaAba(),enc=_aba==='encerrados';
+  const linhas=l.map(c=>{
+    const s=situacao(c),p=PRIO[c.prioridade]||PRIO.NORMAL,acao=minhaAcao(c);
+    const borda=s.k==='atr'?'#dc2626':(s.k==='hoje'||s.k==='amanha')?'#f59e0b':'transparent';
+    const prorr=c.prorrogacoes?`<div class="chx-sub" style="color:#b45309">Prorrogado ${c.prorrogacoes}x · original ${fmtD(c.prazoOriginal)}</div>`:'';
+    const extra=c.pedidoPrazo?`<div class="chx-sub" style="color:#c2410c">⏳ Pediu mais prazo: até ${fmtD(c.pedidoPrazo.novo)}</div>`:prorr;
+    let prazoCol,sitCol,ultCol;
+    if(enc){
+      prazoCol=`<span class="chx-mut">${fmtD(String(c.encerradoEm||'').slice(0,10))}</span>${c.resolvidoNoPrazo===false?`<div class="chx-sub" style="color:#b91c1c">🔴 resolvido com ${duTxt(c.diasAtrasoResolucao||0)} de atraso</div>`:''}${prorr}`;
+      const av=c.avaliacao&&AVAL[c.avaliacao.nota];
+      sitCol=pill(s.txt,s.cor,s.bg);ultCol=av?pill(av.l,av.cor,av.bg):(c.encerradoTipo==='SEM_NECESSIDADE'?'<span class="chx-sub">Não precisou mais</span>':'');
+    }else{
+      prazoCol=`${fmtD(c.prazo)}${extra}`;
+      sitCol=`${pill(s.txt,s.cor,s.bg)}<div class="chx-sub">${c.status==='ABERTO'?'Ainda não começou':c.status==='ANDAMENTO'?'Em andamento':''}</div>`;
+      ultCol=acao?`<span class="chx-acao-tag">👉 ${esc(acao)}</span>`:'';
+    }
+    const pt=pedTxt(c);
+    return`<tr class="chx-tr${acao&&!enc?' chx-acao':''}${s.k==='atr'?' chx-atr':''}" style="box-shadow:inset 3px 0 0 ${borda}" onclick="cipAbrir('${c.id}')">
+      <td class="chx-num">${numTxt(c)}</td>
+      <td><div class="chx-1l"><b>${esc(c.destNome||'—')}</b></div><div class="chx-sub chx-1l">aberto por ${esc(c.criadoPor||'—')}</div></td>
+      <td><div class="chx-1l" title="${esc(c.titulo)}">${esc(c.titulo)}</div><div class="chx-sub chx-1l" title="${esc(pt)}">${esc(c.tipo||'')}${pt?' · '+esc(pt):''}</div></td>
+      <td>${pill(p.l,p.cor,p.bg)}</td>
+      <td class="chx-nw">${prazoCol}</td>
+      <td class="chx-nw">${sitCol}</td>
+      <td>${ultCol}</td>
+    </tr>`;
+  }).join('');
+  const vazio={meus:'Nenhum chamado para você. 👏',abertos:'Você não tem chamado em aberto.',todos:'Nenhum chamado em aberto no setor.',atrasados:'Nenhum chamado atrasado. 👏',encerrados:'Nenhum chamado encerrado ainda.'}[_aba];
+  const th='padding:9px 10px;font-size:.68rem;text-transform:uppercase;letter-spacing:.03em;color:#64748b;font-weight:700;background:#f8fafc;text-align:left;position:sticky;top:0;z-index:1';
+  const tabela=`<table class="chx-t cip-t"><thead><tr><th style="${th};width:84px">Nº</th><th style="${th};width:170px">Projetista</th><th style="${th}">Assunto · pedido</th><th style="${th};width:100px">Prioridade</th><th style="${th};width:140px">${enc?'Encerrado em':'Prazo'}</th><th style="${th};width:175px">Situação</th><th style="${th};width:190px">${enc?'Avaliação':'Precisa de você'}</th></tr></thead><tbody>${linhas||`<tr><td colspan="7" style="text-align:center;padding:30px;color:#94a3b8">${vazio}</td></tr>`}</tbody></table>`;
+  if(soLista){const t=document.getElementById('cip-lista');if(t){t.innerHTML=tabela;return;}}
+  el.innerHTML=`<div class="chx-topo">
+      <div class="dash-tabs chx-tabs">${tab('meus','📥 Para mim',nMeus,aMeus)}${(abre||nAb)?tab('abertos','📤 Abertos por mim',nAb,aAb):''}${ve?tab('todos','📐 Todos do setor',todos.filter(c=>c.status!=='ENCERRADO').length):''}${tab('atrasados','🔴 Atrasados',nAtr,nAtr)}${tab('encerrados','✅ Encerrados',0)}</div>
+      ${abre?`<button type="button" class="dash-btn-conf chx-novo" onclick="cipNovo()">📣 Abrir chamado</button>`:''}
+    </div>
+    <div class="chx-barra"><input class="fc chx-busca" placeholder="🔎 Buscar por número, assunto, projetista, OS ou cliente" value="${esc(_busca)}" oninput="cipBuscar(this.value)"><span class="chx-mut" style="font-size:.72rem">Demandas internas do setor de Projetos. Nada encerra sozinho: só quem abriu confirma.</span></div>
+    <div id="cip-lista">${tabela}</div>`;
+}
+
+// ── Abrir chamado ──
+window.cipNovo=function(pedidoId){
+  if(!podeAbrir()){toast('Só Supervisor ou acima de Projetos abre chamado interno.','terr');return;}
+  const lst=projetistas().filter(e=>e!==meuEmail());
+  if(!lst.length){toast('Nenhum usuário do setor Projetos cadastrado.','terr');return;}
+  _pedSel=null;
+  const bt=lst.map(e=>`<button type="button" class="plx-tg" data-e="${esc(e)}" onclick="this.parentNode.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===this))">${esc(nomeDe(e))}</button>`).join('');
+  const prioBt=Object.keys(PRIO).map(k=>`<button type="button" class="plx-tg${k==='NORMAL'?' on':''}" data-prio="${k}" onclick="cipEscolherPrio('${k}')">${PRIO[k].l} · ${duTxt(PRIO[k].d)}</button>`).join('');
+  modal('mo-cip-novo','📣 Abrir chamado interno',`
+    <div class="fg"><label>Para quem <span class="r">*</span></label><div class="chx-prio" id="cipn-dest">${bt}</div></div>
+    <div class="fg"><label>Pedido (se tiver)</label><div id="cipn-ped-sel"></div><input id="cipn-ped-busca" class="fc chx-tn" placeholder="Digite a OS, o cliente ou o JOB" oninput="cipPedBuscar(this.value)" autocomplete="off"><div id="cipn-ped-res" style="display:flex;flex-direction:column;gap:4px;margin-top:6px"></div></div>
+    <div class="fg"><label>Assunto <span class="r">*</span></label><input id="cipn-titulo" class="fc chx-tn" maxlength="120" placeholder="Resumo em uma linha"></div>
+    <div class="fg"><label>Tipo <span class="r">*</span></label><select id="cipn-tipo" class="fc">${TIPOS.map(t=>`<option>${esc(t)}</option>`).join('')}</select></div>
+    <div class="fg"><label>Prioridade <span class="r">*</span></label><div class="chx-prio" id="cipn-prio" data-v="NORMAL">${prioBt}</div><div id="cipn-prazo-prev" class="chx-sub" style="margin-top:6px"></div></div>
+    <div class="fg"><label>O que precisa ser feito <span class="r">*</span></label><textarea id="cipn-desc" class="fc chx-tn" rows="5" maxlength="2000" placeholder="Descreva o que aconteceu e o que o projetista precisa fazer."></textarea></div>
+    ${arqCampo('cipn-arq','Fotos ou documentos (se tiver)')}
+    <div class="chx-sub" style="margin:-6px 0 12px">O projetista recebe o aviso no sino do sistema.</div>
+    <button type="button" class="chx-btn-main" onclick="cipSalvarNovo(this)">📣 Abrir chamado</button>`,600);
+  cipEscolherPrio('NORMAL');
+  if(pedidoId)cipPedEscolher(pedidoId);
+};
+window.cipEscolherPrio=function(k){
+  const w=document.getElementById('cipn-prio');if(!w)return;w.dataset.v=k;
+  w.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.prio===k));
+  const pv=document.getElementById('cipn-prazo-prev');if(pv)pv.innerHTML=`Prazo para resolver: <b>${fmtD(prazoDe(k))}</b>`;
+};
+const N=s=>String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();
+window.cipPedBuscar=function(q){
+  const el=document.getElementById('cipn-ped-res');if(!el)return;
+  const ts=N(q).trim().split(/\s+/).filter(Boolean);
+  if(!ts.length){el.innerHTML='';return;}
+  const l=(typeof pedidos!=='undefined'?pedidos:[]).filter(p=>p&&!p.cancelado&&p.status!=='cancelado').filter(p=>{const h=N([p.os,_pedNome(p),p.cliente,p.razaoSocial,p.nomeFantasia,p.job].join(' '));return ts.every(t=>h.includes(t));}).sort((a,b)=>(parseInt(b.os)||0)-(parseInt(a.os)||0)).slice(0,8);
+  el.innerHTML=l.length?l.map(p=>`<button type="button" class="chx-grp-i" style="justify-content:flex-start;text-align:left;white-space:normal" onclick="cipPedEscolher('${p.id}')">${esc(pedLbl(p))}</button>`).join(''):'<div class="chx-sub">Nenhum pedido encontrado.</div>';
+};
+window.cipPedEscolher=function(id){
+  const p=(typeof pedidos!=='undefined'?pedidos:[]).find(x=>x.id===id);if(!p)return;
+  _pedSel=p;
+  const s=document.getElementById('cipn-ped-sel'),b=document.getElementById('cipn-ped-busca'),r=document.getElementById('cipn-ped-res');
+  if(s)s.innerHTML=`<span class="chx-arq" style="max-width:100%">📐 ${esc(pedLbl(p))} <button type="button" onclick="cipPedLimpar()" title="Tirar">✕</button></span>`;
+  if(b)b.style.display='none';if(r)r.innerHTML='';
+};
+window.cipPedLimpar=function(){_pedSel=null;const s=document.getElementById('cipn-ped-sel'),b=document.getElementById('cipn-ped-busca');if(s)s.innerHTML='';if(b){b.style.display='';b.value='';b.focus();}};
+window.cipSalvarNovo=async function(btn){
+  const v=id=>(document.getElementById(id)||{}).value||'';
+  const dEl=document.querySelector('#cipn-dest button.on');const destEmail=dEl?dEl.dataset.e:'';
+  const titulo=v('cipn-titulo').trim(),tipo=v('cipn-tipo'),desc=v('cipn-desc').trim();
+  const prio=(document.getElementById('cipn-prio')||{dataset:{}}).dataset.v||'NORMAL';
+  if(!destEmail){toast('Escolha para quem é o chamado','terr');return;}
+  if(!titulo){toast('Escreva o assunto','terr');return;}
+  if(!desc){toast('Descreva o que precisa ser feito','terr');return;}
+  if(!window._fbChCriarSeq){toast('O sistema ainda está carregando — tente de novo em alguns segundos','twar');return;}
+  if(btn){btn.disabled=true;btn.textContent='Abrindo...';}
+  try{
+    const anexos=await subirArqs('cipn-arq');
+    const d=new Date(),mes=d.getFullYear()+'_'+String(d.getMonth()+1).padStart(2,'0');
+    const prazo=prazoDe(prio),p=_pedSel;
+    const c={mes,destEmail,destNome:nomeDe(destEmail),titulo,tipo,descricao:desc,anexos,prioridade:prio,prazo,prazoOriginal:prazo,status:'ABERTO',
+      pedidoId:p?p.id:'',os:p?String(p.os||''):'',pedidoLbl:p?pedLbl(p):'',
+      criadoPor:meuNome(),criadoPorEmail:meuEmail(),criadoEm:agora(),pedidoPrazo:null,prorrogacoes:0,prazoHist:[],hist:[]};
+    hist(c,'abertura',`Chamado aberto por ${c.criadoPor} para ${c.destNome}${p?' · '+c.pedidoLbl:''} · prioridade ${PRIO[prio].l} · prazo ${fmtD(prazo)}`);
+    const r=await window._fbChCriarSeq(SEQ,docNome(mes),[c]);
+    iniciarWatch();
+    closeM('mo-cip-novo');
+    toast(`Chamado aberto — CI-${String(r.num).padStart(4,'0')} para ${c.destNome} ✅`,'tok');
+    _aba='abertos';render();
+  }catch(e){console.error(e);toast('Não consegui abrir o chamado: '+(e.message||e),'terr');if(btn){btn.disabled=false;btn.textContent='📣 Abrir chamado';}}
+};
+
+// ── Detalhe ──
+window.cipAbrir=function(id){
+  const c=_itens[id];if(!c||!visivel(c)){toast('Chamado não encontrado','terr');return;}
+  modal('mo-cip','','',760);
+  const m=document.getElementById('mo-cip');m.dataset.id=id;renderDetalhe(id);
+};
+window.cipVerChecklist=function(pid){try{closeM('mo-cip');}catch(e){}setTimeout(()=>{try{projIniciarOuAbrirChecklist(pid);}catch(e){toast('Não consegui abrir o checklist','terr');}},80);};
+const HIST_IC={abertura:'📣',comecou:'▶️',comentario:'💬',pedido_prazo:'⏳',prazo_aprovado:'✅',prazo_recusado:'⛔',resolvido:'🛠️',confirmado:'🏁',reaberto:'🔁',sem_necessidade:'🗂️',excluido:'🗑️'};
+function prazoHistHtml(c){
+  const l=c.prazoHist||[];if(!l.length&&!c.prorrogacoes&&!c.reaberturas)return'';
+  const dec=x=>x.decisao==='APROVADO'?pill('Aprovado','#15803d','#dcfce7'):x.decisao==='RECUSADO'?pill('Recusado','#b91c1c','#fee2e2'):x.decisao==='SEM_DECISAO'?pill('Sem decisão (resolvido antes)','#475569','#f1f5f9'):pill('Aguardando decisão','#c2410c','#ffedd5');
+  const linhas=l.map(x=>x.tipo==='REABERTURA'
+    ?`<tr><td>🔁 Reabertura</td><td>${fmtD(x.de)} → <b>${fmtD(x.para)}</b></td><td>${esc(x.por)}<div class="chx-sub">${fmtDH(x.em)}</div></td><td colspan="2">${esc(x.motivo||'')}</td></tr>`
+    :`<tr><td>⏳ Pedido de prazo</td><td>${fmtD(x.de)} → <b>${fmtD(x.para)}</b></td><td>${esc(x.pedidoPor)}<div class="chx-sub">${fmtDH(x.pedidoEm)}</div></td><td>${esc(x.motivo)}</td><td>${dec(x)}${x.decididoPor?`<div class="chx-sub">${esc(x.decididoPor)} · ${fmtDH(x.decididoEm)}</div>`:''}${x.obs?`<div class="chx-sub">${esc(x.obs)}</div>`:''}</td></tr>`).join('');
+  return`<div class="chx-hist-t">📅 Histórico de prazos</div><div class="chx-ph"><div class="chx-sub" style="margin-bottom:6px">Prazo original: <b style="color:#0f172a">${fmtD(c.prazoOriginal)}</b> · prazo atual: <b style="color:#0f172a">${fmtD(c.prazo)}</b> · ${c.prorrogacoes?`prorrogado <b style="color:#b45309">${c.prorrogacoes}x</b>`:'nunca prorrogado'}${c.reaberturas?` · reaberto ${c.reaberturas}x`:''}</div>${l.length?`<table class="chx-pht"><thead><tr><th>O quê</th><th>Prazo</th><th>Quem / quando</th><th>Motivo</th><th>Decisão</th></tr></thead><tbody>${linhas}</tbody></table>`:''}</div>`;
+}
+function renderDetalhe(id){
+  const c=_itens[id],m=document.getElementById('mo-cip');if(!m)return;
+  const box=m.querySelector('.chx-mbody'),tit=m.querySelector('.chx-mtit');
+  if(!c||c.excluido){if(box)box.innerHTML='<div style="padding:20px;color:#94a3b8">Este chamado foi excluído pelo administrador.</div>';return;}
+  const s=situacao(c),p=PRIO[c.prioridade]||PRIO.NORMAL,aberto=c.status!=='ENCERRADO',D=ageDest(c),O=ageOrig(c);
+  if(tit)tit.textContent=numTxt(c)+' · '+c.titulo;
+  const bts=[];
+  if(aberto){
+    if(c.pedidoPrazo&&O)bts.push(`<button class="chx-b ok" onclick="cipAcao('${id}','aprovar_prazo')">✅ Aprovar novo prazo</button>`,`<button class="chx-b no" onclick="cipAcao('${id}','recusar_prazo')">⛔ Recusar novo prazo</button>`);
+    if(c.status==='RESOLVIDO'&&O)bts.push(`<button class="chx-b ok" onclick="cipAcao('${id}','confirmar')">🏁 Confirmar e avaliar</button>`,`<button class="chx-b no" onclick="cipAcao('${id}','reabrir')">🔁 Não resolveu — reabrir</button>`);
+    if(c.status==='ABERTO'&&D)bts.push(`<button class="chx-b ok" onclick="cipAcao('${id}','comecar')">▶️ Começar</button>`);
+    if((c.status==='ABERTO'||c.status==='ANDAMENTO')&&D){
+      bts.push(`<button class="chx-b ok" onclick="cipAcao('${id}','resolver')">🛠️ Marcar como resolvido</button>`);
+      if(!c.pedidoPrazo)bts.push(`<button class="chx-b" onclick="cipAcao('${id}','pedir_prazo')">⏳ Pedir mais prazo</button>`);
+    }
+    if(O&&c.status!=='RESOLVIDO')bts.push(`<button class="chx-b" onclick="cipAcao('${id}','sem_necessidade')">🗂️ Não preciso mais — encerrar</button>`);
+  }
+  if(D||O||veTudo())bts.push(`<button class="chx-b" onclick="cipAcao('${id}','comentar')">💬 Comentar</button>`);
+  if(isAdm())bts.push(`<button class="chx-b del" onclick="cipAcao('${id}','excluir')">🗑️ Excluir chamado</button>`);
+  const pend=c.pedidoPrazo?`<div class="chx-aviso">⏳ <b>${esc(c.destNome)} pediu mais prazo</b> — de ${fmtD(c.prazo)} para <b>${fmtD(c.pedidoPrazo.novo)}</b>.<div style="margin-top:3px">Motivo: ${esc(c.pedidoPrazo.motivo)}</div><div class="chx-sub">${fmtDH(c.pedidoPrazo.em)} · enquanto ${esc(c.criadoPor)} não responder, vale o prazo atual.</div></div>`:'';
+  const sol=(c.status==='RESOLVIDO'||c.status==='ENCERRADO')&&(c.solucao||(c.solucaoAnexos||[]).length)?`<div class="chx-sol"><b>🛠️ O que foi feito — ${esc(c.resolvidoPor||c.destNome)}</b> <span class="chx-sub">${fmtDH(c.resolvidoEm)}${c.resolvidoNoPrazo===false?` · <b style="color:#b91c1c">🔴 ${duTxt(c.diasAtrasoResolucao||0)} de atraso</b>`:' · no prazo'}</span>${c.solucao?`<div style="white-space:pre-wrap;margin-top:4px">${esc(c.solucao)}</div>`:''}${anexosHtml(c.solucaoAnexos)}</div>`:'';
+  const av=c.avaliacao&&AVAL[c.avaliacao.nota]?`<div class="chx-aval">⭐ <b>Avaliação de ${esc(c.avaliacao.por)}:</b> ${pill(AVAL[c.avaliacao.nota].l,AVAL[c.avaliacao.nota].cor,AVAL[c.avaliacao.nota].bg)} <span class="chx-sub">${fmtDH(c.avaliacao.em)}</span>${c.avaliacao.obs?`<div style="margin-top:3px;white-space:pre-wrap">${esc(c.avaliacao.obs)}</div>`:''}</div>`:'';
+  const ped=pedidoDe(c);
+  const pedHtml=(ped||c.pedidoLbl)?`<div class="chx-grp"><b>Pedido:</b> <span>${esc(pedTxt(c))}</span>${ped&&ped.arq_os_url?`<a href="${esc(ped.arq_os_url)}" target="_blank" rel="noopener" class="chx-grp-i" style="text-decoration:none">📄 Pedido (PDF)</a>`:''}${ped?`<button type="button" class="chx-grp-i" onclick="cipVerChecklist('${ped.id}')">📐 Checklist do projeto</button>`:''}</div>`:'';
+  const hs=(c.hist||[]).slice().reverse().map(h=>`<div class="chx-h"><div class="chx-h-ic">${HIST_IC[h.tipo]||'•'}</div><div style="min-width:0"><div class="chx-sub"><b style="color:#0f172a">${esc(h.por)}</b> · ${fmtDH(h.em)}</div><div style="white-space:pre-wrap">${esc(h.txt)}</div>${anexosHtml(h.anexos)}</div></div>`).join('');
+  const prazoInfo=c.prazoOriginal&&c.prazoOriginal!==c.prazo?` <span class="chx-sub">(original ${fmtD(c.prazoOriginal)})</span>`:'';
+  box.innerHTML=`
+    <div class="chx-info">
+      <div><span>Para</span><b>${esc(c.destNome)}</b></div>
+      <div><span>Aberto por</span><b>${esc(c.criadoPor)}</b></div>
+      <div><span>Prioridade</span>${pill(p.l,p.cor,p.bg)}</div>
+      <div><span>Prazo</span><b>${fmtD(c.prazo)}</b>${prazoInfo}</div>
+      <div><span>Situação</span>${pill(s.txt,s.cor,s.bg)}</div>
+      <div><span>Tipo</span><b>${esc(c.tipo||'—')}</b></div>
+    </div>
+    <div class="chx-sub" style="margin:8px 0 4px">Aberto em ${fmtDH(c.criadoEm)} · ${esc(STATUS[c.status]||'')}</div>
+    ${pedHtml}
+    <div class="chx-desc">${esc(c.descricao)}${anexosHtml(c.anexos)}</div>
+    ${pend}${sol}${av}
+    ${bts.length?`<div class="chx-bts">${bts.join('')}</div>`:''}
+    ${prazoHistHtml(c)}
+    <div class="chx-hist-t">Linha do tempo</div>
+    <div class="chx-hist">${hs||'<div class="chx-sub">Sem registros.</div>'}</div>`;
+}
+
+// ── Ações ──
+const ACOES={
+  comecar:{t:'▶️ Começar',campo:false},
+  comentar:{t:'💬 Comentar',campo:'Comentário',obrig:true,arq:true},
+  pedir_prazo:{t:'⏳ Pedir mais prazo',campo:'Por que precisa de mais prazo?',obrig:true,data:true},
+  aprovar_prazo:{t:'✅ Aprovar novo prazo',campo:'Observação (opcional)',obrig:false},
+  recusar_prazo:{t:'⛔ Recusar novo prazo',campo:'Por que o prazo não pode ser estendido?',obrig:true},
+  resolver:{t:'🛠️ Marcar como resolvido',campo:'O que foi feito?',obrig:false,arq:true},
+  confirmar:{t:'🏁 Confirmar e encerrar',campo:'Comentário (opcional)',obrig:false},
+  reabrir:{t:'🔁 Reabrir chamado',campo:'O que ainda não foi resolvido?',obrig:true},
+  sem_necessidade:{t:'🗂️ Encerrar — não preciso mais',campo:'Por que não precisa mais?',obrig:true},
+  excluir:{t:'🗑️ Excluir chamado',campo:'Motivo da exclusão',obrig:true}
+};
+window.cipAcao=function(id,acao){
+  const c=_itens[id],a=ACOES[acao];if(!c||!a)return;
+  let html='';
+  if(acao==='pedir_prazo'){const min=_isoLocal(_addDiasUteis(c.prazo<hoje()?hoje():c.prazo,1));html+=`<div class="fg"><label>Novo prazo <span class="r">*</span></label><input type="date" id="cipa-data" class="fc" min="${min}" value="${min}"><div class="chx-sub" style="margin-top:5px">Prazo atual: ${fmtD(c.prazo)}. ${esc(c.criadoPor)} aprova ou recusa; até lá vale o prazo atual.</div></div>`;}
+  if(acao==='comecar')html+=`<div style="font-size:.82rem;color:#334155;margin-bottom:14px">Marca que você começou a resolver este chamado. Prazo: <b>${fmtD(c.prazo)}</b>.</div>`;
+  if(acao==='resolver')html+=`<div class="chx-sub" style="margin-bottom:10px">Comprove: escreva o que foi feito <b>e/ou</b> anexe foto ou documento — pelo menos um dos dois é obrigatório.${c.prazo<hoje()?` <b style="color:#b91c1c">O prazo venceu em ${fmtD(c.prazo)} — vai ficar registrado o atraso.</b>`:''}</div>`;
+  if(acao==='confirmar')html+=`<div class="fg"><label>O que foi pedido foi atendido? <span class="r">*</span></label><div class="chx-prio" id="cipa-aval">${Object.keys(AVAL).map(k=>`<button type="button" class="plx-tg" data-v="${k}" onclick="this.parentNode.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===this))">${AVAL[k].l}</button>`).join('')}</div></div>`;
+  if(acao==='reabrir')html+=`<div class="chx-sub" style="margin-bottom:10px">O chamado volta para ${esc(c.destNome)} com novo prazo de ${duTxt((PRIO[c.prioridade]||PRIO.NORMAL).d)}: <b>${fmtD(prazoDe(c.prioridade))}</b>.</div>`;
+  if(acao==='excluir')html+=`<div class="chx-aviso" style="background:#fef2f2;border-color:#fecaca;color:#991b1b">O chamado some da lista de todos. Só o administrador pode fazer isso.</div>`;
+  if(a.campo)html+=`<div class="fg"><label>${esc(a.campo)}${a.obrig?' <span class="r">*</span>':''}</label><textarea id="cipa-txt" class="fc chx-tn" rows="4" maxlength="1500"></textarea></div>`;
+  if(a.arq)html+=arqCampo('cipa-arq',acao==='resolver'?'Fotos ou documentos que comprovam':'Anexar (opcional)');
+  html+=`<button type="button" class="chx-btn-main${acao==='excluir'?' del':''}" onclick="cipConfirmarAcao('${id}','${acao}',this)">${esc(a.t)}</button>`;
+  modal('mo-cip-acao',a.t,html,500);
+};
+window.cipConfirmarAcao=async function(id,acao,btn){
+  const a=ACOES[acao],txt=((document.getElementById('cipa-txt')||{}).value||'').trim(),data=(document.getElementById('cipa-data')||{}).value||'';
+  const nArq=(_arqs['cipa-arq']||[]).length;
+  if(a.obrig&&!txt){toast('Preencha: '+a.campo,'terr');return;}
+  if(acao==='resolver'&&!txt&&!nArq){toast('Comprove: escreva o que foi feito ou anexe uma foto/documento','terr');return;}
+  const avEl=document.querySelector('#cipa-aval button.on'),aval=avEl?avEl.dataset.v:'';
+  if(acao==='confirmar'&&!aval){toast('Diga se o que foi pedido foi atendido','terr');return;}
+  if(acao==='pedir_prazo'){const c=_itens[id];if(!data||data<=c.prazo||data<=hoje()){toast('O novo prazo tem que ser depois do prazo atual e de hoje','terr');return;}}
+  if(btn){btn.disabled=true;btn.textContent='Salvando...';}
+  const eu=meuNome();
+  try{
+    const anexos=a.arq?await subirArqs('cipa-arq'):[];
+    const res=await alterar(id,c=>{
+      const fechado=c.status==='ENCERRADO';c.prazoHist=Array.isArray(c.prazoHist)?c.prazoHist:[];
+      const ultPed=()=>{for(let i=c.prazoHist.length-1;i>=0;i--)if(c.prazoHist[i].tipo==='PEDIDO'&&c.prazoHist[i].decisao==='PENDENTE')return c.prazoHist[i];return null;};
+      switch(acao){
+        case'comecar':if(c.status!=='ABERTO')return false;if(!ageDest(c))throw new Error('Só o projetista do chamado começa');
+          c.status='ANDAMENTO';c.comecouEm=agora();hist(c,'comecou',`${eu} começou a resolver`);break;
+        case'comentar':hist(c,'comentario',txt,anexos);break;
+        case'pedir_prazo':if(fechado||c.pedidoPrazo)return false;if(!ageDest(c))throw new Error('Só o projetista do chamado pede prazo');
+          c.pedidoPrazo={novo:data,motivo:txt,por:eu,em:agora()};
+          c.prazoHist.push({tipo:'PEDIDO',de:c.prazo,para:data,motivo:txt,pedidoPor:eu,pedidoEm:c.pedidoPrazo.em,decisao:'PENDENTE'});
+          if(c.status==='ABERTO')c.status='ANDAMENTO';
+          hist(c,'pedido_prazo',`Pediu mais prazo: de ${fmtD(c.prazo)} para ${fmtD(data)}\nMotivo: ${txt}`);break;
+        case'aprovar_prazo':case'recusar_prazo':{
+          if(!c.pedidoPrazo)return false;if(!ageOrig(c))throw new Error('Só quem abriu decide o prazo');
+          const up=ultPed(),ap=acao==='aprovar_prazo';
+          if(up){up.decisao=ap?'APROVADO':'RECUSADO';up.decididoPor=eu;up.decididoEm=agora();up.obs=txt;}
+          if(ap){hist(c,'prazo_aprovado',`Novo prazo aprovado: ${fmtD(c.prazo)} → ${fmtD(c.pedidoPrazo.novo)}${txt?'\n'+txt:''}`);c.prazo=c.pedidoPrazo.novo;c.prorrogacoes=(c.prorrogacoes||0)+1;}
+          else hist(c,'prazo_recusado',`Pedido de prazo recusado — continua valendo ${fmtD(c.prazo)}\nMotivo: ${txt}`);
+          c.ultimaDecisaoPrazo={tipo:ap?'aprovado':'recusado',em:agora()};c.pedidoPrazo=null;break;}
+        case'resolver':if(fechado||c.status==='RESOLVIDO')return false;if(!ageDest(c))throw new Error('Só o projetista do chamado resolve');
+          c.status='RESOLVIDO';c.solucao=txt;c.solucaoAnexos=anexos;c.resolvidoEm=agora();c.resolvidoPor=eu;c.resolvidoNoPrazo=hoje()<=c.prazo;c.diasAtrasoResolucao=diasAtraso(c);
+          if(c.pedidoPrazo){const up=ultPed();if(up)up.decisao='SEM_DECISAO';c.pedidoPrazo=null;}
+          hist(c,'resolvido',`Marcado como resolvido${c.resolvidoNoPrazo?' (no prazo)':' com '+duTxt(c.diasAtrasoResolucao)+' de atraso'}${txt?'\n'+txt:''}`,anexos);break;
+        case'confirmar':if(c.status!=='RESOLVIDO')return false;if(!ageOrig(c))throw new Error('Só quem abriu confirma');
+          c.status='ENCERRADO';c.encerradoTipo='CONFIRMADO';c.encerradoEm=agora();c.encerradoPor=eu;c.avaliacao={nota:aval,obs:txt,por:eu,em:agora()};
+          hist(c,'confirmado',`Solução confirmada — ${AVAL[aval].l.toLowerCase()} — chamado encerrado${txt?'\n'+txt:''}`);break;
+        case'reabrir':{if(c.status!=='RESOLVIDO')return false;if(!ageOrig(c))throw new Error('Só quem abriu reabre');
+          const novo=prazoDe(c.prioridade);c.prazoHist.push({tipo:'REABERTURA',de:c.prazo,para:novo,motivo:txt,por:eu,em:agora()});
+          c.status='ANDAMENTO';c.reaberturas=(c.reaberturas||0)+1;c.prazo=novo;c.reabertoEm=agora();
+          hist(c,'reaberto',`Reaberto (não atendeu) — novo prazo ${fmtD(c.prazo)}\n${txt}`);break;}
+        case'sem_necessidade':if(fechado)return false;if(!ageOrig(c))throw new Error('Só quem abriu encerra');
+          if(c.pedidoPrazo){const up=ultPed();if(up)up.decisao='SEM_DECISAO';}
+          c.status='ENCERRADO';c.encerradoTipo='SEM_NECESSIDADE';c.encerradoEm=agora();c.encerradoPor=eu;c.pedidoPrazo=null;hist(c,'sem_necessidade',`Encerrado por quem abriu — não precisa mais\n${txt}`);break;
+        case'excluir':if(!isAdm())throw new Error('Só o administrador exclui chamado');
+          c.excluido=true;c.excluidoEm=agora();c.excluidoPor=eu;hist(c,'excluido',`Excluído pelo administrador\n${txt}`);break;
+      }
+    });
+    closeM('mo-cip-acao');
+    if(!res){toast('Nada foi alterado — o chamado já tinha sido atualizado por outra pessoa. Veja a situação atual.','twar');return;}
+    if(acao==='excluir')closeM('mo-cip');
+    toast({comecar:'Chamado começado ✅',comentar:'Comentário registrado ✅',pedir_prazo:'Pedido de prazo enviado ✅',aprovar_prazo:'Novo prazo aprovado ✅',recusar_prazo:'Pedido de prazo recusado',resolver:'Marcado como resolvido ✅',confirmar:'Chamado encerrado ✅',reabrir:'Chamado reaberto',sem_necessidade:'Chamado encerrado',excluir:'Chamado excluído'}[acao],'tok');
+  }catch(e){console.error(e);toast('Não consegui salvar: '+(e.message||e),'terr');if(btn){btn.disabled=false;btn.textContent=a.t;}}
+};
+
+// ── Janela (mesmo padrão .mov/.mvmod dos Chamados entre setores; fecha só pelo ✕) ──
+function modal(id,titulo,html,larg){
+  let m=document.getElementById(id);
+  if(!m){m=document.createElement('div');m.className='mov';m.id=id;document.body.appendChild(m);}
+  m.innerHTML=`<div class="mvmod" style="width:${larg||520}px;max-width:96vw;max-height:90vh;overflow-y:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px"><h3 class="chx-mtit" style="margin-bottom:0">${esc(titulo)}</h3><button onclick="fecharJanela('${id}')" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1;padding:2px 4px;width:auto;height:auto" title="Fechar">✕</button></div>
+    <div class="chx-mbody">${html}</div></div>`;
+  openM(id);
+}
+
+// ── Avisos no sino ──
+function avisos(){
+  const out=[];if(!temAcesso())return out;const h=hoje();
+  Object.values(_itens).forEach(c=>{
+    if(!c||c.excluido||c.status==='ENCERRADO')return;
+    const base={automatico:true,tipoAuto:'chamado_proj',cipId:c.id,destinatarioTipo:'chamado'},n=numTxt(c),pt=pedTxt(c)?` (${pedTxt(c)})`:'';
+    if(souDest(c)){
+      if(c.status==='ABERTO')out.push({...base,id:'cip_'+c.id+'_novo',assunto:'📣 Chamado interno para você',texto:`${n} de ${c.criadoPor}: "${c.titulo}"${pt} — prazo ${fmtD(c.prazo)}.`});
+      if(c.status!=='RESOLVIDO'){
+        if(c.ultimaDecisaoPrazo)out.push({...base,id:'cip_'+c.id+'_dec_'+c.ultimaDecisaoPrazo.em,assunto:c.ultimaDecisaoPrazo.tipo==='aprovado'?'✅ Novo prazo aprovado':'⛔ Pedido de prazo recusado',texto:`${n} "${c.titulo}" — prazo agora: ${fmtD(c.prazo)}.`});
+        if(c.reabertoEm)out.push({...base,id:'cip_'+c.id+'_reab_'+c.reabertoEm,assunto:'🔁 Chamado interno reaberto',texto:`${n} "${c.titulo}" voltou — ${c.criadoPor} disse que não foi resolvido. Novo prazo ${fmtD(c.prazo)}.`});
+        if(!c.pedidoPrazo){
+          if(c.prazo<h)out.push({...base,id:'cip_'+c.id+'_atr_'+c.prazo,assunto:'🔴 Chamado interno atrasado',texto:`${n} "${c.titulo}" venceu em ${fmtD(c.prazo)}. Resolva ou peça mais prazo.`});
+          else if(c.prazo===h||_lpDuEntre(h,c.prazo)<=1)out.push({...base,id:'cip_'+c.id+'_vence_'+c.prazo,assunto:'⏰ Chamado interno vencendo',texto:`${n} "${c.titulo}" vence ${c.prazo===h?'hoje':'amanhã'} (${fmtD(c.prazo)}).`});
+        }
+      }
+    }
+    if(souOrig(c)){
+      if(c.pedidoPrazo)out.push({...base,id:'cip_'+c.id+'_pp_'+c.pedidoPrazo.em,assunto:'⏳ Pedido de mais prazo',texto:`${c.destNome} pediu para passar o ${n} "${c.titulo}" de ${fmtD(c.prazo)} para ${fmtD(c.pedidoPrazo.novo)}. Aprove ou recuse.`});
+      if(c.status==='RESOLVIDO')out.push({...base,id:'cip_'+c.id+'_res_'+c.resolvidoEm,assunto:'🛠️ Chamado interno resolvido — confirme',texto:`${c.destNome} marcou o ${n} "${c.titulo}" como resolvido. Confira e avalie.`});
+    }
+  });
+  return out;
+}
+const _autoOrig=window._avisosAutomaticos;
+window._avisosAutomaticos=function(){const o=_autoOrig();try{return o.concat(avisos());}catch(e){console.warn('avisos chamados projetos',e);return o;}};
+const _aplicOrig=window._avisoAplicavelPara;
+window._avisoAplicavelPara=function(av){if(av&&av.tipoAuto==='chamado_proj')return true;return _aplicOrig.apply(this,arguments);};
+const _destOrig=window._avisoDestino;
+window._avisoDestino=function(av){
+  if(av&&av.tipoAuto==='chamado_proj'){if(!temAcesso())return null;return{label:'Abrir chamado',go:()=>{_avisoFecharPaineis();setSection('cat:PROJETOS');setTimeout(()=>{try{projSetTab('chamados',document.getElementById('cip-tab-btn'));cipAbrir(av.cipId);}catch(e){}},400);}};}
+  return _destOrig.apply(this,arguments);
+};
+window._cipItensDebug=()=>_itens;
 })();
 
 </script>
