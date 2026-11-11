@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-10.12';</script>
+<script>const APP_BUILD_VERSION='2026-11-11.6';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -11800,6 +11800,9 @@ async function editarVendaLista(os,pedidoId){
   if(!isAdm){toast('Apenas administradores podem editar valores','terr');return;}
   const x=XLSX_VENDAS_BY_OS[String(os)];
   if(!x){toast('Venda não encontrada','terr');return;}
+  // (2026-11-11) Se esta linha da planilha JÁ virou pedido antes (por outro admin, outra aba ou
+  // clique duplo), abre esse pedido — nunca cria um segundo (Bob's Salvador existia 2x assim).
+  {const _ja=_pedidoDaLinhaPlanilha(x);if(_ja){editarValoresPedido(_ja.id);return;}}
   const senha=await pedirSenhaAdmin('Editar Valores do Pedido','Digite sua senha de administrador para editar os valores:');
   if(!senha){toast('Cancelado','tinf');return;}
   if(senha!==_PIN_OK){toast('Senha incorreta','terr');return;}
@@ -11824,9 +11827,16 @@ async function editarVendaLista(os,pedidoId){
     // planilha caso o OS deste pedido seja trocado depois (ver comentário lá).
     origPlanilhaOs:String(x.p),
     valores,pagamento,instalacao,frete,bases:'',elevacoes:[],remocoes:[],projetos};
+  {const _ja=_pedidoDaLinhaPlanilha(x);if(_ja){editarValoresPedido(_ja.id);return;}}
   pedidos.push(pedido);
   await savePedidoFS(pedido);
   editarValoresPedido(pedido.id);
+}
+// Pedido que já existe para uma linha da planilha (XLSX_VENDAS) — pelo OS original da planilha
+// ou pelo número da OS (mesmos números, escrita normalizada).
+function _pedidoDaLinhaPlanilha(x){
+  if(!x)return null;
+  return pedidos.find(p=>p&&((p.origPlanilhaOs!=null&&_osMesmo(p.origPlanilhaOs,x.p))||(p.importadoPlanilha&&p.os!=null&&_osMesmo(p.os,x.p))))||null;
 }
 // Inclui manualmente uma venda antiga na lista de Planejamento → Finalização de Obra, mesmo
 // que ela não passe pelos critérios normais (origemComercial + instalação/frete emitidos),
@@ -11840,6 +11850,7 @@ async function incluirVendaNaFinalizacao(os,pedidoId){
   const {isAdm}=_getUserCat();
   if(!isAdm){toast('Apenas administradores podem incluir vendas antigas na Finalização de Obra','terr');return;}
   let p=pedidoId?pedidos.find(x=>x.id===pedidoId):null;
+  if(!p){try{p=_pedidoDaLinhaPlanilha(XLSX_VENDAS_BY_OS[String(os)]);}catch(e){}} // (2026-11-11) nunca cria um 2º
   if(p&&p.forcarFinalizacao){toast('Este pedido já está na lista de Finalização de Obra','tinf');return;}
   const senha=await pedirSenhaAdmin('Incluir na Finalização de Obra','Digite sua senha de administrador para incluir esta venda na lista de Finalização de Obra (Planejamento):');
   if(!senha){toast('Cancelado','tinf');return;}
@@ -12198,7 +12209,8 @@ async function salvarValoresPedido(){
   // OS duplicado (2026-07-22) — só valida quando o número realmente MUDA (deixar o mesmo OS
   // de sempre nunca deve travar, mesmo que já bata com a planilha — ver pedidoToVendaRow).
   // Ver _osJaEmUso().
-  if(novoOs&&novoOs!==p.os){
+  if(novoOs&&!_osMesmo(novoOs,p.os)){
+    if(_osEhPlaceholder(novoOs)){toast('Informe o número real da OS — "'+novoOs+'" não é um número de pedido','terr');return;}
     if(_osJaEmUso(novoOs,p.id,p.origPlanilhaOs)){toast('Nº da OS "'+novoOs+'" já está em uso por outra venda — use um número diferente','terr');return;}
     p.os=novoOs;
   } else if(novoOs){
@@ -12411,6 +12423,7 @@ async function salvarVendaManual(){
   // OS duplicado (2026-07-22) — venda manual sempre cria um pedido NOVO, então qualquer
   // colisão (com outro pedido ou com a planilha colada) é sempre um erro de digitação, sem
   // exceção. Ver _osJaEmUso().
+  if(_osEhPlaceholder(os)){toast('Informe o número real da OS — "'+os+'" não é um número de pedido','terr');return;}
   if(_osJaEmUso(os,null)){toast('Nº da OS "'+os+'" já está em uso por outra venda — use um número diferente','terr');return;}
   if(!cliente){toast('Informe o cliente','terr');return;}
   if(!cat){toast('Informe a categoria','terr');return;}
@@ -15389,7 +15402,7 @@ function checarOsDuplicado(){
   if(!campoOs||!warnEl)return false;
   const os=(campoOs.value||'').trim();
   const _pedOrigOs=(typeof editing!=='undefined'&&editing)?pedidos.find(x=>x.id===editing):null;
-  const duplicado=!!os&&(!_pedOrigOs||_pedOrigOs.os!==os)&&_osJaEmUso(os,typeof editing!=='undefined'?editing:null,_pedOrigOs?_pedOrigOs.origPlanilhaOs:null);
+  const duplicado=!!os&&(!_pedOrigOs||!_osMesmo(_pedOrigOs.os,os))&&_osJaEmUso(os,typeof editing!=='undefined'?editing:null,_pedOrigOs?_pedOrigOs.origPlanilhaOs:null);
   warnEl.style.display=duplicado?'':'none';
   warnEl.textContent=duplicado?`🔴 Nº da OS "${os}" já está em uso por outra venda — use um número diferente.`:'';
   return duplicado;
@@ -16018,8 +16031,11 @@ async function submit(){
     // (2026-11-03, OS 368 duplicada na Produção) rascunho do Conselho já nasce com a OS, então antes
     // passava direto — dois rascunhos com a mesma OS viravam dois pedidos. Agora o rascunho também é
     // conferido contra os outros pedidos do sistema.
-    const _rascOsRep=_pedOrigOs&&!_pedJaEmitido(_pedOrigOs)&&ed.os&&pedidos.some(x=>x&&x.id!==editing&&!x.copiaOsRepetida&&_pedJaEmitido(x)&&String(x.os||'').trim()===String(ed.os).trim());
-    if(ed.os&&(((!_pedOrigOs||_pedOrigOs.os!==ed.os)&&_osJaEmUso(ed.os,editing,_pedOrigOs?_pedOrigOs.origPlanilhaOs:null))||_rascOsRep)){
+    const _rascOsRep=_pedOrigOs&&!_pedJaEmitido(_pedOrigOs)&&ed.os&&pedidos.some(x=>x&&x.id!==editing&&!x.copiaOsRepetida&&_pedJaEmitido(x)&&x.os!=null&&_osTokens(x.os).some(t=>_osTokens(ed.os).map(_osNormTok).includes(_osNormTok(t))));
+    if(ed.os&&(!_pedOrigOs||!_osMesmo(_pedOrigOs.os,ed.os))&&_osEhPlaceholder(ed.os)){
+      erros.push({msg:'Informe o número real da OS — "'+ed.os+'" não é um número de pedido',aba:(idxConselho>=0?idxConselho:idxDados),label:(idxConselho>=0?'Conselho':'Dados Gerais')});
+    }
+    if(ed.os&&(((!_pedOrigOs||!_osMesmo(_pedOrigOs.os,ed.os))&&_osJaEmUso(ed.os,editing,_pedOrigOs?_pedOrigOs.origPlanilhaOs:null))||_rascOsRep)){
       erros.push({msg:'Nº da OS "'+ed.os+'" já está em uso por outra venda — use um número diferente',aba:(idxConselho>=0?idxConselho:idxDados),label:(idxConselho>=0?'Conselho':'Dados Gerais')});
     }
   }
@@ -17232,6 +17248,8 @@ async function _lixeiraRestaurar(id){
   try{
     if(item.tipo==='pedido'){
       const p=item.dados;
+      // (2026-11-11) não ressuscita uma venda cuja OS já está em outro pedido — viraria duplicata.
+      if(p&&p.os&&!pedidos.some(x=>x.id===p.id)&&_osJaEmUso(p.os,p.id,p.origPlanilhaOs)){toast('Não dá pra restaurar: a OS "'+p.os+'" já está em uso por outro pedido','terr');return;}
       if(!pedidos.some(x=>x.id===p.id))pedidos.push(p);
       if(window._fbSavePedido)await window._fbSavePedido(p);
     }else if(item.tipo==='contaPagar'){
@@ -28985,12 +29003,24 @@ function renderVendasCanceladas(){
 // excludeId = id do próprio pedido (edição não colide consigo mesmo).
 // excludeOrigPlanilhaOs = origPlanilhaOs do próprio pedido — é o mesmo OS que ele já
 // substituiu ao nascer de uma linha da planilha (ver editarVendaLista()), não uma colisão.
+// (2026-11-11) Compara número a número (_osTokens), sem espaço/zero à esquerda e sem diferença
+// de maiúscula: antes só barrava o texto IDÊNTICO — "18711 / 18712 " (com espaço) passava pelo
+// "18711 / 18712", e "54" passava pelo "54/74", gerando venda duplicada.
+// OS "provisório" (venda sem número ainda) — nunca mais pode ser gravado numa venda: é por ele
+// que a mesma venda acabava existindo 2x (uma sem número e outra com o número real).
+function _osEhPlaceholder(v){return /^(FALTA|S\/N|SN|NA|N\/A|SEM\s*N\w*|0+)(\b|-|$)/i.test(String(v==null?'':v).trim());}
+// Mesma OS escrita de jeito diferente ("18711 / 18712 " = "18711/18712", "054" = "54").
+function _osMesmo(a,b){const k=v=>_osTokens(v).map(_osNormTok).filter(Boolean).sort().join('|');return k(a)===k(b);}
+function _osNormTok(t){t=String(t==null?'':t).trim().toUpperCase().replace(/\s+/g,' ');return /^\d+$/.test(t)?String(parseInt(t,10)):t;}
 function _osJaEmUso(os,excludeId,excludeOrigPlanilhaOs){
   const s=String(os||'').trim();
   if(!s)return false;
-  if(pedidos.some(p=>p.id!==excludeId&&String(p.os||'').trim()===s))return true;
-  if(excludeOrigPlanilhaOs&&String(excludeOrigPlanilhaOs).trim()===s)return false;
-  return (typeof XLSX_VENDAS_BY_OS!=='undefined')&&Object.prototype.hasOwnProperty.call(XLSX_VENDAS_BY_OS,s);
+  const toks=_osTokens(s).map(_osNormTok).filter(Boolean);
+  if(!toks.length)return false;
+  const bate=v=>v!=null&&String(v).trim()!==''&&_osTokens(v).some(t=>toks.includes(_osNormTok(t)));
+  if(pedidos.some(p=>p.id!==excludeId&&bate(p.os)))return true;
+  const excl=new Set(excludeOrigPlanilhaOs?_osTokens(excludeOrigPlanilhaOs).map(_osNormTok):[]);
+  return (typeof XLSX_VENDAS!=='undefined')&&XLSX_VENDAS.some(x=>_osTokens(x.p).some(t=>{const n=_osNormTok(t);return toks.includes(n)&&!excl.has(n);}));
 }
 async function reativarVendaCancelada(os){
   const {isAdm}=_getUserCat();
@@ -29026,7 +29056,13 @@ function _invalidateDashCache(){_vrmCache=null;_comItemsCache=null;}
 // comparação ingênua de string inteira, sem essa tokenização — causou os pedidos 235/236
 // aparecendo 2x em Recebimentos & Comissões (pedido no Firestore + a mesma linha da
 // planilha reaparecendo como "sem pedido correspondente" por não bater a string exata).
-function _osTokens(p){return String(p||'').split(/[\/,]/).map(s=>s.trim()).filter(Boolean);}
+// (2026-11-11) Placeholder de pedido sem número ("S/N-...", "FALTA-...", "NA-...") NÃO é
+// OS composto: a "/" de "S/N" quebrava "S/N-UBERLANDIA-JUN" em ["S","N-UBERLANDIA-JUN"], e
+// nenhum token batia com o OS inteiro gravado no pedido do Firestore criado a partir dessa
+// linha (os/origPlanilhaOs = "S/N-UBERLANDIA-JUN") — a venda aparecia 2x na Lista de Vendas
+// (Burger King Uberlândia, junho). O token solto "S" ainda fazia placeholders diferentes se
+// confundirem entre si. Placeholder agora vira UM token só, com o texto inteiro.
+function _osTokens(p){const s0=String(p||'').trim();if(/^(FALTA|S\/N|NA)(-|$)/i.test(s0))return[s0];return s0.split(/[\/,]/).map(s=>s.trim()).filter(Boolean);}
 // Ver comentário completo dentro de getComissaoItemsAll() — lista de OS cuja comissão o
 // usuário confirmou (várias vezes, com print) já ter sido paga em Julho quinzena 2, mesmo o
 // sistema calculando uma quinzena de Agosto pra elas. Global (não só dentro de uma função)
@@ -29111,7 +29147,11 @@ function getVendaRowsMerged(){
   // na Lista de Vendas (ver relato do usuário: Burger King Bandeirantes duplicado ao
   // editar o pedido de maio e preencher o número/PDF).
   const importadosFSOs=new Set();
-  importadosFS.forEach(p=>{importadosFSOs.add(String(p.os));if(p.origPlanilhaOs)importadosFSOs.add(String(p.origPlanilhaOs));});
+  importadosFS.forEach(p=>{importadosFSOs.add(String(p.os));if(p.origPlanilhaOs)importadosFSOs.add(String(p.origPlanilhaOs));
+    // (2026-11-11) também por TOKEN — o filtro xlsxSemFS abaixo compara token a token, e só a
+    // string inteira aqui nunca batia com OS composto ("18711 / 18712", "54/74"): a linha da
+    // planilha continuava aparecendo junto com o pedido (Bob's Salvador, Paulo Faccini).
+    [p.os,p.origPlanilhaOs].forEach(v=>{if(v!=null&&String(v).trim())_osTokens(v).forEach(t=>importadosFSOs.add(t));});});
   // Pedido real já emitido (origemComercial, tipo Venda/Permuta, NÃO importadoPlanilha) —
   // se o MESMO nº de OS também existir como pedido importadoPlanilha (linha antiga da
   // planilha, ou shadow pedido criado por editarVendaLista antes de a OS ser emitida de
@@ -29133,11 +29173,28 @@ function getVendaRowsMerged(){
   // OS composto (ex.: "18711 / 18712") tratado via _osTokens() global — basta UM token
   // bater pra excluir a linha da planilha (ver comentário na definição de _osTokens acima).
   const xlsxSemFS=(typeof XLSX_VENDAS!=='undefined'?XLSX_VENDAS:[]).filter(r=>!_osTokens(r.p).some(tok=>importadosFSOs.has(tok)||realPedidosOsTokens.has(tok)));
-  _vrmCache=[
+  // (2026-11-11) Pedido importado da planilha criado MAIS DE UMA VEZ pra mesma venda (mesmos
+  // números de OS + mesmo Valor Bruto) — ex.: Bob's Salvador "18711 / 18712" existia 2x no banco
+  // (uma com espaço no fim). Fica só um: o que tem parcelas próprias.
+  const _impBr=p=>moneyToNum((p.valores||{})['Valor Bruto']||(p.valores||{})['Valor Total']||'0');
+  const _impKey=p=>{const t=p.os!=null?_osTokens(p.os).map(x=>x.toUpperCase()).sort().join('|'):'';return t?t+'#'+Math.round(_impBr(p)):null;};
+  const _impNParc=p=>{try{return getParcelas(p).length;}catch(e){return 0;}};
+  const _impMelhor={};
+  importadosFSSemDupReal.forEach(p=>{const k=_impKey(p);if(!k)return;const a=_impMelhor[k];if(!a||_impNParc(p)>_impNParc(a))_impMelhor[k]=p;});
+  const importadosUnicos=importadosFSSemDupReal.filter(p=>{const k=_impKey(p);return !k||_impMelhor[k]===p;});
+  let _lista=[
     ...xlsxSemFS,
-    ...importadosFSSemDupReal.map(pedidoToVendaRow),
-    ...pedidos.filter(p=>isComercialPedido(p)&&!p.importadoPlanilha).map(pedidoToVendaRow)
+    ...importadosUnicos.map(pedidoToVendaRow),
+    ...pedidos.filter(p=>isComercialPedido(p)&&!p.importadoPlanilha&&!p.copiaOsRepetida).map(pedidoToVendaRow)
   ].filter(r=>!isVendaCancelada(r.p));
+  // (2026-11-11) Venda ainda sem número ("S/N-...", "FALTA-...") que depois ganhou OS de verdade
+  // num outro registro: mesmo mês/ano e mesmo Valor Bruto (±R$1) → o registro sem número é a
+  // mesma venda e sai daqui (BK Vitória S/N-90001 = OS 199, BK Voluntários S/N-90002 = OS 190,
+  // C&A Catanduva FALTA = OS 270). Só exibição — Comissões/Contas a Receber não usam esta lista.
+  const _ehPH=v=>/^(FALTA|S\/N|NA)(-|$)/i.test(String(v==null?'':v).trim());
+  const _numerados=_lista.filter(r=>!_ehPH(r.p));
+  _lista=_lista.filter(r=>!_ehPH(r.p)||!_numerados.some(q=>q.m===r.m&&_vrAno(q)===_vrAno(r)&&(r.br||0)>0&&Math.abs((q.br||0)-(r.br||0))<1));
+  _vrmCache=_lista;
   return _vrmCache;
 }
 function getVendasMes(y,m,vendedor){
@@ -61397,6 +61454,736 @@ function _ppMotivosHtml(){
     if(body)body.insertAdjacentHTML('afterbegin',`<div style="background:#e0f2fe;border:1.5px solid #0369a1;border-radius:10px;padding:10px 12px;margin-bottom:12px;display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><div style="font-size:.78rem;color:#0c4a6e"><b>🧊 Na geladeira</b> — ${_ppEsc(d.motivo)}${d.comentario?': '+_ppEsc(d.comentario):''}<div style="font-size:.7rem;margin-top:2px">Descartada em ${fmtD(String(d.em).slice(0,10))} por ${_ppEsc(d.por||'—')} · ${d.voltarEm?'volta em '+fmtD(d.voltarEm):'não volta sozinha'}</div></div><button type="button" onclick="ppReativar('${e.id}');setTimeout(()=>{const x=prospEmpresas.find(y=>y.id==='${e.id}');if(x&&_prospCardAtualId==='${e.id}')_prospRenderCard(x);},500)" style="${_ppBtn};background:#ea580c">🔥 Reativar</button></div>`);}
 }catch(err){console.error('card prospecção 2.0',err);}return r;};}
 
+// ══ AGENTE DE PROSPECÇÃO COM IA (2026-11-10, a pedido do Guilherme: "criar um agente de prospecção usando IA dentro do sistema") ══
+// Fase 1 — roda quando alguém clica (não tem nada automático no servidor ainda):
+//  (a) "🤖 Caçar empresas com IA" na barra do Funil: a IA pesquisa na internet redes em expansão que
+//      combinam com o perfil escolhido e devolve uma FILA de sugestões (sistema/prospIASugestoes).
+//      Cada sugestão é aprovada (vira card na 1ª etapa, com cadência) ou descartada com motivo.
+//      Os descartes e aprovações entram no próximo pedido pra IA aprender o perfil.
+//  (b) "🤖 Pesquisar com IA" no card: atualiza o dossiê da empresa (expansão, por que agora, decisores
+//      públicos, mensagens prontas). Os números só vão pro card se a pessoa marcar e clicar em Aplicar.
+// Usa a MESMA chave/modelo da leitura de projeto (sistema/orcamentosIA, ⚙️ de Orçamentos) + a ferramenta
+// de busca na web da API (web_search). A IA nunca envia mensagem sozinha.
+const PIA_DOC='prospIASugestoes';
+const PIA_SEGMENTOS=['Fast food e restaurantes','Varejo e moda','Farmácias e drogarias','Supermercados e atacarejos','Postos de combustível','Bancos e financeiras','Concessionárias','Academias','Saúde e clínicas','Educação e escolas','Construtoras e incorporadoras','Indústrias','Óticas e cosméticos','Hotéis'];
+const PIA_MOTIVOS=['NÃO É O PERFIL','JÁ É CLIENTE OU JÁ ESTÁ NO FUNIL','SEM EXPANSÃO','EMPRESA PEQUENA DEMAIS','INFORMAÇÃO ERRADA','OUTRO'];
+const PIA_CARGOS_PADRAO=['Diretor ou gerente de expansão','Engenharia e obras','Arquitetura e projetos','Marketing e trade marketing','Compras e suprimentos','Facilities e manutenção'];
+let _piaSemCache=false;
+let _piaSug={},_piaWatchOn=false,_piaRun=null,_piaCardRun=null,_piaFilaPesq=[],_piaCtrl=null;
+// Trava de custo (pedido do Guilherme, 11/11): a caça roda no máximo 1 vez a cada 20 dias para a empresa toda.
+// Fica no item "_controle" do mesmo doc (sistema/prospIASugestoes). Só conta quando a busca termina com sucesso.
+const PIA_INTERVALO_DIAS=20;
+function _piaProximaCaca(){const u=_piaCtrl&&_piaCtrl.ultimaCaca;if(!u)return null;const d=new Date(u);if(isNaN(d))return null;d.setDate(d.getDate()+PIA_INTERVALO_DIAS);return d>new Date()?d:null;}
+function _piaFmtData(d){try{return d.toLocaleDateString('pt-BR');}catch(e){return'';}}
+function _piaCargos(){const c=cfg&&cfg.prospCargosIA;return(Array.isArray(c)&&c.filter(Boolean).length)?c.filter(Boolean):PIA_CARGOS_PADRAO;}
+function _piaCargosTxt(){return`CARGOS QUE A GRANDA PROCURA, em ordem de prioridade: ${_piaCargos().map((c,i)=>(i+1)+') '+c).join('; ')}. Procure no site da empresa, em notícias e em perfis do LinkedIn que apareçam na busca até 2 pessoas por cargo (no máximo 8 no total), começando pelos primeiros da lista. Em "cargos_alvo", repita os cargos da lista que fazem sentido para essa empresa.`;}
+// Dois nomes são a mesma empresa quando são iguais, iguais sem espaço, ou um contém o outro como palavras inteiras (mín. 4 letras).
+function _piaNomesBatem(a,b){
+  if(!a||!b)return false;if(a===b||a.replace(/ /g,'')===b.replace(/ /g,''))return true;
+  const[c,l]=a.length<=b.length?[a,b]:[b,a];
+  return c.replace(/ /g,'').length>=4&&(' '+l+' ').includes(' '+c+' ');
+}
+// Onde a empresa já existe no sistema (funil, geladeira, CRM ou cliente com pedido) — null se é nova.
+function _piaOndeExiste(nome){
+  const k=_piaNorm(nome);if(!k)return null;
+  try{for(const e of(prospEmpresas||[])){if(_piaNomesBatem(k,_piaNorm(e.nome))){const at=_ppAtiva(e);
+    let et='';try{const x=_prospEtapas().find(z=>z.key===_prospEtapaEfetiva(e));et=x?x.label:'';}catch(err){}
+    return{onde:at?'funil':'geladeira',rotulo:at?'JÁ ESTÁ NO SEU FUNIL':'JÁ ESTÁ NA GELADEIRA',empresaId:e.id,nome:e.nome,detalhe:[e.responsavel,at?et:''].filter(Boolean).join(' · ')};}}}catch(err){}
+  try{for(const e of(crmEmpresas||[])){if(_piaNomesBatem(k,_piaNorm(e.nome)))return{onde:'crm',rotulo:'JÁ ESTÁ NO CRM',nome:e.nome,detalhe:''};}}catch(err){}
+  try{for(const p of(pedidos||[])){const n=p&&(p.nomeFantasia||p.cliente);if(n&&_piaNomesBatem(k,_piaNorm(n)))return{onde:'cliente',rotulo:'JÁ É CLIENTE',nome:String(n),detalhe:''};}}catch(err){}
+  return null;
+}
+let _piaForm={segs:['Fast food e restaurantes','Varejo e moda','Farmácias e drogarias'],regs:['Sul','Sudeste'],qtd:12,obs:''};
+
+function _piaWatch(){
+  try{_orc2IaWatch();}catch(e){}
+  if(_piaWatchOn||!window._fbOrcWatch)return;_piaWatchOn=true;
+  window._fbOrcWatch(PIA_DOC,itens=>{const t={...(itens||{})};_piaCtrl=t._controle||null;delete t._controle;_piaSug=t;try{_piaAtualizarBotao();}catch(e){}try{if(document.getElementById('pia-fila-modal')&&!_piaRun)_piaRenderFila();}catch(e){}});
+}
+function _piaChave(){try{return(orc2&&orc2.iaCfg&&orc2.iaCfg.chave)||'';}catch(e){return'';}}
+// Prospecção tem modelo próprio (padrão Sonnet 5.5: metade do preço, quase a mesma qualidade pra pesquisar notícia).
+function _piaModelo(){try{return(orc2&&orc2.iaCfg&&orc2.iaCfg.modeloProsp)||'claude-sonnet-5-5';}catch(e){return'claude-sonnet-5-5';}}
+function _piaSemChave(){toast('A IA ainda não está configurada. Peça ao administrador para colar a chave em Orçamentos → ⚙️ Matérias-primas e preços → IA — leitura de projeto e prospecção.','terr');}
+const _piaNorm=t=>String(t||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\b(LTDA|S\.?A|S\/A|EIRELI|ME|EPP|GRUPO|REDE|LOJAS|COMERCIO|DE|DO|DA|E)\b/g,' ').replace(/[^A-Z0-9]+/g,' ').trim();
+const _piaUrl=u=>/^https?:\/\//i.test(String(u||''))?String(u):'';
+function _piaPendentes(){return Object.values(_piaSug||{}).filter(s=>s&&s.status==='pendente').sort((a,b)=>_ppNota(_piaProto(b)).p-_ppNota(_piaProto(a)).p||String(b.em||'').localeCompare(String(a.em||'')));}
+
+// Nomes que a IA não deve sugerir: funil, geladeira, CRM, clientes com pedido e sugestões já vistas.
+function _piaNomesConhecidos(){
+  const set=new Map();
+  const add=(n,orig)=>{const k=_piaNorm(n);if(k&&!set.has(k))set.set(k,orig||n);};
+  try{(prospEmpresas||[]).forEach(e=>add(e.nome));}catch(e){}
+  try{(crmEmpresas||[]).forEach(e=>add(e.nome));}catch(e){}
+  try{(pedidos||[]).forEach(p=>{const n=String(p&&(p.nomeFantasia||p.cliente)||'').trim().split(/\s+/).slice(0,2).join(' ');if(n)add(n);});}catch(e){}
+  Object.values(_piaSug||{}).forEach(s=>s&&add(s.nome));
+  return set;
+}
+function _piaJaConhecida(nome,set){
+  const k=_piaNorm(nome);if(!k)return true;
+  if(set.has(k))return true;
+  const pri=k.split(' ')[0];
+  if(pri.length>=4){for(const kk of set.keys()){if(kk===pri||kk.split(' ')[0]===pri&&(kk.length<=pri.length+3||k.length<=pri.length+3))return true;}}
+  return false;
+}
+// Monta um "card de mentira" pra calcular a mesma nota A/B/C do funil.
+function _piaProto(s){
+  return{nome:s.nome,segmento:s.segmento,unidadesExistentes:s.unidadesExistentes||0,unidadesAbrir:s.unidadesAbrir||0,regioes:s.regioes||[],decisores:[]};
+}
+function _piaRegioesValidas(l){const ok=REGIOES_BR;return(Array.isArray(l)?l:[]).map(r=>{const n=_piaNorm(r);return ok.find(o=>_piaNorm(o)===n);}).filter((v,i,a)=>v&&a.indexOf(v)===i);}
+function _piaNum(v){const n=parseInt(String(v==null?'':v).replace(/\D/g,''),10);return isFinite(n)&&n>0?n:0;}
+
+const PIA_GRANDA=`A Granda Comunicação Visual (Ponta Grossa, Paraná) fabrica e instala comunicação visual para redes com muitas unidades em todo o Brasil: fachadas em ACM, letreiros e letras caixa iluminadas, totens, testeiras, sinalização interna, adesivação e padronização de lojas. Já atende redes como Burger King, Popeyes, Bob's, Dunlop/Pneulândia e ArcelorMittal. O melhor cliente é uma rede que vai ABRIR ou REFORMAR várias unidades nos próximos meses (expansão, franquias novas, rebranding, troca de identidade visual, retrofit de lojas).`;
+
+// ── chamada da API com busca na web (trata pause_turn, prazo e cancelamento) ──
+async function _piaChamar(sistema,pedido,maxBuscas,run,progresso){
+  const chave=_piaChave();if(!chave)throw new Error('sem chave');
+  // Cache: o que se repete a cada volta (ferramentas + instruções + pedido + o que a IA já leu) é marcado
+  // com cache_control e sai por ~5% do preço na volta seguinte. Se a API recusar, repete sem cache.
+  const msgs=[{role:'user',content:[{type:'text',text:pedido}]}];
+  const marcarCache=()=>{
+    msgs.forEach(m=>Array.isArray(m.content)&&m.content.forEach(b=>{if(b&&b.cache_control)delete b.cache_control;}));
+    if(_piaSemCache)return;
+    msgs[0].content[0].cache_control={type:'ephemeral'};
+    const u=msgs[msgs.length-1];
+    if(msgs.length>1&&Array.isArray(u.content)){for(let i=u.content.length-1;i>=0;i--){const b=u.content[i];if(b&&(b.type==='text'||b.type==='server_tool_use'||b.type==='web_search_tool_result')){b.cache_control={type:'ephemeral'};break;}}}
+  };
+  const fontes=[];let buscas=0,uso={entrada:0,saida:0,cacheLido:0,cacheGravado:0},js=null,tentouSemCache=false;
+  for(let volta=0;volta<6;volta++){
+    if(run.cancelado)throw new Error('cancelado');
+    marcarCache();
+    const ctrl=new AbortController();run.ctrl=ctrl;
+    const prazo=setTimeout(()=>{run.estourou=true;ctrl.abort();},480000);
+    let r;
+    try{
+      r=await fetch('https://api.anthropic.com/v1/messages',{signal:ctrl.signal,method:'POST',
+        headers:{'content-type':'application/json','x-api-key':chave,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+        body:JSON.stringify({model:_piaModelo(),max_tokens:16000,system:[{type:'text',text:sistema}],messages:msgs,
+          tools:[{type:'web_search_20250305',name:'web_search',max_uses:maxBuscas,user_location:{type:'approximate',country:'BR',region:'Paraná',city:'Ponta Grossa',timezone:'America/Sao_Paulo'}}]})});
+    }catch(e){
+      clearTimeout(prazo);
+      if(run.cancelado)throw new Error('cancelado');
+      throw new Error(run.estourou?'a IA passou de 8 minutos sem responder — tente de novo com menos empresas':'sem conexão com a IA — confira a internet e tente de novo');
+    }
+    clearTimeout(prazo);
+    js=await r.json().catch(()=>null);
+    if(!r.ok){
+      const m=String((js&&js.error&&js.error.message)||('HTTP '+r.status));
+      if(r.status===400&&/cache/i.test(m)&&!_piaSemCache&&!tentouSemCache){_piaSemCache=true;tentouSemCache=true;volta--;continue;}
+      if(r.status===401)throw new Error('a chave da IA está inválida — confira em Orçamentos → ⚙️');
+      if(r.status===429||r.status===529)throw new Error('a IA está ocupada agora — tente de novo em 1 minuto');
+      if(/web.?search/i.test(m))throw new Error('a busca na internet não está liberada na conta da Anthropic. O administrador precisa ativar a busca na web (Web search) no Console da Anthropic.');
+      if(/credit|billing|balance/i.test(m))throw new Error('acabou o crédito da conta da Anthropic — o administrador precisa recarregar');
+      throw new Error(m);
+    }
+    try{uso.cacheLido+=Number(js.usage&&js.usage.cache_read_input_tokens)||0;uso.cacheGravado+=Number(js.usage&&js.usage.cache_creation_input_tokens)||0;uso.entrada+=Number(js.usage&&js.usage.input_tokens)||0;uso.saida+=Number(js.usage&&js.usage.output_tokens)||0;buscas+=Number(js.usage&&js.usage.server_tool_use&&js.usage.server_tool_use.web_search_requests)||0;}catch(e){}
+    (js.content||[]).forEach(b=>{
+      if(b&&b.type==='web_search_tool_result'&&Array.isArray(b.content))b.content.forEach(x=>{if(x&&x.url&&!fontes.some(f=>f.url===x.url))fontes.push({url:x.url,titulo:x.title||x.url});});
+    });
+    if(progresso)try{progresso(buscas);}catch(e){}
+    if(js.stop_reason==='pause_turn'){msgs.push({role:'assistant',content:js.content});continue;}
+    break;
+  }
+  const txt=((js&&js.content)||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+  let out=null;
+  const blocos=[...txt.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map(m=>m[1]);
+  for(const c of blocos.reverse()){try{out=JSON.parse(c);break;}catch(e){}}
+  if(!out){const i=txt.indexOf('{'),f=txt.lastIndexOf('}');if(i>=0&&f>i){try{out=JSON.parse(txt.slice(i,f+1));}catch(e){}}}
+  if(!out)throw new Error('a resposta da IA veio num formato inesperado — tente de novo');
+  return{out,fontes,buscas,uso};
+}
+
+const PIA_FORMATO_EMPRESA=`{
+  "nome": "nome comercial da rede (como o mercado conhece)",
+  "segmento": "segmento em poucas palavras",
+  "site": "https://... (se achar)",
+  "cnpj": "CNPJ da matriz no Brasil (14 dígitos), só se aparecer em fonte confiável; senão null",
+  "sede_cidade": "cidade da sede", "sede_uf": "UF com 2 letras",
+  "unidades_existentes": número ou null,
+  "unidades_abrir": número de unidades que a rede anunciou que vai abrir/reformar (null se não achou),
+  "regioes_expansao": ["Norte","Nordeste","Centro-Oeste","Sudeste","Sul"] (só as que aparecem nas fontes),
+  "por_que_agora": "1 a 2 frases: o motivo concreto para a Granda procurar essa empresa agora",
+  "resumo": "2 a 4 frases sobre a empresa",
+  "sinais": [{"texto":"fato concreto (ex.: anunciou 40 lojas em 2027)","data":"mês/ano da notícia","url":"https://fonte"}],
+  "decisores": [{"nome":"nome completo, só se aparecer em fonte pública","cargo":"cargo","linkedin":"https://www.linkedin.com/in/... só se aparecer na busca","fonte":"https://..."}],
+  "cargos_alvo": ["cargos que a Granda deve procurar nessa empresa, ex.: Gerente de Expansão"],
+  "mensagem_whatsapp": "1ª mensagem curta de WhatsApp, em português do Brasil, citando o fato da expansão, assinada como {{VENDEDOR}} da Granda",
+  "email_assunto": "assunto do 1º e-mail",
+  "email_corpo": "1º e-mail curto (até 120 palavras), citando o fato da expansão, assinado como {{VENDEDOR}} — Granda Comunicação Visual",
+  "confianca": "alta, media ou baixa"
+}`;
+const PIA_REGRAS=`REGRAS:
+- Use a busca na web. Nunca invente empresa, número, nome de pessoa, telefone, e-mail ou link. Se não achar, deixe null ou lista vazia.
+- Todo número (unidades) precisa vir de uma fonte listada em "sinais". Prefira notícias dos últimos 12 meses.
+- Não procure nem informe telefone ou e-mail pessoal de ninguém. Decisor só com nome e cargo públicos (site da empresa, notícia, LinkedIn que apareceu na busca).
+- Textos em português do Brasil, gramática correta, tom profissional e direto. Nada de exagero.
+- No FINAL da resposta, coloque SOMENTE um bloco \`\`\`json com o resultado.`;
+
+// ══ Receita Federal — consulta gratuita de CNPJ (BrasilAPI). Sem IA, sem custo. ══
+const _piaReceitaCache={};
+function _piaFmtCnpj(c){c=String(c||'').replace(/\D/g,'');return c.length===14?c.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,'$1.$2.$3/$4-$5'):c;}
+async function _piaReceita(cnpj){
+  cnpj=String(cnpj||'').replace(/\D/g,'');
+  if(cnpj.length!==14)return{erro:'CNPJ precisa ter 14 números'};
+  if(_piaReceitaCache[cnpj])return _piaReceitaCache[cnpj];
+  const ctrl=new AbortController(),t=setTimeout(()=>ctrl.abort(),15000);
+  try{
+    const r=await fetch('https://brasilapi.com.br/api/cnpj/v1/'+cnpj,{signal:ctrl.signal});
+    const j=await r.json().catch(()=>null);clearTimeout(t);
+    if(!r.ok||!j)return{erro:r.status===404?'CNPJ não encontrado na Receita':(r.status===400?'CNPJ inválido':'Receita fora do ar agora — tente de novo depois')};
+    const rec={cnpj,razao:String(j.razao_social||'').trim(),fantasia:String(j.nome_fantasia||'').trim(),porte:String(j.porte||'').trim(),
+      capital:Number(j.capital_social)||0,situacao:String(j.descricao_situacao_cadastral||'').trim().toUpperCase(),
+      municipio:String(j.municipio||'').trim().toUpperCase(),uf:String(j.uf||'').trim().toUpperCase(),abertura:String(j.data_inicio_atividade||''),
+      atividade:String(j.cnae_fiscal_descricao||'').trim(),matriz:String(j.descricao_identificador_matriz_filial||'').trim(),em:new Date().toISOString()};
+    _piaReceitaCache[cnpj]=rec;return rec;
+  }catch(e){clearTimeout(t);return{erro:'Receita fora do ar agora — tente de novo depois'};}
+}
+// O CNPJ achado pela IA só vale se a razão social ou o nome fantasia têm alguma palavra do nome da empresa.
+function _piaReceitaConfere(nome,rec){
+  if(!rec||rec.erro)return false;
+  const alvo=' '+_piaNorm(rec.razao+' '+rec.fantasia)+' ';
+  return _piaNorm(nome).split(' ').filter(w=>w.length>=3).some(w=>alvo.includes(' '+w+' '));
+}
+function _piaReceitaAtiva(rec){return!!rec&&!rec.erro&&rec.situacao==='ATIVA';}
+function _piaReceitaHtml(rec,confere){
+  if(!rec||rec.erro)return'';
+  const ativa=_piaReceitaAtiva(rec);
+  const cap=rec.capital?'capital R$ '+rec.capital.toLocaleString('pt-BR',{maximumFractionDigits:0}):'';
+  const ab=rec.abertura?'aberta em '+fmtD(rec.abertura.slice(0,10)):'';
+  return`<div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;background:${!confere?'#fffbeb':ativa?'#f0fdf4':'#fef2f2'};border:1.5px solid ${!confere?'#fcd34d':ativa?'#bbf7d0':'#fecaca'};border-radius:8px;padding:7px 10px;margin-top:8px;font-size:.72rem;color:#334155">
+    <span style="font-weight:800;white-space:nowrap">🏛️ Receita</span>
+    <span style="min-width:0;flex:1"><b>${_ppEsc(rec.razao)}</b> · <span style="white-space:nowrap">${_piaFmtCnpj(rec.cnpj)}</span>${rec.porte?' · '+_ppEsc(rec.porte):''}${cap?' · <span style="white-space:nowrap">'+cap+'</span>':''}${rec.municipio?' · '+_ppEsc(rec.municipio)+'/'+_ppEsc(rec.uf):''}${ab?' · <span style="white-space:nowrap">'+ab+'</span>':''}
+      ${!confere?'<div style="color:#92400e;font-weight:700;margin-top:2px">⚠ O CNPJ que a IA achou não confere com o nome da empresa — confira antes de usar.</div>':''}</span>
+    <span style="background:${ativa?'#16a34a':'#dc2626'};color:#fff;border-radius:20px;padding:0 9px;font-weight:800;white-space:nowrap;line-height:1.8">${_ppEsc(rec.situacao||'—')}</span>
+  </div>`;
+}
+async function piaConsultarCnpj(id){
+  const e=prospEmpresas.find(x=>x.id===id);if(!e)return;
+  const inp=document.getElementById('pia-cnpj-'+id);
+  const c=String((inp&&inp.value)||e.cnpj||'').replace(/\D/g,'');
+  if(c.length!==14){toast('Digite o CNPJ com 14 números','terr');return;}
+  const btn=document.getElementById('pia-cnpj-btn-'+id);if(btn){btn.disabled=true;btn.textContent='Consultando…';}
+  const rec=await _piaReceita(c);
+  if(rec.erro){toast(rec.erro,'terr');if(btn){btn.disabled=false;btn.textContent='Consultar';}return;}
+  e.cnpj=c;e.receita=rec;e.razaoSocial=rec.razao;
+  if(!e.sedeCidade&&rec.municipio)e.sedeCidade=rec.municipio;if(!e.sedeUf&&rec.uf)e.sedeUf=rec.uf;
+  (e.timeline=e.timeline||[]).push({id:_ppId('pcm_'),texto:`🏛️ CNPJ ${_piaFmtCnpj(c)} consultado na Receita por ${_ppEu()}: ${rec.razao} — ${rec.situacao}`,autor:_ppEu(),em:new Date().toISOString(),sistema:true});
+  e.atualizadoEm=new Date().toISOString();
+  try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
+  toast(_piaReceitaAtiva(rec)?'CNPJ ativo na Receita ✅':'⚠ Esse CNPJ está '+rec.situacao.toLowerCase()+' na Receita','tok');
+  if(_prospCardAtualId===id)try{_prospRenderCard(e);}catch(err){}
+}
+
+// ══ (a) CAÇAR EMPRESAS ══════════════════════════════════════════════════════════════
+function piaAbrirCacar(){
+  if(!_temAcessoProspeccao()){toast('Você não tem acesso à Prospecção','terr');return;}
+  _piaWatch();
+  if(!_piaChave()){setTimeout(()=>{if(!_piaChave())_piaSemChave();else piaAbrirCacar();},900);return;}
+  if(_piaRun){_piaRenderCacarRodando();return;}
+  _piaRenderCacarForm();
+}
+function _piaChips(lista,sel,fn){return lista.map(x=>`<button type="button" class="prosp-chip${sel.includes(x)?'':' off'}" onclick="${fn}(${_ppEsc(JSON.stringify(x))})">${_ppEsc(x)}</button>`).join('');}
+function piaTogSeg(x){const l=_piaForm.segs;const i=l.indexOf(x);if(i>=0)l.splice(i,1);else l.push(x);_piaRenderCacarForm();}
+function piaTogReg(x){const l=_piaForm.regs;const i=l.indexOf(x);if(i>=0)l.splice(i,1);else l.push(x);_piaRenderCacarForm();}
+function _piaRenderCacarForm(){
+  const obsEl=document.getElementById('pia-obs');if(obsEl)_piaForm.obs=obsEl.value;
+  const pend=_piaPendentes().length,trava=_piaProximaCaca();
+  _ppModal('pia-cacar-modal',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+      <div><div style="font-size:1rem;font-weight:800">🤖 Caçar empresas com IA</div>
+      <div style="font-size:.74rem;color:var(--ink4);margin-top:2px">A IA pesquisa na internet redes que vão abrir ou reformar unidades e traz cada uma com a fonte. Nada entra no funil sem alguém aprovar.</div></div>${_ppFechar('pia-cacar-modal')}</div>
+    <div style="margin-top:14px;font-size:.72rem;font-weight:800;color:var(--ink3);text-transform:uppercase">Segmentos</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${_piaChips(PIA_SEGMENTOS,_piaForm.segs,'piaTogSeg')}</div>
+    <div style="margin-top:14px;font-size:.72rem;font-weight:800;color:var(--ink3);text-transform:uppercase">Regiões onde a expansão acontece</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">${_piaChips(REGIOES_BR,_piaForm.regs,'piaTogReg')}</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px;align-items:flex-end">
+      <div><div style="font-size:.72rem;font-weight:800;color:var(--ink3);text-transform:uppercase;margin-bottom:6px">Quantas empresas</div>
+        <select id="pia-qtd" onchange="_piaForm.qtd=Number(this.value)" style="padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit">${[8,12,15].map(n=>`<option value="${n}"${_piaForm.qtd===n?' selected':''}>${n} empresas</option>`).join('')}</select></div>
+      <div style="flex:1;min-width:200px"><div style="font-size:.72rem;font-weight:800;color:var(--ink3);text-transform:uppercase;margin-bottom:6px">Observação (opcional)</div>
+        <input id="pia-obs" class="no-upper" value="${_ppEsc(_piaForm.obs)}" placeholder="Ex.: redes que estão chegando ao Paraná" style="width:100%;box-sizing:border-box;padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit"></div>
+    </div>
+    <div style="font-size:.72rem;color:var(--ink3);margin-top:12px">🎯 Decisores procurados: ${_piaCargos().map(_ppEsc).join(' · ')}${_ppPodeConfig()?` <a href="#" onclick="event.preventDefault();piaAbrirCargos()" style="color:#7c3aed;font-weight:800;text-decoration:none;white-space:nowrap">alterar</a>`:''}</div>
+    <div style="font-size:.7rem;color:var(--ink4);margin-top:8px">Como a caça roda uma vez a cada ${PIA_INTERVALO_DIAS} dias, vale pedir mais empresas e marcar todos os segmentos que interessam. Leva de 2 a 6 minutos. Pode continuar usando o sistema, mas não feche nem recarregue a página.</div>
+    ${trava?`<div style="background:#fef3c7;border:1.5px solid #fcd34d;border-radius:10px;padding:10px 12px;margin-top:12px;font-size:.76rem;color:#78350f">
+      🔒 <b>A próxima caça fica liberada em ${_piaFmtData(trava)}.</b> A última foi em ${_piaFmtData(new Date(_piaCtrl.ultimaCaca))}${_piaCtrl.por?' por '+_ppEsc(_piaCtrl.por):''}. A caça roda uma vez a cada ${PIA_INTERVALO_DIAS} dias para controlar o gasto com a IA.</div>`:''}
+    <div style="display:flex;justify-content:space-between;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button type="button" onclick="document.getElementById('pia-cacar-modal').remove();piaAbrirFila()" style="${_ppBtn};background:#fff;color:#7c3aed;border:1.5px solid #c4b5fd">📋 Ver sugestões (${pend})</button>
+      ${trava?`<button type="button" disabled style="${_ppBtn};background:#cbd5e1;color:#475569;padding:9px 16px;font-size:.8rem;cursor:not-allowed">🔒 Liberada em ${_piaFmtData(trava)}</button>`
+        :`<button type="button" onclick="piaCacar()" style="${_ppBtn};background:#7c3aed;padding:9px 16px;font-size:.8rem">🤖 Começar a busca</button>`}
+    </div>`,620);
+}
+function _piaRenderCacarRodando(){
+  const r=_piaRun;if(!r)return;
+  const s=Math.round((Date.now()-r.inicio)/1000);
+  const html=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div style="font-size:1rem;font-weight:800">🤖 Caçar empresas com IA</div>${_ppFechar('pia-cacar-modal')}</div>
+    <div style="text-align:center;padding:26px 8px">
+      <div style="font-size:2rem">🔎</div>
+      <div style="font-weight:800;font-size:.9rem;margin-top:8px">A IA está pesquisando na internet…</div>
+      <div id="pia-run-st" style="font-size:.76rem;color:var(--ink4);margin-top:4px">${r.buscas?r.buscas+' '+_plural(r.buscas,'pesquisa feita','pesquisas feitas')+' · ':''}${s}s</div>
+      <div style="font-size:.72rem;color:var(--ink4);margin-top:10px">Pode fechar esta janela: quando terminar, as sugestões aparecem no botão 🤖 da barra do funil.</div>
+      <button type="button" onclick="piaCancelar()" style="${_ppBtn};background:#fff;color:#dc2626;border:1.5px solid #fecaca;margin-top:16px">✕ Cancelar busca</button>
+    </div>`;
+  const m=document.getElementById('pia-cacar-modal');
+  if(m&&m.firstChild)m.firstChild.innerHTML=html;else _ppModal('pia-cacar-modal',html,520);
+}
+function piaCancelar(){if(_piaRun){_piaRun.cancelado=true;try{_piaRun.ctrl&&_piaRun.ctrl.abort();}catch(e){}}}
+function _piaHistoricoAprendizado(){
+  const l=Object.values(_piaSug||{}).filter(s=>s&&s.status!=='pendente').sort((a,b)=>String(b.decididoEm||'').localeCompare(String(a.decididoEm||'')));
+  const desc=l.filter(s=>s.status==='descartada').slice(0,40).map(s=>`- ${s.nome} (${s.segmento||'—'}): ${s.motivo||'descartada'}${s.comentario?' — '+s.comentario:''}`);
+  const apr=l.filter(s=>s.status==='aprovada').slice(0,25).map(s=>`- ${s.nome} (${s.segmento||'—'})`);
+  let t='';
+  if(apr.length)t+=`\nEMPRESAS QUE A EQUIPE APROVOU (esse é o perfil certo):\n${apr.join('\n')}\n`;
+  if(desc.length)t+=`\nEMPRESAS QUE A EQUIPE DESCARTOU E O MOTIVO (evite sugerir parecidas):\n${desc.join('\n')}\n`;
+  return t;
+}
+async function piaCacar(){
+  if(_piaRun){_piaRenderCacarRodando();return;}
+  const obsEl=document.getElementById('pia-obs');if(obsEl)_piaForm.obs=obsEl.value.trim();
+  if(!_piaForm.segs.length){toast('Escolha pelo menos um segmento','terr');return;}
+  if(!_piaForm.regs.length){toast('Escolha pelo menos uma região','terr');return;}
+  if(!_piaChave()){_piaSemChave();return;}
+  const trava=_piaProximaCaca();
+  if(trava){toast('A próxima caça fica liberada em '+_piaFmtData(trava),'twar');_piaRenderCacarForm();return;}
+  const ctrlAntes=_piaCtrl?{..._piaCtrl}:null;
+  try{const c={ultimaCaca:new Date().toISOString(),por:_ppEu(),emAndamento:true};await window._fbOrcSalvar(PIA_DOC,'_controle',c);_piaCtrl=c;}
+  catch(err){toast('Não consegui iniciar a busca: '+(err.message||err),'terr');return;}
+  const _piaDestravar=async()=>{try{if(ctrlAntes)await window._fbOrcSalvar(PIA_DOC,'_controle',ctrlAntes);else await window._fbOrcExcluir(PIA_DOC,'_controle');_piaCtrl=ctrlAntes;}catch(err){console.error('pia destravar',err);}};
+  const conhecidos=_piaNomesConhecidos();
+  const lista=[...conhecidos.values()].slice(0,400).join('; ');
+  const qtd=_piaForm.qtd||8;
+  const pedido=`${PIA_GRANDA}
+
+TAREFA: encontre ${qtd} empresas (redes) NOVAS para a Granda prospectar.
+- Segmentos: ${_piaForm.segs.join(', ')}.
+- A expansão ou reforma precisa acontecer nestas regiões do Brasil: ${_piaForm.regs.join(', ')}.
+${_piaForm.obs?'- Observação do vendedor: '+_piaForm.obs+'\n':''}- Procure sinais concretos e recentes: anúncio de novas lojas/unidades, plano de expansão, franquias novas, rebranding ou troca de identidade visual, reforma/retrofit de lojas, entrada em novo estado, investimento recebido.
+- Prefira redes com 10 ou mais unidades ou que vão abrir 5 ou mais.
+- NÃO sugira estas empresas (já estão no funil, no CRM ou já são clientes): ${lista||'(nenhuma)'}.
+- ${_piaCargosTxt()}
+${_piaHistoricoAprendizado()}
+${PIA_REGRAS}
+
+Formato do JSON final: {"empresas":[ ${PIA_FORMATO_EMPRESA} ]}`;
+  const run=_piaRun={inicio:Date.now(),buscas:0,cancelado:false};
+  _piaRenderCacarRodando();
+  const tick=setInterval(()=>{const st=document.getElementById('pia-run-st');if(st&&_piaRun)st.textContent=(_piaRun.buscas?_piaRun.buscas+' '+_plural(_piaRun.buscas,'pesquisa feita','pesquisas feitas')+' · ':'')+Math.round((Date.now()-_piaRun.inicio)/1000)+'s';},1000);
+  try{_piaAtualizarBotao();}catch(e){}
+  try{
+    const res=await _piaChamar('Você é um pesquisador de prospecção B2B da Granda Comunicação Visual. Pesquisa na internet, confere as fontes e entrega dados verdadeiros.',pedido,Math.min(30,qtd*2+6),run,b=>{run.buscas=b;});
+    const emp=Array.isArray(res.out.empresas)?res.out.empresas:[];
+    const agora=new Date().toISOString(),eu=_ppEu(),lote=_ppId('lote_');
+    const doLote=[];let novas=0,repetidas=0;
+    const jaSugeridas=Object.values(_piaSug||{}).filter(s=>s&&s.status!=='aprovada').map(s=>_piaNorm(s.nome));
+    for(const x of emp){
+      const nome=String(x&&x.nome||'').trim();if(!nome)continue;
+      const k=_piaNorm(nome);
+      if(doLote.some(z=>_piaNomesBatem(z,k))||jaSugeridas.some(z=>_piaNomesBatem(z,k)))continue;
+      doLote.push(k);
+      if(_piaOndeExiste(nome))repetidas++;
+      const s=_piaMontar(x,res.fontes);
+      if(s.cnpj){try{const st=document.getElementById('pia-run-st');if(st)st.textContent='Conferindo CNPJ na Receita: '+s.nome;}catch(err){}
+        const rec=await _piaReceita(s.cnpj);if(!rec.erro){s.receita=rec;s.receitaConfere=_piaReceitaConfere(s.nome,rec);}}
+      Object.assign(s,{id:_ppId('pia_'),status:'pendente',em:agora,por:eu,lote,modelo:_piaModelo()});
+      try{await window._fbOrcSalvar(PIA_DOC,s.id,s);_piaSug[s.id]=s;novas++;}catch(e){console.error('pia salvar',e);}
+    }
+    await _piaLimparAntigas();
+    try{const c={ultimaCaca:_piaCtrl&&_piaCtrl.ultimaCaca||agora,por:eu,emAndamento:false,empresas:novas};await window._fbOrcSalvar(PIA_DOC,'_controle',c);_piaCtrl=c;}catch(err){}
+    if(!novas)await _piaDestravar();
+    _piaRun=null;clearInterval(tick);
+    const m=document.getElementById('pia-cacar-modal');if(m)m.remove();
+    try{_piaAtualizarBotao();}catch(e){}
+    if(novas){const nv=novas-repetidas;toast(`🤖 ${nv} ${_plural(nv,'empresa nova','empresas novas')}${repetidas?` e ${repetidas} que já ${_plural(repetidas,'existe','existem')} no sistema (marcadas na lista)`:''} — confira e aprove`,'tok');piaAbrirFila();}
+    else toast('A IA não achou empresa nova com esse perfil. Tente outros segmentos ou regiões.','twar');
+  }catch(e){
+    await _piaDestravar();
+    _piaRun=null;clearInterval(tick);
+    const m=document.getElementById('pia-cacar-modal');
+    try{_piaAtualizarBotao();}catch(err){}
+    if(String(e.message)==='cancelado'){if(m)m.remove();toast('Busca cancelada','tinf');return;}
+    console.error('pia caçar',e);
+    if(m)_piaRenderCacarForm();
+    toast('Não consegui fazer a busca: '+(e.message||e),'terr');
+  }
+}
+function _piaMontar(x,fontesBusca){
+  const sinais=(Array.isArray(x.sinais)?x.sinais:[]).map(s=>({texto:String(s&&s.texto||'').trim(),data:String(s&&s.data||'').trim(),url:_piaUrl(s&&s.url)})).filter(s=>s.texto).slice(0,6);
+  const decisores=(Array.isArray(x.decisores)?x.decisores:[]).map(d=>({nome:String(d&&d.nome||'').trim(),cargo:String(d&&d.cargo||'').trim(),linkedin:_piaUrl(d&&d.linkedin),fonte:_piaUrl(d&&d.fonte)})).filter(d=>d.nome&&d.cargo).slice(0,6);
+  const urlsSinais=new Set(sinais.map(s=>s.url).filter(Boolean));
+  const fontes=(fontesBusca||[]).filter(f=>urlsSinais.has(f.url)).slice(0,8);
+  sinais.forEach(s=>{if(s.url&&!fontes.some(f=>f.url===s.url))fontes.push({url:s.url,titulo:s.url});});
+  return{
+    nome:String(x.nome||'').trim().toUpperCase(),
+    cnpj:(String(x.cnpj||'').replace(/\D/g,'').length===14?String(x.cnpj).replace(/\D/g,''):''),
+    segmento:String(x.segmento||'').trim().toUpperCase(),
+    site:_piaUrl(x.site),
+    sedeCidade:String(x.sede_cidade||'').trim().toUpperCase(),
+    sedeUf:(UF_BR.includes(String(x.sede_uf||'').trim().toUpperCase())?String(x.sede_uf).trim().toUpperCase():''),
+    unidadesExistentes:_piaNum(x.unidades_existentes),
+    unidadesAbrir:_piaNum(x.unidades_abrir),
+    regioes:_piaRegioesValidas(x.regioes_expansao),
+    porQueAgora:String(x.por_que_agora||'').trim(),
+    resumo:String(x.resumo||'').trim(),
+    sinais,decisores,
+    cargosAlvo:(Array.isArray(x.cargos_alvo)?x.cargos_alvo:[]).map(c=>String(c||'').trim()).filter(Boolean).slice(0,5),
+    msgWhats:String(x.mensagem_whatsapp||'').trim(),
+    emailAssunto:String(x.email_assunto||'').trim(),
+    emailCorpo:String(x.email_corpo||'').trim(),
+    confianca:['alta','media','baixa'].includes(x.confianca)?x.confianca:'media',
+    fontes
+  };
+}
+// Mantém o documento leve: guarda no máximo 150 decididas (as mais novas) e enxuga o dossiê delas.
+async function _piaLimparAntigas(){
+  try{
+    const dec=Object.values(_piaSug||{}).filter(s=>s&&s.status!=='pendente').sort((a,b)=>String(b.decididoEm||'').localeCompare(String(a.decididoEm||'')));
+    for(const s of dec.slice(150)){try{await window._fbOrcExcluir(PIA_DOC,s.id);delete _piaSug[s.id];}catch(e){}}
+  }catch(e){}
+}
+
+// ── fila de sugestões ──
+function piaAbrirFila(){
+  if(!_temAcessoProspeccao()){toast('Você não tem acesso à Prospecção','terr');return;}
+  _piaWatch();_piaRenderFila();
+}
+function _piaTxt(t,vend){return String(t||'').replace(/\{\{VENDEDOR\}\}/g,vend||_ppEu());}
+function _piaBlocoDossie(s,ctx){
+  // ctx: {tipo:'fila'|'card', id}
+  const vend=_ppEu();
+  const sinais=(s.sinais||[]).map(x=>`<li style="margin-bottom:3px">${_ppEsc(x.texto)}${x.data?` <span style="color:var(--ink4)">(${_ppEsc(x.data)})</span>`:''}${x.url?` <a href="${_ppEsc(x.url)}" target="_blank" rel="noopener" style="color:#2563eb;font-weight:700;text-decoration:none;white-space:nowrap">fonte ↗</a>`:''}</li>`).join('');
+  const decs=(s.decisores||[]).map((d,i)=>`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid var(--border-lt);border-radius:8px;padding:6px 9px;margin-bottom:5px">
+      <div style="min-width:0;font-size:.74rem"><b>👤 ${_ppEsc(d.nome)}</b> <span style="color:#4338ca">· ${_ppEsc(d.cargo)}</span>${d.linkedin?` <a href="${_ppEsc(d.linkedin)}" target="_blank" rel="noopener" style="color:#0369a1;font-weight:700;text-decoration:none;white-space:nowrap">LinkedIn ↗</a>`:''}${d.fonte&&!d.linkedin?` <a href="${_ppEsc(d.fonte)}" target="_blank" rel="noopener" style="color:#2563eb;font-weight:700;text-decoration:none;white-space:nowrap">fonte ↗</a>`:''}</div>
+      ${ctx.tipo==='card'?`<button type="button" onclick="piaCadastrarDecisor('${ctx.id}',${i})" style="${_ppBtn};background:#2563eb;padding:5px 9px;font-size:.68rem">➕ Cadastrar</button>`:''}
+    </div>`).join('');
+  const cargos=(s.cargosAlvo||[]).length?`<div style="font-size:.72rem;color:var(--ink3);margin-top:4px">🎯 Procure: ${(s.cargosAlvo||[]).map(_ppEsc).join(' · ')}</div>`:'';
+  const wa=_piaTxt(s.msgWhats,vend),em=_piaTxt(s.emailCorpo,vend);
+  const k=ctx.tipo+'_'+ctx.id;
+  return`${s.porQueAgora?`<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:8px 10px;font-size:.76rem;color:#4c1d95;margin-top:8px"><b>⏰ Por que agora:</b> ${_ppEsc(s.porQueAgora)}</div>`:''}
+    ${s.resumo?`<div style="font-size:.76rem;color:var(--ink3);margin-top:8px">${_ppEsc(s.resumo)}${s.site?` <a href="${_ppEsc(s.site)}" target="_blank" rel="noopener" style="color:#2563eb;font-weight:700;text-decoration:none;white-space:nowrap">site ↗</a>`:''}</div>`:''}
+    ${sinais?`<div style="font-size:.7rem;font-weight:800;color:var(--ink3);text-transform:uppercase;margin-top:10px">Sinais encontrados</div><ul style="margin:4px 0 0;padding-left:18px;font-size:.74rem;color:var(--ink2)">${sinais}</ul>`:''}
+    ${decs||cargos?`<div style="font-size:.7rem;font-weight:800;color:var(--ink3);text-transform:uppercase;margin-top:10px">Decisores</div>${decs||'<div style="font-size:.72rem;color:var(--ink4)">Nenhum nome público encontrado.</div>'}${cargos}`:''}
+    ${wa||em?`<details style="margin-top:10px"><summary style="cursor:pointer;font-size:.74rem;font-weight:800;color:#7c3aed">💬 Mensagens prontas</summary>
+      ${wa?`<div style="font-size:.7rem;font-weight:800;color:var(--ink3);margin-top:8px">WhatsApp</div><div id="pia-wa-${k}" style="white-space:pre-wrap;font-size:.74rem;background:#f8fafc;border:1px solid var(--border-lt);border-radius:8px;padding:8px 10px;margin-top:4px">${_ppEsc(wa)}</div>
+        <button type="button" onclick="piaCopiar('pia-wa-${k}')" style="${_ppBtn};background:#334155;margin-top:6px;padding:5px 10px;font-size:.68rem">📋 Copiar</button>`:''}
+      ${em?`<div style="font-size:.7rem;font-weight:800;color:var(--ink3);margin-top:10px">E-mail${s.emailAssunto?' — '+_ppEsc(s.emailAssunto):''}</div><div id="pia-em-${k}" style="white-space:pre-wrap;font-size:.74rem;background:#f8fafc;border:1px solid var(--border-lt);border-radius:8px;padding:8px 10px;margin-top:4px">${_ppEsc(em)}</div>
+        <button type="button" onclick="piaCopiar('pia-em-${k}')" style="${_ppBtn};background:#334155;margin-top:6px;padding:5px 10px;font-size:.68rem">📋 Copiar</button>`:''}
+    </details>`:''}`;
+}
+function piaCopiar(id){const el=document.getElementById(id);if(!el)return;const v=el.textContent||'';if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(v).then(()=>toast('Copiado!','tok')).catch(()=>_prospCopiarFallback(v));else _prospCopiarFallback(v);}
+function _piaConfChip(c){const m={alta:['#dcfce7','#166534','confiança alta'],media:['#fef3c7','#92400e','confiança média'],baixa:['#fee2e2','#991b1b','confiança baixa — confira']}[c]||['#f1f5f9','#475569','—'];return`<span style="background:${m[0]};color:${m[1]};border-radius:20px;padding:0 8px;font-size:.62rem;font-weight:800;white-space:nowrap;line-height:1.7">${m[2]}</span>`;}
+function _piaRenderFila(){
+  const l=_piaPendentes();
+  const equipe=(function(){try{return _prospNomesEquipe();}catch(e){return[];}})();
+  const meu=String(_ppEu()).toUpperCase().trim();
+  const optResp=equipe.map(n=>`<option value="${_ppEsc(n)}"${n===meu?' selected':''}>${_ppEsc(n)}</option>`).join('');
+  const lx=l.map(s=>{let ja=_piaOndeExiste(s.nome);
+    if(!ja&&s.receita&&s.receitaConfere&&!_piaReceitaAtiva(s.receita))ja={onde:'receita',rotulo:'CNPJ '+(s.receita.situacao||'INATIVO')+' NA RECEITA',nome:s.receita.razao,detalhe:''};
+    return{s,ja};}).sort((a,b)=>(a.ja?1:0)-(b.ja?1:0));
+  const cards=lx.map(({s,ja})=>{
+    const jaHtml=ja?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fff7ed;border:1.5px solid #fdba74;border-radius:8px;padding:7px 10px;margin-top:8px">
+        <span style="background:#ea580c;color:#fff;border-radius:20px;padding:1px 10px;font-size:.68rem;font-weight:800;white-space:nowrap">⚠ ${ja.rotulo}</span>
+        <span style="font-size:.74rem;color:#9a3412">como <b>${_ppEsc(ja.nome)}</b>${ja.detalhe?' · '+_ppEsc(ja.detalhe):''}</span></div>`:'';
+    return`<div style="border:1.5px solid ${ja?'#fdba74':'var(--border-lt)'};border-radius:12px;padding:12px 14px;margin-top:10px${ja?';background:#fffbf5':''}">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap">
+        <div style="min-width:0">
+          <div style="font-weight:800;font-size:.9rem;display:flex;gap:6px;align-items:center;flex-wrap:wrap">${_ppNotaChip(_piaProto(s),true)} <span>${_ppEsc(s.nome)}</span></div>
+          <div style="font-size:.72rem;color:var(--ink4);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            ${s.segmento?`<span>${_ppEsc(s.segmento)}</span>`:''}${s.sedeCidade||s.sedeUf?`<span>📍 ${_ppEsc([s.sedeCidade,s.sedeUf].filter(Boolean).join('/'))}</span>`:''}
+            ${s.unidadesExistentes?`<span style="white-space:nowrap">🏬 ${s.unidadesExistentes} ${_plural(s.unidadesExistentes,'unidade','unidades')}</span>`:''}
+            ${s.unidadesAbrir?`<span style="white-space:nowrap;color:#166534;font-weight:800">＋${s.unidadesAbrir} a abrir</span>`:''}
+            ${(s.regioes||[]).length?`<span>🗺️ ${(s.regioes||[]).map(_ppEsc).join(', ')}</span>`:''}
+            ${_piaConfChip(s.confianca)}
+          </div>
+        </div>
+      </div>
+      ${jaHtml}
+      ${_piaReceitaHtml(s.receita,s.receitaConfere)}
+      ${_piaBlocoDossie(s,{tipo:'fila',id:s.id})}
+      ${ja?`<div id="pia-dec-${s.id}" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--border-lt)">
+        ${ja.empresaId?`<button type="button" onclick="document.getElementById('pia-fila-modal').remove();prospAbrirCard('${ja.empresaId}')" style="${_ppBtn};background:#ea580c">📂 Abrir o card</button>`:''}
+        <button type="button" onclick="piaDispensarExistente('${s.id}')" style="${_ppBtn};background:#fff;color:#475569;border:1.5px solid #cbd5e1">✓ Tirar da lista</button>
+      </div>`:`<div id="pia-dec-${s.id}" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--border-lt)">
+        <select id="pia-resp-${s.id}" title="Responsável pelo card" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:.74rem;max-width:200px">${optResp}</select>
+        <button type="button" onclick="piaAprovar('${s.id}')" style="${_ppBtn};background:#16a34a">✅ Aprovar e criar card</button>
+        <button type="button" onclick="piaAbrirDescartarSug('${s.id}')" style="${_ppBtn};background:#fff;color:#dc2626;border:1.5px solid #fecaca">🗑️ Descartar</button>
+      </div>`}
+    </div>`;}).join('');
+  const html=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+      <div><div style="font-size:1rem;font-weight:800">🤖 Sugestões da IA <span style="color:var(--ink4);font-weight:700">(${l.length})</span></div>
+      <div style="font-size:.74rem;color:var(--ink4);margin-top:2px">Aprovar cria o card na 1ª etapa do funil, com o dossiê e a cadência. Confira as fontes antes de aprovar.</div></div>${_ppFechar('pia-fila-modal')}</div>
+    <div style="display:flex;justify-content:flex-end;margin-top:10px">${_piaProximaCaca()?`<span style="font-size:.72rem;color:#92400e;font-weight:700;background:#fef3c7;border-radius:8px;padding:6px 10px">🔒 Próxima caça liberada em ${_piaFmtData(_piaProximaCaca())}</span>`:`<button type="button" onclick="document.getElementById('pia-fila-modal').remove();piaAbrirCacar()" style="${_ppBtn};background:#7c3aed">🤖 Buscar mais empresas</button>`}</div>
+    ${cards||`<div style="text-align:center;padding:30px 10px;color:var(--ink4);font-size:.8rem">Nenhuma sugestão esperando aprovação.<br>${_piaProximaCaca()?'A próxima caça fica liberada em <b>'+_piaFmtData(_piaProximaCaca())+'</b>.':'Clique em <b>🤖 Buscar mais empresas</b> para a IA pesquisar.'}</div>`}`;
+  const m=document.getElementById('pia-fila-modal');
+  if(m&&m.firstChild){const sc=m.firstChild.scrollTop;m.firstChild.innerHTML=html;m.firstChild.scrollTop=sc;}
+  else _ppModal('pia-fila-modal',html,760);
+}
+async function piaAprovar(id){
+  const s=_piaSug[id];if(!s||s.status!=='pendente'){toast('Essa sugestão já foi decidida por outra pessoa','tinf');_piaRenderFila();return;}
+  const ja=_piaOndeExiste(s.nome);
+  if(ja&&(ja.onde==='funil'||ja.onde==='geladeira')){toast(`${s.nome}: ${ja.rotulo.toLowerCase()} (${ja.nome})`,'twar');_piaRenderFila();return;}
+  if(ja&&!confirm(`${s.nome}: ${ja.rotulo.toLowerCase()} (${ja.nome}). Criar o card na Prospecção mesmo assim?`))return;
+  const sel=document.getElementById('pia-resp-'+id);
+  const resp=(sel&&sel.value)||String(_ppEu()).toUpperCase();
+  const etapas=_prospEtapas();const agora=new Date().toISOString();
+  const e={
+    id:'pe_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),
+    etapa:etapas[0].key,timeline:[],tarefas:[],decisores:[],
+    criadoPor:_ppEu(),criadoEm:agora,atualizadoEm:agora,
+    nome:s.nome,segmento:s.segmento||'',responsavel:resp,
+    unidadesExistentes:s.unidadesExistentes?String(s.unidadesExistentes):'',
+    unidadesAbrir:s.unidadesAbrir?String(s.unidadesAbrir):'',
+    regioes:(s.regioes||[]).slice(),sedeCidade:s.sedeCidade||(s.receitaConfere&&s.receita&&s.receita.municipio)||'',sedeUf:s.sedeUf||(s.receitaConfere&&s.receita&&s.receita.uf)||'',
+    origemIA:{sugestaoId:id,em:s.em,por:s.por},
+    ...(s.receita&&s.receitaConfere?{cnpj:s.receita.cnpj,razaoSocial:s.receita.razao,receita:s.receita}:{}),
+    iaDossie:_piaDossieDe(s)
+  };
+  e.timeline.push({id:_ppId('pcm_'),texto:`🤖 Card criado a partir de uma sugestão da IA (aprovada por ${_ppEu()}).${s.porQueAgora?'\nPor que agora: '+s.porQueAgora:''}`,autor:_ppEu(),em:agora,sistema:true});
+  try{_ppAplicarCadencia(e,'',e.etapa);}catch(err){console.error('cadência',err);}
+  const btns=document.querySelectorAll('#pia-dec-'+id+' button');btns.forEach(b=>b.disabled=true);
+  try{await _prospSalvarEmpresaObj(e);}catch(err){btns.forEach(b=>b.disabled=false);return;}
+  const dec={...s,status:'aprovada',decididoEm:agora,decididoPor:_ppEu(),empresaId:e.id};
+  _piaEnxugar(dec);
+  try{await window._fbOrcSalvar(PIA_DOC,id,dec);_piaSug[id]=dec;}catch(err){console.error('pia aprovar',err);}
+  toast(`✅ ${s.nome} entrou no funil com ${resp}. A IA já está buscando os decisores.`,'tok');
+  _piaRenderFila();
+  _piaEnfileirarPesquisa(e.id);
+  try{if(typeof _prospTabAtiva!=='undefined'&&_prospTabAtiva==='kanban')renderProspKanban();}catch(err){}
+}
+async function piaDispensarExistente(id){
+  const s=_piaSug[id];if(!s)return;let ja=_piaOndeExiste(s.nome);
+  if(!ja&&s.receita&&s.receitaConfere&&!_piaReceitaAtiva(s.receita))ja={onde:'receita',rotulo:'CNPJ '+(s.receita.situacao||'INATIVO')+' NA RECEITA',nome:s.receita.razao};
+  const dec={...s,status:'descartada',motivo:ja&&ja.onde==='receita'?'EMPRESA BAIXADA OU INAPTA NA RECEITA':'JÁ É CLIENTE OU JÁ ESTÁ NO FUNIL',comentario:ja?ja.rotulo+' como '+ja.nome:'',decididoEm:new Date().toISOString(),decididoPor:_ppEu()};
+  _piaEnxugar(dec);
+  try{await window._fbOrcSalvar(PIA_DOC,id,dec);_piaSug[id]=dec;}catch(err){toast('Erro: '+(err.message||err),'terr');return;}
+  _piaRenderFila();
+}
+function _piaEnxugar(s){delete s.msgWhats;delete s.emailCorpo;delete s.emailAssunto;delete s.decisores;delete s.fontes;delete s.resumo;s.sinais=(s.sinais||[]).slice(0,2);}
+function _piaDossieDe(s){
+  return{em:new Date().toISOString(),por:_ppEu(),modelo:s.modelo||_piaModelo(),resumo:s.resumo||'',porQueAgora:s.porQueAgora||'',site:s.site||'',
+    sinais:(s.sinais||[]).slice(),decisores:(s.decisores||[]).slice(),cargosAlvo:(s.cargosAlvo||[]).slice(),
+    msgWhats:s.msgWhats||'',emailAssunto:s.emailAssunto||'',emailCorpo:s.emailCorpo||'',confianca:s.confianca||'media',fontes:(s.fontes||[]).slice(0,8)};
+}
+function piaAbrirDescartarSug(id){
+  const s=_piaSug[id];if(!s)return;
+  _ppModal('pia-desc-modal',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div style="font-size:1rem;font-weight:800">🗑️ Descartar ${_ppEsc(s.nome)}</div>${_ppFechar('pia-desc-modal')}</div>
+    <div style="font-size:.74rem;color:var(--ink4);margin-top:4px">O motivo ensina a IA a não sugerir empresas parecidas.</div>
+    <select id="pia-desc-mot" style="width:100%;margin-top:12px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit">${PIA_MOTIVOS.map(m=>`<option>${m}</option>`).join('')}</select>
+    <textarea id="pia-desc-com" class="no-upper" rows="2" placeholder="Comentário (opcional)" style="width:100%;box-sizing:border-box;margin-top:8px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;text-transform:none"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px"><button type="button" onclick="piaDescartarSug('${id}')" style="${_ppBtn};background:#dc2626">Descartar</button></div>`,440);
+}
+async function piaDescartarSug(id){
+  const s=_piaSug[id];if(!s)return;
+  const motivo=(document.getElementById('pia-desc-mot')||{}).value||'OUTRO';
+  const comentario=((document.getElementById('pia-desc-com')||{}).value||'').trim();
+  if(motivo==='OUTRO'&&!comentario){toast('Escreva o motivo no comentário','terr');return;}
+  const dec={...s,status:'descartada',motivo,comentario,decididoEm:new Date().toISOString(),decididoPor:_ppEu()};
+  _piaEnxugar(dec);
+  try{await window._fbOrcSalvar(PIA_DOC,id,dec);_piaSug[id]=dec;}catch(err){toast('Erro ao descartar: '+(err.message||err),'terr');return;}
+  const m=document.getElementById('pia-desc-modal');if(m)m.remove();
+  toast('Sugestão descartada','tinf');
+  _piaRenderFila();
+}
+
+// ── botão na barra do funil ──
+function _piaAtualizarBotao(){
+  const b=document.getElementById('pia-btn-cacar');if(!b)return;
+  const n=_piaPendentes().length;
+  b.innerHTML=_piaRun?'🤖 Pesquisando…':`🤖 Caçar com IA${n?` <span style="background:#fff;color:#7c3aed;border-radius:20px;padding:0 7px;margin-left:4px;font-size:.66rem;font-weight:800">${n}</span>`:''}`;
+  const tv=_piaProximaCaca();
+  if(!_piaRun&&!n&&tv)b.innerHTML=`🤖 Caçar com IA <span style="background:rgba(255,255,255,.25);border-radius:20px;padding:0 7px;margin-left:4px;font-size:.66rem;font-weight:800;white-space:nowrap">🔒 ${_piaFmtData(tv).slice(0,5)}</span>`;
+  b.title=n?n+' '+_plural(n,'sugestão esperando aprovação','sugestões esperando aprovação'):(tv?'Próxima caça liberada em '+_piaFmtData(tv):'A IA pesquisa na internet redes em expansão para prospectar');
+}
+function piaClicarBotao(){if(_piaRun){_piaRenderCacarRodando();return;}if(_piaPendentes().length)piaAbrirFila();else piaAbrirCacar();}
+
+// ══ (b) PESQUISAR UMA EMPRESA DO FUNIL ═══════════════════════════════════════════════
+function _piaEnfileirarPesquisa(id){if(!_piaFilaPesq.includes(id))_piaFilaPesq.push(id);_piaProcessarFila();}
+async function _piaProcessarFila(){
+  if(_piaCardRun||!_piaFilaPesq.length)return;
+  const id=_piaFilaPesq.shift();
+  try{await piaPesquisarCard(id,{silencioso:true});}catch(err){}
+  setTimeout(_piaProcessarFila,300);
+}
+function _piaPesquisando(id){return(_piaCardRun&&_piaCardRun.id===id)||_piaFilaPesq.includes(id);}
+async function piaPesquisarCard(id,opt){
+  opt=opt||{};
+  const e=prospEmpresas.find(x=>x.id===id);if(!e)return;
+  _piaWatch();
+  if(!_piaChave()){if(opt.silencioso)return;setTimeout(()=>{if(!_piaChave())_piaSemChave();else piaPesquisarCard(id);},900);return;}
+  if(_piaCardRun){
+    if(_piaCardRun.id===id){if(!opt.silencioso)_piaRenderCardRodando();return;}
+    _piaFilaPesq=_piaFilaPesq.filter(x=>x!==id);_piaFilaPesq.unshift(id);
+    toast('A IA está terminando de pesquisar '+(_piaCardRun.nome||'outra empresa')+'. Esta entra logo em seguida.','tinf');return;
+  }
+  _piaFilaPesq=_piaFilaPesq.filter(x=>x!==id);
+  const run=_piaCardRun={inicio:Date.now(),buscas:0,cancelado:false,nome:e.nome,id,silencioso:!!opt.silencioso};
+  if(!opt.silencioso)_piaRenderCardRodando();
+  if(_prospCardAtualId===id)try{_prospRenderCard(e);}catch(err){}
+  const tick=setInterval(()=>{const st=document.getElementById('pia-card-st');if(st&&_piaCardRun)st.textContent=(_piaCardRun.buscas?_piaCardRun.buscas+' '+_plural(_piaCardRun.buscas,'pesquisa feita','pesquisas feitas')+' · ':'')+Math.round((Date.now()-_piaCardRun.inicio)/1000)+'s';},1000);
+  const conhecido=[e.segmento&&'Segmento cadastrado: '+e.segmento,(e.sedeCidade||e.sedeUf)&&'Sede cadastrada: '+[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'),
+    e.unidadesExistentes&&'Unidades existentes cadastradas: '+e.unidadesExistentes,e.unidadesAbrir&&'Unidades a abrir cadastradas: '+e.unidadesAbrir,
+    (e.decisores||[]).length&&'Decisores já cadastrados (não repita): '+e.decisores.map(d=>d.nome+(d.cargo?' ('+d.cargo+')':'')).join('; ')].filter(Boolean).join('\n');
+  const pedido=`${PIA_GRANDA}
+
+TAREFA: pesquise a empresa "${e.nome}" para a Granda abordar.
+${conhecido?'O que já está no sistema:\n'+conhecido+'\n':''}
+Descubra: quantas unidades tem, se anunciou abertura de unidades, reforma, rebranding ou troca de identidade visual, em quais regiões vai crescer, quem são os decisores públicos e por que este é um bom momento para a Granda procurar a empresa.
+O MAIS IMPORTANTE é achar os decisores. ${_piaCargosTxt()}
+
+${PIA_REGRAS}
+
+Formato do JSON final: ${PIA_FORMATO_EMPRESA}`;
+  try{
+    const res=await _piaChamar('Você é um pesquisador de prospecção B2B da Granda Comunicação Visual. Pesquisa na internet, confere as fontes e entrega dados verdadeiros.',pedido,10,run,b=>{run.buscas=b;});
+    const s=_piaMontar(res.out,res.fontes);
+    const atual=prospEmpresas.find(x=>x.id===id)||e;
+    const antigos=(atual.iaDossie&&atual.iaDossie.decisores)||[];
+    antigos.forEach(d=>{if(d&&d.nome&&!s.decisores.some(x=>_piaNorm(x.nome)===_piaNorm(d.nome)))s.decisores.push(d);});
+    if(s.cnpj&&!atual.receita){const rec=await _piaReceita(s.cnpj);if(!rec.erro&&_piaReceitaConfere(atual.nome,rec)){atual.cnpj=rec.cnpj;atual.razaoSocial=rec.razao;atual.receita=rec;}}
+    atual.iaDossie={..._piaDossieDe({...s,modelo:_piaModelo()}),
+      sugeridos:{segmento:s.segmento,sedeCidade:s.sedeCidade,sedeUf:s.sedeUf,unidadesExistentes:s.unidadesExistentes,unidadesAbrir:s.unidadesAbrir,regioes:s.regioes},
+      buscas:res.buscas,seg:Math.round((Date.now()-run.inicio)/1000)};
+    (atual.timeline=atual.timeline||[]).push({id:_ppId('pcm_'),texto:`🤖 Pesquisa com IA feita por ${_ppEu()}${s.porQueAgora?'\nPor que agora: '+s.porQueAgora:''}`,autor:_ppEu(),em:new Date().toISOString(),sistema:true});
+    atual.atualizadoEm=new Date().toISOString();
+    _piaCardRun=null;clearInterval(tick);
+    try{await _prospSalvarEmpresaObj(atual);}catch(err){}
+    if(_prospCardAtualId===id)try{_prospRenderCard(atual);}catch(err){}
+    const nd=(s.decisores||[]).length;
+    if(opt.silencioso)toast(`🤖 ${atual.nome}: ${nd?nd+' '+_plural(nd,'decisor encontrado','decisores encontrados'):'nenhum decisor público encontrado'}. Veja em Decisores, no card.`,'tok');
+    else{piaVerDossie(id);toast('🤖 Pesquisa pronta: '+atual.nome,'tok');}
+  }catch(err){
+    _piaCardRun=null;clearInterval(tick);
+    if(!opt.silencioso){const m=document.getElementById('pia-card-modal');if(m)m.remove();}
+    if(_prospCardAtualId===id)try{_prospRenderCard(prospEmpresas.find(x=>x.id===id)||e);}catch(e2){}
+    if(String(err.message)==='cancelado'){toast('Pesquisa cancelada','tinf');return;}
+    console.error('pia card',err);toast(`Não consegui buscar os dados de ${e.nome}: `+(err.message||err),'terr');
+  }finally{setTimeout(_piaProcessarFila,300);}
+}
+function _piaRenderCardRodando(){
+  const r=_piaCardRun;if(!r)return;
+  _ppModal('pia-card-modal',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div style="font-size:1rem;font-weight:800">🤖 Pesquisar ${_ppEsc(r.nome)}</div>${_ppFechar('pia-card-modal')}</div>
+    <div style="text-align:center;padding:26px 8px">
+      <div style="font-size:2rem">🔎</div>
+      <div style="font-weight:800;font-size:.9rem;margin-top:8px">A IA está pesquisando na internet…</div>
+      <div id="pia-card-st" style="font-size:.76rem;color:var(--ink4);margin-top:4px">${Math.round((Date.now()-r.inicio)/1000)}s</div>
+      <div style="font-size:.72rem;color:var(--ink4);margin-top:10px">Leva de 30 segundos a 2 minutos. Pode fechar esta janela: o resultado fica salvo no card.</div>
+      <button type="button" onclick="if(_piaCardRun){_piaCardRun.cancelado=true;try{_piaCardRun.ctrl.abort()}catch(e){}}" style="${_ppBtn};background:#fff;color:#dc2626;border:1.5px solid #fecaca;margin-top:16px">✕ Cancelar pesquisa</button>
+    </div>`,520);
+}
+function piaVerDossie(id){
+  const e=prospEmpresas.find(x=>x.id===id);if(!e||!e.iaDossie)return;
+  const d=e.iaDossie,sg=d.sugeridos||{};
+  const campos=[
+    ['segmento','Segmento',e.segmento||'',sg.segmento||''],
+    ['sede','Sede',[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'),[sg.sedeCidade,sg.sedeUf].filter(Boolean).join('/')],
+    ['unidadesExistentes','Unidades existentes',String(e.unidadesExistentes||''),sg.unidadesExistentes?String(sg.unidadesExistentes):''],
+    ['unidadesAbrir','Unidades a abrir',String(e.unidadesAbrir||''),sg.unidadesAbrir?String(sg.unidadesAbrir):''],
+    ['regioes','Regiões de interesse',(e.regioes||[]).join(', '),(sg.regioes||[]).join(', ')]
+  ].filter(c=>c[3]&&c[3]!==c[2]);
+  const diff=campos.length?`<div style="border:1.5px solid #bbf7d0;background:#f0fdf4;border-radius:10px;padding:10px 12px;margin-top:12px">
+      <div style="font-size:.76rem;font-weight:800;color:#166534">Dados novos que a IA achou — marque o que quer levar para o card</div>
+      ${campos.map(c=>`<label style="display:flex;gap:8px;align-items:flex-start;font-size:.74rem;margin-top:7px;cursor:pointer"><input type="checkbox" class="pia-ap" value="${c[0]}" ${c[2]?'':'checked'} style="margin-top:2px;width:auto">
+        <span><b>${c[1]}:</b> <span style="color:var(--ink4);text-decoration:${c[2]?'line-through':'none'}">${_ppEsc(c[2]||'vazio')}</span> → <b style="color:#166534">${_ppEsc(c[3])}</b></span></label>`).join('')}
+      <button type="button" onclick="piaAplicar('${id}')" style="${_ppBtn};background:#16a34a;margin-top:10px">✅ Aplicar ao card</button>
+    </div>`:'';
+  _ppModal('pia-card-modal',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+      <div style="min-width:0"><div style="font-size:1rem;font-weight:800">🤖 Pesquisa da IA — ${_ppEsc(e.nome)}</div>
+      <div style="font-size:.7rem;color:var(--ink4);margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span>${_fmtDataHora(d.em)} · ${_ppEsc(d.por||'—')}</span>${_piaConfChip(d.confianca)}</div></div>${_ppFechar('pia-card-modal')}</div>
+    ${diff}
+    ${_piaBlocoDossie(d,{tipo:'card',id})}
+    <div style="display:flex;justify-content:flex-end;margin-top:14px"><button type="button" onclick="document.getElementById('pia-card-modal').remove();piaPesquisarCard('${id}')" style="${_ppBtn};background:#fff;color:#7c3aed;border:1.5px solid #c4b5fd">🔄 Pesquisar de novo</button></div>`,680);
+}
+async function piaAplicar(id){
+  const e=prospEmpresas.find(x=>x.id===id);if(!e||!e.iaDossie)return;
+  const sg=e.iaDossie.sugeridos||{};
+  const marc=[...document.querySelectorAll('#pia-card-modal .pia-ap:checked')].map(c=>c.value);
+  if(!marc.length){toast('Marque pelo menos um dado','terr');return;}
+  const mud=[];
+  if(marc.includes('segmento')&&sg.segmento){mud.push('segmento: '+sg.segmento);e.segmento=sg.segmento;}
+  if(marc.includes('sede')&&(sg.sedeCidade||sg.sedeUf)){e.sedeCidade=sg.sedeCidade||e.sedeCidade||'';e.sedeUf=sg.sedeUf||e.sedeUf||'';mud.push('sede: '+[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'));}
+  if(marc.includes('unidadesExistentes')&&sg.unidadesExistentes){e.unidadesExistentes=String(sg.unidadesExistentes);mud.push('unidades existentes: '+sg.unidadesExistentes);}
+  if(marc.includes('unidadesAbrir')&&sg.unidadesAbrir){e.unidadesAbrir=String(sg.unidadesAbrir);mud.push('unidades a abrir: '+sg.unidadesAbrir);}
+  if(marc.includes('regioes')&&(sg.regioes||[]).length){e.regioes=sg.regioes.slice();mud.push('regiões: '+sg.regioes.join(', '));}
+  (e.timeline=e.timeline||[]).push({id:_ppId('pcm_'),texto:`🤖 Dados da pesquisa com IA aplicados por ${_ppEu()}: ${mud.join(' · ')}`,autor:_ppEu(),em:new Date().toISOString(),sistema:true});
+  e.atualizadoEm=new Date().toISOString();
+  try{await _prospSalvarEmpresaObj(e);}catch(err){return;}
+  toast('Card atualizado','tok');
+  if(_prospCardAtualId===id)try{_prospRenderCard(e);}catch(err){}
+  try{renderProspKanban();}catch(err){}
+  piaVerDossie(id);
+}
+function piaCadastrarDecisor(id,i){
+  const e=prospEmpresas.find(x=>x.id===id);const d=e&&e.iaDossie&&(e.iaDossie.decisores||[])[i];if(!d)return;
+  const m=document.getElementById('pia-card-modal');if(m)m.remove();
+  prospAbrirAdicionarDecisor(id);
+  try{
+    document.getElementById('prosp-decisor-add-nome').value=d.nome||'';
+    document.getElementById('prosp-decisor-add-cargo').value=d.cargo||'';
+    document.getElementById('prosp-decisor-add-linkedin').value=d.linkedin||'';
+  }catch(err){}
+  toast('Complete o telefone ou o e-mail do decisor para salvar','tinf');
+}
+
+// ── cargos que a IA procura (admin ou quem edita etapas) ──
+function piaAbrirCargos(){
+  if(!_ppPodeConfig()){toast('Só o administrador altera os cargos','terr');return;}
+  _ppModal('pia-cargos-modal',`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+      <div><div style="font-size:1rem;font-weight:800">🎯 Cargos que a IA procura</div>
+      <div style="font-size:.74rem;color:var(--ink4);margin-top:2px">Um cargo por linha, do mais importante para o menos importante. Vale para a caça, para a pesquisa no card e, depois, para o Lusha.</div></div>${_ppFechar('pia-cargos-modal')}</div>
+    <textarea id="pia-cargos-txt" class="no-upper" rows="8" style="width:100%;box-sizing:border-box;margin-top:12px;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:.8rem;text-transform:none">${_ppEsc(_piaCargos().join('\n'))}</textarea>
+    <div style="display:flex;justify-content:space-between;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <button type="button" onclick="document.getElementById('pia-cargos-txt').value=PIA_CARGOS_PADRAO.join('\n')" style="${_ppBtn};background:#fff;color:#475569;border:1.5px solid #cbd5e1">Voltar ao padrão</button>
+      <button type="button" onclick="piaSalvarCargos()" style="${_ppBtn};background:#16a34a">Salvar</button>
+    </div>`,520);
+}
+async function piaSalvarCargos(){
+  const l=String((document.getElementById('pia-cargos-txt')||{}).value||'').split('\n').map(x=>x.trim()).filter(Boolean).slice(0,15);
+  if(!l.length){toast('Coloque pelo menos um cargo','terr');return;}
+  try{cfg.prospCargosIA=l;if(window._fbUpdateCfgField)await window._fbUpdateCfgField(['prospCargosIA'],l);toast('Cargos salvos ✅','tok');const m=document.getElementById('pia-cargos-modal');if(m)m.remove();}
+  catch(err){toast('Erro ao salvar: '+(err.message||err),'terr');}
+}
+{const _o=_prospRenderEtapasModal;_prospRenderEtapasModal=function(){const r=_o.apply(this,arguments);try{
+  const w=document.getElementById('prosp-etapas-list');
+  if(w&&_ppPodeConfig())w.insertAdjacentHTML('beforeend',`<button type="button" onclick="piaAbrirCargos()" style="margin-top:6px;background:#f5f3ff;color:#6d28d9;border:1.5px solid #ddd6fe;border-radius:8px;padding:8px 12px;font-size:.76rem;font-weight:800;cursor:pointer;font-family:inherit">🎯 Cargos que a IA procura</button>`);
+}catch(err){}return r;};}
+
+// ── ganchos (wrappers), mesmo padrão da Prospecção 2.0 ──
+{const _o=renderProspKanban;renderProspKanban=function(){const r=_o.apply(this,arguments);try{
+  _piaWatch();
+  if(_temAcessoProspeccao()&&!document.getElementById('pia-btn-cacar')){
+    const nova=document.querySelector('#prosp-sec-kanban .prosp-tb button[onclick="prospAbrirNovaEmpresa()"]');
+    if(nova)nova.insertAdjacentHTML('beforebegin',`<button type="button" id="pia-btn-cacar" onclick="piaClicarBotao()" class="dash-btn-conf" style="background:#7c3aed;white-space:nowrap">🤖 Caçar com IA</button>`);
+  }
+  _piaAtualizarBotao();
+}catch(err){console.error('agente IA botão',err);}return r;};}
+{const _o=_prospRenderCard;_prospRenderCard=function(e){const r=_o.apply(this,arguments);try{
+  const b=document.getElementById('prosp-card-badges');
+  const linha=b&&b.querySelector('button[onclick^="ppAbrirScripts"]');
+  if(linha)linha.insertAdjacentHTML('beforebegin',`<button type="button" onclick="piaPesquisarCard('${e.id}')" style="${_ppBtn};background:#7c3aed" title="A IA pesquisa a empresa na internet: expansão, decisores e mensagens prontas">🤖 Pesquisar com IA</button>`);
+  const v0=document.getElementById('prosp-tab-visao');
+  if(_piaPesquisando(e.id)&&v0)v0.insertAdjacentHTML('afterbegin',`<div style="border:1.5px dashed #c4b5fd;background:#faf5ff;border-radius:10px;padding:9px 12px;margin-bottom:10px;font-size:.76rem;font-weight:700;color:#5b21b6">🤖 A IA está buscando os decisores desta empresa…</div>`);
+  const td=document.getElementById('prosp-tab-decisores'),cad=(e.decisores||[]).map(x=>_piaNorm(x.nome));
+  const sug=((e.iaDossie&&e.iaDossie.decisores)||[]).map((x,i)=>({x,i})).filter(o=>o.x&&o.x.nome&&!cad.includes(_piaNorm(o.x.nome)));
+  if(td&&(sug.length||_piaPesquisando(e.id)))td.insertAdjacentHTML('afterbegin',`<div style="border:1.5px solid #ddd6fe;background:#faf5ff;border-radius:10px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-size:.78rem;font-weight:800;color:#5b21b6">🤖 Decisores que a IA encontrou ${sug.length?`<span style="font-weight:600;color:var(--ink4);font-size:.68rem">· complete o telefone ou e-mail para cadastrar</span>`:''}</div>
+      ${sug.length?sug.map(({x,i})=>`<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid var(--border-lt);background:#fff;border-radius:8px;padding:6px 9px;margin-top:6px">
+        <div style="min-width:0;font-size:.74rem"><b>👤 ${_ppEsc(x.nome)}</b> <span style="color:#4338ca">· ${_ppEsc(x.cargo)}</span>${x.linkedin?` <a href="${_ppEsc(x.linkedin)}" target="_blank" rel="noopener" style="color:#0369a1;font-weight:700;text-decoration:none;white-space:nowrap">LinkedIn ↗</a>`:''}</div>
+        <button type="button" onclick="piaCadastrarDecisor('${e.id}',${i})" style="${_ppBtn};background:#2563eb;padding:5px 9px;font-size:.68rem">➕ Cadastrar</button></div>`).join('')
+      :`<div style="font-size:.74rem;color:var(--ink4);margin-top:4px">Buscando…</div>`}
+    </div>`);
+  if(v0)v0.insertAdjacentHTML('afterbegin',e.receita?`<div style="margin-bottom:12px">${_piaReceitaHtml(e.receita,true)}</div>`
+    :`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;border:1.5px dashed #cbd5e1;border-radius:10px;padding:8px 10px;margin-bottom:12px">
+      <span style="font-size:.74rem;font-weight:800;color:#334155;white-space:nowrap">🏛️ Receita Federal</span>
+      <input id="pia-cnpj-${e.id}" class="no-upper" inputmode="numeric" placeholder="CNPJ da empresa" value="${_ppEsc(e.cnpj?_piaFmtCnpj(e.cnpj):'')}" style="flex:1;min-width:150px;padding:6px 9px;border:1px solid #cbd5e1;border-radius:8px;font-family:inherit;font-size:.76rem">
+      <button type="button" id="pia-cnpj-btn-${e.id}" onclick="piaConsultarCnpj('${e.id}')" style="${_ppBtn};background:#334155;padding:6px 11px;font-size:.7rem">Consultar</button>
+    </div>`);
+  const d=e.iaDossie,v=document.getElementById('prosp-tab-visao');
+  if(d&&v)v.insertAdjacentHTML('afterbegin',`<div style="border:1.5px solid #ddd6fe;background:#faf5ff;border-radius:10px;padding:10px 12px;margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
+        <div style="font-size:.78rem;font-weight:800;color:#5b21b6">🤖 Pesquisa da IA <span style="font-weight:600;color:var(--ink4);font-size:.68rem">· ${fmtD(String(d.em||'').slice(0,10))}</span></div>
+        <button type="button" onclick="piaVerDossie('${e.id}')" style="${_ppBtn};background:#7c3aed;padding:5px 10px;font-size:.68rem">Ver completa</button>
+      </div>
+      ${d.porQueAgora?`<div style="font-size:.74rem;color:#4c1d95;margin-top:6px"><b>⏰ Por que agora:</b> ${_ppEsc(d.porQueAgora)}</div>`:''}
+      ${(d.decisores||[]).length?`<div style="font-size:.7rem;color:var(--ink3);margin-top:4px">👤 ${d.decisores.length} ${_plural(d.decisores.length,'decisor público encontrado','decisores públicos encontrados')}</div>`:''}
+    </div>`);
+}catch(err){console.error('agente IA card',err);}return r;};}
+
 function prospAbrirGerenciarEtapas(){
   if(!_pode('com_etapas_funil')){toast('Você não tem permissão para isso — fale com o administrador','terr');return;}
   _prospRenderEtapasModal();
@@ -69676,11 +70463,12 @@ function _orc2IaTemChave(){return!!(orc2.iaCfg&&orc2.iaCfg.chave);}
 function _orc2IaHtmlConfig(){
   const adm=_getUserCat().isAdm,c=orc2.iaCfg||{};
   const mod=c.modelo||ORC2_IA_MODELOS[0][0];
-  return`<div class="dash-card"><div class="dash-sec-title">🤖 Leitura de projeto por IA</div>
+  return`<div class="dash-card"><div class="dash-sec-title">🤖 IA — leitura de projeto e prospecção</div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">${c.chave?`<span class="orc2-tag t2">✓ Chave cadastrada (…${_orcxEsc(String(c.chave).slice(-4))})</span>`:'<span class="orc2-tag t3">Sem chave — a leitura de projeto fica desligada</span>'}${c.em?`<span style="font-size:.74rem;color:#64748b">Atualizada em ${new Date(c.em).toLocaleString('pt-BR')}${c.por?' por '+_orcxEsc(c.por):''}</span>`:''}</div>
   ${adm?`<div class="orcx-campos">
     ${_orcxCampo('Chave da API (Anthropic)',`<input class="fc no-upper" id="orc2-ia-chave" type="password" autocomplete="off" placeholder="${c.chave?'Deixe em branco pra manter a atual':'sk-ant-...'}">`)}
-    ${_orcxCampo('Modelo',`<select class="fc" id="orc2-ia-modelo">${ORC2_IA_MODELOS.map(([k,l])=>`<option value="${k}" ${k===mod?'selected':''}>${l}</option>`).join('')}</select>`)}
+    ${_orcxCampo('Modelo da leitura de projeto',`<select class="fc" id="orc2-ia-modelo">${ORC2_IA_MODELOS.map(([k,l])=>`<option value="${k}" ${k===mod?'selected':''}>${l}</option>`).join('')}</select>`)}
+    ${_orcxCampo('Modelo da prospecção (caça e pesquisa de empresas)',`<select class="fc" id="orc2-ia-modelo-prosp">${ORC2_IA_MODELOS.map(([k,l])=>`<option value="${k}" ${k===(c.modeloProsp||'claude-sonnet-5-5')?'selected':''}>${l.replace(' (recomendado)','')}${k==='claude-sonnet-5-5'?' (recomendado)':''}</option>`).join('')}</select>`)}
   </div>
   <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button type="button" class="orc2-btn nav" onclick="orc2IaSalvarCfg()">💾 Salvar</button>${c.chave?`<button type="button" class="orc2-btn sec" onclick="orc2IaRemoverChave()">Remover chave</button>`:''}</div>`:''}
   <div class="orcx-hint" style="margin-top:10px">A chave fica guardada no banco do sistema, não no código. Crie a chave em console.anthropic.com e coloque lá um <b>limite de gasto mensal</b> — assim o custo nunca passa do teto. Cada projeto lido custa poucos centavos de dólar (depende do número de páginas).</div></div>`;
@@ -69692,7 +70480,8 @@ async function orc2IaSalvarCfg(){
   const chave=nova||(orc2.iaCfg&&orc2.iaCfg.chave)||'';
   if(!chave){toast('Cole a chave da API','terr');return;}
   if(nova&&!/^sk-ant-/.test(nova)&&!confirm('A chave normalmente começa com "sk-ant-". Salvar assim mesmo?'))return;
-  try{await window._fbOrcSubstituir(ORC2_DOC_IA,{chave,modelo,em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—'});orc2.iaCfg={chave,modelo};toast('Leitura de projeto configurada ✅','tok');orc2Render();}
+  const modeloProsp=(document.getElementById('orc2-ia-modelo-prosp')||{}).value||(orc2.iaCfg&&orc2.iaCfg.modeloProsp)||'claude-sonnet-5-5';
+  try{await window._fbOrcSubstituir(ORC2_DOC_IA,{chave,modelo,modeloProsp,em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—'});orc2.iaCfg={chave,modelo,modeloProsp};toast('Leitura de projeto configurada ✅','tok');orc2Render();}
   catch(e){toast('Erro ao salvar: '+(e.message||e),'terr');}
 }
 async function orc2IaRemoverChave(){
