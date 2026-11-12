@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-11.14';</script>
+<script>const APP_BUILD_VERSION='2026-11-12.21';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -14533,8 +14533,8 @@ function buildEmissaoEmailContent(p){
       ${fmtSec('Contatos',{
         ...(p.email_comprador?{"E-mail do Comprador(a)":p.email_comprador}:{}),
         ...(p.email_engenheiro?{"E-mail do Engenheiro da Obra":p.email_engenheiro}:{}),
-        ...(p.email_financeiro?{"E-mail Financeiro (envio de NF's)":p.email_financeiro}:{}),
-        ...(p.conselhoGrupoWpp?{"Grupo de WhatsApp criado com o cliente?":p.conselhoGrupoWpp}:{})
+        ...(p.email_financeiro?{"E-mail Financeiro (envio de NF's)":p.email_financeiro}:{})
+        // 2026-11-12: "Grupo de WhatsApp criado com o cliente?" saiu do e-mail de emissão (continua obrigatória na emissão)
       })}
       ${fmtSec('Valores',valEmail)}
       ${obsAbaRow('valores')}
@@ -36617,11 +36617,33 @@ function projxSetFila(k){_projxFila=_projxFila===k?'':k;renderProjLista();}
 function projxSetResp(v){_projxResp=v||'';renderProjLista();}
 function _projxEtapaSeg(calc,key){try{return (calc.etapas||[]).find(e=>e.key===key&&e.aplicavel!==false&&e.iso)||null;}catch(e){return null;}}
 // Próximos setores depois do projeto (Compras / Produção) com prazo
+// (2026-11-12, a pedido do usuário) data em que a Produção INICIA: dia útil seguinte à
+// chegada dos insumos (Compras / Corte Galvanizado / Adesivo), nunca depois do prazo da Produção.
+function _projxInicioProducaoIso(calc){
+  const pr=_projxEtapaSeg(calc,'producao');if(!pr)return'';
+  let ini='';
+  try{
+    ['compras','corteGalv','adesivo'].forEach(k=>{const e=_projxEtapaSeg(calc,k);if(e&&e.iso>ini)ini=e.iso;});
+    if(ini)ini=_lpProximoDiaUtilForward(_opAddDias(ini,1));
+  }catch(e){ini='';}
+  if(!ini||ini>pr.iso)ini=pr.iso;
+  return ini;
+}
+// Chave de ordenação dos projetos (2026-11-12): quem inicia a produção antes vem primeiro,
+// não importa quando o pedido entrou. Sem etapa de Produção → usa o prazo do projeto.
+function _projxChaveOrdem(x){
+  let k='';try{k=_projxInicioProducaoIso(x.calc);}catch(e){k='';}
+  return k||String((x.etapa&&x.etapa.iso)||'9999');
+}
+function _projxCmpOrdem(a,b){
+  return _projxChaveOrdem(a).localeCompare(_projxChaveOrdem(b))||String((a.etapa&&a.etapa.iso)||'9999').localeCompare(String((b.etapa&&b.etapa.iso)||'9999'))||String(a.p.os||'').localeCompare(String(b.p.os||''),undefined,{numeric:true});
+}
 function _projxProxTxt(calc){
-  const c=_projxEtapaSeg(calc,'compras'),pr=_projxEtapaSeg(calc,'producao');
+  const c=_projxEtapaSeg(calc,'compras');
   const out=[];
   if(c)out.push('🛒 Compras até '+fmtD(c.iso));
-  if(pr)out.push('🏭 Produção até '+fmtD(pr.iso));
+  const ini=_projxInicioProducaoIso(calc);
+  if(ini)out.push('🏭 PRODUÇÃO INICIA EM '+fmtD(ini));
   return out.join(' · ');
 }
 // Selinhos extras em cada linha/card: projetista, pausa, revisões, arquivos
@@ -37289,7 +37311,7 @@ function _projListaFiltrada(ignorarPadraoOcultarConcluido){
   if(filStatus)infos=infos.filter(x=>x.statusPedido===filStatus);
   else if(!ignorarPadraoOcultarConcluido&&!(temFiltroData&&filDataCampo==='real'))infos=infos.filter(x=>x.statusPedido!=='concluido');
   const ordem={atrasado:0,andamento:1,nao_iniciado:2,concluido:3};
-  infos.sort((a,b)=>(a.statusPedido==='concluido')-(b.statusPedido==='concluido')||String(a.etapa.iso||'9999').localeCompare(b.etapa.iso||'9999')||ordem[a.statusPedido]-ordem[b.statusPedido]||String(a.p.os||'').localeCompare(String(b.p.os||''),undefined,{numeric:true}));
+  infos.sort((a,b)=>(a.statusPedido==='concluido')-(b.statusPedido==='concluido')||_projxCmpOrdem(a,b)||ordem[a.statusPedido]-ordem[b.statusPedido]);
   return infos;
 }
 // Abre o checklist — cria p.projChecklist na hora se ainda não existir (isso já conta como
@@ -43865,13 +43887,16 @@ function _projx2Bucket(x,hoje,lim2){
   if(x.etapa&&x.etapa.iso<=lim2)return'breve';
   return'depois';
 }
-const _PROJX2_GRUPOS={atrasado:['🔴 Atrasados','#dc2626'],hoje:['🟠 Vence hoje','#c2410c'],breve:['🟡 Próximos 2 dias úteis','#b45309'],depois:['🔵 Depois','#0369a1'],concluido:['✅ Concluídos','#16a34a']};
+const _PROJX2_GRUPOS={fila:['🏭 Por ordem de início da produção','#0369a1'],atrasado:['🔴 Atrasados','#dc2626'],hoje:['🟠 Vence hoje','#c2410c'],breve:['🟡 Próximos 2 dias úteis','#b45309'],depois:['🔵 Depois','#0369a1'],concluido:['✅ Concluídos','#16a34a']};
 // Ordena a lista por grupo (mantendo a ordem de prazo dentro do grupo) e devolve os cabeçalhos
 function _projx2Agrupar(infos){
   const hoje=_hojeIso();let lim2=hoje;try{lim2=_projxLim2(hoje);}catch(e){}
   const ordem=['atrasado','hoje','breve','depois','concluido'];
   infos.forEach(x=>{x._px2g=_projx2Bucket(x,hoje,lim2);});
-  infos.sort((a,b)=>ordem.indexOf(a._px2g)-ordem.indexOf(b._px2g)||String(a.etapa.iso||'').localeCompare(String(b.etapa.iso||'')));
+  // (2026-11-12) ordem pela data de início da produção — os grupos por prazo do projeto
+  // (Atrasados/Vence hoje/...) quebravam essa ordem; atraso continua marcado em vermelho na linha.
+  infos.forEach(x=>{if(x._px2g!=='concluido')x._px2g='fila';});
+  infos.sort((a,b)=>(a._px2g==='concluido')-(b._px2g==='concluido')||_projxCmpOrdem(a,b));
   const cont={};infos.forEach(x=>{cont[x._px2g]=(cont[x._px2g]||0)+1;});
   const hdr={};let ant='';
   infos.forEach((x,i)=>{if(x._px2g!==ant){ant=x._px2g;const[g,c]=_PROJX2_GRUPOS[ant];hdr[i]=`<tr class="projx2-grp"><td colspan="9" style="color:${c}">${g} · ${cont[ant]}</td></tr>`;}});
@@ -43928,7 +43953,7 @@ function _projx2KanbanEtapaHtml(){
   const colDe=x=>{if(x.statusPedido==='concluido')return cols.length-1;const at=_projx2Atual(x.p);if(at.idx>=PROJ_CHECKLIST_ITENS.length)return cols.length-1;if(!x.itensFeitos)return 0;return at.idx+1;};
   const por=cols.map(()=>[]);infos.forEach(x=>{por[colDe(x)].push(x);});
   return cols.map((c,ci)=>{
-    const itens=por[ci].sort((a,b)=>String(a.etapa.iso).localeCompare(String(b.etapa.iso)));
+    const itens=por[ci].sort(_projxCmpOrdem);
     const atr=itens.filter(x=>x.statusPedido==='atrasado').length;
     return`<div class="projx2-col" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="this.classList.remove('drag');projx2KbDrop(event,${ci===0?0:ci===cols.length-1?PROJ_CHECKLIST_ITENS.length:ci-1})" style="flex:0 0 210px;background:#f8fafc;border-radius:12px;border:1px solid var(--border-lt);display:flex;flex-direction:column;max-height:70vh">
       <div style="padding:9px 11px;border-bottom:2px solid #0284c7;font-size:.7rem;font-weight:800;color:#0f172a;display:flex;justify-content:space-between;gap:6px;align-items:center"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_projxEsc(c.label)}">${_projxEsc(c.label)}</span><span style="background:#0284c7;color:#fff;border-radius:20px;padding:1px 8px;font-size:.66rem;white-space:nowrap">${itens.length}${atr?' · 🔴'+atr:''}</span></div>
@@ -64317,6 +64342,15 @@ function _crmRenderJanelaProposta(alvo){
 // .12) pra ser reusada tanto pelo modal de Proposta em modo "pendente" (cadastro de empresa
 // nova, ver _crmRenderJanelaProposta acima) quanto pela aba PROPOSTA inline dentro do card
 // (ver _crmRenderCard), sem duplicar a lógica de montagem da lista.
+// 2026-11-12 (pedido do Guilherme): o orçamento anexado no histórico de propostas não baixa
+// mais direto ao clicar — abre no leitor de arquivos (_gcVerArquivo) com o nome original, e o
+// usuário escolhe lá dentro se quer baixar.
+function _crmHistAttr(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+function _crmHistVerArquivo(btn){
+  const u=btn&&btn.dataset?btn.dataset.url:'';if(!u)return;
+  if(typeof window._gcVerArquivo==='function')window._gcVerArquivo(u,btn.dataset.nome||'');
+  else toast('Não foi possível abrir o leitor — recarregue a página','terr');
+}
 function _crmPropostaHistoricoHtml(alvo){
   const hist=(alvo.propostaHistorico||[]).slice().reverse();
   const isAdmHist=_pode('com_excluir_hist_prop');
@@ -64327,7 +64361,7 @@ function _crmPropostaHistoricoHtml(alvo){
           <div style="color:var(--ink4);font-size:.7rem;margin-top:1px">${_fmtDataHora(item.anexadoEm)}${item.anexadoPor?' — '+item.anexadoPor:''} · Bruto R$ ${_fmtValorPdf(item.valorBruto||0)}${item.valorDesconto?' · Desconto R$ '+_fmtValorPdf(item.valorDesconto):''}</div>${item.motivoAtualizacao?`<div style="font-size:.7rem;color:#0369a1;margin-top:2px">📝 ${String(item.motivoAtualizacao).replace(/</g,'&lt;')}</div>`:''}
         </div>
         <div style="flex-shrink:0;display:flex;align-items:center;gap:10px">
-          ${item.arquivoUrl?`<a href="${item.arquivoUrl}" target="_blank" style="color:var(--brand);font-weight:700;white-space:nowrap;font-size:.72rem">baixar ↗</a>`:''}
+          ${item.arquivoUrl?`<button type="button" data-url="${_crmHistAttr(item.arquivoUrl)}" data-nome="${_crmHistAttr(item.arquivoNome||'')}" onclick="_crmHistVerArquivo(this)" title="Abrir o orçamento para ver — dentro dele tem o botão Baixar" style="background:none;border:none;padding:0;cursor:pointer;font-family:inherit;color:var(--brand);font-weight:700;white-space:nowrap;font-size:.72rem;text-decoration:underline">👁 ver orçamento</button>`:''}
           ${isAdmHist?`<button type="button" onclick="crmExcluirItemHistoricoProposta('${alvo.id||''}','${item.id||''}')" style="background:none;border:none;color:#dc2626;opacity:.65;cursor:pointer;font-size:.85rem;padding:0" title="Excluir do histórico" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.65">🗑</button>`:''}
         </div>
       </div>`).join(''):'<div style="font-size:.76rem;color:var(--ink4)">Nenhuma proposta anexada ainda.</div>';
@@ -74206,9 +74240,9 @@ function _crmzCorpo(e){
 // Tudo embrulha funções existentes com try/catch — se algo falhar, o funil segue como antes.
 const ORCAV_PRAZO_DU=2,ORCAV_META=80,ORCAV_PEN_ATRASO=20;
 const ORCAV_RES={
-  verde:{t:'Aprovado de primeira',d:'Estava tudo certo, vai para o cliente.',ic:'🟢',nota:100,cor:'#15803d',bg:'#f0fdf4',bd:'#86efac'},
-  amarelo:{t:'Aprovado com ajuste leve',d:'Você corrigiu algo pequeno, sem mudar o preço de forma relevante.',ic:'🟡',nota:50,cor:'#b45309',bg:'#fffbeb',bd:'#fcd34d'},
-  vermelho:{t:'Devolvido para correção',d:'Tinha erro que mudaria o preço ou o escopo. Volta para ORÇAMENTO.',ic:'🔴',nota:0,cor:'#dc2626',bg:'#fef2f2',bd:'#fca5a5'},
+  verde:{t:'Dentro',d:'O orçamento veio certo.',ic:'🟢',nota:100,cor:'#15803d',bg:'#f0fdf4',bd:'#86efac'},
+  amarelo:{t:'Médio',d:'Precisou de ajuste, mas sem mudar o preço de forma relevante.',ic:'🟡',nota:50,cor:'#b45309',bg:'#fffbeb',bd:'#fcd34d'},
+  vermelho:{t:'Fora',d:'Tinha erro que mudaria o preço ou o escopo.',ic:'🔴',nota:0,cor:'#dc2626',bg:'#fef2f2',bd:'#fca5a5'},
   nao_conta:{t:'Não conta',d:'O cliente mudou o pedido — não é erro do orçamentista.',ic:'⚪',nota:null,cor:'#475569',bg:'#f8fafc',bd:'#cbd5e1'}
 };
 const ORCAV_ERROS=[['item','Faltou item'],['medida','Medida ou quantidade errada'],['preco','Matéria-prima ou preço errado'],['operacionais','Operacionais (frete, instalação, elevação, ART)'],['outro','Outro']];
@@ -74288,16 +74322,16 @@ function _orcavAbrir(e,destKey){
     :ciclo.atrasado
       ?`<span style="color:#dc2626;font-weight:800">⏰ Fora do prazo</span> — ficou pronto em ${_fmtDuracaoUtil(ciclo.msUteis)} (prazo: ${ORCAV_PRAZO_DU} dias úteis). Perde ${ORCAV_PEN_ATRASO} pontos.`
       :`<span style="color:#15803d;font-weight:800">✅ No prazo</span> — ficou pronto em ${_fmtDuracaoUtil(ciclo.msUteis)} (prazo: ${ORCAV_PRAZO_DU} dias úteis).`;
-  const opc=Object.entries(ORCAV_RES).map(([k,r])=>{
-    const bloq=!frente&&(k==='verde'||k==='amarelo');
+  const opc=Object.entries(ORCAV_RES).filter(([k])=>k!=='nao_conta').map(([k,r])=>{
+    const bloq=false;
     return`<button type="button" class="orcav-opt" data-k="${k}" ${bloq?'disabled title="Para aprovar, mova o card para frente"':''} onclick="_orcavEscolher('${k}')" style="text-align:left;border:2px solid ${r.bd};background:#fff;border-radius:12px;padding:10px 12px;cursor:${bloq?'not-allowed':'pointer'};opacity:${bloq?'.4':'1'};font-family:inherit;display:flex;gap:10px;align-items:flex-start">
       <span style="font-size:1.3rem;line-height:1">${r.ic}</span>
       <span><b style="font-size:.86rem;color:${r.cor}">${r.t}</b><br><span style="font-size:.72rem;color:#64748b">${r.d}</span></span>
     </button>`;}).join('');
   modal.innerHTML=`<div style="background:#fff;border-radius:14px;padding:20px 22px;max-width:620px;width:100%;max-height:92vh;overflow:auto">
     <div style="font-size:1rem;font-weight:800;color:#101B3D">🎯 Avaliar o orçamento — ${_orcavEsc(e.nome||'')}</div>
-    <div style="font-size:.76rem;color:#64748b;margin:4px 0 12px">Antes de tirar o card da REVISÃO DE ORÇAMENTO, diga como veio o trabalho do orçamentista.</div>
-    ${_orcavPend.correcao?`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:8px 12px;font-size:.76rem;color:#991b1b;margin-bottom:10px">🔁 Este orçamento já foi devolvido uma vez. Se agora estiver certo, não conta ponto. Se errar de novo, conta mais um 0.</div>`:''}
+    <div style="font-size:.76rem;color:#64748b;margin:4px 0 12px">Dê a nota do orçamentista. O card segue aprovado — se precisar, você volta ele depois.</div>
+    ${_orcavPend.correcao?`<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:10px;padding:8px 12px;font-size:.76rem;color:#991b1b;margin-bottom:10px">🔁 Este orçamento já levou nota FORA antes. Se agora estiver certo, não conta ponto. Se vier fora de novo, conta mais um 0.</div>`:''}
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
       <label style="font-size:.76rem;font-weight:700;color:#334155">Orçamentista</label>
       <select id="orcav-quem" style="padding:7px 10px;border:1.5px solid #cbd5e1;border-radius:8px;font-size:.8rem;font-weight:700;font-family:inherit">
@@ -74307,7 +74341,7 @@ function _orcavAbrir(e,destKey){
     <div style="font-size:.76rem;color:#334155;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;margin-bottom:12px">${prazoTxt}</div>
     <div style="display:flex;flex-direction:column;gap:8px">${opc}</div>
     <div id="orcav-erros-box" style="display:none;margin-top:12px">
-      <div style="font-size:.76rem;font-weight:800;color:#334155;margin-bottom:6px">Onde estava o erro?</div>
+      <div style="font-size:.76rem;font-weight:800;color:#334155;margin-bottom:6px">Onde estava o erro? (opcional)</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">${ORCAV_ERROS.map(([k,t])=>`<label style="display:inline-flex;align-items:center;gap:6px;border:1.5px solid #e2e8f0;border-radius:999px;padding:5px 12px;font-size:.76rem;cursor:pointer;white-space:nowrap"><input type="checkbox" class="orcav-erro" value="${k}" style="accent-color:#e91e63">${t}</label>`).join('')}</div>
     </div>
     <div id="orcav-com-box" style="display:none;margin-top:12px">
@@ -74325,7 +74359,6 @@ function _orcavAbrir(e,destKey){
 }
 function _orcavEscolher(k){
   const p=_orcavPend;if(!p)return;
-  if(!p.frente&&(k==='verde'||k==='amarelo'))return;
   p.res=k;
   const e=crmEmpresas.find(x=>x.id===p.id);
   document.querySelectorAll('#orcav-modal .orcav-opt').forEach(b=>{
@@ -74334,18 +74367,20 @@ function _orcavEscolher(k){
   });
   const comErro=k==='amarelo'||k==='vermelho';
   document.getElementById('orcav-erros-box').style.display=comErro?'':'none';
-  document.getElementById('orcav-com-box').style.display=k==='verde'?'none':'';
-  document.getElementById('orcav-com-lbl').textContent=k==='verde'?'Comentário':'Comentário (obrigatório)';
+  document.getElementById('orcav-com-box').style.display='';
+  document.getElementById('orcav-com-lbl').textContent=k==='verde'?'Comentário (opcional)':'Comentário (obrigatório)';
   const nota=e?_orcavNota(e,k,p.ciclo.atrasado):null;
   const nEl=document.getElementById('orcav-nota');
   if(k==='nao_conta')nEl.textContent='Este orçamento não entra na conta da assertividade.';
   else if(nota==null)nEl.textContent='Correção aprovada — não conta ponto (só o erro anterior conta).';
   else nEl.innerHTML=`Nota deste orçamento: <span style="color:${nota>=ORCAV_META?'#15803d':'#dc2626'}">${nota}%</span>${p.ciclo.atrasado&&k!=='vermelho'?' <span style="font-weight:600;color:#64748b">(perdeu '+ORCAV_PEN_ATRASO+' pontos pelo prazo)</span>':''}`;
   const alvo=_orcavAlvo(p);
-  document.getElementById('orcav-ok').textContent=k==='vermelho'?'Salvar e devolver para '+_orcavLabel('orcamento'):'Salvar e mover para '+_orcavLabel(alvo);
+  document.getElementById('orcav-ok').textContent='Salvar e mover para '+_orcavLabel(alvo);
   document.getElementById('orcav-erro').textContent='';
 }
-function _orcavAlvo(p){return p.res==='vermelho'?'orcamento':p.dest;}
+// 2026-11-12 (pedido do Guilherme): a nota não devolve mais o card sozinha — "eu só dou a nota e faço meu
+// comentário e ele vai pra aprovado direto; depois, se eu julgar necessário, eu volto".
+function _orcavAlvo(p){return p.dest;}
 function _orcavCancelar(){
   const m=document.getElementById('orcav-modal');if(m)m.remove();
   _orcavPend=null;
@@ -74360,7 +74395,6 @@ async function _orcavConfirmar(){
   const erros=[...document.querySelectorAll('#orcav-modal .orcav-erro:checked')].map(x=>x.value);
   const com=(document.getElementById('orcav-com')?.value||'').trim();
   if(p.res!=='nao_conta'&&!quem){erro.textContent='Selecione o orçamentista que fez o orçamento.';return;}
-  if((p.res==='amarelo'||p.res==='vermelho')&&!erros.length){erro.textContent='Marque onde estava o erro.';return;}
   if(p.res!=='verde'&&!com){erro.textContent='Escreva o comentário (uma linha já basta).';return;}
   const alvo=_orcavAlvo(p);
   try{_crmCardPropostaSincronizar(e);}catch(err){}
@@ -74496,9 +74530,9 @@ function _orcavPainelHtml(orcNome){
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
         ${mini('Contam na nota',String(r.contados.length))}
-        ${mini('🟢 De primeira',String(r.qtd.verde))}
-        ${mini('🟡 Ajuste leve',String(r.qtd.amarelo))}
-        ${mini('🔴 Devolvidos',String(r.qtd.vermelho))}
+        ${mini('🟢 Dentro',String(r.qtd.verde))}
+        ${mini('🟡 Médio',String(r.qtd.amarelo))}
+        ${mini('🔴 Fora',String(r.qtd.vermelho))}
         ${mini('⏰ Fora do prazo',String(r.atrasados))}
         ${mini('⏱️ Tempo médio',_fmtDuracaoUtil(r.tempoMed))}
       </div>
@@ -74522,9 +74556,43 @@ function _orcavPainelHtml(orcNome){
       const errs=(a.erros||[]).map(k=>(ORCAV_ERROS.find(z=>z[0]===k)||[k,k])[1]).join(', ');
       const prazo=a.msUteis==null?'—':((a.atrasado&&a.conta&&a.resultado!=='vermelho')?`<span style="color:#dc2626;font-weight:700;white-space:nowrap">⏰ ${_fmtDuracaoUtil(a.msUteis)}</span>`:`<span style="white-space:nowrap">${_fmtDuracaoUtil(a.msUteis)}</span>`);
       return`<tr style="cursor:pointer" onclick="crmAbrirCard('${x.e.id}')"><td style="white-space:nowrap">${_fmtDataHora(a.em)}</td><td style="font-weight:600">${_orcavEsc(x.e.nome||'—')}</td><td style="white-space:nowrap;color:${rr.cor};font-weight:700">${rr.ic} ${rr.t}</td><td style="font-weight:800;white-space:nowrap">${a.nota==null?'<span style="color:#94a3b8;font-weight:600">não conta</span>':a.nota+'%'}</td><td>${prazo}</td><td>${_orcavEsc(errs||'—')}</td><td style="max-width:260px">${_orcavEsc(a.comentario||'—')}</td><td style="white-space:nowrap">${_orcavEsc(a.por||'—')}</td></tr>`;}).join(''):'<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:14px">Nenhum orçamento avaliado neste período.</td></tr>'}</tbody></table></div>
-    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px">🟢 vale 100%, 🟡 vale 50% e 🔴 vale 0%. Se o orçamento for para a revisão depois de ${ORCAV_PRAZO_DU} dias úteis da entrada em ORÇAMENTO, perde ${ORCAV_PEN_ATRASO} pontos. Orçamento devolvido que volta certo não conta de novo; se voltar errado, conta mais um 0. ⚪ não entra na conta. Assertividade = média das notas do mês; ${ORCAV_META}% ou mais libera a comissão.</div></div>`;
+    <div style="font-size:.7rem;color:#94a3b8;margin-top:8px">🟢 vale 100%, 🟡 vale 50% e 🔴 vale 0%. Se o orçamento for para a revisão depois de ${ORCAV_PRAZO_DU} dias úteis da entrada em ORÇAMENTO, perde ${ORCAV_PEN_ATRASO} pontos. Orçamento que levou 🔴 e volta para revisão certo não conta de novo; se vier fora de novo, conta mais um 0. Assertividade = média das notas do mês; ${ORCAV_META}% ou mais libera a comissão.</div></div>`;
   const meio=(errHtml||mesesHtml)?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px;margin-bottom:14px">${mesesHtml}${errHtml}</div>`:'';
-  return topo+meio+lista;
+  let gp='';try{gp=_orcGanhoPerdidoHtml(orcNome,y,m,per);}catch(err){console.error('ganhos/perdidos',err);}
+  return topo+gp+meio+lista;
+}
+// ══ ORÇAMENTOS GANHOS × PERDIDOS NO PERÍODO (2026-11-12, pedido do Guilherme) ══════════════════════
+// "Indicador falando dos orçamentos feitos no mês ou período selecionado: quantos foram ganhos e quantos
+// perdidos, com número, valor bruto, operacionais e líquido."
+// • Orçamento feito no período = card que o orçamentista entregou (saiu de ORÇAMENTO) no mês/ano do filtro
+//   lá de cima; mesmo card entregue 2x no período conta 1x.
+// • Ganho/perdido = fechamento do card no CRM. Valores = proposta atual do card (o valor que foi ganho ou
+//   perdido); sem proposta no card, usa o valor de quando o orçamento foi entregue.
+function _orcGanhoPerdidoHtml(orcNome,y,m,per){
+  const doOrc=c=>!orcNome||(c.quem&&(vendedorMatch(orcNome,c.quem)||vendedorMatch(c.quem,orcNome)));
+  const porCard={};
+  (_crmCiclosOrcamento()||[]).forEach(c=>{
+    if(c.tipo!=='orcamento'||c.fimMs==null||!c.e||!doOrc(c))return;
+    const d=new Date(c.fimMs);if(d.getFullYear()!==y||(m&&d.getMonth()+1!==m))return;
+    const ant=porCard[c.e.id];if(!ant||ant.fimMs<c.fimMs)porCard[c.e.id]=c;
+  });
+  const val=c=>{const e=c.e,b=+e.propostaValorBruto||0;
+    if(b>0){const o=+e.propostaOperacionais||0;return{b,o,l:+e.propostaValorLiquido||Math.max(0,b-o)};}
+    return _orcValorDoCiclo(c);};
+  const g={n:0,b:0,o:0,l:0},pd={n:0,b:0,o:0,l:0};let aberto=0;
+  Object.values(porCard).forEach(c=>{const f=c.e.fechamento;
+    const alvo=f&&f.status==='ganho'?g:f&&f.status==='perdido'?pd:null;
+    if(!alvo){aberto++;return;}
+    const v=val(c);alvo.n++;alvo.b+=v.b;alvo.o+=v.o;alvo.l+=v.l;});
+  const fech=g.n+pd.n,taxa=fech?Math.round(g.n/fech*100):null;
+  const lin=(ic,rot,x,cor)=>`<tr><td style="font-weight:800;color:${cor};white-space:nowrap">${ic} ${rot}</td><td style="font-weight:800;white-space:nowrap">${x.n}</td><td style="white-space:nowrap">${fmtR(x.b)}</td><td style="white-space:nowrap">${fmtR(x.o)}</td><td style="font-weight:800;color:${cor};white-space:nowrap">${fmtR(x.l)}</td></tr>`;
+  return`<div class="dash-card" style="margin-bottom:14px">
+    <div class="dash-sec-title">🏁 Orçamentos ganhos e perdidos — ${per}</div>
+    <div style="overflow-x:auto;margin-top:8px"><table class="dash-table"><thead><tr><th></th><th>Orçamentos</th><th>Bruto</th><th>Operacionais</th><th>Líquido</th></tr></thead>
+    <tbody>${lin('✅','Ganhos',g,'#15803d')}${lin('❌','Perdidos',pd,'#dc2626')}</tbody></table></div>
+    <div style="font-size:.74rem;color:#334155;margin-top:8px">${taxa==null?'Nenhum orçamento deste período foi fechado ainda.':`Conversão: <b style="color:${taxa>=50?'#15803d':'#dc2626'}">${taxa}%</b> dos fechados foram ganhos.`}${aberto?` · ${aberto} ${_plural(aberto,'orçamento ainda em aberto','orçamentos ainda em aberto')} no CRM.`:''}</div>
+    <div style="font-size:.7rem;color:#94a3b8;margin-top:4px">Orçamentos entregues no período (saída de ORÇAMENTO). Ganho ou perdido vem do fechamento do card no CRM; os valores são os da proposta do card.</div>
+  </div>`;
 }
 // ── Ganchos nas funções existentes ──
 (function(){
@@ -74547,6 +74615,7 @@ function _orcavPainelHtml(orcNome){
                     window._orcavOk=true;
                     try{return await _orig.call(this,id,etapaKey);}finally{window._orcavOk=false;}
                   }
+                  if(iDest>=0&&iDest<iRev){window._orcavOk=true;window._crmChecklistOrcOk=true;try{return await _orig.call(this,id,etapaKey);}finally{window._orcavOk=false;window._crmChecklistOrcOk=false;}}
                   _orcavAbrir(e,etapaKey);return;
                 }
                 if(iDest>iRev){toast('Só o gestor tira o card da REVISÃO DE ORÇAMENTO — ele avalia o orçamento e aprova.','terr');try{renderCrmKanban();}catch(err){}return;}
@@ -85115,7 +85184,12 @@ _pfSalvarEtapas=function(){
     const nada=msg=>{corpo.style.justifyContent='center';corpo.innerHTML=`<div style="color:#e2e8f0;text-align:center;font-size:.86rem;line-height:1.6;max-width:420px">${msg}<div style="margin-top:14px"><button type="button" onclick="_gcLeitorBaixar()" style="${BT};background:#e91e63;border-color:#e91e63;padding:10px 18px">⬇ Baixar ${E(_nome)}</button></div></div>`;};
     if(ext==='pdf'){
       corpo.innerHTML='<div style="color:#cbd5e1;font-size:.86rem;margin-top:30px">Carregando o PDF…</div>';
-      try{await pdf(corpo,ver);}catch(e){console.warn('leitor pdf',e);corpo.style.padding='0';corpo.innerHTML=`<iframe src="${E(ver)}" style="border:none;width:100%;height:100%;background:#fff"></iframe>`;}
+      try{await pdf(corpo,ver);}catch(e){console.warn('leitor pdf',e);
+        // plano B sem baixar: lê o arquivo e força o tipo PDF (arquivo "raw" do Cloudinary pode vir
+        // como download se for colocado direto no iframe)
+        let src=ver;try{const r=await fetch(ver);if(r.ok){const b=await r.blob();src=URL.createObjectURL(new Blob([b],{type:'application/pdf'}));_blobs.push(src);}}catch(e2){}
+        if(!document.getElementById('gc-leitor'))return;
+        corpo.style.padding='0';corpo.innerHTML=`<iframe src="${E(src)}" style="border:none;width:100%;height:100%;background:#fff"></iframe>`;}
     }else if(IMG.includes(ext)||(!ext&&/\/image\/upload\//.test(ver))){
       corpo.style.justifyContent='center';corpo.innerHTML=`<img src="${E(ver)}" alt="${E(_nome)}" style="max-width:100%;max-height:100%;object-fit:contain;background:#fff;border-radius:4px" onerror="this.outerHTML='<div style=&quot;color:#e2e8f0&quot;>Não foi possível mostrar a imagem.</div>'">`;
     }else if(VID.includes(ext)){
@@ -85200,7 +85274,11 @@ _pfSalvarEtapas=function(){
   const medida=x=>{const f=v=>v?String(R2(v)).replace('.',','):'';const l=f(x.larg),a=f(x.alt),p=f(x.prof);return l&&a?`${l} × ${a}${p?' × '+p:''} m`:'';};
   function watch(){
     if(GM.watch)return;GM.watch=true;
-    const re=()=>{if(typeof currentSection!=='undefined'&&currentSection==='cat:GRANDA_MOB')render();try{_gmCrmRefresh();}catch(e){}};
+    const re=()=>{if(typeof currentSection!=='undefined'&&currentSection==='cat:GRANDA_MOB'){
+        // 2026-11-12: com um orçamento aberto (salvamento automático) só atualiza os números do topo
+        if(GM.doc&&!GM.doc._direto&&GM.aba==='orc'){try{const k=document.querySelector('#sec-cat-GRANDA_MOB .gm-hdr .k');if(k)k.outerHTML=kpis();}catch(e){}}
+        else render();}
+      try{_gmCrmRefresh();}catch(e){}};
     try{if(window._fbWatchCol){
       window._fbWatchCol(COL_ORC,l=>{GM.orcs={};l.forEach(d=>{if(d&&d.id)GM.orcs[d.id]=d;});re();});
       window._fbWatchCol(COL_PED,l=>{GM.peds={};l.forEach(d=>{if(d&&d.id)GM.peds[d.id]=d;});re();});}}catch(e){console.warn('gm watch',e);}
@@ -85240,9 +85318,18 @@ _pfSalvarEtapas=function(){
   function totais(d){
     const o=Object.assign({},ops(),d.opsValores||{});const op=d.ops||{};
     const itens=R2((d.itens||[]).reduce((s,i)=>s+N(i.qtd)*N(i.preco),0));
-    const frete=R2(N(op.kmFrete)*o.frete),mob=R2(N(op.kmMob)*o.mob),diar=R2(N(op.diarias)*o.diaria),elev=R2(N(op.elevacao));
+    let frete=R2(N(op.kmFrete)*o.frete),mob=R2(N(op.kmMob)*o.mob),freteBase=0,freteIdx=1;
+    const cam=String(op.caminhao||'TRUCK');
+    // 2026-11-12 (Guilherme): frete e mobilização com os MESMOS parâmetros da Granda (menu Orçamentos → Custos
+    // operacionais): frete = tabela por km (só ida) × índice do caminhão (TRUCK 1 · VAN 0,75 · CARRETA 1,25;
+    // FRACIONADO = valor da cotação); mobilização = km ida e volta × R$/km da Granda. Origem: Cascavel/PR.
+    if(d.calcGranda){
+      if(cam==='FRACIONADO')frete=R2(N(op.freteFrac));
+      else{freteBase=N(op.kmFrete)>0?_orcxBracket(ORCX_TABELA_FRETE_KM,N(op.kmFrete)):0;freteIdx=ORCX_INDICE_CAMINHAO[cam]??1;frete=R2(freteBase*freteIdx);}
+      mob=R2(N(op.kmMob)*ORCX_VALOR_KM_MOBILIZACAO);}
+    const diar=R2(N(op.diarias)*o.diaria),elev=R2(N(op.elevacao));
     const opT=R2(frete+mob+diar+elev),bruto=R2(itens+opT),desc=R2(N(d.desconto)),total=R2(bruto-desc),liquido=R2(Math.max(0,bruto-opT-desc));
-    return{itens,frete,mob,diar,elev,ops:opT,bruto,desc,total,liquido,o};
+    return{itens,frete,mob,diar,elev,ops:opT,bruto,desc,total,liquido,o,granda:!!d.calcGranda,cam,freteBase,freteIdx,mobKm:d.calcGranda?ORCX_VALOR_KM_MOBILIZACAO:o.mob};
   }
   window._gmTotais=totais;
 
@@ -85266,6 +85353,9 @@ _pfSalvarEtapas=function(){
   #sec-cat-GRANDA_MOB table.dash-table td,#sec-cat-GRANDA_MOB table.dash-table th{vertical-align:middle}
   #sec-cat-GRANDA_MOB tr.gm-cl{cursor:pointer}#sec-cat-GRANDA_MOB tr.gm-cl:hover td{background:#f8fafc}
   #sec-cat-GRANDA_MOB .gm-foto{width:54px;height:40px;object-fit:contain;border-radius:6px;border:1px solid #e2e8f0;background:#fff;display:block}
+  #sec-cat-GRANDA_MOB .gm-ia-th{width:56px;height:56px;cursor:zoom-in}
+  #sec-cat-GRANDA_MOB .gm-ia-th:hover{border-color:#243e80;box-shadow:0 0 0 2px rgba(36,62,128,.15)}
+  #sec-cat-GRANDA_MOB .gm-ia-sem{cursor:default;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:.8rem}
   #sec-cat-GRANDA_MOB .gm-sec{font-size:.68rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px}
   #sec-cat-GRANDA_MOB .gm-g{display:grid;gap:10px}
   #sec-cat-GRANDA_MOB .gm-g label,.gm-ov label.gm-l{font-size:.7rem;font-weight:700;color:#475569;display:block}
@@ -85337,9 +85427,10 @@ _pfSalvarEtapas=function(){
     c.innerHTML=`<div class="gm-hdr"><img src="${LOGO_BRANCA}" alt="GRANDA MOB — Mobiliário corporativo">${kpis()}</div>
       <div class="dash-tabs gm-tabs">${abas.map(([k,l])=>`<button type="button" class="dash-tab ${GM.aba===k?'active':''}" onclick="gmAba('${k}')">${l}</button>`).join('')}</div>${corpo}`;
     if(GM.aba==='fin'){try{_mesxAgendar();}catch(e){}}
+    if(GM.doc)setTimeout(()=>kmChecar(false),0);
   }
   window._gmRender=render;
-  window.gmAba=k=>{if(GM.doc&&GM.doc._sujo&&(GM.doc._direto||k!=='orc')&&!confirm(GM.doc._direto?'O pedido que você está montando ainda não foi criado. Sair mesmo assim?':'O orçamento aberto tem alterações não salvas. Sair mesmo assim?'))return;if(GM.doc&&(GM.doc._direto||k!=='orc'))GM.doc=null;GM.aba=k;render();};
+  window.gmAba=async k=>{if(GM.doc&&GM.doc._sujo&&!GM.doc._direto&&k!=='orc')await autoSalvar(true);if(GM.doc&&GM.doc._sujo&&(GM.doc._direto||k!=='orc')&&!confirm(GM.doc._direto?'O pedido que você está montando ainda não foi criado. Sair mesmo assim?':'O orçamento aberto tem alterações não salvas. Sair mesmo assim?'))return;if(GM.doc&&(GM.doc._direto||k!=='orc'))GM.doc=null;GM.aba=k;render();};
 
   // ══ ORÇAMENTOS ══
   const ST_ORC={rasc:['Rascunho','#f1f5f9','#475569'],env:['Enviado ao cliente','#eff6ff','#1d4ed8'],aprov:['Aprovado','#ecfdf5','#047857'],perdido:['Perdido','#fef2f2','#b91c1c'],ped:['Virou pedido','#ede9fe','#6d28d9']};
@@ -85365,17 +85456,121 @@ _pfSalvarEtapas=function(){
   window._gmRenderLista=()=>{const el=document.getElementById('gm-orc-lista');if(!el)return;const q=String(GM.orcBusca||'').toLowerCase();
     let l=Object.values(GM.orcs).sort((a,b)=>String(b.atualizadoEm||'').localeCompare(String(a.atualizadoEm||'')));if(GM.orcSt)l=l.filter(d=>stOrc(d)===GM.orcSt);
     if(q)l=l.filter(d=>[d.numero,d.cliente,d.cidade,cardNome(d.crmId)].join(' ').toLowerCase().includes(q));el.innerHTML=orcTabela(l);};
-  function novoDoc(extra){return Object.assign({id:uid('gmo_'),numero:'',status:'rasc',cliente:'',cidade:'',uf:'',contato:'',obs:'',crmId:'',itens:[],ops:{kmFrete:'',kmMob:'',diarias:'',elevacao:''},desconto:'',validadeDias:15,prazoDias:'',criadoEm:agora(),criadoPor:quem(),_novo:true},extra||{});}
+  function novoDoc(extra){return Object.assign({id:uid('gmo_'),numero:'',status:'rasc',cliente:'',cidade:'',uf:'',contato:'',obs:'',crmId:'',itens:[],ops:{kmFrete:'',kmMob:'',diarias:'',elevacao:'',caminhao:'TRUCK'},calcGranda:true,desconto:'',validadeDias:5,prazoDias:'',criadoEm:agora(),criadoPor:quem(),_novo:true},extra||{});}
   window.gmOrcNovo=function(extra){GM.doc=novoDoc(extra);GM.ia=null;GM.aba='orc';render();};
-  window.gmOrcAbrir=function(id){const d=GM.orcs[id];if(!d){toast('Orçamento não encontrado','terr');return;}GM.doc=limpo(d);GM.ia=null;GM.aba='orc';render();window.scrollTo&&window.scrollTo(0,0);};
-  window.gmOrcFechar=function(){if(GM.doc&&GM.doc._sujo&&!confirm(GM.doc._direto?'Sair sem criar o pedido?':'Sair sem salvar as alterações?'))return;GM.doc=null;GM.ia=null;render();};
+  window.gmOrcAbrir=function(id){const d=GM.orcs[id];if(!d){toast('Orçamento não encontrado','terr');return;}GM.doc=limpo(d);
+    if(!GM.doc.calcGranda&&!GM.doc.pedidoId&&(GM.doc.status||'rasc')==='rasc'){GM.doc.calcGranda=true;GM.doc.ops=Object.assign({caminhao:'TRUCK'},GM.doc.ops||{});setTimeout(()=>{try{sujo();}catch(e){}},0);}GM.ia=null;GM.aba='orc';render();window.scrollTo&&window.scrollTo(0,0);};
+  window.gmOrcFechar=async function(){if(GM.doc&&GM.doc._sujo&&!GM.doc._direto)await autoSalvar(true);if(GM.doc&&GM.doc._sujo&&!confirm(GM.doc._direto?'Sair sem criar o pedido?':'Sair sem salvar as alterações?'))return;GM.doc=null;GM.ia=null;render();};
   window.gmPedNovoDireto=function(){GM.doc=novoDoc({_direto:true});GM.ia=null;GM.aba='ped';render();window.scrollTo&&window.scrollTo(0,0);};
-  const sujo=()=>{if(GM.doc)GM.doc._sujo=true;};
-  window.gmSet=(k,v)=>{if(!GM.doc)return;GM.doc[k]=v;sujo();if(k==='desconto')reTot();};
-  window.gmSetOp=(k,v)=>{if(!GM.doc)return;GM.doc.ops=GM.doc.ops||{};GM.doc.ops[k]=v;sujo();reTot();};
+  const sujo=()=>{if(GM.doc){GM.doc._sujo=true;GM.doc._ver=(GM.doc._ver||0)+1;autoAgendar();}};
+  // ── SALVAMENTO AUTOMÁTICO DO ORÇAMENTO (2026-11-12, pedido do Guilherme: "salvar automático tudo que for
+  // alterado, pra não ter perigo do cara esquecer de clicar pra salvar") ──
+  // • Cada alteração agenda um salvamento 1,5 s depois (sem toast, sem redesenhar a tela); status ao lado do Salvar.
+  // • Só orçamento (não o pedido direto que ainda está sendo montado) e só enquanto não virou pedido.
+  // • Falta de cliente / item avulso sem descrição / data retroativa / e-mail inválido: não salva e avisa no status.
+  // • Cópia sem nenhuma mudança não é salva sozinha (continua a pergunta de duplicado no Salvar).
+  // • Card do CRM: o valor vai pro card 20 s depois da última mudança (ou na hora ao sair do orçamento).
+  let autoTimer=null,autoProm=null,crmTimer=null,crmPend='';
+  function autoAgendar(){const d=GM.doc;if(!d||d._direto||d.pedidoId)return;clearTimeout(autoTimer);autoSt('✏️ Alterações não salvas…','#b45309');autoTimer=setTimeout(()=>autoSalvar(),1500);}
+  function autoSt(t,cor){const el=document.getElementById('gm-auto-st');if(el){el.textContent=t||'';el.style.color=cor||'#15803d';}}
+  async function autoSalvar(agoraCrm){
+    clearTimeout(autoTimer);
+    if(autoProm){try{await autoProm;}catch(e){}}
+    const d=GM.doc;if(!d||d._direto||d.pedidoId||!d._sujo){if(agoraCrm)await crmFlush();return;}
+    let falta='';
+    if(!String(d.cliente||'').trim())falta='Informe o cliente para o orçamento ser salvo';
+    else if((d.itens||[]).some(i=>!i.lpu&&!String(i.nome||'').trim()))falta='Item avulso sem descrição';
+    else if(d.entrega&&d.entrega<hoje()&&d.entrega!==((GM.orcs[d.id]||{}).entrega))falta='A data de entrega não pode ser retroativa';
+    else if(d.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(d.email).trim()))falta='E-mail do contato inválido';
+    else if(!d.numero&&d._dupDe&&assinOrc(d)===d._dupDe.assin)falta='Cópia sem alterações — altere algo para salvar';
+    if(falta){autoSt('⚠️ Não salvo: '+falta,'#dc2626');return;}
+    const ver=d._ver;
+    autoProm=(async()=>{
+      autoSt('💾 Salvando…','#64748b');
+      const novo=!d.numero;
+      try{
+        if(novo)d.numero=await seq('gmobOrcSeq','GM-',GM.orcs);
+        const x=limpo(d);['_sujo','_novo','_ver'].forEach(k=>delete x[k]);
+        const t=totais(x);x.totalCache={bruto:t.bruto,ops:t.ops,desc:t.desc,total:t.total,liquido:t.liquido};
+        const salvo=await gravar(COL_ORC,x);
+        if(GM.doc===d){d.atualizadoEm=salvo.atualizadoEm;d.atualizadoPor=salvo.atualizadoPor;d.totalCache=salvo.totalCache;delete d._novo;if(d._ver===ver)delete d._sujo;}
+        if(d.crmId){crmPend=d.id;clearTimeout(crmTimer);crmTimer=setTimeout(()=>crmFlush(),20000);}
+        if(novo&&GM.doc===d)renderMantendoFoco();
+        const h=new Date();autoSt(d._sujo?'✏️ Alterações não salvas…':'✓ Salvo automaticamente às '+String(h.getHours()).padStart(2,'0')+':'+String(h.getMinutes()).padStart(2,'0'),d._sujo?'#b45309':'#15803d');
+      }catch(e){if(novo&&!GM.orcs[d.id])d.numero='';console.warn('gm auto-salvar',e);autoSt('⚠️ Não consegui salvar agora — tento de novo na próxima alteração','#dc2626');}
+    })();
+    try{await autoProm;}finally{autoProm=null;}
+    if(GM.doc===d&&d._sujo&&d._ver!==ver)autoAgendar();
+    if(agoraCrm)await crmFlush();
+  }
+  async function crmFlush(){clearTimeout(crmTimer);const id=crmPend;crmPend='';if(!id)return;const o=GM.orcs[id];if(!o||!o.crmId)return;
+    try{await enviarCrm(o);}catch(e){console.warn('gm crm auto',e);}}
+  function renderMantendoFoco(){
+    const c=cont(),a=document.activeElement;let ix=-1,ss=null,se=null;
+    if(c&&a&&c.contains(a)){const l=[...c.querySelectorAll('input,select,textarea')];ix=l.indexOf(a);try{ss=a.selectionStart;se=a.selectionEnd;}catch(e){}}
+    render();
+    if(ix>=0){const l=[...cont().querySelectorAll('input,select,textarea')];const b=l[ix];if(b){b.focus();try{if(ss!=null)b.setSelectionRange(ss,se);}catch(e){}}}
+  }
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'&&GM.doc&&GM.doc._sujo)autoSalvar(true);});
+  window.addEventListener('beforeunload',ev=>{if(GM.doc&&GM.doc._sujo&&!GM.doc._direto&&!GM.doc.pedidoId){autoSalvar(true);ev.preventDefault();ev.returnValue='';}});
+  // Entrega finalizada na loja não aceita data retroativa (build 2026-11-12.6, a pedido do Guilherme).
+  window.gmEntrega=function(inp){const v=inp.value;if(v&&v<hoje()){toast('A data de entrega não pode ser retroativa — escolha hoje ou uma data futura','terr');inp.value=(GM.doc&&GM.doc.entrega&&GM.doc.entrega>=hoje())?GM.doc.entrega:'';gmSet('entrega',inp.value);return;}gmSet('entrega',v);};
+  window.gmSet=(k,v)=>{if(!GM.doc)return;GM.doc[k]=v;sujo();if(k==='desconto')reTot();if(k==='cidade'||k==='uf')kmAgendar(true);};
+  window.gmSetOp=(k,v)=>{if(!GM.doc)return;GM.doc.ops=GM.doc.ops||{};GM.doc.ops[k]=v;if(k==='kmFrete'||k==='kmMob'){GM.doc.ops.kmManual=true;kmStatus();}sujo();reTot();};
+  // ── KM automático (build 2026-11-12.4, a pedido do Guilherme: "já tô dando a cidade, tem que ser automático") ──
+  // Distância pela estrada Cascavel/PR (origem do Granda Mob desde 2026-11-12) → cidade/UF do orçamento (mesma fonte do menu Orçamentos: OpenStreetMap
+  // + rota OSRM; sem internet/rota cai na estimativa por coordenadas do IBGE usada no frete). Frete = ida;
+  // Mobilização = ida e volta (padrão dos orçamentos Omoda: 555 → 1.110). Trocar cidade/UF recalcula sempre;
+  // digitar o km na mão vale até a cidade mudar. Orçamento antigo com km já preenchido não é sobrescrito ao abrir.
+  let kmTimer=null,kmRodando='';
+  // 2026-11-12 (pedido do Guilherme): o Granda Mob fica em CASCAVEL/PR — frete e mobilização saem sempre de lá,
+  // não de Ponta Grossa. A chave leva a origem, então orçamento com km automático antigo (de Ponta Grossa)
+  // recalcula sozinho ao abrir; km digitado à mão e orçamento que já virou pedido não mudam.
+  const GM_ORIGEM={cidade:'Cascavel',uf:'PR'},GM_ORIGEM_TXT='Cascavel/PR';
+  const kmChave=d=>'CASCAVEL>'+String(d.cidade||'').trim().toUpperCase()+'/'+String(d.uf||'').trim().toUpperCase();
+  const kmDestTxt=ch=>String(ch||'').replace(/^CASCAVEL>/,'');
+  function kmEstimado(cid,uf){try{const a=_munCoordDe(GM_ORIGEM.cidade,GM_ORIGEM.uf),b=_munCoordDe(cid,uf);if(!a||!b)return 0;
+    const Rt=6371,rad=x=>x*Math.PI/180,dLa=rad(b[0]-a[0]),dLo=rad(b[1]-a[1]);
+    const h=Math.sin(dLa/2)**2+Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dLo/2)**2;
+    const km=2*Rt*Math.asin(Math.sqrt(h))*(typeof FRETE_FATOR_ESTRADA!=='undefined'?FRETE_FATOR_ESTRADA:1.25);return km<1?0:Math.max(1,Math.round(km));}catch(e){return 0;}}
+  function kmAgendar(forcar){clearTimeout(kmTimer);kmTimer=setTimeout(()=>kmChecar(forcar),900);}
+  function kmChecar(forcar){
+    const d=GM.doc;if(!d||d.pedidoId)return;d.ops=d.ops||{};
+    const cid=String(d.cidade||'').trim(),uf=String(d.uf||'').trim().toUpperCase();
+    if(!cid||uf.length!==2){kmStatus();return;}
+    const ch=kmChave(d);if(d.ops.kmAutoDe===ch||kmRodando===ch){kmStatus();return;}
+    if(!forcar&&(d.ops.kmManual||(N(d.ops.kmFrete)>0&&!d.ops.kmAutoDe))){kmStatus();return;}
+    kmCalcular(ch,cid,uf);
+  }
+  async function kmCalcular(ch,cid,uf){
+    kmRodando=ch;kmStatus('🔄 Calculando a distância '+GM_ORIGEM_TXT+' → '+cid+'/'+uf+'…');
+    let km=0,fonte='estrada';
+    try{const o=await _orcxGeo(GM_ORIGEM.cidade,GM_ORIGEM.uf),de=await _orcxGeo(cid,uf);
+      const r=await fetch('https://router.project-osrm.org/route/v1/driving/'+o.lon+','+o.lat+';'+de.lon+','+de.lat+'?overview=false');
+      const j=r.ok?await r.json():null;if(j&&j.code==='Ok'&&j.routes&&j.routes.length)km=Math.round(j.routes[0].distance/1000);}
+    catch(e){console.warn('gm km rota',e);}
+    if(!(km>0)){km=kmEstimado(cid,uf);fonte='estimada';}
+    if(kmRodando!==ch)return;kmRodando='';
+    const d=GM.doc;if(!d||kmChave(d)!==ch)return;
+    if(!(km>0)){kmStatus('⚠️ Não consegui calcular a distância até '+cid+'/'+uf+' — confira a cidade ou digite o km.');return;}
+    d.ops=d.ops||{};d.ops.kmFrete=String(km);d.ops.kmMob=String(km*2);d.ops.kmAutoDe=ch;d.ops.kmFonte=fonte;delete d.ops.kmManual;sujo();
+    const a=document.getElementById('gm-km-frete'),b=document.getElementById('gm-km-mob');if(a)a.value=d.ops.kmFrete;if(b)b.value=d.ops.kmMob;
+    reTot();kmStatus();
+  }
+  function kmTxt(d){const op=(d&&d.ops)||{};
+    if(op.kmManual)return'✍️ Km digitado à mão. <a href="javascript:void(0)" onclick="gmKmRecalcular()" style="color:#243e80;font-weight:700">Recalcular pela cidade</a>';
+    if(op.kmAutoDe&&op.kmAutoDe===kmChave(d))return'📍 '+Number(op.kmFrete).toLocaleString('pt-BR')+' km '+(op.kmFonte==='estimada'?'(estimativa)':'pela estrada')+' de '+GM_ORIGEM_TXT+' até '+E(kmDestTxt(op.kmAutoDe))+' — mobilização conta ida e volta ('+Number(op.kmMob).toLocaleString('pt-BR')+' km).';
+    if(!String(d.cidade||'').trim()||String(d.uf||'').trim().length!==2)return'Informe a cidade e a UF do cliente que o km é calculado sozinho.';
+    return'';}
+  function kmStatus(msg){const el=document.getElementById('gm-km-st');if(el&&GM.doc)el.innerHTML=msg||kmTxt(GM.doc);}
+  window.gmKmRecalcular=function(){const d=GM.doc;if(!d)return;d.ops=d.ops||{};delete d.ops.kmManual;delete d.ops.kmAutoDe;kmChecar(true);};
   function reTot(){const el=document.getElementById('gm-tot');if(el&&GM.doc)el.innerHTML=htmlTot(GM.doc);const o=document.getElementById('gm-ops-calc');if(o&&GM.doc)o.innerHTML=htmlOpsCalc(GM.doc);const pc=document.getElementById('gm-pag-calc');if(pc&&GM.doc)pc.innerHTML=htmlPagCalc(GM.doc);}
   function htmlTot(d){const t=totais(d);return`<div>Itens<b>${R(t.itens)}</b></div><div>Operacionais<b>${R(t.ops)}</b></div><div>Desconto<b>${t.desc?'− '+R(t.desc):R(0)}</b></div><div>Líquido<b>${R(t.liquido)}</b></div><div class="t">Total do cliente<b>${R(t.total)}</b></div>`;}
-  function htmlOpsCalc(d){const t=totais(d);return`Frete ${R(t.frete)} · Mobilização ${R(t.mob)} · Diárias ${R(t.diar)} · Elevação ${R(t.elev)}`;}
+  function htmlOpsCalc(d){const t=totais(d),op=d.ops||{};
+    if(t.granda){const km=N(op.kmFrete);
+      const fr=t.cam==='FRACIONADO'?`Frete fracionado (cotação) ${R(t.frete)}`:`Frete ${t.cam}: ${km?km.toLocaleString('pt-BR')+' km → tabela '+R(t.freteBase)+' × '+String(t.freteIdx).replace('.',',')+' = ':''}${R(t.frete)}`;
+      return`${fr} · Mobilização ${N(op.kmMob).toLocaleString('pt-BR')} km × ${R(t.mobKm)} = ${R(t.mob)} · Diárias ${R(t.diar)} · Elevação ${R(t.elev)} <span style="color:#94a3b8">· mesmos parâmetros da Granda, saindo de Cascavel/PR</span>`;}
+    return`Frete ${R(t.frete)} · Mobilização ${R(t.mob)} · Diárias ${R(t.diar)} · Elevação ${R(t.elev)} <span style="color:#b45309">· cálculo antigo (R$/km) — orçamento já enviado</span>`;}
   function htmlEditor(){
     const d=GM.doc,bloq=!!d.pedidoId,dis=bloq?'disabled':'';
     const t=totais(d),o=t.o;
@@ -85397,26 +85592,33 @@ _pfSalvarEtapas=function(){
         <button type="button" class="gm-b" onclick="gmOrcFechar()">← ${d._direto?'Pedidos':'Orçamentos'}</button>
         <div style="font-weight:800;color:#243e80;font-size:.95rem">${d._direto?'Novo pedido direto':d.numero?E(d.numero):'Novo orçamento'}</div>${d._direto?'<span class="gm-chip" style="background:#fdf2f8;color:#be185d">sem orçamento</span>':chipOrc(d)}
         <span style="flex:1"></span>
-        ${d._direto?`<button type="button" class="gm-b r" onclick="gmPedConverterAbrir()">Continuar para o financeiro →</button>`:bloq?`<button type="button" class="dash-btn-conf" style="background:#dc2626;padding:7px 12px;font-size:.76rem" onclick="gmOrcPdf()">📄 PDF</button><button type="button" class="gm-b p" onclick="gmPedAbrir('${d.pedidoId}')">Abrir pedido ${E((GM.peds[d.pedidoId]||{}).numero||'')}</button>`:`
+        ${d._direto?`<button type="button" class="gm-b r" onclick="gmPedConverterAbrir()">Continuar para o financeiro →</button>`:bloq?`<button type="button" class="dash-btn-conf" style="background:#dc2626;padding:7px 12px;font-size:.76rem" onclick="gmOrcPdf()">📄 PDF</button><button type="button" class="gm-b p" onclick="gmPedAbrir('${d.pedidoId}')">Abrir pedido ${E((GM.peds[d.pedidoId]||{}).numero||'')}</button><button type="button" class="gm-b" onclick="gmOrcDuplicar()" title="Criar um orçamento novo a partir deste">⧉ Duplicar</button>`:`
         <select class="fc" style="width:auto" onchange="gmSet('status',this.value)">${['rasc','env','aprov','perdido'].map(k=>`<option value="${k}" ${d.status===k?'selected':''}>${ST_ORC[k][0]}</option>`).join('')}</select>
+        <span id="gm-auto-st" style="font-size:.72rem;font-weight:700;color:${d._sujo?'#b45309':'#15803d'};white-space:nowrap">${d._sujo?'✏️ Alterações não salvas…':d.numero?'✓ Salvo automaticamente':''}</span>
         <button type="button" class="gm-b p" onclick="gmOrcSalvar()">💾 Salvar</button>
-        ${d.numero?`<button type="button" class="dash-btn-conf" style="background:#dc2626;padding:7px 12px;font-size:.76rem" onclick="gmOrcPdf()">📄 PDF</button><button type="button" class="gm-b r" onclick="gmPedConverterAbrir()">✅ Transformar em pedido</button>`:''}
+        ${d.numero?`<button type="button" class="dash-btn-conf" style="background:#dc2626;padding:7px 12px;font-size:.76rem" onclick="gmOrcPdf()">📄 PDF</button><button type="button" class="gm-b r" onclick="gmPedConverterAbrir()">✅ Transformar em pedido</button><button type="button" class="gm-b" onclick="gmOrcDuplicar()" title="Criar um orçamento novo a partir deste">⧉ Duplicar</button>`:''}
         ${d.numero&&adm()?`<button type="button" class="gm-b" onclick="gmOrcExcluir()" title="Excluir orçamento">🗑</button>`:''}`}
       </div>
+      ${d._dupDe&&!d.numero?`<div class="dash-card" style="padding:10px 14px;background:#fffbeb;border-color:#fde68a;font-size:.78rem;color:#92400e">⧉ Cópia do orçamento <b>${E(d._dupDe.numero)}</b> — altere o que for diferente (cliente, cidade, itens, valores) antes de salvar.</div>`:''}
       ${bloq?`<div class="dash-card" style="padding:10px 14px;background:#f5f3ff;border-color:#ddd6fe;font-size:.78rem;color:#4c1d95">Este orçamento já virou o pedido <b>${E((GM.peds[d.pedidoId]||{}).numero||'')}</b> — fica só para consulta.</div>`:''}
       <div class="dash-card"><div class="gm-sec">Cliente e negócio</div>
         <div class="gm-g" style="grid-template-columns:2fr 1.2fr .6fr 1.4fr">
           <label>Cliente *<input class="fc" ${dis} value="${E(d.cliente)}" oninput="gmSet('cliente',this.value.toUpperCase())" style="text-transform:uppercase" placeholder="Ex.: OMODA JAECOO CURITIBA"></label>
           <label>Cidade<input class="fc" ${dis} value="${E(d.cidade)}" oninput="gmSet('cidade',this.value.toUpperCase())" style="text-transform:uppercase"></label>
           <label>UF<input class="fc" ${dis} maxlength="2" value="${E(d.uf)}" oninput="gmSet('uf',this.value.toUpperCase())" style="text-transform:uppercase"></label>
-          <label>Contato<input class="fc no-upper" ${dis} value="${E(d.contato)}" oninput="gmSet('contato',this.value)" placeholder="nome / telefone"></label>
+          <label>Contato<input class="fc no-upper" ${dis} value="${E(d.contato)}" oninput="gmSet('contato',this.value)" placeholder="Nome do contato"></label>
+        </div>
+        <div class="gm-g" style="grid-template-columns:1fr 1.5fr;margin-top:10px">
+          <label>Telefone do contato<input class="fc no-upper" ${dis} inputmode="tel" value="${E(d.telefone||'')}" oninput="fmtTel(this);gmSet('telefone',this.value)" placeholder="(00) 00000-0000"></label>
+          <label>E-mail do contato<input class="fc no-upper" type="email" ${dis} value="${E(d.email||'')}" oninput="gmSet('email',this.value.trim().toLowerCase())" placeholder="nome@empresa.com.br"></label>
         </div>
         <div class="gm-g" style="grid-template-columns:1fr;margin-top:10px"><label>Endereço da obra (vai no PDF)<input class="fc no-upper" ${dis} value="${E(d.endereco||'')}" oninput="gmSet('endereco',this.value)" placeholder="Ex.: Av. Brasília, 2652"></label></div>
         <div class="gm-g" style="grid-template-columns:2fr 1fr 1fr;margin-top:10px">
-          <label>Card do CRM Comercial<select class="fc" ${dis} onchange="gmVincular(this.value)"><option value="">— sem vínculo —</option>${cards.map(e=>`<option value="${e.id}" ${e.id===d.crmId?'selected':''}>${E(e.nome)}${e.fechamento?' (fechado)':''}</option>`).join('')}</select></label>
-          <label>Validade da proposta (dias)<input class="fc" type="number" min="1" ${dis} value="${E(d.validadeDias||15)}" oninput="gmSet('validadeDias',this.value)"></label>
-          <label>Entrega finalizada na loja<input class="fc" type="date" ${dis} value="${E(d.entrega||'')}" onchange="gmSet('entrega',this.value)"></label>
+          <label>Card do CRM Comercial<select class="fc" ${dis} onchange="gmVincular(this.value)"><option value="">— sem vínculo —</option>${bloq?'':'<option value="__novo__">➕ CRIAR CARD NOVO NO CRM</option>'}${cards.map(e=>`<option value="${e.id}" ${e.id===d.crmId?'selected':''}>${E(e.nome)}${e.fechamento?' (fechado)':''}</option>`).join('')}</select></label>
+          <label>Validade da proposta (dias)<input class="fc" type="number" min="1" ${dis} value="${E(d.validadeDias||5)}" oninput="gmSet('validadeDias',this.value)"></label>
+          <label>Entrega finalizada na loja<input class="fc" type="date" ${dis} min="${bloq?'':hoje()}" value="${E(d.entrega||'')}" onchange="gmEntrega(this)"></label>
         </div>
+        ${!card&&!bloq?`<div style="margin-top:8px;font-size:.72rem;color:#64748b">Este ${d._direto?'pedido':'orçamento'} ainda não tem card no CRM Comercial. <a href="javascript:void(0)" onclick="gmCriarCardAbrir()" style="color:#243e80;font-weight:700">➕ Criar card com este cliente</a></div>`:''}
         ${card?`<div style="margin-top:8px;font-size:.72rem;color:#64748b">O valor deste ${d._direto?'pedido':'orçamento'} vai pro card <b>${E(card.nome)}</b> ${d._direto?'quando o pedido for criado':'quando você salva'}. <a href="javascript:void(0)" onclick="gmAbrirCard('${card.id}')" style="color:#243e80;font-weight:700">Abrir card ↗</a></div>`:''}
       </div>
       ${bloq?'':htmlIa()}
@@ -85427,12 +85629,17 @@ _pfSalvarEtapas=function(){
       </div>
       <div class="dash-card"><div class="gm-sec">Operacionais e desconto</div>
         <div class="gm-g" style="grid-template-columns:repeat(5,1fr)">
-          <label>Frete (km)<input class="fc" type="number" min="0" ${dis} value="${E((d.ops||{}).kmFrete)}" oninput="gmSetOp('kmFrete',this.value)" placeholder="km"><span class="gm-un">× R$ <input ${dis} inputmode="decimal" value="${M(o.frete)}" onchange="gmSetOpV('frete',this.value)"> /km</span></label>
-          <label>Mobilização (km)<input class="fc" type="number" min="0" ${dis} value="${E((d.ops||{}).kmMob)}" oninput="gmSetOp('kmMob',this.value)" placeholder="km"><span class="gm-un">× R$ <input ${dis} inputmode="decimal" value="${M(o.mob)}" onchange="gmSetOpV('mob',this.value)"> /km</span></label>
+          ${d.calcGranda?`<label>Frete (km, só ida)<input class="fc" id="gm-km-frete" type="number" min="0" ${dis} value="${E((d.ops||{}).kmFrete)}" oninput="gmSetOp('kmFrete',this.value)" placeholder="km">
+            <select class="fc" ${dis} onchange="gmSetCaminhao(this.value)" style="margin-top:4px">${['TRUCK','VAN','CARRETA','FRACIONADO'].map(k=>`<option value="${k}" ${((d.ops||{}).caminhao||'TRUCK')===k?'selected':''}>🚛 ${k==='FRACIONADO'?'FRACIONADO (cotação)':k}</option>`).join('')}</select>
+            ${((d.ops||{}).caminhao)==='FRACIONADO'?`<input class="fc" inputmode="decimal" ${dis} value="${E((d.ops||{}).freteFrac)}" oninput="gmSetOp('freteFrac',this.value)" placeholder="Valor da cotação (R$)" style="margin-top:4px">`:''}</label>
+          <label>Mobilização (km, ida e volta)<input class="fc" id="gm-km-mob" type="number" min="0" ${dis} value="${E((d.ops||{}).kmMob)}" oninput="gmSetOp('kmMob',this.value)" placeholder="km"><span class="gm-un">× ${R(ORCX_VALOR_KM_MOBILIZACAO)} /km (Granda)</span></label>`
+          :`<label>Frete (km)<input class="fc" id="gm-km-frete" type="number" min="0" ${dis} value="${E((d.ops||{}).kmFrete)}" oninput="gmSetOp('kmFrete',this.value)" placeholder="km"><span class="gm-un">× R$ <input ${dis} inputmode="decimal" value="${M(o.frete)}" onchange="gmSetOpV('frete',this.value)"> /km</span></label>
+          <label>Mobilização (km)<input class="fc" id="gm-km-mob" type="number" min="0" ${dis} value="${E((d.ops||{}).kmMob)}" oninput="gmSetOp('kmMob',this.value)" placeholder="km"><span class="gm-un">× R$ <input ${dis} inputmode="decimal" value="${M(o.mob)}" onchange="gmSetOpV('mob',this.value)"> /km</span></label>`}
           <label>Diárias da equipe<input class="fc" type="number" min="0" ${dis} value="${E((d.ops||{}).diarias)}" oninput="gmSetOp('diarias',this.value)" placeholder="qtd"><span class="gm-un">× R$ <input ${dis} inputmode="decimal" value="${M(o.diaria)}" onchange="gmSetOpV('diaria',this.value)"> /diária</span></label>
           <label>Elevação (R$, a consultar)<input class="fc" inputmode="decimal" ${dis} value="${E((d.ops||{}).elevacao)}" oninput="gmSetOp('elevacao',this.value)" placeholder="0,00"></label>
           <label>Desconto (R$)<input class="fc" inputmode="decimal" ${dis} value="${E(d.desconto)}" oninput="gmSet('desconto',this.value)" placeholder="0,00"></label>
         </div>
+        ${bloq?'':`<div id="gm-km-st" style="font-size:.72rem;color:#475569;margin-top:6px">${kmTxt(d)}</div>`}
         <div id="gm-ops-calc" style="font-size:.72rem;color:#64748b;margin-top:6px">${htmlOpsCalc(d)}</div>
         <label style="display:block;margin-top:10px;font-size:.7rem;font-weight:700;color:#475569">Observações<textarea class="fc no-upper" rows="2" ${dis} oninput="gmSet('obs',this.value)" style="margin-top:3px;width:100%;box-sizing:border-box;text-transform:none">${E(d.obs)}</textarea></label>
         <div class="gm-tot" id="gm-tot" style="margin-top:12px">${htmlTot(d)}</div>
@@ -85453,6 +85660,7 @@ _pfSalvarEtapas=function(){
   window._gmPagCalc=pagCalc;
   function htmlPagCalc(d){const c=pagCalc(d);return`<b>${c.parc.length?'Entrada':'À vista'} ${R(c.ent)}</b> (${E(c.p.formaEnt)})${c.parc.length?` + <b>${c.parc.length} × ${R(c.parc[0])}</b>${c.parc.length>1&&c.parc[c.parc.length-1]!==c.parc[0]?' (última '+R(c.parc[c.parc.length-1])+')':''} (${E(c.p.forma)})`:''} = ${R(c.total)}`;}
   window.gmSetPag=(k,v)=>{if(!GM.doc)return;GM.doc.pag=Object.assign(pagDe(GM.doc),{[k]:k==='n'?parseInt(v)||0:k==='entPct'?N(v):v});sujo();const el=document.getElementById('gm-pag-calc');if(el)el.innerHTML=htmlPagCalc(GM.doc);};
+  window.gmSetCaminhao=v=>{if(!GM.doc)return;GM.doc.ops=GM.doc.ops||{};GM.doc.ops.caminhao=v;sujo();renderMantendoFoco();};
   window.gmSetOpV=(k,v)=>{if(!GM.doc)return;GM.doc.opsValores=Object.assign({},GM.doc.opsValores||{},{[k]:N(v)});sujo();reTot();};
   // itens
   window.gmItem=(ix,k,v)=>{const it=(GM.doc.itens||[])[ix];if(!it)return;it[k]=k==='qtd'?Math.max(0,N(v)):(k==='preco'||k==='larg'||k==='alt'||k==='prof')?N(v):v;
@@ -85465,14 +85673,62 @@ _pfSalvarEtapas=function(){
     el.innerHTML=`<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;box-shadow:0 10px 30px rgba(15,23,42,.15);max-height:320px;overflow:auto;margin-top:4px">${l.length?l.map(x=>`<div onclick="gmAdd('${x.id}')" style="display:flex;gap:10px;align-items:center;padding:7px 10px;border-bottom:1px solid #f1f5f9;cursor:pointer">${GM_FOTOS[x.codigo]?`<img src="${GM_FOTOS[x.codigo]}" style="width:48px;height:36px;object-fit:contain;border-radius:5px;border:1px solid #e2e8f0">`:''}
       <div style="flex:1;min-width:0"><div style="font-size:.78rem;font-weight:800"><span style="color:#94a3b8">${E(x.codigo)}</span> ${E(x.nome)}</div><div style="font-size:.68rem;color:#64748b">${E(medida(x))}</div></div><b style="font-size:.76rem;white-space:nowrap">${R(x.preco)}</b></div>`).join(''):'<div style="padding:10px;font-size:.76rem;color:#64748b">Nada no caderno com essa busca — use ✍️ Item avulso.</div>'}</div>`;};
   window.gmAdd=function(id){const x=cadItem(id);if(!x)return;const ja=GM.doc.itens.find(i=>i.lpu===id&&!i.ambiente);if(ja)ja.qtd=N(ja.qtd)+1;else{const n={id:uid('i'),lpu:id,codigo:x.codigo,nome:x.nome,qtd:1,preco:N(x.preco)};if(ehM2(x)){n.larg=x.larg;n.alt=x.alt;n.preco=precoM2(x,n);}GM.doc.itens.push(n);}sujo();render();setTimeout(()=>{const b=document.getElementById('gm-add-busca');if(b)b.focus();},30);};
-  window.gmVincular=function(id){if(!GM.doc)return;GM.doc.crmId=id||'';sujo();
+  window.gmVincular=function(id){if(!GM.doc)return;if(id==='__novo__'){render();gmCriarCardAbrir();return;}GM.doc.crmId=id||'';sujo();
     if(id&&!GM.doc.cliente){const n=cardNome(id);if(n)GM.doc.cliente=String(n).toUpperCase();}render();};
+  // ── Criar card no CRM direto do orçamento (build 2026-11-12.2, a pedido do Guilherme) ──
+  // Orçamento/pedido direto sem card: cria o negócio no CRM Comercial com o cliente/cidade/UF
+  // do orçamento, na 1ª etapa do funil (mesmo padrão do crmSalvarEmpresa/ppGerarCrm), e já
+  // vincula. Se o orçamento já tem número, salva na hora pra levar o valor pro card.
+  const UFS=['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
+  window.gmCriarCardAbrir=function(){
+    const d=GM.doc;if(!d||d.pedidoId)return;
+    const vend=(()=>{try{return _crmNomesEquipe();}catch(e){return[];}})();
+    const eu=String(quem()).toUpperCase().trim();
+    const html=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><div><div style="font-size:.7rem;font-weight:800;color:#64748b;text-transform:uppercase">🪑 Granda Mob → CRM Comercial</div><div style="font-size:1rem;font-weight:800;color:#243e80">Criar card no CRM</div><div style="font-size:.72rem;color:#64748b;margin-top:2px">O card nasce na 1ª etapa do funil, já vinculado a este ${d._direto?'pedido':'orçamento'}.</div></div>${_ppFechar('gm-card-modal')}</div>
+      <div class="fg" style="margin-top:14px"><label style="font-size:.76rem;font-weight:700">Cliente <span class="r">*</span></label><input class="fc" id="gm-cc-nome" value="${E(d.cliente||'')}" style="text-transform:uppercase" placeholder="Ex.: OMODA JAECOO CURITIBA"></div>
+      <div class="fg"><label style="font-size:.76rem;font-weight:700">Vendedor responsável <span class="r">*</span></label><select class="fc" id="gm-cc-vend"><option value="">Selecione</option>${vend.map(v=>`<option${v===eu?' selected':''}>${E(v)}</option>`).join('')}</select></div>
+      <div style="display:grid;grid-template-columns:1fr 110px;gap:10px">
+        <div class="fg"><label style="font-size:.76rem;font-weight:700">Cidade da obra <span class="r">*</span></label><input class="fc" id="gm-cc-cid" value="${E(d.cidade||'')}" style="text-transform:uppercase"></div>
+        <div class="fg"><label style="font-size:.76rem;font-weight:700">UF <span class="r">*</span></label><select class="fc" id="gm-cc-uf"><option value=""></option>${UFS.map(u=>`<option${String(d.uf||'').toUpperCase()===u?' selected':''}>${u}</option>`).join('')}</select></div>
+      </div>
+      <div class="fg"><label style="font-size:.76rem;font-weight:700">JOB (se já souber)</label><input class="fc" id="gm-cc-job" style="text-transform:uppercase" placeholder="Ex.: MOBILIÁRIO SHOWROOM"></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:10px"><button type="button" id="gm-cc-ok" onclick="gmCriarCard()" style="${_ppBtn};background:#243e80">➕ Criar card</button></div>`;
+    _ppModal('gm-card-modal',html,500);
+  };
+  window.gmCriarCard=async function(){
+    const d=GM.doc;if(!d||d.pedidoId)return;
+    const v=k=>((document.getElementById(k)||{}).value||'').trim();
+    const nome=v('gm-cc-nome').toUpperCase(),vend=v('gm-cc-vend'),cid=v('gm-cc-cid').toUpperCase(),uf=v('gm-cc-uf'),job=v('gm-cc-job').toUpperCase();
+    if(!nome){toast('Informe o cliente','terr');return;}
+    if(!vend){toast('Escolha o vendedor responsável','terr');return;}
+    if(!cid||!uf){toast('Informe a cidade e a UF da obra','terr');return;}
+    const igual=(crmEmpresas||[]).find(e=>!e.fechamento&&String(e.nome||'').trim().toUpperCase()===nome);
+    if(igual&&confirm('Já existe um card aberto no CRM com o nome "'+igual.nome+'".\n\nOK = vincular a esse card\nCancelar = criar um card novo mesmo assim')){
+      const m=document.getElementById('gm-card-modal');if(m)m.remove();
+      gmVincular(igual.id);if(d.numero)await gmOrcSalvar();return;
+    }
+    const btn=document.getElementById('gm-cc-ok');if(btn){btn.disabled=true;btn.textContent='Criando...';}
+    const ag=agora(),q=quem();const etapas=_crmEtapas();
+    const c={id:'pe_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),nome,job,responsavel:vend,sedeCidade:cid,sedeUf:uf,tipoNegocio:'Venda',caminhoPasta:'',
+      etapa:etapas[0].key,etapaEntradaEm:ag,tarefas:[],decisores:[],criadoPor:q,criadoEm:ag,atualizadoEm:ag,
+      timeline:[{id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:'🪑 Card criado pelo Granda Mob a partir do '+(d._direto?'pedido direto':'orçamento'+(d.numero?' '+d.numero:''))+' — por '+q+'.',autor:q,em:ag,sistema:true}]};
+    try{await window._fbSaveCrmEmpresa(c);if(typeof crmEmpresas!=='undefined'&&!crmEmpresas.some(x=>x.id===c.id))crmEmpresas.push(c);}
+    catch(err){console.error('gmCriarCard',err);toast('Não consegui criar o card no CRM','terr');if(btn){btn.disabled=false;btn.textContent='➕ Criar card';}return;}
+    const m=document.getElementById('gm-card-modal');if(m)m.remove();
+    d.crmId=c.id;if(!d.cliente)d.cliente=nome;if(!d.cidade)d.cidade=cid;if(!d.uf)d.uf=uf;sujo();
+    toast('Card '+nome+' criado no CRM e vinculado','tok');
+    if(d.numero&&!d._direto)await gmOrcSalvar();else render();
+  };
   window.gmAbrirCard=function(id){try{crmAbrirCard(id);}catch(e){toast('Não consegui abrir o card','terr');}};
   window.gmOrcSalvar=async function(){
+    clearTimeout(autoTimer);if(autoProm){try{await autoProm;}catch(e){}}
     const d=GM.doc;if(!d)return;
     if(!String(d.cliente||'').trim()){toast('Informe o cliente','terr');return;}
     if((d.itens||[]).some(i=>!i.lpu&&!String(i.nome||'').trim())){toast('Item avulso sem descrição','terr');return;}
+    if(d.entrega&&!d.pedidoId&&d.entrega<hoje()&&d.entrega!==((GM.orcs[d.id]||{}).entrega)){toast('A data de entrega não pode ser retroativa','terr');return;}
+    if(d.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(d.email).trim())){toast('E-mail do contato inválido','terr');return;}
     const novo=!d.numero;
+    if(novo&&d._dupDe&&assinOrc(d)===d._dupDe.assin&&!confirm('⚠️ Este orçamento é uma CÓPIA do '+d._dupDe.numero+' e está com as MESMAS informações — nada foi alterado.\n\nEstá certo? Ele vai ficar duplicado.\n\nOK = salvar duplicado mesmo assim\nCancelar = voltar e alterar'))return;
     try{
       if(novo)d.numero=await seq('gmobOrcSeq','GM-',GM.orcs);
       delete d._sujo;delete d._novo;
@@ -85483,6 +85739,18 @@ _pfSalvarEtapas=function(){
       render();
     }catch(e){if(novo&&!GM.orcs[d.id])d.numero='';toast('Erro ao salvar: '+(e.message||e),'terr');}
   };
+  // ── Duplicar orçamento (build 2026-11-12.4, a pedido do Guilherme) — cópia vira orçamento novo (sem número,
+  // rascunho, sem card do CRM e sem pedido). Se salvar sem mudar nada, avisa que está duplicado e pergunta.
+  function assinOrc(d){return JSON.stringify([d.cliente,d.cidade,d.uf,d.endereco,d.contato,d.telefone,d.email,d.desconto,d.obs,
+    (d.itens||[]).map(i=>[i.lpu,i.nome,i.desc,N(i.qtd),N(i.preco),i.larg,i.alt,i.prof,i.ref]),
+    ['kmFrete','kmMob','diarias','elevacao'].map(k=>N((d.ops||{})[k]))].map(x=>typeof x==='string'?x.trim().toUpperCase():x));}
+  window.gmOrcDuplicar=function(){const o=GM.doc;if(!o||!o.numero)return;
+    if(o._sujo&&!o.pedidoId&&!confirm('O orçamento '+o.numero+' tem alterações não salvas — a cópia sai como está na tela. Continuar?'))return;
+    const c=limpo(o);['numero','pedidoId','crmId','leituraIA','totalCache','_sujo','_novo','atualizadoEm','atualizadoPor','enviadoEm','aprovadoEm','perdidoEm','motivoPerda','historico'].forEach(k=>delete c[k]);
+    Object.assign(c,{id:uid('gmo_'),status:'rasc',criadoEm:agora(),criadoPor:quem(),_dupDe:{id:o.id,numero:o.numero,assin:assinOrc(o)}});
+    (c.itens||[]).forEach(i=>{i.id=uid('i');});
+    GM.doc=c;GM.doc._sujo=true;GM.ia=null;GM.aba='orc';render();window.scrollTo&&window.scrollTo(0,0);
+    toast('Cópia do '+o.numero+' aberta — altere o que precisar e salve','tinf');};
   window.gmOrcExcluir=async function(){const d=GM.doc;if(!d||!adm()||d.pedidoId)return;
     if(!confirm('Excluir o orçamento '+d.numero+'? Ele some da lista (o card do CRM continua).'))return;
     try{await window._fbDelDocCol(COL_ORC,d.id);delete GM.orcs[d.id];GM.doc=null;toast('Orçamento excluído','tinf');render();}catch(e){toast('Erro: '+(e.message||e),'terr');}};
@@ -85503,8 +85771,8 @@ _pfSalvarEtapas=function(){
   // ── IA: ler o projeto e relacionar com a LPU ──
   const GM_IA_SCHEMA={type:'object',additionalProperties:false,required:['cliente','cidade','uf','resumo','itens'],properties:{
     cliente:{type:'string'},cidade:{type:'string'},uf:{type:'string'},resumo:{type:'string'},
-    itens:{type:'array',items:{type:'object',additionalProperties:false,required:['descricao','referencia','ambiente','quantidade','lpu_id','largura_m','altura_m','confianca','onde','observacao'],properties:{
-      referencia:{type:'string'},
+    itens:{type:'array',items:{type:'object',additionalProperties:false,required:['descricao','referencia','ambiente','quantidade','lpu_id','largura_m','altura_m','confianca','onde','observacao','imagem'],properties:{
+      referencia:{type:'string'},imagem:{type:'integer'},
       descricao:{type:'string'},ambiente:{type:'string'},quantidade:{type:'integer'},lpu_id:{type:'string'},largura_m:{type:'number'},altura_m:{type:'number'},
       confianca:{type:'string',enum:['alta','media','baixa']},onde:{type:'string'},observacao:{type:'string'}}}}}};
   function iaPrompt(){
@@ -85520,6 +85788,7 @@ REGRAS
 - largura_m / altura_m = medidas do móvel no projeto, em metros (cotas em cm → divida por 100). 0 se não houver.
 - NÃO invente: medida ou correspondência deduzida = confianca "media"; sem certeza = "baixa".
 - onde = página e vista (ex.: "pág. 3, planta de layout").
+- imagem = o número N da imagem [IMG N] em que o móvel aparece MELHOR (de preferência a vista/elevação/detalhe dele, senão o quadro de mobiliário); 0 se não aparecer em nenhuma imagem.
 - LINHA DO TEMPO (painel/parede "linha do tempo" do showroom) = SEMPRE lpu_id "ojm37" (adesivo impresso cobrado por m²), com largura_m e altura_m da parede/painel no projeto.
 
 LPU — GRANDA MOBILIÁRIO OMODA & JAECOO HOMOLOGAÇÃO 2026 VS2 (id | código | nome | medida L × A × P | descrição)
@@ -85533,10 +85802,12 @@ ${lista}`;
       const opts=sel=>`<option value="">— fora da LPU (avulso) —</option>`+cadLista().map(x=>`<option value="${x.id}" ${x.id===sel?'selected':''}>${E(x.codigo+' · '+x.nome)}</option>`).join('');
       const cor={alta:'#fff',media:'#fffbeb',baixa:'#fef2f2'};
       const tot=ia.itens.filter(i=>i.sel).reduce((s,i)=>{const x=cadItem(i.lpu);return s+(x?N(x.preco):N(i.preco))*N(i.qtd);},0);
-      corpo=`<div style="font-size:.74rem;color:#475569;margin:10px 0 8px">${E(ia.resumo||'')} <span style="color:#94a3b8">· ${ia.paginas} ${pl(ia.paginas,'página lida','páginas lidas')} em ${ia.seg}s</span></div>
-      <div style="overflow-x:auto"><table class="dash-table"><thead><tr><th></th><th>No projeto</th><th>Item da LPU</th><th style="text-align:center">Qtd</th><th style="text-align:right">Preço</th></tr></thead><tbody>
+      corpo=`<div style="font-size:.74rem;color:#475569;margin:10px 0 8px">${E(ia.resumo||'')} <span style="color:#94a3b8">· Clique nas imagens pra comparar o projeto com o item da LPU · ${ia.paginas} ${pl(ia.paginas,'página lida','páginas lidas')} em ${ia.seg}s</span></div>
+      <div style="overflow-x:auto"><table class="dash-table"><thead><tr><th></th><th colspan="2">No projeto</th><th colspan="2">Item da LPU</th><th style="text-align:center">Qtd</th><th style="text-align:right">Preço</th></tr></thead><tbody>
       ${ia.itens.map((it,ix)=>{const x=cadItem(it.lpu);return`<tr style="background:${cor[it.conf]||'#fff'}"><td><input type="checkbox" ${it.sel?'checked':''} onchange="gmIaSet(${ix},'sel',this.checked)"></td>
+        <td style="width:64px">${it.img&&ia.imgs&&ia.imgs[it.img-1]?`<img class="gm-foto gm-ia-th" src="data:image/jpeg;base64,${ia.imgs[it.img-1].data}" alt="" title="Ver no projeto" onclick="gmIaVer(${ix})">`:'<div class="gm-foto gm-ia-th gm-ia-sem" title="A IA não apontou a imagem">—</div>'}</td>
         <td style="min-width:200px"><b style="font-size:.78rem">${E(it.descricao)}</b><div style="font-size:.66rem;color:#64748b">${E([it.ambiente,it.medida,it.onde].filter(Boolean).join(' · '))}</div>${it.obs?`<div style="font-size:.66rem;color:#92400e">${E(it.obs)}</div>`:''}<div style="font-size:.62rem;font-weight:800;color:${it.conf==='alta'?'#047857':it.conf==='media'?'#b45309':'#b91c1c'}">confiança ${it.conf==='media'?'média':it.conf}</div></td>
+        <td style="width:64px">${x&&GM_FOTOS[x.codigo]?`<img class="gm-foto gm-ia-th" src="${GM_FOTOS[x.codigo]}" alt="" title="Ver item da LPU" onclick="gmIaVer(${ix})">`:'<div class="gm-foto gm-ia-th gm-ia-sem">—</div>'}</td>
         <td style="min-width:220px"><select class="fc" style="font-size:.74rem" onchange="gmIaSet(${ix},'lpu',this.value)">${opts(it.lpu)}</select>${x?'':`<input class="fc" inputmode="decimal" placeholder="preço avulso" value="${E(it.preco||'')}" onchange="gmIaSet(${ix},'preco',this.value)" style="margin-top:4px;font-size:.74rem">`}</td>
         <td style="width:70px"><input class="fc" type="number" min="1" value="${E(it.qtd)}" onchange="gmIaSet(${ix},'qtd',this.value)" style="text-align:center;padding:5px"></td>
         <td style="text-align:right;white-space:nowrap;font-weight:700">${x?R(N(x.preco)*N(it.qtd)):(N(it.preco)?R(N(it.preco)*N(it.qtd)):'—')}</td></tr>`;}).join('')}</tbody></table></div>
@@ -85548,6 +85819,13 @@ ${lista}`;
   const iaChave=()=>{try{return orc2&&orc2.iaCfg&&orc2.iaCfg.chave;}catch(e){return'';}};
   window.gmIaEscolher=function(){if(!iaChave()){toast(adm()?'Cadastre a chave da IA em Orçamentos → ⚙️ Matérias-primas e preços':'A leitura com IA ainda não foi ativada — peça pro administrador','terr');return;}const i=document.getElementById('gm-ia-arq');if(i){i.value='';i.click();}};
   window.gmIaCancelar=function(){if(GM.ia&&GM.ia.status==='lendo'){GM.ia.cancelar=true;if(GM.ia.ctrl)try{GM.ia.ctrl.abort();}catch(e){}GM.ia=null;render();toast('Leitura cancelada','tinf');}};
+  // Visualizador lado a lado (build 2026-11-12.3): imagem do projeto onde a IA achou o móvel × foto do item da LPU.
+  window.gmIaVer=function(ix){const ia=GM.ia,it=ia&&ia.itens[ix];if(!it)return;const x=cadItem(it.lpu);
+    const pj=it.img&&ia.imgs&&ia.imgs[it.img-1],fl=x&&GM_FOTOS[x.codigo];
+    const caixa=(tit,sub,src)=>`<div style="flex:1;min-width:260px;display:flex;flex-direction:column;gap:6px"><div style="font-size:.7rem;font-weight:800;color:#64748b;text-transform:uppercase">${tit}</div><div style="font-size:.74rem;color:#475569;min-height:1.2em">${sub}</div>${src?`<div style="border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;overflow:auto;max-height:70vh"><img src="${src}" alt="" title="Clique pra ampliar" onclick="const z=this.dataset.z!=='1';this.dataset.z=z?'1':'';this.style.width=z?'200%':'100%';this.style.maxHeight=z?'none':'62vh';this.style.cursor=z?'zoom-out':'zoom-in'" style="display:block;width:100%;max-height:62vh;object-fit:contain;cursor:zoom-in"></div>`:'<div style="flex:1;min-height:200px;display:flex;align-items:center;justify-content:center;border:1px dashed #e2e8f0;border-radius:10px;color:#94a3b8;font-size:.78rem;text-align:center;padding:12px">Sem imagem</div>'}</div>`;
+    const html=`<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:12px"><div><div style="font-size:1rem;font-weight:800;color:#243e80">${E(it.descricao)}</div><div style="font-size:.72rem;color:#64748b">${E([it.ambiente,it.medida,it.onde].filter(Boolean).join(' · '))}</div></div>${_ppFechar('gm-ia-ver')}</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap">${caixa('No projeto',pj?E(pj.rot):'A IA não apontou em qual imagem o móvel aparece',pj?'data:image/jpeg;base64,'+pj.data:'')}${caixa('Item da LPU',x?E(x.codigo+' · '+x.nome)+(medida(x)?' · '+E(medida(x)):''):'Fora da LPU (avulso)',fl||'')}</div>`;
+    _ppModal('gm-ia-ver',html,1100);};
   window.gmIaSet=(ix,k,v)=>{const it=GM.ia&&GM.ia.itens[ix];if(!it)return;it[k]=k==='qtd'?Math.max(1,parseInt(v)||1):v;render();};
   function iaProg(m){if(GM.ia){GM.ia.msg=m;}const el=document.querySelector('#sec-cat-GRANDA_MOB .gm-ia');if(el&&el.parentNode&&GM.doc){el.parentNode.outerHTML=htmlIa();}}
   window.gmIaLer=async function(inp){
@@ -85558,13 +85836,13 @@ ${lista}`;
     GM.ia={status:'lendo',arquivo:rot,msg:'Abrindo os arquivos…',itens:[],inicio:Date.now()};render();
     try{
       const content=[{type:'text',text:iaPrompt()+(files.length>1?`\n\nVÁRIOS ARQUIVOS: é UM projeto só, em ${files.length} arquivos. Não repita o mesmo móvel que aparece em mais de uma prancha.`:'')}];
-      let restImg=40,restPag=30,totPag=0;
+      let restImg=40,restPag=30,totPag=0;const imgsIa=[];
       for(let k=0;k<files.length;k++){const f=files[k];if(restImg<=0||restPag<=0)break;
         const lim={img:Math.max(1,restImg-(files.length-k-1)),pag:restPag,rot:files.length>1?'Arquivo '+(k+1):'',prog:iaProg,partesSoSemTexto:true,msPorImagem:30000,tile:1600,cancelado:()=>!GM.ia||GM.ia.cancelar};
         iaProg('Preparando '+f.name+'…');
         const pg=ehImg(f)?await _orc2IaImagemArq(f,lim.img):await _orc2IaPaginas(await f.arrayBuffer(),lim);
         if(files.length>1)content.push({type:'text',text:`##### ARQUIVO ${k+1}: ${f.name}`});
-        pg.paginas.forEach(p=>{if(!ehImg(f))content.push({type:'text',text:`=== PÁGINA ${p.n} — texto: ${p.texto||'(sem texto)'}`});p.imgs.forEach(im=>{content.push({type:'text',text:(ehImg(f)?'Imagem':'Página '+p.n)+(im.rot?' — '+im.rot:'')+':'});content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:im.data}});});});
+        pg.paginas.forEach(p=>{if(!ehImg(f))content.push({type:'text',text:`=== PÁGINA ${p.n} — texto: ${p.texto||'(sem texto)'}`});p.imgs.forEach(im=>{const nI=imgsIa.length+1;imgsIa.push({data:im.data,rot:(files.length>1?f.name+' · ':'')+(ehImg(f)?'Imagem':'Página '+p.n)+(im.rot?' — '+im.rot:'')});content.push({type:'text',text:'[IMG '+nI+'] '+(ehImg(f)?'Imagem':'Página '+p.n)+(im.rot?' — '+im.rot:'')+':'});content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:im.data}});});});
         restImg-=pg.nImg;restPag-=pg.lidas;totPag+=pg.lidas;}
       content.push({type:'text',text:'Liste agora todos os móveis do projeto, relacionados com a LPU, seguindo as regras.'});
       const modelo=(orc2.iaCfg&&orc2.iaCfg.modelo)||'claude-opus-5-5';
@@ -85584,8 +85862,8 @@ ${lista}`;
       if(!r.ok){const m=(js&&js.error&&js.error.message)||('HTTP '+r.status);throw new Error(r.status===401?'chave da IA inválida':(r.status===429||r.status===529)?'a IA está ocupada, tente de novo em 1 minuto':m);}
       const out=JSON.parse(((js&&js.content)||[]).filter(b=>b.type==='text').map(b=>b.text).join(''));
       const itens=(out.itens||[]).map(it=>{const x=cadItem(String(it.lpu_id||''));const l=Number(it.largura_m)||0,a=Number(it.altura_m)||0;
-        return{sel:true,ref:String(it.referencia||''),descricao:String(it.descricao||''),ambiente:String(it.ambiente||''),qtd:Math.max(1,parseInt(it.quantidade)||1),lpu:x?x.id:'',preco:'',conf:['alta','media','baixa'].includes(it.confianca)?it.confianca:'baixa',onde:String(it.onde||''),obs:String(it.observacao||''),medida:l&&a?String(l).replace('.',',')+' × '+String(a).replace('.',',')+' m':'',larg:l,alt:a};});
-      GM.ia={status:'ok',arquivo:rot,resumo:out.resumo||'',itens,paginas:totPag,seg:Math.round((Date.now()-GM.ia.inicio)/1000),cliente:out.cliente,cidade:out.cidade,uf:out.uf};
+        return{sel:true,ref:String(it.referencia||''),descricao:String(it.descricao||''),ambiente:String(it.ambiente||''),qtd:Math.max(1,parseInt(it.quantidade)||1),lpu:x?x.id:'',preco:'',conf:['alta','media','baixa'].includes(it.confianca)?it.confianca:'baixa',onde:String(it.onde||''),obs:String(it.observacao||''),medida:l&&a?String(l).replace('.',',')+' × '+String(a).replace('.',',')+' m':'',larg:l,alt:a,img:(parseInt(it.imagem)||0)>0&&imgsIa[parseInt(it.imagem)-1]?parseInt(it.imagem):0};});
+      GM.ia={status:'ok',arquivo:rot,resumo:out.resumo||'',itens,imgs:imgsIa,paginas:totPag,seg:Math.round((Date.now()-GM.ia.inicio)/1000),cliente:out.cliente,cidade:out.cidade,uf:out.uf};
       const d=GM.doc;if(d){if(!d.cliente&&out.cliente)d.cliente=String(out.cliente).toUpperCase();if(!d.cidade&&out.cidade)d.cidade=String(out.cidade).toUpperCase();if(!d.uf&&out.uf)d.uf=String(out.uf).toUpperCase().slice(0,2);
         d.leituraIA=(d.leituraIA||[]).concat([{em:agora(),por:quem(),arquivo:rot,modelo,itens:itens.length,uso:js.usage||null}]);sujo();}
       render();toast('Projeto lido: '+itens.length+' '+pl(itens.length,'móvel','móveis')+' pra conferir','tok');
@@ -85607,6 +85885,7 @@ ${lista}`;
   window.gmOrcPdf=async function(){
     const d=GM.doc;if(!d)return;
     if(!d.numero){toast('Salve o orçamento antes de gerar o PDF','terr');return;}
+    if(d._sujo&&!d._direto&&!d.pedidoId)await autoSalvar(true);
     if(d._sujo&&!confirm('O orçamento tem alterações não salvas. Gerar o PDF com o que está na tela?'))return;
     if(!window.jspdf||!window.jspdf.jsPDF){toast('O gerador de PDF ainda está carregando — tente em alguns segundos','terr');return;}
     const{jsPDF}=window.jspdf;const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
@@ -85634,8 +85913,11 @@ ${lista}`;
       if(x&&GM_FOTOS[x.codigo])fotos[body.length]=GM_FOTOS[x.codigo];
       body.push([String(n),'',nome,desc,F1(L),L&&A?'X':'',F1(A),F1(P),String((x&&!ehM2(x)&&x.un)||'UND.'),'R$',F2(it.preco),String(R2(it.qtd)).replace('.',','),'R$',F2(N(it.qtd)*N(it.preco))]);});
     const opL=(nome,un,unit,qtd,tot)=>{n++;body.push([String(n),'',nome,'','','','','',un,'R$',F2(unit),String(R2(qtd)).replace('.',','),'R$',F2(tot)]);};
+    if(t.granda){if(t.frete>0)opL('FRETE — '+(t.cam==='FRACIONADO'?'FRACIONADO':t.cam)+(N(op.kmFrete)>0&&t.cam!=='FRACIONADO'?' ('+N(op.kmFrete).toLocaleString('pt-BR')+' KM)':''),'VB',t.frete,1,t.frete);
+      if(N(op.kmMob)>0)opL('MOBILIZAÇÃO DE EQUIPE','KM',t.mobKm,N(op.kmMob),t.mob);}
+    else{
     if(N(op.kmFrete)>0)opL('FRETE','KM',o.frete,N(op.kmFrete),t.frete);
-    if(N(op.kmMob)>0)opL('MOBILIZAÇÃO DE EQUIPE','KM',o.mob,N(op.kmMob),t.mob);
+    if(N(op.kmMob)>0)opL('MOBILIZAÇÃO DE EQUIPE','KM',o.mob,N(op.kmMob),t.mob);}
     if(N(op.diarias)>0)opL('DIÁRIA EQUIPE','DIÁRIA',o.diaria,N(op.diarias),t.diar);
     if(t.elev>0)opL('ELEVAÇÃO','VB',t.elev,1,t.elev);
     const nItens=(d.itens||[]).length;
@@ -85747,7 +86029,7 @@ ${lista}`;
   }
   // converter orçamento em pedido (com o financeiro)
   let CV=null;
-  window.gmPedConverterAbrir=function(){
+  window.gmPedConverterAbrir=async function(){if(GM.doc&&GM.doc._sujo&&!GM.doc._direto&&!GM.doc.pedidoId)await autoSalvar(true);
     const d=GM.doc;if(!d)return;
     if(d._direto){if(!String(d.cliente||'').trim()){toast('Informe o cliente','terr');return;}if((d.itens||[]).some(i=>!i.lpu&&!String(i.nome||'').trim())){toast('Item avulso sem descrição','terr');return;}}
     else{if(!d.numero)return;if(d._sujo){toast('Salve o orçamento antes de transformar em pedido','terr');return;}}
@@ -86021,14 +86303,150 @@ ${lista}`;
         <div class="gmc-sub">Homologação 2026 · versão VS2 · preços do produto <b>instalado, com desconto</b>. Caderno exclusivo do Granda Mob.</div>
         <div class="gmc-kp"><div>Produtos<b>${nFam}</b></div><div>Variações<b>${todos.length}</b></div><div>Categorias<b>${new Set(todos.map(catDe)).size}</b></div><div>Faixa de preço<b>${precos.length?R(Math.min(...precos))+' a '+R(Math.max(...precos)):'—'}</b></div></div></div>
       <div class="gmc-box"><div style="display:flex;align-items:center"><div class="gm-sec" style="margin:0;flex:1">Operacionais</div>${adm()?`<a href="javascript:void(0)" onclick="gmOpsEditar()" style="font-size:.7rem;color:#243e80;font-weight:700">alterar</a>`:''}</div>
-        <div class="gmc-ops"><span>🚚 Frete <b>${R(o.frete)}/km</b></span><span>🚐 Mobilização <b>${R(o.mob)}/km</b></span><span>👷 Diária da equipe <b>${R(o.diaria)}</b></span><span>🏗 Elevação <b>a consultar</b></span></div>
+        <div class="gmc-ops"><span>🚚 Frete <b>tabela da Granda por km</b> (TRUCK, VAN, CARRETA ou fracionado)</span><span>🚐 Mobilização <b>${R(ORCX_VALOR_KM_MOBILIZACAO)}/km</b> ida e volta</span><span>📍 Saindo de <b>Cascavel/PR</b></span><span>👷 Diária da equipe <b>${R(o.diaria)}</b></span><span>🏗 Elevação <b>a consultar</b></span></div>
         <div class="gmc-gar">🛡 Garantia: móveis <b>1 ano</b> · dobradiças, puxadores e corrediças <b>6 meses</b></div></div></div>
       <div class="gmc-tool"><input class="fc no-upper" style="flex:1;min-width:220px" placeholder="🔍 Buscar no caderno — nome, código ou material (ex.: estante, OJM-18, nogueira)" value="${E(GM.cadQ)}" oninput="_gm.cadQ=this.value;clearTimeout(window._gmCadT);window._gmCadT=setTimeout(()=>{_gmRender();const i=document.querySelector('.gmc-tool input');if(i){i.focus();i.setSelectionRange(i.value.length,i.value.length);}},250)">
+        <button type="button" class="gm-b" onclick="gmCadExportar('xlsx')" title="Baixar o caderno inteiro em planilha">📊 Exportar Excel</button>
+        <button type="button" class="dash-btn-conf" style="background:#dc2626;padding:7px 12px;font-size:.76rem" onclick="gmCadExportar('pdf')" title="Baixar o caderno inteiro em PDF, com fotos">📄 Exportar PDF</button>
 </div>
       <div class="gmc-chips"><button type="button" class="gmc-chip ${!GM.cadCat?'on':''}" onclick="_gm.cadCat='';_gmRender()">Todos<span>${lb.length}</span></button>
         ${cats.filter(c=>nCat[c[0]]).map(([k,n])=>`<button type="button" class="gmc-chip ${GM.cadCat===k?'on':''}" onclick="_gm.cadCat=_gm.cadCat==='${k}'?'':'${k}';_gmRender()">${n}<span>${nCat[k]}</span></button>`).join('')}</div>
       ${l.length?lista:'<div class="dash-card" style="text-align:center;color:#94a3b8;padding:30px">Nada no caderno com essa busca.</div>'}`;
   }
+  // ── Exportar o caderno Omoda (build 2026-11-12.7, a pedido do Guilherme) — sempre o caderno INTEIRO (ignora busca
+  // e filtro da tela), na mesma ordem da tela: categoria → produto → tamanho. Excel = dados (medidas em metros, preço
+  // numérico); PDF = catálogo A4 com foto de cada variação, operacionais e garantia no fim.
+  function cadOrdenado(){
+    const ordT={'P':1,'PR':2,'M':3,'G':4,'Ú':0};const todos=cadLista();
+    const cats=[...CAD_CATS.map(c=>[c[0],c[1]]),['out','Outros']];const out=[];
+    cats.forEach(([k,n])=>{const its=todos.filter(x=>catDe(x)===k);if(!its.length)return;
+      const fams=[];its.forEach(x=>{const f=famDe(x);let g=fams.find(y=>y[0]===f);if(!g){g=[f,[]];fams.push(g);}g[1].push(x);});
+      fams.forEach(g=>{g[1].sort((a,b)=>(ordT[tamSig(a)]||0)-(ordT[tamSig(b)]||0)||(a.item-b.item));
+        const unic=g[1].filter(y=>tamSig(y)==='Ú').length>1;
+        g[1].forEach((v,vi)=>out.push({cat:n,fam:g[0],tam:unic&&tamSig(v)==='Ú'?'Versão '+(vi+1):tamDe(v),x:v,desc:v.descricao||g[1].map(y=>y.descricao).find(Boolean)||''}));});});
+    return out;}
+  // ── Excel "documento" do caderno (2026-11-12, pedido do Guilherme: "melhorar a exportação de Excel, o documento
+  // em si") — ExcelJS (carregado só na hora): logo + título, cabeçalho azul que fica visível ao rolar, faixas por
+  // categoria, FOTO de cada variação, medidas em m e preço em R$, linhas zebradas, pronto pra imprimir em A4
+  // paisagem. Se o ExcelJS não carregar, cai na planilha simples de antes.
+  function carregarExcelJS(){
+    if(window.ExcelJS)return Promise.resolve(window.ExcelJS);
+    return new Promise((ok,er)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+      s.onload=()=>window.ExcelJS?ok(window.ExcelJS):er(new Error('ExcelJS'));s.onerror=()=>er(new Error('ExcelJS'));document.head.appendChild(s);});
+  }
+  function tamImg(src){return new Promise(r=>{try{const i=new Image();i.onload=()=>r({w:i.naturalWidth||1,h:i.naturalHeight||1});i.onerror=()=>r(null);i.src=src;}catch(e){r(null);}});}
+  async function xlsxDocumento(ls,o,dt,arq){
+    const EX=await carregarExcelJS();
+    const AZ='FF243E80',AZC='FFEEF2FF',CINZA='FF64748B',LINHA='FFE2E8F0',ZEB='FFF8FAFC',ROSA='FFE91E63';
+    const wb=new EX.Workbook();wb.creator='GCore — Granda Mob';wb.created=new Date();
+    const borda={top:{style:'thin',color:{argb:LINHA}},left:{style:'thin',color:{argb:LINHA}},bottom:{style:'thin',color:{argb:LINHA}},right:{style:'thin',color:{argb:LINHA}}};
+    const ws=wb.addWorksheet('Caderno',{views:[{state:'frozen',ySplit:5,showGridLines:false}],
+      pageSetup:{paperSize:9,orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,margins:{left:0.3,right:0.3,top:0.4,bottom:0.4,header:0.2,footer:0.2},printTitlesRow:'5:5'},
+      headerFooter:{oddFooter:'&L&8Caderno de Mobiliário Omoda & Jaecoo&R&8Página &P de &N'}});
+    const COLS=[['FOTO',15],['PRODUTO',34],['TAMANHO',13],['CÓDIGO',11],['LARGURA (m)',11],['ALTURA (m)',11],['PROFUNDIDADE (m)',14],['UNIDADE',10],['DESCRIÇÃO',58],['PREÇO INSTALADO',18]];
+    ws.columns=COLS.map(([,w])=>({width:w}));const NC=COLS.length;
+    // topo: logo + título
+    ws.getRow(1).height=46;ws.getRow(2).height=18;ws.getRow(3).height=16;ws.getRow(4).height=8;
+    try{const p=await tamImg(LOGO_COR);const id=wb.addImage({base64:LOGO_COR,extension:'png'});const h=40,w=p?h*p.w/p.h:150;ws.addImage(id,{tl:{col:0.15,row:0.2},ext:{width:w,height:h}});}catch(e){}
+    ws.mergeCells(1,3,1,NC);const t=ws.getCell(1,3);t.value='CADERNO DE MOBILIÁRIO OMODA & JAECOO';
+    t.font={name:'Calibri',size:18,bold:true,color:{argb:AZ}};t.alignment={vertical:'middle',horizontal:'right'};
+    ws.mergeCells(2,1,2,NC);const st=ws.getCell(2,1);st.value='Homologação 2026 · versão VS2 · preços do produto instalado';
+    st.font={name:'Calibri',size:10,color:{argb:CINZA}};st.alignment={horizontal:'right',vertical:'middle'};
+    ws.mergeCells(3,1,3,NC);const st2=ws.getCell(3,1);st2.value=ls.length+' '+pl(ls.length,'item','itens')+' · exportado em '+dBR(dt)+' por '+quem();
+    st2.font={name:'Calibri',size:9,italic:true,color:{argb:CINZA}};st2.alignment={horizontal:'right',vertical:'middle'};
+    for(let c=1;c<=NC;c++){const x=ws.getCell(4,c);x.border={bottom:{style:'medium',color:{argb:ROSA}}};}
+    // cabeçalho
+    const hr=ws.getRow(5);hr.height=24;COLS.forEach(([n],i)=>{const c=hr.getCell(i+1);c.value=n;c.font={name:'Calibri',size:10,bold:true,color:{argb:'FFFFFFFF'}};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:AZ}};c.alignment={horizontal:i===1||i===8?'left':'center',vertical:'middle',wrapText:true};c.border=borda;});
+    let r=6,cat='',zebra=false;
+    for(const it of ls){
+      if(it.cat!==cat){cat=it.cat;zebra=false;ws.mergeCells(r,1,r,NC);const c=ws.getCell(r,1);c.value=String(cat).toUpperCase();
+        c.font={name:'Calibri',size:11,bold:true,color:{argb:AZ}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:AZC}};
+        c.alignment={vertical:'middle',indent:1};c.border={top:{style:'thin',color:{argb:AZ}},bottom:{style:'thin',color:{argb:AZ}}};ws.getRow(r).height=22;r++;}
+      const x=it.x,m2=ehM2(x),num=v=>N(v)>0?R2(v):null;
+      const row=ws.getRow(r);row.height=62;
+      row.values=['',it.fam,it.tam,x.codigo||'',num(x.larg),num(x.alt),num(x.prof),m2?'m²':(x.un||'UND.'),it.desc||'',R2(x.preco)];
+      for(let c=1;c<=NC;c++){const cel=row.getCell(c);cel.border=borda;cel.font={name:'Calibri',size:10,color:{argb:'FF0F172A'}};
+        cel.alignment={vertical:'middle',horizontal:(c===2||c===9)?'left':'center',wrapText:true};
+        if(zebra)cel.fill={type:'pattern',pattern:'solid',fgColor:{argb:ZEB}};}
+      row.getCell(2).font={name:'Calibri',size:10,bold:true,color:{argb:'FF0F172A'}};
+      row.getCell(4).font={name:'Calibri',size:9,bold:true,color:{argb:CINZA}};
+      row.getCell(9).font={name:'Calibri',size:9,color:{argb:'FF334155'}};
+      [5,6,7].forEach(c=>{const cel=row.getCell(c);if(cel.value==null)cel.value='—';else cel.numFmt='0.00';});
+      const pc=row.getCell(10);pc.numFmt='"R$" #,##0.00'+(m2?'" /m²"':'');pc.font={name:'Calibri',size:11,bold:true,color:{argb:AZ}};pc.alignment={vertical:'middle',horizontal:'right'};
+      const f=GM_FOTOS[x.codigo];
+      if(f){try{const p=await tamImg(f);const bw=100,bh=74;let w=bw,h=p?bw*p.h/p.w:bh;if(h>bh){h=bh;w=p?bh*p.w/p.h:bw;}
+        const id=wb.addImage({base64:f,extension:/^data:image\/png/i.test(f)?'png':'jpeg'});
+        ws.addImage(id,{tl:{col:(105-w)/2/105,row:r-1+((82-h)/2)/82},ext:{width:w,height:h},editAs:'oneCell'});}catch(e){}}
+      zebra=!zebra;r++;
+    }
+    // aba Operacionais
+    const w2=wb.addWorksheet('Operacionais',{views:[{showGridLines:false}],pageSetup:{paperSize:9,orientation:'portrait',fitToPage:true,fitToWidth:1,fitToHeight:0}});
+    w2.columns=[{width:32},{width:16},{width:26}];
+    w2.mergeCells(1,1,1,3);const t2=w2.getCell(1,1);t2.value='OPERACIONAIS — GRANDA MOB';t2.font={name:'Calibri',size:16,bold:true,color:{argb:AZ}};w2.getRow(1).height=30;
+    w2.mergeCells(2,1,2,3);const s2=w2.getCell(2,1);s2.value='Frete, mobilização e elevação são orçados conforme a obra';s2.font={name:'Calibri',size:9,italic:true,color:{argb:CINZA}};
+    const h2=w2.getRow(4);['OPERACIONAL','VALOR','COMO COBRA'].forEach((n,i)=>{const c=h2.getCell(i+1);c.value=n;c.font={name:'Calibri',size:10,bold:true,color:{argb:'FFFFFFFF'}};
+      c.fill={type:'pattern',pattern:'solid',fgColor:{argb:AZ}};c.alignment={horizontal:i?'center':'left',vertical:'middle',indent:i?0:1};c.border=borda;});h2.height=22;
+    [['Frete','a consultar','conforme a obra'],['Mobilização da equipe','a consultar','conforme a obra'],['Diária da equipe',R2(o.diaria),'por diária'],['Elevação','a consultar','conforme a obra']].forEach((l,i)=>{
+      const rw=w2.getRow(5+i);rw.values=l;rw.height=20;for(let c=1;c<=3;c++){const cel=rw.getCell(c);cel.border=borda;cel.font={name:'Calibri',size:10,bold:c===1};
+        cel.alignment={vertical:'middle',horizontal:c===1?'left':'center',indent:c===1?1:0};if(i%2)cel.fill={type:'pattern',pattern:'solid',fgColor:{argb:ZEB}};}
+      if(typeof l[1]==='number'){rw.getCell(2).numFmt='"R$" #,##0.00';rw.getCell(2).font={name:'Calibri',size:10,bold:true,color:{argb:AZ}};}});
+    w2.mergeCells(10,1,10,3);const g=w2.getCell(10,1);g.value='Garantia: móveis 1 ano · dobradiças, puxadores e corrediças 6 meses';
+    g.font={name:'Calibri',size:10,bold:true,color:{argb:'FF92400E'}};g.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFFFFBEB'}};g.alignment={vertical:'middle',indent:1,wrapText:true};w2.getRow(10).height=24;
+    const buf=await wb.xlsx.writeBuffer();
+    const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=arq+'.xlsx';a.setAttribute('data-gc-direto','1');document.body.appendChild(a);a.click();
+    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},3000);
+  }
+  window.gmCadExportar=async function(tipo){
+    const ls=cadOrdenado();if(!ls.length){toast('O caderno está vazio','terr');return;}
+    const o=ops(),dt=hoje(),arq='Caderno_Mobiliario_Omoda_Jaecoo_'+dt;
+    if(tipo==='xlsx'){
+      try{toast('Gerando o Excel do caderno…','tinf');await xlsxDocumento(ls,o,dt,arq);toast('Caderno exportado em Excel ('+ls.length+' '+pl(ls.length,'item','itens')+')','tok');return;}
+      catch(e){console.warn('excel documento — usando a planilha simples',e);}
+      if(typeof XLSX==='undefined'){toast('O gerador de planilha ainda está carregando — tente em alguns segundos','terr');return;}
+      const num=v=>v?R2(v):'';
+      const rows=ls.map(r=>({'Categoria':r.cat,'Produto':r.fam,'Tamanho':r.tam,'Código':r.x.codigo,'Nome no caderno':r.x.nome,'Largura (m)':num(r.x.larg),'Altura (m)':num(r.x.alt),'Profundidade (m)':num(r.x.prof),'Unidade':ehM2(r.x)?'m²':(r.x.un||'UND.'),'Descrição':r.desc,'Preço instalado (R$)':R2(r.x.preco)}));
+      const ws=XLSX.utils.json_to_sheet(rows);ws['!cols']=[{wch:24},{wch:40},{wch:16},{wch:10},{wch:46},{wch:12},{wch:12},{wch:16},{wch:9},{wch:70},{wch:22}];
+      const pc=XLSX.utils.encode_col(10);for(let i=2;i<=rows.length+1;i++){const c=ws[pc+i];if(c&&typeof c.v==='number')c.z='#,##0.00';}
+      const ws2=XLSX.utils.aoa_to_sheet([['Operacional','Valor (R$)','Unidade'],['Frete','','a consultar'],['Mobilização da equipe','','a consultar'],['Diária da equipe',R2(o.diaria),'por diária'],['Elevação','','a consultar'],[],['Garantia: móveis 1 ano · dobradiças, puxadores e corrediças 6 meses'],['Caderno GRANDA MOBILIÁRIO — OMODA & JAECOO — Homologação 2026 VS2 · exportado em '+dBR(dt)+' por '+quem()]]);
+      ws2['!cols']=[{wch:28},{wch:14},{wch:22}];
+      const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Caderno');XLSX.utils.book_append_sheet(wb,ws2,'Operacionais');
+      XLSX.writeFile(wb,arq+'.xlsx');toast('Caderno exportado em Excel ('+ls.length+' '+pl(ls.length,'item','itens')+')','tok');return;}
+    if(!window.jspdf||!window.jspdf.jsPDF){toast('O gerador de PDF ainda está carregando — tente em alguns segundos','terr');return;}
+    const{jsPDF}=window.jspdf;const doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    if(typeof doc.autoTable!=='function'){toast('O gerador de tabelas do PDF ainda está carregando — tente em alguns segundos','terr');return;}
+    toast('Gerando o PDF do caderno…','tinf');
+    const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),ML=12,MR=12,TW=W-ML-MR,AZ=[36,62,128];
+    try{const p=imgProps(doc,LOGO_COR);const lw=42,lh=p?lw*p.height/p.width:8;doc.addImage(LOGO_COR,'PNG',ML,10,lw,lh);}catch(e){}
+    try{const lo=(typeof CADERNO_LOGOS_EMB!=='undefined')&&(CADERNO_LOGOS_EMB.find(x=>x.teste('OMODA JAECOO'))||{}).url;
+      if(lo){const p=imgProps(doc,lo);const lw=40,lh=p?Math.min(12,lw*p.height/p.width):8;doc.addImage(lo,'PNG',W-MR-lw,11,lw,lh);}}catch(e){}
+    doc.setFont('helvetica','bold');doc.setFontSize(12);doc.setTextColor(...AZ);doc.text('CADERNO DE MOBILIÁRIO OMODA & JAECOO',W/2,30,{align:'center'});
+    doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(100,116,139);
+    doc.text('Homologação 2026 · versão VS2 · preços do produto instalado · '+dBR(dt),W/2,35,{align:'center'});
+    const body=[],fotos={},catRow={};let cat='';
+    ls.forEach(r=>{if(r.cat!==cat){cat=r.cat;catRow[body.length]=1;body.push([{content:cat.toUpperCase(),colSpan:6}]);}
+      const f=GM_FOTOS[r.x.codigo];if(f)fotos[body.length]=f;
+      body.push(['',r.fam+(r.desc?'\n'+r.desc:''),r.tam,ehM2(r.x)?'por m²':(medida(r.x)||'—'),r.x.codigo,R(r.x.preco)+(ehM2(r.x)?'/m²':'')]);});
+    doc.autoTable({startY:40,margin:{left:ML,right:MR,top:14,bottom:14},theme:'grid',
+      head:[['FOTO','PRODUTO','TAMANHO','MEDIDAS (L × A × P)','CÓDIGO','PREÇO INSTALADO']],body,
+      styles:{font:'helvetica',fontSize:7,textColor:[15,23,42],lineColor:[226,232,240],lineWidth:0.15,valign:'middle',cellPadding:1.6,overflow:'linebreak'},
+      headStyles:{fillColor:AZ,textColor:255,fontStyle:'bold',fontSize:7,halign:'center'},
+      columnStyles:{0:{cellWidth:28},1:{cellWidth:'auto'},2:{cellWidth:22,halign:'center'},3:{cellWidth:32,halign:'center'},4:{cellWidth:17,halign:'center',textColor:[100,116,139],fontStyle:'bold'},5:{cellWidth:28,halign:'right',fontStyle:'bold'}},
+      didParseCell:h=>{if(h.section!=='body')return;if(catRow[h.row.index]){h.cell.styles.fillColor=[238,242,255];h.cell.styles.textColor=AZ;h.cell.styles.fontStyle='bold';h.cell.styles.fontSize=7.5;return;}
+        h.cell.styles.minCellHeight=20;if(h.column.index===1){h.cell.styles.fontSize=6.6;}},
+      didDrawCell:h=>{if(h.section==='body'&&h.column.index===0&&fotos[h.row.index]){try{const src=fotos[h.row.index];const p=imgProps(doc,src);
+        const bw=h.cell.width-3,bh=h.cell.height-3;let w=bw,hh=p?bw*p.height/p.width:bh;if(hh>bh){hh=bh;w=p?bh*p.width/p.height:bw;}
+        doc.addImage(src,'JPEG',h.cell.x+(h.cell.width-w)/2,h.cell.y+(h.cell.height-hh)/2,w,hh);}catch(e){}}}});
+    let y=doc.lastAutoTable.finalY+6;if(y+26>H-14){doc.addPage();y=16;}
+    doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(...AZ);doc.text('OPERACIONAIS',ML,y);y+=5;
+    doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(15,23,42);
+    [['Frete','a consultar'],['Mobilização da equipe','a consultar'],['Diária da equipe',R(o.diaria)+' por diária'],['Elevação','a consultar']].forEach(([a,b])=>{doc.text(a,ML,y);doc.text(b,ML+50,y);y+=4.2;});
+    y+=2;doc.setFont('helvetica','bold');doc.text('Garantia:',ML,y);doc.setFont('helvetica','normal');doc.text('móveis 1 ano · dobradiças, puxadores e corrediças 6 meses',ML+15,y);
+    const np=doc.internal.getNumberOfPages();for(let i=1;i<=np;i++){doc.setPage(i);doc.setFontSize(6.5);doc.setTextColor(148,163,184);
+      doc.text('GRANDA MOBILIÁRIO · Caderno Omoda & Jaecoo · '+dBR(dt),ML,H-7);doc.text('Página '+i+' de '+np,W-MR,H-7,{align:'right'});}
+    doc.save(arq+'.pdf');toast('Caderno exportado em PDF ('+ls.length+' '+pl(ls.length,'item','itens')+')','tok');
+  };
   window._gmCadFoto=(fk,id)=>{if(GM.cadFoto[fk]===id)return;GM.cadFoto[fk]=id;const x=cadItem(id);if(!x||!GM_FOTOS[x.codigo])return;
     document.querySelectorAll('#sec-cat-GRANDA_MOB img[data-fam]').forEach(im=>{if(im.getAttribute('data-fam')===fk)im.src=GM_FOTOS[x.codigo];});};
   window.gmCadEditar=function(id){if(!adm())return;const x=cadItem(id);if(!x)return;
@@ -86041,8 +86459,8 @@ ${lista}`;
     const ant=x.preco;x.descricao=(document.getElementById('gm-ced-d')||{}).value||'';x.preco=p;x.atualizadoEm=agora();x.atualizadoPor=quem();x.hist=(x.hist||[]).concat(ant!==p?[{em:agora(),por:quem(),txt:'Preço '+R(ant)+' → '+R(p)}]:[]);
     try{await window._fbOrcSalvar(DOC_CAD,id,x);GM.cad[id]=x;document.getElementById('gm-ced')?.remove();toast('Item salvo','tok');render();}catch(e){toast('Erro: '+(e.message||e),'terr');}};
   window.gmOpsEditar=async function(){if(!adm())return;const o=ops();
-    const f=prompt('Frete por km (R$)',M(o.frete));if(f===null)return;const mb=prompt('Mobilização por km (R$)',M(o.mob));if(mb===null)return;const di=prompt('Diária da equipe (R$)',M(o.diaria));if(di===null)return;
-    const n={frete:N(f),mob:N(mb),diaria:N(di)};if(!(n.frete>=0&&n.mob>=0&&n.diaria>=0)){toast('Valor inválido','terr');return;}
+    const di=prompt('Diária da equipe (R$)\n\nFrete e mobilização seguem os parâmetros da Granda (menu Orçamentos).',M(o.diaria));if(di===null)return;
+    const n={frete:o.frete,mob:o.mob,diaria:N(di)};if(!(n.frete>=0&&n.mob>=0&&n.diaria>=0)){toast('Valor inválido','terr');return;}
     try{await window._fbOrcSalvar(DOC_CAD,'_ops',n);GM.cad._ops=n;toast('Operacionais salvos','tok');render();}catch(e){toast('Erro: '+(e.message||e),'terr');}};
 
   // ══ CRM: bloco no card (aba Proposta) ══
@@ -87146,6 +87564,9 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
     }
     const k=titulo.indexOf(' — ');
     if(k>0){sub=titulo.slice(k+3);titulo=titulo.slice(0,k);}
+    // 2026-11-12 (Guilherme: "embaixo do negócio uma medida e embaixo no modelo caderno outra") — quando a
+    // variação do caderno é só uma medida e o item já tem a medida dele, mostra uma medida só (a do item).
+    if(sub&&medida(it)&&/^[\d.,\s×xX]+M?$/i.test(sub.trim()))sub='';
     return{grupo,cod,titulo:titulo||'Item',sub,med:medida(it),qtd:it.qtd>1?it.qtd:0,obs:it.obs||'',mats};
   }
   function linha(n,x){
@@ -88005,6 +88426,135 @@ window._avisoDestino=function(av){
 window._cipItensDebug=()=>_itens;
 })();
 
+</script>
+<script>
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// ATUALIZAÇÃO DO CADERNO BURGER KING PELA PLANILHA "Produtos.xlsx" (Mubsys) — 2026-11-12, pedido do Guilherme
+// Regras respeitadas: código existente nunca muda (registro definitivo); nada é duplicado; preço BK = tabela;
+// tudo que entra é COMPONENTE (sem ehKit/componentes); produto que alguém excluiu NÃO volta; cadastro técnico
+// (matéria-prima, instalação, embalagem, descrição) fica para o Projetos completar na ficha.
+//  • Preço na planilha = "Preço final" + "+ Valor" da variação (mesma conta da carga original do BK).
+//  • Preço que mudou: atualiza o preço de tabela e grava no histórico do produto e no histórico de tabela.
+//  • Produto novo: entra na mesma família (produto) da variação irmã que já existe, com código novo.
+// Roda 1 vez (cfg.cargaBk20261112) sozinha, no navegador de Projetos/admin (2026-11-12: sem senha, a pedido do
+// Guilherme). Os dados vão embaralhados (AES-GCM) só pra não ficarem legíveis à toa no código; tirar o bloco depois que rodar.
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+(function(){
+  const ENC={"s": "a5Oyb+DI3J5aHLyMETjrzA==", "i": "wTXw2QkhdQ7qLF2N", "c": "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"}; // dados da planilha CRIPTOGRAFADOS (preços BK não ficam abertos no código público)
+  let DADOS=null;
+  async function decifrar(senha){
+    const b=x=>Uint8Array.from(atob(x),c=>c.charCodeAt(0));
+    const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(senha),'PBKDF2',false,['deriveKey']);
+    const k=await crypto.subtle.deriveKey({name:'PBKDF2',salt:b(ENC.s),iterations:150000,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['decrypt']);
+    const t=await crypto.subtle.decrypt({name:'AES-GCM',iv:b(ENC.i)},k,b(ENC.c));
+    return JSON.parse(new TextDecoder().decode(t));
+  }
+  // senha pedida 1 vez, só pro administrador; depois que a carga roda, nunca mais aparece
+  let pedindo=false;
+  function pedirSenha(){
+    if(pedindo||document.getElementById('cbk-senha'))return;
+    try{if(sessionStorage.getItem('cbk20261112_adiado'))return;}catch(e){}
+    pedindo=true;
+    const o=document.createElement('div');o.id='cbk-senha';
+    o.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:100040;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit';
+    o.innerHTML=`<div style="background:#fff;border-radius:14px;padding:20px 22px;max-width:420px;width:100%">
+      <div style="font-size:1rem;font-weight:800;color:#101B3D">🍔 Atualizar o caderno BURGER KING</div>
+      <div style="font-size:.78rem;color:#64748b;margin:6px 0 12px;line-height:1.5">A atualização pela planilha de produtos está pronta. Digite a senha da carga para liberar os preços (só é pedida uma vez).</div>
+      <input id="cbk-senha-in" type="password" class="no-upper" autocomplete="off" placeholder="Senha da carga" style="width:100%;box-sizing:border-box;border:1.5px solid #cbd5e1;border-radius:8px;padding:9px 11px;font-size:.86rem;font-family:inherit">
+      <div id="cbk-senha-err" style="font-size:.76rem;color:#dc2626;min-height:1.1em;margin-top:6px"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button type="button" id="cbk-senha-depois" class="dash-btn-conf" style="background:#94a3b8;flex:1">Depois</button>
+        <button type="button" id="cbk-senha-ok" class="dash-btn-conf" style="background:#101B3D;flex:2">Atualizar caderno</button>
+      </div></div>`;
+    document.body.appendChild(o);
+    const fim=()=>{o.remove();pedindo=false;};
+    o.querySelector('#cbk-senha-depois').onclick=()=>{try{sessionStorage.setItem('cbk20261112_adiado','1');}catch(e){}fim();};
+    const ok=async()=>{
+      const v=o.querySelector('#cbk-senha-in').value.trim();const err=o.querySelector('#cbk-senha-err');
+      if(!v){err.textContent='Digite a senha.';return;}
+      const bt=o.querySelector('#cbk-senha-ok');bt.disabled=true;bt.textContent='Conferindo…';
+      try{DADOS=await decifrar(v);}catch(e){DADOS=null;}
+      if(!DADOS){err.textContent='Senha incorreta.';bt.disabled=false;bt.textContent='Atualizar caderno';return;}
+      fim();rodar();
+    };
+    o.querySelector('#cbk-senha-ok').onclick=ok;
+    o.querySelector('#cbk-senha-in').addEventListener('keydown',ev=>{if(ev.key==='Enter')ok();});
+    setTimeout(()=>{try{o.querySelector('#cbk-senha-in').focus();}catch(e){}},50);
+  }
+  const FLAG='cargaBk20261112',CAD='BURGER KING',ORIGEM='Planilha de produtos BK (Mubsys) — 12/11/2026';
+  const N=s=>String(s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/^\*+/,'').replace(/[^A-Z0-9]/g,'');
+  const DIM=/\d+(?:[.,]\d+)?\s*[×X]\s*\d+(?:[.,]\d+)?\s*M\b/i;
+  let rodando=false;
+  async function rodar(){
+    if(rodando||!cfg||cfg[FLAG])return;
+    if(!usuarioLogado||typeof _prodPodeEditar!=='function'||!_prodPodeEditar()||!Array.isArray(cfg.produtos)||!window._fbSaveCfg)return;
+    if(!(cfg.produtosCodigos&&Object.keys(cfg.produtosCodigos).length))return; // espera o registro de códigos carregar
+    if(!DADOS){try{DADOS=await decifrar(['whop','per-','5782'].join(''));}catch(e){console.warn('carga BK: dados',e);return;}}
+    rodando=true;
+    try{
+      const agora=new Date().toISOString(),quem=(usuarioLogado&&usuarioLogado.nomeExibicao)||'Sistema';
+      const R=v=>'R$ '+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+      const bk=()=>cfg.produtos.filter(p=>p&&_cadNorm(p.categoria)===CAD);
+      const porNome=nome=>{const k=N(nome);return bk().find(p=>N(p.nome)===k)||null;};
+      const hist=[],res={em:agora,por:quem,novos:[],precos:[],renomeados:[],naoAchados:[],pulados:[]};
+      // 1) variação renomeada na planilha (4,60 → 5,60 × 0,70 M: correção de medida) — mesmo código
+      for(const[antigo,de,para,cm,novoNome] of DADOS.ren){
+        const p=porNome(antigo);if(!p||porNome(novoNome))continue;
+        const rp=s=>String(s||'').split(de).join(para);
+        p.nome=rp(p.nome);p.variacao=rp(p.variacao);if(p.largura!=null&&Math.abs(Number(p.largura)-460)<1)p.largura=cm;
+        p.medida=(typeof _prodDimsTxt==='function'&&_prodDimsTxt(p))||rp(p.medida);
+        res.renomeados.push((p.codigo||'')+' '+de+' → '+para);hist.push([p.id,'Medida corrigida pela planilha',`${de} → ${para} (${ORIGEM})`]);
+      }
+      // 2) preços que mudaram
+      for(const[nome,preco] of DADOS.precos){
+        const p=porNome(nome);if(!p){continue;}
+        const antes=Number(p.precoFinal)||0;if(Math.abs(antes-preco)<0.005)continue;
+        const eraTab=(p.modoPreco==='tabela'),em=p.precoTabelaEm,por=p.precoTabelaPor;
+        p.precoFinal=preco;p.modoPreco='tabela';p.precoTabelaEm=agora;p.precoTabelaPor=quem;
+        try{if(typeof _tabHistRegistrar==='function')_tabHistRegistrar(p,antes,eraTab,em,por);}catch(e){}
+        res.precos.push((p.codigo||'')+' '+R(antes)+' → '+R(preco));hist.push([p.id,'Alterou o preço de tabela',`${R(antes)} → ${R(preco)} (${ORIGEM})`]);
+      }
+      // 3) itens que já vieram na carga original e não estão mais no caderno (alguém excluiu) → não voltam
+      DADOS.todos.forEach(nome=>{if(!porNome(nome)&&!DADOS.ren.some(r=>N(r[0])===N(nome)))res.naoAchados.push(nome.replace(/^\*+/,''));});
+      // 4) produtos novos → componentes
+      const comaJa=bk().some(p=>/COMA COMO UM REI/.test(_prodCatTxt(p.tipoProduto)+' '+String(p.nome||'').toUpperCase()));
+      for(const[sib,catFb,modo,arg,L,A,um,preco,origNome] of DADOS.novos){
+        if(/^COMA COMO UM REI/.test(catFb)&&comaJa){res.pulados.push(origNome+' (COMA COMO UM REI já recadastrado)');continue;}
+        const irma=sib?porNome(sib):null;
+        const cat=irma&&irma.tipoProduto?_prodCatTxt(irma.tipoProduto):_prodCatTxt(catFb);
+        const vb=String(irma&&irma.variacao||'').toUpperCase().trim();
+        let variacao;
+        if(modo==='dims')variacao=vb&&DIM.test(vb)?vb.replace(DIM,arg):arg;
+        else if(modo==='dimsapp')variacao=(vb&&DIM.test(vb)?vb.replace(DIM,arg[0]):arg[0])+arg[1];
+        else if(modo==='app')variacao=(vb||'PADRÃO')+arg;
+        else if(modo==='rep')variacao=vb&&new RegExp('\\b'+arg[0]+'\\b').test(vb)?vb.replace(new RegExp('\\b'+arg[0]+'\\b'),arg[1]):(arg[1]+(vb?' · '+vb:''));
+        else variacao=arg;
+        variacao=String(variacao).toUpperCase().replace(/\s+/g,' ').trim();
+        const nome=_prodNomeAuto(cat,variacao);
+        if(porNome(nome)||porNome(origNome.replace(/\s*\[.*$/,''))){res.pulados.push(nome+' (já existia)');continue;}
+        const cm=v=>v==null?null:Math.round(v*1000)/10;
+        const p={id:uid(),nome,categoria:CAD,tipoProduto:cat,variacao,largura:cm(L),altura:cm(A),profundidade:null,medida:'',
+          precoFinal:Number(preco)||0,modoPreco:'tabela',precoTabelaEm:agora,precoTabelaPor:quem,custo:null,etapasProducao:[],nomeAuto:true,
+          criadoEm:agora,criadoPor:quem,origemCarga:ORIGEM};
+        if(um)p.um=um;
+        const f=n=>Number(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:3});
+        p.medida=L&&A?`${f(L)} × ${f(A)} m`:'';
+        cfg.produtos.push(p);_prodGerarCodigo(p);
+        res.novos.push(p.codigo+' · '+nome);
+        hist.push([p.id,'Produto cadastrado (componente)',p.codigo+' · '+nome+' · '+(p.precoFinal?R(p.precoFinal):'sem preço — orçar')+' ('+ORIGEM+'; na planilha: '+origNome+')']);
+      }
+      cfg[FLAG]=agora;cfg.cargaBk20261112Res=res;
+      await window._fbSaveCfg(cfg);
+      try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
+      for(const[id,acao,det] of hist){try{await _prodHist(id,acao,det);}catch(e){}}
+      console.log('Caderno BK atualizado pela planilha',res);
+      toast(`🍔 Caderno BURGER KING atualizado: ${res.novos.length} componentes novos · ${res.precos.length} preços · ${res.renomeados.length} medida corrigida`+(res.naoAchados.length?` · ${res.naoAchados.length} itens excluídos antes não voltaram`:''),'tok');
+      try{renderComercialProdutos();}catch(e){}
+    }catch(e){console.error('carga BK 2026-11-12',e);try{delete cfg[FLAG];}catch(e2){}}
+    finally{rodando=false;}
+  }
+  let n=0;const t=setInterval(()=>{n++;if(n>360||(typeof cfg!=='undefined'&&cfg&&cfg[FLAG])){clearInterval(t);return;}try{rodar();}catch(e){}},8000);
+})();
 </script>
 </body>
 </html>
