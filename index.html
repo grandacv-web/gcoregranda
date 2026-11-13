@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-12.21';</script>
+<script>const APP_BUILD_VERSION='2026-11-13.2';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -57228,6 +57228,8 @@ function pedidoToVendaRow(p){
   const vendaVend=xlsxRow?(mapVendedorName(xlsxRow.v)||p.responsavel||''):(p.responsavel||'');
   return {mes,m,p:p.os,cl:p.cliente,fant:p.nomeFantasia||'',cat:p.tipoPedido||'',v:vendaVend,
     br,ft,vi,el,mo,art,rem,med,pintub,ba,ou,lq,op,entrega:p.prazo,parcelas:undefined,_pid:p.id,
+    // dia exato da venda (2026-11-12, filtro de período por datas): só existe quando o mês vem da emissão
+    dtVenda:(!p.mesVendaOverride&&!(xlsxRow&&xlsxRow.m)&&p.emissaoEm)?(String(p.emissaoEm).length<=10?String(p.emissaoEm):_isoLocal(new Date(p.emissaoEm))):'',
     numOC:p.numOC||'',ocUrl:p.ocUrl||'',pedidoPdfUrl:p.arq_os_url||'',job:p.job||'',cidade:p.locCidade||'',
     // prazoOriginal só existe se o prazo já foi alterado em Planejamento (abrirAlterarPrazoObra)
     // — usado na Lista de Vendas pra mostrar "(adiado)" quando entrega!==prazoOriginal
@@ -57386,7 +57388,7 @@ function _vndFilteredRows(){
   // Busca livre: OS, cliente, JOB, cidade, vendedor, categoria e Nº de OC — tudo num campo só,
   // sem acento/maiúsculas (norm()) pra não depender de digitar exatamente igual.
   const _buscaMatch=r=>!filBusca||[r.p,r.cl,r.job,r.cidade,r.v,r.cat,r.numOC].some(v=>v&&norm(String(v)).includes(filBusca));
-  let rows2=allRowsForFil.filter(r=>_vrAno(r)===_anoRef&&(!filMes||r.mes===filMes)&&(filMes||!_vndPer||(r.m>=_vndPer.de&&r.m<=_vndPer.ate))&&(!filVend||r.v===filVend)&&(!filCat||r.cat===filCat)&&_buscaMatch(r));
+  let rows2=allRowsForFil.filter(r=>_vrAno(r)===_anoRef&&(!filMes||r.mes===filMes)&&(filMes||!_vndPer||_perLinhaOk(r,_vndPer))&&(!filVend||r.v===filVend)&&(!filCat||r.cat===filCat)&&_buscaMatch(r));
   rows2=rows2.map(r=>({...r,rem:r.rem||0,med:r.med||0,opAdj:(r.op||0),lqAdj:(r.lq||0)}));
   // (2026-10-29, a pedido do Guilherme) dentro de cada mês, ordem pela data da venda (emissão,
   // com hora quando tem); vendas sem data (planilha antiga) vão pro fim do mês, por cliente.
@@ -57420,7 +57422,7 @@ async function gerarPDFVendas(){
   const filBusca=(document.getElementById('vnd-fil-busca')||{}).value||'';
   const filtrosAtivos=[];
   if(filMes)filtrosAtivos.push('Mês: '+filMes);
-  else if(_vndPer)filtrosAtivos.push('Período: '+MESES_PT[_vndPer.de]+' a '+MESES_PT[_vndPer.ate]+' de '+_anoRef);
+  else if(_vndPer)filtrosAtivos.push('Período: '+_perTxt(_vndPer));
   if(filVend)filtrosAtivos.push('Vendedor: '+filVend);
   if(filCat)filtrosAtivos.push('Categoria: '+filCat);
   if(filBusca)filtrosAtivos.push('Busca: "'+filBusca+'"');
@@ -65338,7 +65340,10 @@ async function crmConfirmarPerda(id){
   if(_semDecisor&&motivo!=='SEM_RETORNO'){toast('Selecione o decisor que comunicou a perda','terr');return;}
   const decisor=_semDecisor?null:(e.decisores||[])[parseInt(decisorIdxRaw,10)];
   if(!_semDecisor&&!decisor){toast('Decisor inválido — selecione novamente','terr');return;}
+  // concorrente e preço dele (2026-11-12, "Por que perdemos") — ver _pdzPerdaExtras
+  const _pdzEx=(typeof _pdzPerdaExtras==='function')?_pdzPerdaExtras(motivo):{};if(_pdzEx===false)return;
   e.fechamento={status:'perdido',em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',motivo,comentario:comentario.trim(),decisorNome:decisor?(decisor.nome||'—'):'— (sem retorno do cliente)'};
+  Object.assign(e.fechamento,_pdzEx||{});
   e.atualizadoEm=e.fechamento.em;
   if(!e.timeline)e.timeline=[];
   const motivoLabel=(CRM_MOTIVOS_PERDA.find(m=>m.k===motivo)||{}).l||motivo;
@@ -77398,6 +77403,7 @@ function _cqxCss(){
   .nx-wrap > table td{padding-left:8px!important;padding-right:8px!important}
   .nx-wrap > table td.nx-keep,.nx-wrap > table th.nx-keep{white-space:nowrap!important;overflow-wrap:normal}
   .nx-fit{overflow:visible!important}
+  .nx-clip{overflow:clip!important}
   .nx-wrap2 > table{font-size:.72rem!important}
   .nx-wrap2 > table td.nx-keep{white-space:normal!important}
   /* último recurso: cada linha vira um cartão com "rótulo: valor" */
@@ -77432,6 +77438,19 @@ function _cqxCss(){
     if(!t.tHead||!t.tHead.rows.length||t.closest('.cqx-cats,.plx-et'))return;
     t.classList.add('nx-sticky');
     const cont=scrollPai(t);const ct=cont?cont.getBoundingClientRect().top:0;
+    // (2026-11-13) Caixa com overflow entre a tabela e a rolagem de verdade (ex.: .lt da Lista de Emissão
+    // tem overflow:hidden pra arredondar o canto) vira "caixa de rolagem" pro cabeçalho grudado: o topo
+    // calculado empurrava o cabeçalho pra baixo, por cima das primeiras linhas. Troca por overflow:clip
+    // (mesmo visual, sem virar caixa de rolagem); se a caixa rola pro lado de verdade, o cabeçalho fica no lugar.
+    let preso=false;
+    for(let e=t;e&&e!==cont&&e!==document.body;e=e.parentElement){
+      const cs=getComputedStyle(e),ox=cs.overflowX,oy=cs.overflowY;
+      const livre=v=>v==='visible'||v==='clip';
+      if(livre(ox)&&livre(oy))continue;
+      if((ox==='hidden'&&oy==='hidden')||e.scrollWidth<=e.clientWidth+1){e.classList.add('nx-clip');continue;}
+      preso=true;break;
+    }
+    if(preso){[...t.tHead.rows].forEach(r=>[...r.cells].forEach(c=>{c.style.top='0px';}));return;}
     // janela/modal por cima de tudo (fora o #sec-cat dos menus): o topo é o da própria janela
     let emModal=false;for(let e=cont;e&&e!==document.body;e=e.parentElement){if(e.id==='sec-cat')break;if(getComputedStyle(e).position==='fixed'){emModal=true;break;}}
     const base=emModal?0:Math.max(0,Math.round(hdrFundo()-ct));
@@ -79624,6 +79643,20 @@ var _gcPerScope=0;
 function _gcPerTem(){return typeof gcMes!=='undefined'&&gcMes&&!gcMes.m&&gcMes.de&&gcMes.ate;}
 function _gcPerAtivo(y,m){return _gcPerScope>0&&!m&&_gcPerTem()&&(y==null||_anoEf(y)===_anoEf(gcMes.y));}
 function _gcPerMesOk(y,m,mes){return !_gcPerAtivo(y,m)||(mes>=gcMes.de&&mes<=gcMes.ate);}
+// 2026-11-12 (Guilherme: "quero selecionar duas datas e não assim por mês") — o período virou DE [data] ATÉ
+// [data] (dIni/dFim em ISO, dentro do ano escolhido); de/ate continuam guardando os meses tocados.
+// Venda com dia exato (emitida no sistema, sem mês alterado): conta se a data de emissão está no período.
+// Venda só com mês (planilha jan–jun ou mês alterado em Editar Valores): conta se o mês está no período.
+// Meta do período: meta de cada mês proporcional aos dias do período dentro daquele mês.
+function _perLinhaOk(r,per){if(!per)return true;
+  if(per.dIni&&per.dFim&&r.dtVenda)return r.dtVenda>=per.dIni&&r.dtVenda<=per.dFim;
+  return r.m>=per.de&&r.m<=per.ate;}
+function _perDataOk(iso,per){if(!per||!per.dIni)return true;let d='';try{d=String(iso).length<=10?String(iso):_isoLocal(new Date(iso));}catch(e){return false;}return d>=per.dIni&&d<=per.dFim;}
+function _perFracMes(per,y,m){if(!per||!per.dIni)return 1;const ult=new Date(y,m,0).getDate();
+  const ini=new Date(y,m-1,1,12),fim=new Date(y,m-1,ult,12),a=new Date(per.dIni+'T12:00:00'),b=new Date(per.dFim+'T12:00:00');
+  const i0=a>ini?a:ini,f0=b<fim?b:fim;if(f0<i0)return 0;return(Math.round((f0-i0)/86400000)+1)/ult;}
+function _perTxt(per){if(!per)return'';if(per.dIni){const f=x=>x.slice(8,10)+'/'+x.slice(5,7);return f(per.dIni)+' a '+f(per.dFim)+'/'+per.dFim.slice(0,4);}
+  return MESES_PT[per.de]+' a '+MESES_PT[per.ate];}
 function _gcSuf(m,pre){pre=pre||'do';return m?pre+' Mês':(_gcPerTem()?pre+' Período':pre+' Ano');}
 function _perMesCap(m){const t=MESES_PT[m]||'';return t.charAt(0)+t.slice(1).toLowerCase();}
 (function(){
@@ -79644,20 +79677,21 @@ function _perMesCap(m){const t=MESES_PT[m]||'';return t.charAt(0)+t.slice(1).toL
   }catch(e){console.error('período gráficos (escopo)',e);}
   try{
     const o1=_vrNoPeriodo;
-    _vrNoPeriodo=function(r,y,m){if(_gcPerAtivo(y,m))return _vrAno(r)===_anoEf(y)&&r.m>=gcMes.de&&r.m<=gcMes.ate;return o1.apply(this,arguments);};
+    _vrNoPeriodo=function(r,y,m){if(_gcPerAtivo(y,m))return _vrAno(r)===_anoEf(y)&&_perLinhaOk(r,gcMes);return o1.apply(this,arguments);};
     const o2=_gxNoPeriodo;
-    _gxNoPeriodo=function(iso,y,m){if(_gcPerAtivo(y,m)){if(!o2(iso,y,null))return false;const d=new Date(iso);const mm=d.getMonth()+1;return mm>=gcMes.de&&mm<=gcMes.ate;}return o2.apply(this,arguments);};
+    _gxNoPeriodo=function(iso,y,m){if(_gcPerAtivo(y,m)){if(!o2(iso,y,null))return false;if(gcMes.dIni)return _perDataOk(iso,gcMes);const d=new Date(iso);const mm=d.getMonth()+1;return mm>=gcMes.de&&mm<=gcMes.ate;}return o2.apply(this,arguments);};
     const soma=(orig,mensal)=>function(y,m,v){if(_gcPerAtivo(y,m)){let s=0;for(let i=gcMes.de;i<=gcMes.ate;i++)s+=mensal(y,i,v);return s;}return orig.apply(this,arguments);};
-    getVendasMesTodos=soma(getVendasMesTodos,(y,i,v)=>getVendasMes(y,i,v));
-    getVendasBrutoMesTodos=soma(getVendasBrutoMesTodos,(y,i,v)=>getVendasBrutoMes(y,i,v));
-    getMetaMesTodos=soma(getMetaMesTodos,(y,i,v)=>getMetaMes(y,i,v));
+    const somaLinhas=(orig,campo)=>function(y,m,v){if(_gcPerAtivo(y,m))return getVendaRowsMerged().filter(r=>_vrAno(r)===_anoEf(y)&&_perLinhaOk(r,gcMes)&&vendedorMatch(r.v,v)).reduce((s,r)=>s+(r[campo]||0),0);return orig.apply(this,arguments);};
+    getVendasMesTodos=somaLinhas(getVendasMesTodos,'lq');
+    getVendasBrutoMesTodos=somaLinhas(getVendasBrutoMesTodos,'br');
+    getMetaMesTodos=soma(getMetaMesTodos,(y,i,v)=>getMetaMes(y,i,v)*_perFracMes(gcMes,y,i));
     const o3=_gcPeriodoLabel;
     _gcPeriodoLabel=function(y,m,vendedor){
-      if(!m&&_gcPerTem()&&_anoEf(y)===_anoEf(gcMes.y))return MESES_PT[gcMes.de]+' A '+MESES_PT[gcMes.ate]+'/'+y+(vendedor?' · '+vendedor:'');
+      if(!m&&_gcPerTem()&&_anoEf(y)===_anoEf(gcMes.y))return(gcMes.dIni?_perTxt(gcMes):MESES_PT[gcMes.de]+' A '+MESES_PT[gcMes.ate]+'/'+y)+(vendedor?' · '+vendedor:'');
       return o3.apply(this,arguments);
     };
     const o4=_gxPeriodoTxt;
-    _gxPeriodoTxt=function(y,m){if(!m&&_gcPerTem()&&_anoEf(y)===_anoEf(gcMes.y))return _perMesCap(gcMes.de)+' a '+_perMesCap(gcMes.ate)+'/'+y;return o4.apply(this,arguments);};
+    _gxPeriodoTxt=function(y,m){if(!m&&_gcPerTem()&&_anoEf(y)===_anoEf(gcMes.y)&&gcMes.dIni)return _perTxt(gcMes);if(!m&&_gcPerTem()&&_anoEf(y)===_anoEf(gcMes.y))return _perMesCap(gcMes.de)+' a '+_perMesCap(gcMes.ate)+'/'+y;return o4.apply(this,arguments);};
   }catch(e){console.error('período gráficos (somas)',e);}
   try{const o5=vndMostrarTodas;vndMostrarTodas=function(){_vndPer=null;return o5.apply(this,arguments);};}catch(e){}
 
@@ -79668,7 +79702,7 @@ function _perMesCap(m){const t=MESES_PT[m]||'';return t.charAt(0)+t.slice(1).toL
     .perx-pop .perx-t{font-size:.74rem;font-weight:800;color:#64748b;text-transform:uppercase;margin-bottom:10px}
     .perx-pop .perx-l{display:grid;grid-template-columns:1fr 1fr;gap:8px}
     .perx-pop label{display:block;font-size:.7rem;font-weight:700;color:#475569;margin-bottom:4px}
-    .perx-pop select{width:100%;height:38px;padding:0 10px;border-radius:8px;border:1.5px solid #cbd5e1;background:#fff;font-size:.78rem;font-weight:700;color:#0f172a;font-family:inherit;text-transform:uppercase;box-sizing:border-box}
+    .perx-pop select,.perx-pop input[type=date]{width:100%;height:38px;padding:0 10px;border-radius:8px;border:1.5px solid #cbd5e1;background:#fff;font-size:.78rem;font-weight:700;color:#0f172a;font-family:inherit;text-transform:uppercase;box-sizing:border-box}
     .perx-pop .perx-ok{margin-top:12px;width:100%;height:38px;border:none;border-radius:8px;background:#101B3D;color:#fff;font-size:.78rem;font-weight:800;cursor:pointer;font-family:inherit;text-transform:uppercase}
     .perx-pop .perx-err{color:#dc2626;font-size:.72rem;font-weight:700;margin-top:8px;display:none}`;
     document.head.appendChild(st);
@@ -79676,31 +79710,35 @@ function _perMesCap(m){const t=MESES_PT[m]||'';return t.charAt(0)+t.slice(1).toL
   const fechar=()=>{const o=document.getElementById('perx-pop');if(o)o.remove();};
   function abrir(btn,cfg){
     const old=document.getElementById('perx-pop');if(old){old.remove();if(old._btn===btn)return;}
-    const atual=cfg.get()||{de:1,ate:new Date().getMonth()+1};
+    const ano=+cfg.ano(),hj=_isoLocal(new Date()),min=ano+'-01-01',max=ano+'-12-31';
+    const at=cfg.get();const ini0=at&&at.dIni?at.dIni:(hj.slice(0,4)===String(ano)?hj.slice(0,8)+'01':min);const fim0=at&&at.dFim?at.dFim:(hj.slice(0,4)===String(ano)?hj:max);
     const r=btn.getBoundingClientRect(),p=document.createElement('div');p.id='perx-pop';p.className='perx-pop';p._btn=btn;
     p.style.top=(r.bottom+6)+'px';p.style.left=Math.max(8,Math.min(innerWidth-308,r.left))+'px';
-    const ops=sel=>_MESX_MESES.slice(1).map((n,i)=>`<option value="${i+1}"${sel===i+1?' selected':''}>${n}</option>`).join('');
-    p.innerHTML=`<div class="perx-t">📆 Período em ${cfg.ano()}</div>
-      <div class="perx-l"><div><label>De</label><select id="perx-de">${ops(atual.de)}</select></div><div><label>Até</label><select id="perx-ate">${ops(atual.ate)}</select></div></div>
-      <div class="perx-err" id="perx-err">O mês final precisa ser igual ou depois do mês inicial.</div>
+    p.innerHTML=`<div class="perx-t">📆 Período em ${ano}</div>
+      <div class="perx-l"><div><label>De</label><input type="date" id="perx-de" min="${min}" max="${max}" value="${ini0}"></div><div><label>Até</label><input type="date" id="perx-ate" min="${min}" max="${max}" value="${fim0}"></div></div>
+      <div class="perx-err" id="perx-err"></div>
+      <div style="font-size:.66rem;color:#94a3b8;margin-top:8px;line-height:1.4">Vendas da planilha (janeiro a junho) e com mês alterado em Editar Valores não têm o dia — entram pelo mês.</div>
       <button type="button" class="perx-ok" id="perx-ok">Aplicar período</button>`;
     document.body.appendChild(p);
     p.querySelector('#perx-ok').onclick=()=>{
-      const de=+p.querySelector('#perx-de').value,ate=+p.querySelector('#perx-ate').value;
-      if(ate<de){p.querySelector('#perx-err').style.display='block';return;}
-      fechar();cfg.set(de,ate);setTimeout(_mesxSync,0);
+      const di=p.querySelector('#perx-de').value,df=p.querySelector('#perx-ate').value,er=p.querySelector('#perx-err');
+      const erro=t=>{er.textContent=t;er.style.display='block';};
+      if(!di||!df)return erro('Escolha as duas datas.');
+      if(di<min||df>max||di>max||df<min)return erro('As datas precisam estar dentro de '+ano+'.');
+      if(df<di)return erro('A data final precisa ser igual ou depois da data inicial.');
+      fechar();cfg.set(+di.slice(5,7),+df.slice(5,7),di,df);setTimeout(_mesxSync,0);
     };
     setTimeout(()=>document.addEventListener('mousedown',function f(ev){if(!p.isConnected){document.removeEventListener('mousedown',f);return;}if(!p.contains(ev.target)&&ev.target!==btn){p.remove();document.removeEventListener('mousedown',f);}}),0);
   }
   const CFGS=[
     {w:()=>{const l=document.getElementById('gc-mes-lbl');return l&&l.parentElement&&l.parentElement._mesx;},
-     ano:()=>gcMes.y,get:()=>_gcPerTem()?{de:gcMes.de,ate:gcMes.ate}:null,
-     set:(de,ate)=>{gcMes=de===ate?{y:gcMes.y,m:de}:{y:gcMes.y,m:null,de,ate};renderDashGraficos();},
+     ano:()=>gcMes.y,get:()=>_gcPerTem()?{de:gcMes.de,ate:gcMes.ate,dIni:gcMes.dIni,dFim:gcMes.dFim}:null,
+     set:(de,ate,dIni,dFim)=>{gcMes={y:gcMes.y,m:null,de,ate,dIni,dFim};renderDashGraficos();},
      limparAntes:null},
     {w:()=>{const s=document.getElementById('vnd-fil-mes');return s&&s._mesx;},
      ano:()=>_anoRef,get:()=>{const s=document.getElementById('vnd-fil-mes');return(_vndPer&&s&&!s.value)?_vndPer:null;},
-     set:(de,ate)=>{const s=document.getElementById('vnd-fil-mes');
-       if(de===ate){_vndPer=null;if(s)s.value=MESES_PT[de];}else{_vndPer={de,ate};if(s)s.value='';}
+     set:(de,ate,dIni,dFim)=>{const s=document.getElementById('vnd-fil-mes');
+       _vndPer={de,ate,dIni,dFim};if(s)s.value='';
        renderDashVendas();},
      limparAntes:()=>{_vndPer=null;}}
   ];
@@ -79717,7 +79755,7 @@ function _perMesCap(m){const t=MESES_PT[m]||'';return t.charAt(0)+t.slice(1).toL
         if(cfg.limparAntes)W.sm.addEventListener('change',()=>cfg.limparAntes(),true);
       }
       const per=cfg.get();
-      const txt=per?'📆 '+_MESX_MESES[per.de].slice(0,3)+' A '+_MESX_MESES[per.ate].slice(0,3):'📆 Período';
+      const txt=per?(per.dIni?'📆 '+per.dIni.slice(8,10)+'/'+per.dIni.slice(5,7)+' A '+per.dFim.slice(8,10)+'/'+per.dFim.slice(5,7):'📆 '+_MESX_MESES[per.de].slice(0,3)+' A '+_MESX_MESES[per.ate].slice(0,3)):'📆 Período';
       if(b.textContent!==txt)b.textContent=txt;
       if(b.classList.contains('on')!==!!per)b.classList.toggle('on',!!per);
       if(per&&W.bt&&W.bt.classList.contains('on'))W.bt.classList.remove('on');
@@ -88555,6 +88593,1177 @@ window._cipItensDebug=()=>_itens;
   }
   let n=0;const t=setInterval(()=>{n++;if(n>360||(typeof cfg!=='undefined'&&cfg&&cfg[FLAG])){clearInterval(t);return;}try{rodar();}catch(e){}},8000);
 })();
+</script>
+<script>
+// ══ 📚 APRENDIZADO DAS OBRAS (build 2026-11-12.23, pedido do Clabonde: "orçamento que aprende com as
+// obras... organize no sistema pra ficar legal e fácil de ver e usar"). SÓ LEITURA.
+// Base: as mesmas linhas do Fechamento de Pedidos (_fechLinhasRange/_fechLinha/_fechEnriquecer) —
+// obras FINALIZADAS, sem venda cancelada, vendido de pedidoToVendaRow e custo real do que o
+// Planejamento lançou em Fornecedores. Nunca diverge do Fechamento.
+// Regras próprias daqui:
+//  • Meta = custo real até 70% do cobrado (o mesmo Budget do Planejamento, _fgCalc ×0.7).
+//  • Operacional sem fornecedor lançado (pendente) ou lançado com custo zero (equipe própria) fica
+//    fora da conta — senão parece margem que não existe.
+//  • Histórico só vale com 3+ obras naquele operacional; com menos, cai na média geral.
+// Onde aparece: Orçamentos → 📚 Aprendizado das obras (admin + orçamentistas, mesmo acesso dos
+// Indicadores do orçamentista) e um quadro no 💰 Resumo do orçamento (quem edita o orçamento vê),
+// mais um aviso ao salvar quando algum operacional está abaixo do que as obras mostram.
+const APZ_META=0.70,APZ_MIN=3;
+const APZ_OPS=[['inst','🔧 Instalação','Instalação','Inst.'],['frete','🚚 Frete','Frete','Frete'],['munque','🏗️ Munque / elevação','Munque / elevação','Munque']];
+let _apzView={y:new Date().getFullYear(),m:0,por:'uf'};
+let _apzCache12={k:'',t:0,L:null};
+function _apzLinhas12m(){
+  const hoje=_hojeIso(),k=hoje+'|'+(pedidos||[]).length;
+  if(_apzCache12.L&&_apzCache12.k===k&&Date.now()-_apzCache12.t<60000)return _apzCache12.L;
+  let L=[];try{L=_fechLinhasRange(_opAddDias(hoje,-365),hoje);}catch(e){console.error('aprendizado 12m',e);}
+  _apzCache12={k,t:Date.now(),L};return L;
+}
+function _apzLinhasPeriodo(y,m){
+  const p2=n=>String(n).padStart(2,'0');
+  const de=m?`${y}-${p2(m)}-01`:`${y}-01-01`;
+  const ate=m?`${y}-${p2(m)}-${p2(new Date(y,m,0).getDate())}`:`${y}-12-31`;
+  try{return _fechLinhasRange(de,ate);}catch(e){console.error('aprendizado período',e);return[];}
+}
+function _apzAgg(){return{obras:new Set(),inst:{v:0,r:0,n:0},frete:{v:0,r:0,n:0},munque:{v:0,r:0,n:0},extras:0,nExtras:0,bruto:0};}
+function _apzConta(o){return !!(o&&!o.pendente&&o.vendido>0.005&&o.realizado>0.005);}
+function _apzSomar(a,x){
+  a.obras.add(x.p.id);
+  APZ_OPS.forEach(([k])=>{const o=x[k];if(_apzConta(o)){a[k].v+=o.vendido;a[k].r+=o.realizado;a[k].n++;}});
+  a.extras+=x.extras||0;if((x.extras||0)>0.005)a.nExtras++;a.bruto+=x.bruto||0;
+}
+function _apzAgrupar(L,campo){
+  const g={};
+  L.forEach(x=>{const k=campo==='geral'?'Geral':(String(x[campo]||'').trim()||'—');_apzSomar(g[k]=g[k]||_apzAgg(),x);});
+  return g;
+}
+function _apzPct(o){return o&&o.n&&o.v>0?o.r/o.v:null;}
+function _apzCor(p){return p==null?'#94a3b8':p<=APZ_META?'#16a34a':p<=0.80?'#d97706':'#dc2626';}
+function _apzPctTxt(p){return p==null?'—':Math.round(p*100)+'%';}
+function _apzAcimaTxt(p){return Math.round((p/APZ_META-1)*100)+'%';}
+const _apzR=v=>`<span style="white-space:nowrap">${fmtR(v)}</span>`;
+const _apzE=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+// ── Padrões encontrados (frases prontas, sem IA paga) ──
+function _apzPadroes(L){
+  const out=[],bons=[];
+  const dims=[['uf',k=>`em <b>${_apzE(k)}</b>`],['grupo',k=>`nas obras de <b>${_apzE(k)}</b>`],['cat',k=>`em pedidos <b>${_apzE(k)}</b>`]];
+  const G=_apzAgrupar(L,'geral').Geral;
+  if(G)APZ_OPS.forEach(([k,,l])=>{const p=_apzPct(G[k]);if(p!=null&&G[k].n>=APZ_MIN&&p>APZ_META)out.push({imp:G[k].r-APZ_META*G[k].v+1e9,txt:`<b>No geral</b>, ${l.toLowerCase()} está custando <b style="color:${_apzCor(p)}">${_apzPctTxt(p)}</b> do que cobramos (${G[k].n} ${_plural(G[k].n,'obra','obras')}). Pra bater a meta, cobre cerca de <b>${_apzAcimaTxt(p)} a mais</b>.`});});
+  dims.forEach(([campo,onde])=>{
+    const g=_apzAgrupar(L,campo);
+    Object.keys(g).forEach(nome=>{if(nome==='—')return;const a=g[nome];if(G&&a.obras.size===G.obras.size)return; // ex.: todo pedido é "Venda" — repetiria o geral
+      APZ_OPS.forEach(([k,,l])=>{const o=a[k],p=_apzPct(o);if(p==null||o.n<APZ_MIN)return;
+        if(p>APZ_META)out.push({imp:o.r-APZ_META*o.v,txt:`${l} ${onde(nome)} custa <b style="color:${_apzCor(p)}">${_apzPctTxt(p)}</b> do que cobramos (${o.n} ${_plural(o.n,'obra','obras')}). Pra bater a meta, cobre cerca de <b>${_apzAcimaTxt(p)} a mais</b>.`});
+        else if(campo==='uf')bons.push({n:o.n,txt:`${l} ${onde(nome)} está em <b style="color:#16a34a">${_apzPctTxt(p)}</b> do cobrado (${o.n} ${_plural(o.n,'obra','obras')}) — dentro da meta.`});
+      });
+    });
+  });
+  out.sort((a,b)=>b.imp-a.imp);
+  // gastos extras: setor que mais gerou e motivo mais comum
+  const porSetor={},porMotivo={};let totEx=0,nEx=0;
+  L.forEach(x=>{(x.extrasLista||[]).forEach(e=>{const v=moneyToNum(e.valor)||0;if(!(v>0))return;totEx+=v;nEx++;const s=e.setor||'Sem setor';porSetor[s]=(porSetor[s]||0)+v;const mo=String(e.motivo||'').trim().toUpperCase();if(mo)porMotivo[mo]=(porMotivo[mo]||0)+v;});});
+  let extra='';
+  if(totEx>0){
+    const s=Object.keys(porSetor).sort((a,b)=>porSetor[b]-porSetor[a])[0];
+    const m=Object.keys(porMotivo).sort((a,b)=>porMotivo[b]-porMotivo[a])[0];
+    const bruto=L.reduce((t,x)=>t+(x.bruto||0),0);
+    extra=`Os gastos extras somaram <b>${_apzR(totEx)}</b> em ${nEx} ${_plural(nEx,'lançamento','lançamentos')}${bruto?` (${(totEx/bruto*100).toFixed(1).replace('.',',')}% do bruto)`:''}. Quem mais gerou: <b>${_apzE(s)}</b> (${_apzR(porSetor[s])})${m?`. Maior motivo: <b>${_apzE(m)}</b> (${_apzR(porMotivo[m])})`:''}.`;
+  }
+  bons.sort((a,b)=>b.n-a.n);
+  return{ruins:out.slice(0,6),bons:bons.slice(0,2),extra};
+}
+
+// ── Obras que mais estouraram ──
+function _apzEstouros(L){
+  return L.filter(x=>(x.dif||0)<-0.5).sort((a,b)=>a.dif-b.dif).slice(0,8).map(x=>{
+    const c=[];
+    APZ_OPS.forEach(([k,l])=>{const o=x[k];if(o&&!o.pendente&&o.realizado>o.vendido+0.5)c.push(`${l} +${_apzR(o.realizado-o.vendido)}`);});
+    (x.extrasLista||[]).forEach(e=>{const v=moneyToNum(e.valor)||0;if(v>0)c.push(`🧾 ${_apzE(e.motivo||'Gasto extra')}${e.setor?` (${_apzE(e.setor)})`:''} ${_apzR(v)}`);});
+    return{x,causas:c};
+  });
+}
+
+// ── Tela: Orçamentos → 📚 Aprendizado das obras ──
+function apzSetPeriodo(){
+  const a=document.getElementById('apz-ano'),m=document.getElementById('apz-mes');
+  _apzView.y=parseInt(a&&a.value,10)||new Date().getFullYear();_apzView.m=parseInt(m&&m.value,10)||0;orc2Render();
+}
+function apzSetPor(v){_apzView.por=v;orc2Render();}
+function _apzTabelaHtml(L){
+  const por=_apzView.por,campo=por==='grupo'?'grupo':por==='cat'?'cat':'uf';
+  const nome=por==='grupo'?'Cliente (marca)':por==='cat'?'Tipo de pedido':'Estado';
+  const g=_apzAgrupar(L,campo),G=_apzAgrupar(L,'geral').Geral;
+  const chips=`<div class="gc-vend-tabs" style="margin:0 0 10px">${[['uf','📍 Por estado'],['grupo','🏢 Por cliente'],['cat','🏷️ Por tipo de pedido']].map(([v,l])=>`<button type="button" class="gc-vend-tab ${por===v?'active':''}" onclick="apzSetPor('${v}')">${l}</button>`).join('')}</div>`;
+  const cel=o=>{const p=_apzPct(o);if(p==null)return'<td class="apz-n" style="color:#cbd5e1">—</td>';return`<td class="apz-n" title="${o.n} ${_plural(o.n,'obra','obras')} · cobrado ${fmtR(o.v)} · custo real ${fmtR(o.r)}"><b style="color:${_apzCor(p)}">${_apzPctTxt(p)}</b></td>`;};
+  const ext=a=>`<td class="apz-n apz-m">${a.obras.size?fmtR(a.extras/a.obras.size):'—'}</td>`;
+  const linha=(k,a,tot)=>`<tr${tot?' class="apz-tot"':''}><td class="apz-nm">${tot?'Geral':_apzE(k)}</td><td class="apz-n">${a.obras.size}</td>${OPS.map(([kk])=>cel(a[kk])).join('')}${ext(a)}</tr>`;
+  const ks=Object.keys(g).sort((a,b)=>g[b].obras.size-g[a].obras.size||a.localeCompare(b,'pt-BR'));
+  const OPS=APZ_OPS.filter(([kk])=>G&&G[kk].n>0);
+  return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">📊 Custo real ÷ valor cobrado</div>
+    <div class="apz-sub">Verde = dentro da meta (até 70%). Laranja = até 80%. Vermelho = acima de 80%. Passe o mouse no número pra ver os valores.</div>
+    ${chips}
+    <table class="dash-table apz-tab"><thead><tr><th class="apz-nm">${nome}</th><th class="apz-n"><span class="apz-l">Obras</span><span class="apz-s">Nº</span></th>${OPS.map(([,l,,sh])=>`<th class="apz-n"><span class="apz-l">${l}</span><span class="apz-s">${sh}</span></th>`).join('')}<th class="apz-n"><span class="apz-l">Gastos extras por obra</span><span class="apz-s">Extras</span></th></tr></thead>
+    <tbody>${G?linha('',G,true):''}${ks.map(k=>linha(k,g[k],false)).join('')}</tbody></table></div>`;
+}
+function _apzRenderTela(c){
+  const{y,m}=_apzView;
+  const anos=[...new Set((pedidos||[]).map(p=>p.finalizacao&&p.finalizacao.dataFinalizacao?parseInt(String(p.finalizacao.dataFinalizacao).slice(0,4),10):0).filter(a=>a>2000).concat([new Date().getFullYear()]))].sort((a,b)=>b-a);
+  const L=_apzLinhasPeriodo(y,m);
+  const periodo=m?`${MESES_PT[m]} de ${y}`:`${y} (todos os meses)`;
+  const filtros=`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+    <span style="font-size:.78rem;font-weight:700;color:var(--ink3)">Obras finalizadas em:</span>
+    <select id="apz-mes" class="fc" style="width:auto;padding:6px 10px" onchange="apzSetPeriodo()"><option value="0"${!m?' selected':''}>Todos os meses</option>${MESES_PT.slice(1).map((n,i)=>`<option value="${i+1}"${m===i+1?' selected':''}>${n}</option>`).join('')}</select>
+    <select id="apz-ano" class="fc" style="width:auto;padding:6px 10px" onchange="apzSetPeriodo()">${anos.map(a=>`<option value="${a}"${a===y?' selected':''}>${a}</option>`).join('')}</select>
+  </div>`;
+  const intro=`<div class="dash-card" style="margin-bottom:14px;border-left:4px solid #6366f1"><div style="font-weight:800;color:#1e1b4b;font-size:.92rem">📚 O que as obras ensinam pro próximo orçamento</div>
+    <div class="apz-sub" style="margin:4px 0 0">Comparamos o que cobramos de cada operacional com o que ele custou de verdade. <b>Meta: custo de até 70% do valor cobrado</b> (o mesmo Budget do Planejamento). Quando um estado, cliente ou tipo de pedido passa disso, o próximo orçamento pra lá precisa vir mais alto — e o 💰 Resumo de cada orçamento já avisa sozinho.</div></div>`;
+  if(!L.length){c.innerHTML=_orc2HtmlSubAbas()+filtros+intro+`<div class="dash-card"><div style="padding:24px;text-align:center;color:var(--ink4);font-size:.84rem">Nenhuma obra finalizada em ${periodo}.</div></div>`;_apzMesx();return;}
+  const G=_apzAgrupar(L,'geral').Geral;
+  const cob=APZ_OPS.reduce((s,[k])=>s+G[k].v,0),real=APZ_OPS.reduce((s,[k])=>s+G[k].r,0),pG=cob>0?real/cob:null;
+  const semBase=L.filter(x=>APZ_OPS.some(([k])=>x[k]&&x[k].vendido>0.005&&!_apzConta(x[k]))).length;
+  const tiles=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px">
+    <div class="gc-kp az"><div class="gc-kl">🏗️ Obras analisadas</div><div class="gc-kv">${L.length}</div><div class="gc-ks">${semBase?`${semBase} ${_plural(semBase,'obra tem','obras têm')} operacional sem custo lançado`:'Todas com custo lançado'}</div></div>
+    <div class="gc-kp tl"><div class="gc-kl">💵 Operacionais cobrados</div><div class="gc-kv">${fmtR(cob)}</div><div class="gc-ks">Só os que já têm custo real</div></div>
+    <div class="gc-kp ${pG!=null&&pG<=APZ_META?'vd':'ro'}"><div class="gc-kl">💸 Custo real</div><div class="gc-kv">${fmtR(real)}</div><div class="gc-ks">${pG==null?'—':`<b>${_apzPctTxt(pG)}</b> do cobrado · meta até 70%`}</div></div>
+    <div class="gc-kp wn"><div class="gc-kl">🧾 Gastos extras</div><div class="gc-kv">${fmtR(G.extras)}</div><div class="gc-ks">${G.nExtras} ${_plural(G.nExtras,'obra','obras')} com gasto extra${G.bruto?` · ${(G.extras/G.bruto*100).toFixed(1).replace('.',',')}% do bruto`:''}</div></div>
+  </div>`;
+  const P=_apzPadroes(L);
+  const padroes=`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">🧠 Padrões encontrados</div>
+    ${P.ruins.length?P.ruins.map(r=>`<div class="apz-li apz-ruim">⚠️ ${r.txt}</div>`).join(''):`<div class="apz-li apz-bom">✅ Nenhum operacional passou da meta com 3 ou mais obras neste período.</div>`}
+    ${P.bons.map(b=>`<div class="apz-li apz-bom">✅ ${b.txt}</div>`).join('')}
+    ${P.extra?`<div class="apz-li apz-ext">🧾 ${P.extra}</div>`:''}
+  </div>`;
+  const E=_apzEstouros(L);
+  const estouros=`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">💥 Obras que mais estouraram</div>
+    ${E.length?E.map(({x,causas})=>`<div class="apz-est"><div class="apz-est-n" onclick="planAbrirDetalhePedido('${x.p.id}')" title="Ver o planejamento do pedido">${_apzE(_pedNome(x.p))}<div class="apz-sub" style="margin:2px 0 0">${_apzE(x.uf||'UF não informada')}${x.grupo?' · '+_apzE(x.grupo):''}</div></div><div class="apz-est-v">−${fmtR(-x.dif)}</div><div class="apz-est-c">${causas.join(' · ')||'—'}</div></div>`).join(''):'<div class="apz-li apz-bom">✅ Nenhuma obra gastou mais do que foi cobrado neste período.</div>'}
+  </div>`;
+  const nota=`<div style="font-size:.7rem;color:#94a3b8;line-height:1.5;margin:0 2px 8px">Custo real = o que o Planejamento lançou em Fornecedores nas obras finalizadas. Ficam fora da conta os operacionais ainda sem fornecedor lançado e os lançados com custo zero (equipe própria). Os mesmos números do Fechamento de Pedidos.</div>`;
+  c.innerHTML=_orc2HtmlSubAbas()+filtros+intro+tiles+padroes+_apzTabelaHtml(L)+estouros+nota;
+  _apzMesx();
+}
+function _apzMesx(){try{if(typeof _MESX_SELECTS!=='undefined'&&_MESX_SELECTS.indexOf('apz-mes')<0)_MESX_SELECTS.push('apz-mes');_mesxSelect('apz-mes');}catch(e){}}
+
+// ── Quadro no 💰 Resumo do orçamento ──
+function _apzCobradoOrc(d){
+  const t=orc2Totais(d),c={inst:0,frete:0,munque:0};
+  if(!d||d.tipo==='produto'||!(d.operacionais&&d.operacionais.resultado))return c;
+  const op=d.operacionais;
+  if(d.tipo==='operacionais'||op.instConta==='SIM'){c.inst=t.sub('instalacao')+t.sub('mobilizacao');c.munque=t.sub('extras');}
+  if(d.tipo==='operacionais'||op.freteConta==='SIM')c.frete=t.sub('frete');
+  return c;
+}
+function _apzAnaliseOrc(d){
+  const pj=(d&&d.projeto)||{},uf=String(pj.uf||'').trim().toUpperCase();
+  const L=_apzLinhas12m();const Guf=_apzAgrupar(L,'uf'),G=_apzAgrupar(L,'geral').Geral||_apzAgg();
+  const cob=_apzCobradoOrc(d),itens=[];
+  APZ_OPS.forEach(([k,l])=>{
+    const v=cob[k];if(!(v>0.005))return;
+    let o=null,onde='';
+    if(uf&&Guf[uf]&&Guf[uf][k].n>=APZ_MIN){o=Guf[uf][k];onde=uf;}
+    else if(G[k].n>=APZ_MIN){o=G[k];onde='média geral';}
+    const p=_apzPct(o);
+    itens.push({k,l,v,o,onde,p,sug:p!=null&&p>APZ_META?Math.ceil(v*p/APZ_META/10)*10:null});
+  });
+  let grupo='';try{grupo=_finGrupoCliente({cliente:pj.empresa||'',job:pj.job||''});}catch(e){}
+  const Gg=grupo?_apzAgrupar(L,'grupo')[grupo]:null;
+  const baseEx=(uf&&Guf[uf]&&Guf[uf].obras.size>=APZ_MIN)?{a:Guf[uf],onde:uf}:(G.obras.size>=APZ_MIN?{a:G,onde:'média geral'}:null);
+  return{uf,itens,grupo,Gg,baseEx,nObras:G.obras.size};
+}
+function _apzHtmlOrc(){
+  const d=orc2.doc;if(!d||d.tipo==='produto')return'';
+  if(!(d.operacionais&&d.operacionais.resultado))return'';
+  const A=_apzAnaliseOrc(d);
+  if(!A.itens.length)return'';
+  const head=`<div class="dash-sec-title" style="margin-bottom:2px">📚 O que as obras ensinam</div><div class="apz-sub">Custo real dos últimos 12 meses ÷ valor cobrado. Meta: até 70%.</div>`;
+  if(!A.nObras)return`<div class="dash-card apz-orc">${head}<div class="apz-li">Ainda não há obras finalizadas com custo lançado pra comparar.</div></div>`;
+  const linhas=A.itens.map(i=>{
+    const hist=i.p==null?'<span style="color:#94a3b8">Poucas obras pra comparar</span>':`<b style="color:${_apzCor(i.p)}">${_apzPctTxt(i.p)}</b> <span class="apz-sub apz-onde">(${_apzE(i.onde)}, ${i.o.n} ${_plural(i.o.n,'obra','obras')})</span>`;
+    const sug=i.p==null?'—':i.sug?`<b style="color:#dc2626;white-space:nowrap">${fmtR(i.sug)}</b>`:'<span style="color:#16a34a;font-weight:700">✅ OK</span>';
+    return`<tr><td class="apz-nm">${i.l}</td><td class="apz-n apz-m">${fmtR(i.v)}</td><td class="apz-n">${hist}</td><td class="apz-n">${sug}</td></tr>`;
+  }).join('');
+  const nSug=A.itens.filter(i=>i.sug).length;
+  const aviso=nSug?`<div class="apz-li apz-ruim" style="margin-top:8px">⚠️ ${nSug===1?'Um operacional está':nSug+' operacionais estão'} abaixo do que as obras mostram${A.uf?` em ${_apzE(A.uf)}`:''}. Pra bater a meta, o valor sugerido é o da última coluna.</div>`:`<div class="apz-li apz-bom" style="margin-top:8px">✅ Os operacionais deste orçamento estão de acordo com o histórico.</div>`;
+  const semUf=!A.uf?`<div class="apz-li" style="margin-top:6px">📍 Informe a UF na aba 📋 Projeto pra comparar com as obras daquele estado.</div>`:'';
+  let cli='';
+  if(A.Gg&&A.Gg.obras.size>=2){const cob=APZ_OPS.reduce((s,[k])=>s+A.Gg[k].v,0),re=APZ_OPS.reduce((s,[k])=>s+A.Gg[k].r,0),p=cob>0?re/cob:null;
+    cli=`<div class="apz-li" style="margin-top:6px">🏢 Obras de <b>${_apzE(A.grupo)}</b> (${A.Gg.obras.size}): operacionais custaram ${p==null?'—':`<b style="color:${_apzCor(p)}">${_apzPctTxt(p)}</b> do cobrado`} · gastos extras médios de <b>${_apzR(A.Gg.extras/A.Gg.obras.size)}</b> por obra.</div>`;}
+  const ex=A.baseEx&&A.baseEx.a.extras>0?`<div class="apz-li" style="margin-top:6px">🧾 Gastos extras médios ${A.baseEx.onde==='média geral'?'(média geral)':'em '+_apzE(A.baseEx.onde)}: <b>${_apzR(A.baseEx.a.extras/A.baseEx.a.obras.size)}</b> por obra.</div>`:'';
+  return`<div class="dash-card apz-orc">${head}
+    <table class="dash-table apz-tab" style="margin-top:8px"><thead><tr><th class="apz-nm"><span class="apz-l">Operacional</span><span class="apz-s">Item</span></th><th class="apz-n">Cobrando</th><th class="apz-n"><span class="apz-l">Custo real no histórico</span><span class="apz-s">Histórico</span></th><th class="apz-n">Sugerido</th></tr></thead><tbody>${linhas}</tbody></table>
+    ${aviso}${semUf}${cli}${ex}</div>`;
+}
+function _apzAlertasOrc(d){try{if(!d||d.tipo==='produto'||!(d.operacionais&&d.operacionais.resultado))return 0;return _apzAnaliseOrc(d).itens.filter(i=>i.sug).length;}catch(e){return 0;}}
+
+(function(){
+  const st=document.createElement('style');
+  st.textContent=`.apz-sub{font-size:.72rem;color:var(--ink4);margin:2px 0 10px;line-height:1.45}
+  .apz-tab{width:100%;table-layout:fixed;font-size:.76rem}
+  .apz-tab th,.apz-tab td{white-space:normal;overflow-wrap:anywhere;vertical-align:middle}
+  .apz-tab .apz-nm{width:30%;text-align:left}
+  .apz-tab .apz-n{text-align:right}
+  .apz-tab .apz-m{white-space:nowrap}.apz-s{display:none}.apz-onde{display:inline;margin:0}
+  .apz-tab tr.apz-tot td{font-weight:800;background:#f8fafc}
+  .apz-li{font-size:.8rem;line-height:1.5;padding:7px 10px;border-radius:8px;margin-top:6px;background:#f8fafc;color:#334155}
+  .apz-ruim{background:#fef2f2;color:#7f1d1d}.apz-bom{background:#f0fdf4;color:#14532d}.apz-ext{background:#fffbeb;color:#78350f}
+  .apz-est{display:grid;grid-template-columns:minmax(0,1.3fr) auto minmax(0,2fr);gap:10px;align-items:start;padding:8px 2px;border-bottom:1px dashed var(--border-lt);font-size:.78rem}
+  .apz-est-n{cursor:pointer;font-weight:700;color:#1a1f36;min-width:0;overflow-wrap:anywhere}.apz-est-n:hover{color:#e91e63}
+  .apz-est-v{font-weight:800;color:#dc2626;white-space:nowrap;text-align:right}
+  .apz-est-c{color:var(--ink2);min-width:0;overflow-wrap:anywhere}
+  .apz-orc{margin-top:14px;border-left:4px solid #6366f1}
+  @media(max-width:640px){.apz-est{grid-template-columns:minmax(0,1fr) auto}.apz-est-c{grid-column:1/-1}.apz-tab{font-size:.68rem}.apz-tab .apz-nm{width:26%}.apz-tab th,.apz-tab td{padding:7px 3px;overflow-wrap:normal;word-break:normal}.apz-tab th{letter-spacing:0;font-size:.6rem}.apz-l{display:none}.apz-s{display:inline}.apz-onde{display:block}}`;
+  document.head.appendChild(st);
+
+  // sub-aba nova (mesmo acesso dos Indicadores do orçamentista)
+  if(typeof _orc2HtmlSubAbas==='function'){const _o=_orc2HtmlSubAbas;_orc2HtmlSubAbas=function(){
+    let h=_o.apply(this,arguments);
+    try{
+      if(!_orcavPodeVer())return h;
+      const on=orc2.view==='aprendizado';
+      if(on)h=h.replace(/class="dash-tab-sub active"/g,'class="dash-tab-sub"');
+      const btn=`<button type="button" class="dash-tab-sub ${on?'active':''}" data-sub="aprendizado" onclick="orc2SetSubAba('aprendizado')">📚 Aprendizado das obras</button>`;
+      const i=h.indexOf('data-sub="painel"');
+      if(i>=0){const j=h.lastIndexOf('<button',i);h=h.slice(0,j)+btn+h.slice(j);}
+      else{const j=h.lastIndexOf('</div>');h=h.slice(0,j)+btn+h.slice(j);}
+    }catch(e){console.error('aprendizado sub-aba',e);}
+    return h;
+  };}
+  if(typeof orc2SetSubAba==='function'){const _o=orc2SetSubAba;orc2SetSubAba=function(k){
+    if(k==='aprendizado'){if(!_orcavPodeVer()){toast('Só administrador e orçamentista acessam o aprendizado das obras','terr');return;}orc2.view='aprendizado';orc2Render();return;}
+    return _o.apply(this,arguments);
+  };}
+  if(typeof _orc2RenderLista==='function'){const _o=_orc2RenderLista;_orc2RenderLista=function(c){
+    if(orc2.view==='aprendizado'){if(_orcavPodeVer()){try{return _apzRenderTela(c);}catch(e){console.error('aprendizado tela',e);c.innerHTML=_orc2HtmlSubAbas()+'<div class="dash-card" style="color:#dc2626">Erro ao montar o aprendizado das obras.</div>';return;}}orc2.view='lista';}
+    return _o.apply(this,arguments);
+  };}
+  // quadro no Resumo
+  if(typeof _orc2RenderResumo==='function'){const _o=_orc2RenderResumo;_orc2RenderResumo=function(){
+    const r=_o.apply(this,arguments);
+    try{const b=document.getElementById('orc2-resumo-body');if(b){const h=_apzHtmlOrc();if(h)b.insertAdjacentHTML('beforeend',h);}}catch(e){console.error('aprendizado resumo',e);}
+    return r;
+  };}
+  // aviso ao salvar
+  if(typeof orc2Salvar==='function'){const _o=orc2Salvar;orc2Salvar=async function(){
+    const r=await _o.apply(this,arguments);
+    try{const n=_apzAlertasOrc(orc2.doc);if(n)setTimeout(()=>toast(`📚 ${n===1?'Um operacional está':n+' operacionais estão'} abaixo do que as obras mostram — confira no 💰 Resumo`,'twar'),1500);}catch(e){}
+    return r;
+  };}
+})();
+</script>
+
+<script>
+// ══ 🔎 POR QUE PERDEMOS + 📘 MANUAIS DE MARCA (build 2026-11-12.24, pedido do Clabonde: "faz o resto já
+// agora" — as outras 2 ideias de IA: lição dos orçamentos perdidos e IA que lê o manual de marca).
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// A) PERDAS — fonte: cards do CRM com e.fechamento (ganho/perdido), data = e.fechamento.em.
+//    O formulário de perda ganhou "Perdemos pra quem?" (obrigatório em Preço e Prazo — vale "Não sei")
+//    e "Preço do concorrente" (opcional, só em Preço) → e.fechamento.concorrente / precoConcorrente.
+//    Tela Orçamentos → 🔎 Por que perdemos (admin + orçamentistas): padrões em frases prontas (código,
+//    sem custo), tabelas por motivo/produto/estado/concorrente/vendedor, lista das perdas e um resumo
+//    dos comentários pela IA (só quando alguém clica — centavos por clique).
+// B) MANUAIS DE MARCA — sistema/orcamentosPadroesMarca (itens{id:{marca,palavras,resumo,itens,...}}).
+//    No 📦 Produtos do orçamento, a leitura com IA ganhou a opção "📘 manual de marca": a IA lista o kit
+//    padrão de uma loja da rede, a conferência é a mesma de sempre e dá pra guardar como padrão da marca.
+//    Orçamento de um cliente com padrão salvo mostra "Usar como base" (cai na mesma conferência) e a
+//    leitura de projeto desse cliente recebe o padrão como referência. Tela Orçamentos → 📘 Manuais de marca.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+const _pdzE=v=>String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const _pdzR=v=>`<span style="white-space:nowrap">${fmtR(v||0)}</span>`;
+const PDZ_EXIGE_CONC=['PRECO','PRAZO'];
+let _pdzView={y:new Date().getFullYear(),m:0,por:'motivo'};
+let _pdzIa={};
+
+// ── A1) formulário de perda ──
+function _pdzConcorrentes(){const s=new Set();try{_orc5Crm().forEach(e=>{const c=e.fechamento&&e.fechamento.concorrente;if(c&&c!=='NÃO SEI')s.add(c);});}catch(e){}return[...s].sort((a,b)=>a.localeCompare(b,'pt-BR'));}
+function _pdzNaoSeiMudou(){const ns=document.getElementById('crm-perda-conc-naosei'),i=document.getElementById('crm-perda-conc');if(ns&&i){i.disabled=ns.checked;if(ns.checked)i.value='';}}
+function _pdzPerdaExtras(motivo){
+  const i=document.getElementById('crm-perda-conc');if(!i)return{};
+  const ns=!!(document.getElementById('crm-perda-conc-naosei')||{}).checked;
+  const nome=String(i.value||'').trim().toUpperCase().replace(/\s+/g,' ');
+  if(PDZ_EXIGE_CONC.indexOf(motivo)>=0&&!nome&&!ns){toast('Informe pra quem perdemos (ou marque "Não sei")','terr');return false;}
+  const out={};
+  if(nome)out.concorrente=nome;else if(ns)out.concorrente='NÃO SEI';
+  if(motivo==='PRECO'){const v=moneyToNum((document.getElementById('crm-perda-preco')||{}).value||'');if(v>0)out.precoConcorrente=v;}
+  return out;
+}
+
+// ── A2) dados ──
+function _pdzProdutosCard(e){
+  const tipos=new Set();
+  try{
+    const o=_orc5OrcDoCard(e.id)[0];
+    if(o){(o.produtos||[]).forEach(p=>{
+      const k=p.tipo==='letra'?'🔠 Letra caixa':p.tipo==='fachada'?'🏢 Fachada/Testeira':p.tipo==='bk'?'🍔 Tabela BK':p.tipo==='config'&&p.categoria==='placa'?'🪧 Placa':p.tipo==='config'?'⚙️ Produto configurado':p.tipo==='catalogo'?'📚 Caderno/catálogo':'✍️ Avulso';tipos.add(k);});
+      if(!tipos.size&&o.tipo==='operacionais')tipos.add('🚚 Só operacionais');}
+    if(!tipos.size){
+      if(typeof _crmCkCaderno==='function'&&_crmCkCaderno(e))tipos.add('📚 Caderno/catálogo');
+      (typeof _crmCkItens==='function'?_crmCkItens(e):[]).forEach(it=>{const d=CRM_ORC_CHECKLIST.find(x=>x.key===it.key);if(d)tipos.add(d.ic+' '+d.l);});
+    }
+  }catch(err){}
+  return tipos.size?[...tipos]:['❔ Sem produto informado'];
+}
+function _pdzLinhas(y,m){
+  const out=[];
+  _orc5Crm().forEach(e=>{
+    const f=e.fechamento;if(!f||(f.status!=='ganho'&&f.status!=='perdido'))return;
+    const d=new Date(f.em);if(isNaN(d)||d.getFullYear()!==y||(m&&d.getMonth()+1!==m))return;
+    let o=null;try{o=_orc5OrcDoCard(e.id)[0]||null;}catch(err){}
+    const uf=String((o&&o.projeto&&o.projeto.uf)||e.sedeUf||'').trim().toUpperCase();
+    const valor=Number(e.propostaValorBruto)||(o&&o.totalCliente)||0;
+    const mot=f.status==='perdido'?((CRM_MOTIVOS_PERDA.find(x=>x.k===f.motivo)||{}).l||f.motivo||'Sem motivo'):'';
+    out.push({e,f,ganho:f.status==='ganho',valor,uf:uf||'—',vend:e.responsavel||'Sem responsável',prods:_pdzProdutosCard(e),
+      motivo:f.motivo||'',motivoL:mot,conc:f.concorrente||'',precoC:Number(f.precoConcorrente)||0,coment:String(f.comentario||'').trim(),em:f.em});
+  });
+  return out.sort((a,b)=>String(b.em).localeCompare(String(a.em)));
+}
+function _pdzAgg(){return{n:0,g:0,p:0,vg:0,vp:0,mot:{}};}
+function _pdzSomar(a,x){a.n++;if(x.ganho){a.g++;a.vg+=x.valor;}else{a.p++;a.vp+=x.valor;a.mot[x.motivoL]=(a.mot[x.motivoL]||0)+1;}}
+function _pdzAgrupar(L,dim){
+  const g={};
+  L.forEach(x=>{
+    let ks;
+    if(dim==='produto')ks=x.prods;else if(dim==='uf')ks=[x.uf];else if(dim==='vend')ks=[x.vend];
+    else if(dim==='conc'){if(x.ganho)return;ks=[x.conc||'Não informado'];}
+    else if(dim==='motivo'){if(x.ganho)return;ks=[x.motivoL];}
+    ks.forEach(k=>_pdzSomar(g[k]=g[k]||_pdzAgg(),x));
+  });
+  return g;
+}
+function _pdzConv(a){return a.g+a.p?a.g/(a.g+a.p):null;}
+function _pdzMotTop(a){const k=Object.keys(a.mot).sort((x,y)=>a.mot[y]-a.mot[x])[0];return k?{k,n:a.mot[k]}:null;}
+function _pdzPct(v){return v==null?'—':Math.round(v*100)+'%';}
+
+// ── A3) padrões em frases ──
+function _pdzPadroes(L){
+  const ruins=[],bons=[],info=[];
+  const T=_pdzAgg();L.forEach(x=>_pdzSomar(T,x));const cG=_pdzConv(T);
+  if(!T.p)return{ruins,bons,info};
+  const mt=_pdzMotTop(T);
+  if(mt)info.push(`<b>${Math.round(mt.n/T.p*100)}%</b> das perdas foram por <b>${_pdzE(mt.k)}</b> (${mt.n} de ${T.p}).`);
+  [['produto',k=>`em <b>${_pdzE(k)}</b>`],['uf',k=>`em <b>${_pdzE(k)}</b>`],['vend',k=>`com <b>${_pdzE(k)}</b>`]].forEach(([dim,onde])=>{
+    const g=_pdzAgrupar(L,dim);
+    Object.keys(g).forEach(k=>{
+      if(k==='—'||k.indexOf('Sem ')===0||k.indexOf('❔')===0)return;
+      const a=g[k];if(a.n<3||a.n===T.n)return;const c=_pdzConv(a);if(c==null||cG==null)return;
+      const m=_pdzMotTop(a);
+      if(c<=cG-0.15)ruins.push({imp:a.vp,txt:`${dim==='vend'?'Fechamento':'Fechamos'} ${onde(k)}: só <b style="color:#dc2626">${_pdzPct(c)}</b> (${a.g} de ${a.n}), contra ${_pdzPct(cG)} no geral${m?` — ${m.n===a.p&&a.p>1?'todas as perdas':m.n+' de '+a.p+' '+_plural(a.p,'perda','perdas')} por <b>${_pdzE(m.k)}</b>`:''}.`});
+      else if(c>=cG+0.15&&dim!=='vend')bons.push({n:a.n,txt:`Fechamos ${onde(k)}: <b style="color:#16a34a">${_pdzPct(c)}</b> (${a.g} de ${a.n}) — acima do geral.`});
+    });
+  });
+  // concorrentes
+  const gc=_pdzAgrupar(L,'conc');
+  Object.keys(gc).filter(k=>k!=='Não informado'&&k!=='NÃO SEI').forEach(k=>{
+    const a=gc[k];if(a.p<2)return;
+    const perd=L.filter(x=>!x.ganho&&x.conc===k);
+    const ufs=[...new Set(perd.map(x=>x.uf).filter(u=>u&&u!=='—'))];
+    const comP=perd.filter(x=>x.precoC>0&&x.valor>0);
+    const gap=comP.length?comP.reduce((s,x)=>s+(1-x.precoC/x.valor),0)/comP.length:null;
+    const m=_pdzMotTop(a);
+    ruins.push({imp:a.vp+1,txt:`Perdemos <b>${a.p} vezes</b> pra <b>${_pdzE(k)}</b>${ufs.length?' ('+ufs.map(_pdzE).join(', ')+')':''}${m?`, ${m.n===a.p?'sempre':'principalmente'} por <b>${_pdzE(m.k)}</b>`:''}${gap!=null&&gap>0?`. O preço dele ficou em média <b>${Math.round(gap*100)}% abaixo</b> do nosso (${comP.length} ${_plural(comP.length,'proposta','propostas')} com preço informado)`:''}.`});
+  });
+  // ticket
+  const pp=L.filter(x=>!x.ganho&&x.motivo==='PRECO'&&x.valor>0),gg=L.filter(x=>x.ganho&&x.valor>0);
+  if(pp.length>=2&&gg.length>=2){const tp=pp.reduce((s,x)=>s+x.valor,0)/pp.length,tg=gg.reduce((s,x)=>s+x.valor,0)/gg.length;
+    info.push(`Propostas perdidas por preço tinham ticket médio de <b>${_pdzR(tp)}</b>; as ganhas, <b>${_pdzR(tg)}</b>.`);}
+  const semConc=L.filter(x=>!x.ganho&&!x.conc).length;
+  if(semConc)info.push(`${semConc} ${_plural(semConc,'perda está','perdas estão')} sem concorrente informado — a partir de agora o formulário de perda pede essa informação.`);
+  ruins.sort((a,b)=>b.imp-a.imp);bons.sort((a,b)=>b.n-a.n);
+  return{ruins:ruins.slice(0,6),bons:bons.slice(0,3),info};
+}
+
+// ── A4) tela ──
+function pdzSetPeriodo(){const a=document.getElementById('pdz-ano'),m=document.getElementById('pdz-mes');_pdzView.y=parseInt(a&&a.value,10)||new Date().getFullYear();_pdzView.m=parseInt(m&&m.value,10)||0;orc2Render();}
+function pdzSetPor(v){_pdzView.por=v;orc2Render();}
+function _pdzTabela(L){
+  const por=_pdzView.por;
+  const chips=`<div class="gc-vend-tabs" style="margin:0 0 10px">${[['motivo','❌ Por motivo'],['produto','📦 Por produto'],['uf','📍 Por estado'],['conc','🥊 Por concorrente'],['vend','👤 Por vendedor']].map(([v,l])=>`<button type="button" class="gc-vend-tab ${por===v?'active':''}" onclick="pdzSetPor('${v}')">${l}</button>`).join('')}</div>`;
+  const g=_pdzAgrupar(L,por);const ks=Object.keys(g).sort((a,b)=>(g[b].p-g[a].p)||(g[b].n-g[a].n));
+  const nome={motivo:'Motivo',produto:'Produto',uf:'Estado',conc:'Concorrente',vend:'Vendedor'}[por];
+  let corpo;
+  if(por==='motivo'||por==='conc'){
+    const tp=L.filter(x=>!x.ganho).length;
+    corpo=`<thead><tr><th class="apz-nm">${nome}</th><th class="apz-n">Perdas</th><th class="apz-n"><span class="apz-l">% das perdas</span><span class="apz-s">%</span></th><th class="apz-n"><span class="apz-l">Valor perdido</span><span class="apz-s">Valor</span></th>${por==='conc'?'<th class="apz-n"><span class="apz-l">Motivo principal</span><span class="apz-s">Motivo</span></th>':''}</tr></thead>
+      <tbody>${ks.map(k=>{const a=g[k],m=_pdzMotTop(a);return`<tr><td class="apz-nm">${_pdzE(k)}</td><td class="apz-n">${a.p}</td><td class="apz-n">${tp?Math.round(a.p/tp*100)+'%':'—'}</td><td class="apz-n apz-m">${fmtR(a.vp)}</td>${por==='conc'?`<td class="apz-n">${m?_pdzE(m.k):'—'}</td>`:''}</tr>`;}).join('')}</tbody>`;
+  }else{
+    corpo=`<thead><tr><th class="apz-nm">${nome}</th><th class="apz-n"><span class="apz-l">Decididas</span><span class="apz-s">Nº</span></th><th class="apz-n">Ganhas</th><th class="apz-n"><span class="apz-l">Conversão</span><span class="apz-s">Conv.</span></th><th class="apz-n"><span class="apz-l">Valor perdido</span><span class="apz-s">Perdido</span></th><th class="apz-n"><span class="apz-l">Motivo principal</span><span class="apz-s">Motivo</span></th></tr></thead>
+      <tbody>${ks.map(k=>{const a=g[k],c=_pdzConv(a),m=_pdzMotTop(a);return`<tr><td class="apz-nm">${_pdzE(k)}</td><td class="apz-n">${a.n}</td><td class="apz-n">${a.g}</td><td class="apz-n"><b style="color:${c==null?'#94a3b8':c>=0.5?'#16a34a':c>=0.3?'#d97706':'#dc2626'}">${_pdzPct(c)}</b></td><td class="apz-n apz-m">${fmtR(a.vp)}</td><td class="apz-n">${m?_pdzE(m.k):'—'}</td></tr>`;}).join('')}</tbody>`;
+  }
+  return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">📊 Onde ganhamos e onde perdemos</div>${chips}
+    ${ks.length?`<table class="dash-table apz-tab">${corpo}</table>`:'<div class="apz-li">Nada pra mostrar nesse recorte.</div>'}
+    ${por==='produto'?'<div class="apz-sub" style="margin:8px 0 0">Uma proposta com mais de um tipo de produto conta em cada um deles.</div>':''}</div>`;
+}
+function _pdzListaPerdas(L){
+  const P=L.filter(x=>!x.ganho);
+  if(!P.length)return'';
+  return`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">❌ Perdas do período (${P.length})</div>
+    ${P.slice(0,40).map(x=>`<div class="apz-est"><div class="apz-est-n" onclick="crmAbrirCard('${x.e.id}')" title="Abrir o card no CRM">${_pdzE(x.e.nome||'—')}<div class="apz-sub" style="margin:2px 0 0">${_pdzE(x.vend)} · ${_pdzE(x.uf)} · ${fmtD(String(x.em).slice(0,10))}</div></div>
+      <div class="apz-est-v" style="color:#475569">${_pdzR(x.valor)}</div>
+      <div class="apz-est-c"><b>${_pdzE(x.motivoL)}</b>${x.conc?` · 🥊 ${_pdzE(x.conc)}${x.precoC>0?' por '+_pdzR(x.precoC):''}`:''} · ${x.prods.map(_pdzE).join(', ')}${x.coment?`<div style="color:#64748b;margin-top:2px">“${_pdzE(x.coment.length>220?x.coment.slice(0,220)+'…':x.coment)}”</div>`:''}</div></div>`).join('')}
+    ${P.length>40?`<div class="apz-sub" style="margin:8px 0 0">Mostrando as 40 mais recentes.</div>`:''}</div>`;
+}
+function _pdzChaveIa(){return _pdzView.y+'-'+_pdzView.m;}
+function _pdzIaHtml(L){
+  const P=L.filter(x=>!x.ganho);if(!P.length)return'';
+  const k=_pdzChaveIa(),r=_pdzIa[k];
+  const tem=typeof _orc2IaTemChave==='function'&&_orc2IaTemChave();
+  let corpo;
+  if(r&&r.status==='lendo')corpo='<div class="apz-li">⏳ A IA está lendo as perdas… leva uns 20 segundos.</div>';
+  else if(r&&r.status==='erro')corpo=`<div class="apz-li apz-ruim">⚠️ ${_pdzE(r.erro)}</div>`;
+  else if(r&&r.status==='ok')corpo=r.itens.map(t=>`<div class="apz-li">💡 ${_pdzE(t)}</div>`).join('')+`<div class="apz-sub" style="margin:8px 0 0">Gerado em ${_pdzE(r.quando)}. A IA lê os dados e os comentários das perdas deste período; confira antes de mudar a estratégia.</div>`;
+  else corpo=`<div class="apz-sub" style="margin:0">A IA lê os ${P.length} ${_plural(P.length,'registro','registros')} de perda (motivo, concorrente, produto, estado e comentários) e devolve os aprendizados em poucas linhas.</div>`;
+  return`<div class="dash-card" style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px"><div class="dash-sec-title" style="margin:0;flex:1">🤖 Resumo da IA</div>
+    ${tem?`<button type="button" class="dash-btn-conf" style="background:#4f46e5" ${r&&r.status==='lendo'?'disabled':''} onclick="pdzIaResumir()">${r&&r.status==='ok'?'🔄 Gerar de novo':'🧠 Resumir com IA'}</button>`:'<span class="apz-sub" style="margin:0">A IA ainda não foi ativada (⚙️ Matérias-primas e preços).</span>'}</div>${corpo}</div>`;
+}
+async function pdzIaResumir(){
+  const L=_pdzLinhas(_pdzView.y,_pdzView.m),P=L.filter(x=>!x.ganho);if(!P.length)return;
+  const k=_pdzChaveIa();_pdzIa[k]={status:'lendo'};orc2Render();
+  try{
+    const dados=P.slice(0,150).map(x=>({cliente:x.e.nome||'',valor:Math.round(x.valor),motivo:x.motivoL,concorrente:x.conc||'',preco_concorrente:x.precoC?Math.round(x.precoC):'',produtos:x.prods.map(p=>p.replace(/^\S+\s/,'')).join(', '),uf:x.uf,vendedor:x.vend,comentario:x.coment}));
+    const ganhos=L.filter(x=>x.ganho).length;
+    const pedido=`Período: ${_pdzView.m?MESES_PT[_pdzView.m]+' de ':'ano de '}${_pdzView.y}. Propostas ganhas no período: ${ganhos}. Perdidas: ${P.length}.\nPERDAS (JSON):\n${JSON.stringify(dados)}`;
+    const sistema='Você é o diretor comercial da GRANDA Comunicação Visual (letreiros, fachadas em ACM, totens, placas; atende redes como Burger King, Popeyes e Bob\'s). Leia as propostas PERDIDAS e escreva de 3 a 6 aprendizados práticos, em português do Brasil, frases curtas e diretas. Cada aprendizado diz o padrão encontrado (com números) e a ação recomendada pro time comercial. Baseie-se SÓ nos dados recebidos; não invente concorrente, valor nem motivo. Se os dados forem poucos, diga isso. Responda só com a lista, uma linha por aprendizado, começando cada linha com "- ".';
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':orc2.iaCfg.chave,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:(orc2.iaCfg&&orc2.iaCfg.modeloProsp)||'claude-sonnet-5-5',max_tokens:1500,system:sistema,messages:[{role:'user',content:pedido}]})});
+    const js=await r.json().catch(()=>null);
+    if(!r.ok){const m=(js&&js.error&&js.error.message)||('HTTP '+r.status);throw new Error(r.status===401?'a chave da IA está inválida — confira em ⚙️':(r.status===429||r.status===529)?'a IA está ocupada agora — tente de novo em 1 minuto':/credit|billing|balance/i.test(m)?'acabou o crédito da conta da Anthropic':m);}
+    const txt=((js&&js.content)||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+    const itens=txt.split('\n').map(s=>s.replace(/^\s*[-•*]\s*/,'').replace(/\*\*/g,'').trim()).filter(Boolean);
+    _pdzIa[k]={status:'ok',itens:itens.length?itens:['A IA não encontrou padrões claros nesses dados.'],quando:new Date().toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})};
+  }catch(e){console.error('pdz ia',e);_pdzIa[k]={status:'erro',erro:'Não consegui gerar o resumo: '+(e.message||e)};}
+  if(currentSection==='cat:ORCAMENTOS'&&orc2.view==='perdas')orc2Render();
+}
+function _pdzRenderTela(c){
+  const{y,m}=_pdzView;
+  const anos=[...new Set(_orc5Crm().map(e=>e.fechamento&&e.fechamento.em?new Date(e.fechamento.em).getFullYear():0).filter(a=>a>2000).concat([new Date().getFullYear()]))].sort((a,b)=>b-a);
+  const L=_pdzLinhas(y,m);const periodo=m?`${MESES_PT[m]} de ${y}`:`${y} (todos os meses)`;
+  const filtros=`<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+    <span style="font-size:.78rem;font-weight:700;color:var(--ink3)">Propostas decididas em:</span>
+    <select id="pdz-mes" class="fc" style="width:auto;padding:6px 10px" onchange="pdzSetPeriodo()"><option value="0"${!m?' selected':''}>Todos os meses</option>${MESES_PT.slice(1).map((n,i)=>`<option value="${i+1}"${m===i+1?' selected':''}>${n}</option>`).join('')}</select>
+    <select id="pdz-ano" class="fc" style="width:auto;padding:6px 10px" onchange="pdzSetPeriodo()">${anos.map(a=>`<option value="${a}"${a===y?' selected':''}>${a}</option>`).join('')}</select></div>`;
+  const intro=`<div class="dash-card" style="margin-bottom:14px;border-left:4px solid #dc2626"><div style="font-weight:800;color:#7f1d1d;font-size:.92rem">🔎 Por que perdemos — e o que ajustar</div>
+    <div class="apz-sub" style="margin:4px 0 0">Cruza o resultado de cada proposta do CRM (ganhou ou perdeu, motivo, concorrente) com o produto, o estado e o vendedor. Quando um recorte fecha bem menos que o geral, ele aparece em <b>Padrões encontrados</b>.</div></div>`;
+  if(!L.length){c.innerHTML=_orc2HtmlSubAbas()+filtros+intro+`<div class="dash-card"><div style="padding:24px;text-align:center;color:var(--ink4);font-size:.84rem">Nenhuma proposta ganha ou perdida em ${periodo}.</div></div>`;_pdzMesx();return;}
+  const T=_pdzAgg();L.forEach(x=>_pdzSomar(T,x));const cG=_pdzConv(T);
+  const tiles=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px">
+    <div class="gc-kp az"><div class="gc-kl">📨 Propostas decididas</div><div class="gc-kv">${T.n}</div><div class="gc-ks">${_pdzR(T.vg+T.vp)} em propostas</div></div>
+    <div class="gc-kp vd"><div class="gc-kl">🏆 Ganhas</div><div class="gc-kv">${T.g}</div><div class="gc-ks">${_pdzR(T.vg)}</div></div>
+    <div class="gc-kp ro"><div class="gc-kl">❌ Perdidas</div><div class="gc-kv">${T.p}</div><div class="gc-ks">${_pdzR(T.vp)}</div></div>
+    <div class="gc-kp tl"><div class="gc-kl">🎯 Conversão</div><div class="gc-kv">${_pdzPct(cG)}</div><div class="gc-ks">${T.vg+T.vp?Math.round(T.vg/(T.vg+T.vp)*100)+'% em valor':'—'}</div></div></div>`;
+  const P=_pdzPadroes(L);
+  const pad=`<div class="dash-card" style="margin-bottom:14px"><div class="dash-sec-title">🧠 Padrões encontrados</div>
+    ${P.ruins.map(r=>`<div class="apz-li apz-ruim">⚠️ ${r.txt}</div>`).join('')}
+    ${P.bons.map(b=>`<div class="apz-li apz-bom">✅ ${b.txt}</div>`).join('')}
+    ${P.info.map(t=>`<div class="apz-li apz-ext">📌 ${t}</div>`).join('')}
+    ${!P.ruins.length&&!P.bons.length&&!P.info.length?'<div class="apz-li">Ainda não há perdas suficientes pra mostrar padrões neste período.</div>':''}
+    <div class="apz-sub" style="margin:8px 0 0">Um recorte só vira padrão com 3 ou mais propostas decididas.</div></div>`;
+  c.innerHTML=_orc2HtmlSubAbas()+filtros+intro+tiles+pad+_pdzIaHtml(L)+_pdzTabela(L)+_pdzListaPerdas(L);
+  _pdzMesx();
+}
+function _pdzMesx(){try{if(typeof _MESX_SELECTS!=='undefined'&&_MESX_SELECTS.indexOf('pdz-mes')<0)_MESX_SELECTS.push('pdz-mes');_mesxSelect('pdz-mes');}catch(e){}}
+
+// ── B) MANUAIS DE MARCA ──
+const MMZ_DOC='orcamentosPadroesMarca';
+let _mmz={itens:{},on:false};
+function _mmzWatch(){
+  if(_mmz.on||!window._fbOrcWatch)return;_mmz.on=true;
+  window._fbOrcWatch(MMZ_DOC,itens=>{_mmz.itens=itens||{};
+    try{if(currentSection==='cat:ORCAMENTOS'){if(orc2.view==='manuais')orc2Render();else if(orc2.view==='editor'&&orc2.aba==='produtos'&&!(orc2.ia&&orc2.ia.status==='lendo'))_orc2ReRenderProdutos();}}catch(e){}});
+}
+function _mmzNorm(s){return String(s||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();}
+function _mmzLista(){return Object.entries(_mmz.itens||{}).map(([id,p])=>Object.assign({id},p)).filter(p=>p&&p.marca).sort((a,b)=>String(a.marca).localeCompare(String(b.marca),'pt-BR'));}
+function _mmzDoDoc(d){
+  d=d||orc2.doc;if(!d)return null;const pj=d.projeto||{};
+  const alvo=' '+_mmzNorm((pj.empresa||'')+' '+(pj.job||''))+' ';if(!alvo.trim())return null;
+  return _mmzLista().find(p=>(p.palavras&&p.palavras.length?p.palavras:[p.marca]).some(w=>{const n=_mmzNorm(w);return n&&alvo.indexOf(' '+n+' ')>=0;}))||null;
+}
+const MMZ_PROMPT_MANUAL=`
+
+ATENÇÃO — ESTE ARQUIVO É UM MANUAL DE MARCA / BOOK DE PADRÃO VISUAL de uma rede (não é o projeto de uma loja específica).
+- Liste o KIT PADRÃO de comunicação visual que a marca define para UMA loja: fachada/testeira, letreiros, totem, placas, sinalização interna, adesivos de vitrine, menu board etc. — cada um com a medida padrão do manual.
+- quantidade = quantidade típica por loja (1 se o manual não disser).
+- Se o manual tem tamanhos ou versões (P/M/G, loja de rua × shopping, quiosque), escolha o mais comum e escreva os outros em observacao.
+- Em observacao, registre também as exigências que mudam preço: cor (Pantone/RAL), material, iluminação, fixação, acabamento.
+- Em resumo, escreva em até 3 frases as regras mais importantes da marca (cores, materiais, iluminação).
+- Em cliente, coloque o nome da marca. Cidade e uf ficam vazias.
+- Ignore fotos de ambientação, uniformes, cardápio, mobiliário, embalagens e papelaria.`;
+function _mmzPromptPadrao(){
+  const p=_mmzDoDoc();if(!p)return'';
+  const l=(p.itens||[]).slice(0,40).map(it=>`- ${it.descricao||'item'}${it.largura&&it.altura?' ('+it.largura+' × '+it.altura+' m)':''}${it.obs?' — '+it.obs:''}`).join('\n');
+  return`\n\nPADRÃO DA MARCA ${p.marca} (tirado do manual da rede — use como referência pra reconhecer e nomear os itens; a medida que vale é a do projeto):\n${p.resumo?'Regras: '+p.resumo+'\n':''}${l}`;
+}
+async function mmzSalvarPadrao(){
+  const ia=orc2.ia;if(!ia||ia.status!=='ok'||!ia.manual)return;
+  const marca=String((document.getElementById('mmz-marca')||{}).value||'').trim().toUpperCase();
+  if(!marca){toast('Informe o nome da marca','terr');return;}
+  const palavras=String((document.getElementById('mmz-palavras')||{}).value||marca).split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
+  const exist=_mmzLista().find(p=>_mmzNorm(p.marca)===_mmzNorm(marca));
+  if(exist&&!confirm('Já existe um padrão salvo para '+exist.marca+'. Substituir pelo desta leitura?'))return;
+  const id=exist?exist.id:('mm_'+Date.now().toString(36));
+  const itens=JSON.parse(JSON.stringify(ia.itens.filter(it=>it.sel)));
+  if(!itens.length){toast('Marque pelo menos um item pra guardar','terr');return;}
+  const obj={marca,palavras:palavras.length?palavras:[marca],resumo:ia.resumo||'',itens,arquivo:ia.arquivo||'',em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—'};
+  try{await window._fbOrcSalvar(MMZ_DOC,id,obj);_mmz.itens[id]=obj;ia.padraoSalvo=marca;_orc2ReRenderProdutos();toast('📘 Padrão da marca '+marca+' guardado ('+itens.length+' '+_plural(itens.length,'item','itens')+')','tok');}
+  catch(e){toast('Erro ao guardar: '+(e.message||e),'terr');}
+}
+function mmzUsar(id){
+  const p=(_mmz.itens||{})[id];if(!p||!orc2.doc)return;
+  if(orc2.ia&&orc2.ia.status==='ok'&&orc2.ia.itens&&orc2.ia.itens.length&&!confirm('Já tem uma leitura de IA aberta pra conferir. Trocar pelo padrão da marca?'))return;
+  orc2.ia={status:'ok',arquivo:'📘 Padrão da marca '+p.marca,modelo:'',cliente:p.marca,cidade:'',uf:'',resumo:p.resumo||'',itens:JSON.parse(JSON.stringify(p.itens||[])).map(it=>Object.assign(it,{sel:true})),paginas:0,imagens:0,seg:0,dePadrao:id};
+  if(orc2.aba!=='produtos')orc2SetAba('produtos');else _orc2ReRenderProdutos();
+  toast('Padrão da marca carregado — confira medidas e quantidades e adicione','tinf');
+}
+function mmzNovoOrcamento(id){
+  const p=(_mmz.itens||{})[id];if(!p)return;
+  orc2Criar('completo');
+  const i=document.getElementById('orcx-empresa');if(i)i.value=p.marca;
+  try{orcxAoMudar();}catch(e){}
+  orc2SetAba('produtos');mmzUsar(id);
+}
+async function mmzEditarPalavras(id){
+  const p=(_mmz.itens||{})[id];if(!p)return;
+  const v=prompt('Palavras que identificam esta marca no nome do cliente ou no job (separe por vírgula):',(p.palavras||[p.marca]).join(', '));
+  if(v==null)return;const palavras=v.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean);
+  if(!palavras.length){toast('Informe pelo menos uma palavra','terr');return;}
+  try{await window._fbOrcSalvar(MMZ_DOC,id,Object.assign({},p,{palavras}));p.palavras=palavras;orc2Render();toast('Palavras atualizadas','tok');}catch(e){toast('Erro: '+(e.message||e),'terr');}
+}
+async function mmzExcluir(id){
+  if(!_getUserCat().isAdm){toast('Só administrador exclui um padrão de marca','terr');return;}
+  const p=(_mmz.itens||{})[id];if(!p)return;
+  if(!confirm('Excluir o padrão da marca '+p.marca+'? Os orçamentos já feitos não mudam; só deixa de aparecer a opção "Usar como base".'))return;
+  try{await window._fbOrcExcluir(MMZ_DOC,id);delete _mmz.itens[id];orc2Render();toast('Padrão excluído','tok');}catch(e){toast('Erro: '+(e.message||e),'terr');}
+}
+function _mmzRenderTela(c){
+  _mmzWatch();
+  const L=_mmzLista(),adm=_getUserCat().isAdm;
+  const intro=`<div class="dash-card" style="margin-bottom:14px;border-left:4px solid #2563eb"><div style="font-weight:800;color:#1e3a8a;font-size:.92rem">📘 Manuais de marca</div>
+    <div class="apz-sub" style="margin:4px 0 0">A rede manda o book de padrão visual em PDF e a IA tira o kit padrão de uma loja (itens, medidas e exigências). Fica guardado aqui e vira a base de qualquer orçamento daquela marca.</div>
+    <div class="apz-li" style="margin-top:8px"><b>Como ler um manual:</b> abra um orçamento (pode ser novo) → 📦 Produtos → marque <b>"📘 O arquivo é um manual de marca"</b> → suba o PDF → confira a lista → <b>💾 Guardar como padrão da marca</b>.</div></div>`;
+  const cards=L.length?L.map(p=>{
+    const its=p.itens||[];
+    return`<div class="dash-card" style="margin-bottom:12px"><div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><div style="font-weight:800;font-size:.95rem;color:#1a1f36">📘 ${_pdzE(p.marca)}</div>
+        <div class="apz-sub" style="margin:2px 0 0">${its.length} ${_plural(its.length,'item','itens')} · reconhece: ${_pdzE((p.palavras||[p.marca]).join(', '))} · lido em ${p.em?fmtD(String(p.em).slice(0,10)):'—'} por ${_pdzE(p.por||'—')}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="dash-btn-conf" style="background:#2563eb" onclick="mmzNovoOrcamento('${p.id}')">＋ Novo orçamento com este padrão</button>
+        <button type="button" class="orc2-btn sec" onclick="mmzEditarPalavras('${p.id}')">✏️ Palavras</button>${adm?`<button type="button" class="orc2-btn sec" onclick="mmzExcluir('${p.id}')">🗑️</button>`:''}</div></div>
+      ${p.resumo?`<div class="apz-li" style="margin-top:8px">📐 ${_pdzE(p.resumo)}</div>`:''}
+      <details style="margin-top:8px"><summary style="cursor:pointer;font-size:.78rem;font-weight:700;color:#2563eb">Ver os itens do padrão</summary>
+        <table class="dash-table apz-tab" style="margin-top:6px"><thead><tr><th class="apz-nm" style="width:46%">Item</th><th class="apz-n">Qtd</th><th class="apz-n"><span class="apz-l">Medida (m)</span><span class="apz-s">Medida</span></th></tr></thead>
+        <tbody>${its.map(it=>`<tr><td class="apz-nm">${_pdzE(it.descricao||'—')}${it.obs?`<div class="apz-sub" style="margin:2px 0 0">${_pdzE(it.obs)}</div>`:''}</td><td class="apz-n">${_pdzE(it.qtd||1)}</td><td class="apz-n apz-m">${it.largura&&it.altura?_pdzE(it.largura)+' × '+_pdzE(it.altura):'—'}</td></tr>`).join('')}</tbody></table></details></div>`;
+  }).join(''):'<div class="dash-card"><div style="padding:22px;text-align:center;color:var(--ink4);font-size:.84rem">Nenhum manual de marca guardado ainda.</div></div>';
+  c.innerHTML=_orc2HtmlSubAbas()+intro+cards;
+}
+
+(function(){
+  const st=document.createElement('style');
+  st.textContent=`.mmz-chk{display:flex;gap:8px;align-items:flex-start;font-size:.78rem;color:#1e3a8a;background:#eff6ff;border:1px solid #bfdbfe;border-radius:9px;padding:8px 10px;margin:-4px 0 10px;cursor:pointer;line-height:1.4}
+  .mmz-chk input{margin-top:2px;flex-shrink:0}
+  .mmz-banner{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#eff6ff;border:1.5px solid #93c5fd;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:.8rem;color:#1e3a8a}
+  .mmz-salvar{margin-top:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+  .mmz-salvar label{font-size:.7rem;font-weight:700;color:#1e3a8a;display:block;margin-bottom:3px}`;
+  document.head.appendChild(st);
+
+  // formulário de perda
+  if(typeof crmMostrarFormPerda==='function'){const _o=crmMostrarFormPerda;crmMostrarFormPerda=function(id){
+    const r=_o.apply(this,arguments);
+    try{const w=document.getElementById('crm-fechamento-form-perda');const b=w&&w.querySelector('button[onclick^="crmConfirmarPerda"]');
+      if(b&&!document.getElementById('crm-perda-conc')){
+        const conc=_pdzConcorrentes();
+        b.insertAdjacentHTML('beforebegin',`<div class="fg"><label>Perdemos pra quem?<span class="r" id="crm-perda-conc-obrig" style="display:none"> *</span></label>
+          <input class="fc" id="crm-perda-conc" list="crm-perda-conc-lista" placeholder="Nome da empresa concorrente" autocomplete="off">
+          <datalist id="crm-perda-conc-lista">${conc.map(x=>`<option value="${_pdzE(x)}">`).join('')}</datalist>
+          <label style="display:flex;gap:6px;align-items:center;font-size:.72rem;font-weight:600;margin-top:5px;cursor:pointer"><input type="checkbox" id="crm-perda-conc-naosei" onchange="_pdzNaoSeiMudou()"> Não sei</label></div>
+          <div class="fg" id="crm-perda-preco-box" style="display:none"><label>Preço do concorrente (se souber)</label><input class="fc" id="crm-perda-preco" inputmode="decimal" placeholder="R$ 0,00"></div>`);
+      }}catch(e){console.error('perda concorrente',e);}
+    return r;
+  };}
+  if(typeof _crmPerdaMotivoMudou==='function'){const _o=_crmPerdaMotivoMudou;_crmPerdaMotivoMudou=function(){
+    const r=_o.apply(this,arguments);
+    try{const mo=(document.getElementById('crm-perda-motivo')||{}).value||'';
+      const ob=document.getElementById('crm-perda-conc-obrig');if(ob)ob.style.display=PDZ_EXIGE_CONC.indexOf(mo)>=0?'':'none';
+      const pb=document.getElementById('crm-perda-preco-box');if(pb)pb.style.display=mo==='PRECO'?'':'none';}catch(e){}
+    return r;
+  };}
+  if(typeof _crmFechamentoHtml==='function'){const _o=_crmFechamentoHtml;_crmFechamentoHtml=function(e){
+    let h=_o.apply(this,arguments);
+    try{const f=e&&e.fechamento;if(f&&f.status==='perdido'&&f.concorrente){
+      const bloco=`<div class="fg" style="margin-bottom:8px"><label>Perdemos pra</label><div style="font-weight:700;font-size:.82rem">🥊 ${_pdzE(f.concorrente)}${f.precoConcorrente?` <span style="font-weight:600;color:var(--ink3)">· preço dele ${_pdzR(f.precoConcorrente)}</span>`:''}</div></div>`;
+      const ref='<div class="fg" style="margin-bottom:0"><label>Decisor que comunicou</label>';
+      if(h.indexOf(ref)>=0)h=h.replace(ref,bloco+ref);}}catch(err){}
+    return h;
+  };}
+
+  // sub-abas: 🔎 Por que perdemos (admin + orçamentistas) e 📘 Manuais de marca (todos do Orçamentos)
+  if(typeof _orc2HtmlSubAbas==='function'){const _o=_orc2HtmlSubAbas;_orc2HtmlSubAbas=function(){
+    let h=_o.apply(this,arguments);
+    try{
+      const v=orc2.view,on=v==='perdas'||v==='manuais';
+      if(on)h=h.replace(/class="dash-tab-sub active"/g,'class="dash-tab-sub"');
+      const b=(k,l)=>`<button type="button" class="dash-tab-sub ${v===k?'active':''}" data-sub="${k}" onclick="orc2SetSubAba('${k}')">${l}</button>`;
+      const btns=(_orcavPodeVer()?b('perdas','🔎 Por que perdemos'):'')+b('manuais','📘 Manuais de marca');
+      const i=h.indexOf('data-sub="painel"');
+      if(i>=0){const j=h.lastIndexOf('<button',i);h=h.slice(0,j)+btns+h.slice(j);}
+      else{const j=h.lastIndexOf('</div>');h=h.slice(0,j)+btns+h.slice(j);}
+    }catch(e){console.error('sub-abas perdas/manuais',e);}
+    return h;
+  };}
+  if(typeof orc2SetSubAba==='function'){const _o=orc2SetSubAba;orc2SetSubAba=function(k){
+    if(k==='perdas'){if(!_orcavPodeVer()){toast('Só administrador e orçamentista acessam esta tela','terr');return;}orc2.view='perdas';orc2Render();return;}
+    if(k==='manuais'){orc2.view='manuais';orc2Render();return;}
+    return _o.apply(this,arguments);
+  };}
+  if(typeof _orc2RenderLista==='function'){const _o=_orc2RenderLista;_orc2RenderLista=function(c){
+    try{
+      if(orc2.view==='perdas'){if(_orcavPodeVer())return _pdzRenderTela(c);orc2.view='lista';}
+      if(orc2.view==='manuais')return _mmzRenderTela(c);
+    }catch(e){console.error('perdas/manuais tela',e);c.innerHTML=_orc2HtmlSubAbas()+'<div class="dash-card" style="color:#dc2626">Erro ao montar esta tela.</div>';return;}
+    return _o.apply(this,arguments);
+  };}
+
+  // leitura com IA: opção "manual de marca"
+  if(typeof _orc2IaHtmlBotao==='function'){const _o=_orc2IaHtmlBotao;_orc2IaHtmlBotao=function(){
+    let h=_o.apply(this,arguments);
+    try{_mmzWatch();const lendo=orc2.ia&&orc2.ia.status==='lendo';
+      const chk=`<label class="mmz-chk"><input type="checkbox" id="mmz-manual" ${orc2._iaManual?'checked':''} ${lendo?'disabled':''} onchange="orc2._iaManual=this.checked"><span>📘 O arquivo é um <b>manual de marca</b> (book de padrão visual da rede) — a IA lista o kit padrão de uma loja e você pode guardar como padrão da marca.</span></label>`;
+      const ref='<div id="orc2-ia-box">';h=h.indexOf(ref)>=0?h.replace(ref,chk+ref):h+chk;}catch(e){}
+    return h;
+  };}
+  if(typeof _orc2IaPrompt==='function'){const _o=_orc2IaPrompt;_orc2IaPrompt=function(){
+    const p=_o.apply(this,arguments);
+    try{if(orc2._iaManual)return p+MMZ_PROMPT_MANUAL;return p+_mmzPromptPadrao();}catch(e){return p;}
+  };}
+  if(typeof orc2IaLerArquivo==='function'){const _o=orc2IaLerArquivo;orc2IaLerArquivo=async function(){
+    const manual=!!orc2._iaManual;
+    const r=await _o.apply(this,arguments);
+    try{if(manual&&orc2.ia&&orc2.ia.status==='ok'){orc2.ia.manual=true;_orc2ReRenderProdutos();}}catch(e){}
+    return r;
+  };}
+  if(typeof _orc2IaHtmlBox==='function'){const _o=_orc2IaHtmlBox;_orc2IaHtmlBox=function(){
+    let h=_o.apply(this,arguments);
+    try{const ia=orc2.ia;if(!ia||ia.status!=='ok')return h;
+      if(ia.dePadrao)h=h.replace(/<span style="font-size:\.7rem;color:#94a3b8">[^<]*pág\.[^<]*<\/span>/,'<span style="font-size:.7rem;color:#2563eb;font-weight:700">padrão guardado — sem custo de IA</span>');
+      if(ia.manual){
+        const sug=String(ia.padraoSalvo||ia.cliente||(orc2.doc&&orc2.doc.projeto&&orc2.doc.projeto.empresa)||'').toUpperCase();
+        const box=ia.padraoSalvo?`<div class="mmz-salvar"><b>✅ Guardado como padrão da marca ${_pdzE(ia.padraoSalvo)}</b> — aparece em Orçamentos → 📘 Manuais de marca.</div>`
+          :`<div class="mmz-salvar"><div style="flex:1;min-width:160px"><label>Marca</label><input class="fc" id="mmz-marca" value="${_pdzE(sug)}" placeholder="Ex.: BURGER KING"></div>
+            <div style="flex:1.4;min-width:200px"><label>Palavras que identificam o cliente (separe por vírgula)</label><input class="fc" id="mmz-palavras" value="${_pdzE(sug)}" placeholder="Ex.: BURGER KING, BK"></div>
+            <button type="button" class="orc2-btn pri" onclick="mmzSalvarPadrao()">💾 Guardar como padrão da marca</button>
+            <div class="apz-sub" style="flex-basis:100%;margin:0">Guarda os itens marcados como estão agora (medidas e produto relacionado). Dá pra adicionar ao orçamento também, normalmente.</div></div>`;
+        const k=h.lastIndexOf('</div>');h=h.slice(0,k)+box+h.slice(k);
+      }}catch(e){console.error('mmz box',e);}
+    return h;
+  };}
+  if(typeof _orc2HtmlProdutos==='function'){const _o=_orc2HtmlProdutos;_orc2HtmlProdutos=function(){
+    const h=_o.apply(this,arguments);
+    try{_mmzWatch();const p=_mmzDoDoc();if(!p)return h;
+      if(orc2.ia&&(orc2.ia.dePadrao===p.id||orc2.ia.status==='lendo'))return h;
+      const n=(p.itens||[]).length;
+      return`<div class="mmz-banner"><span style="flex:1;min-width:200px">📘 <b>${_pdzE(p.marca)}</b> tem padrão de marca guardado (${n} ${_plural(n,'item','itens')}).</span><button type="button" class="orc2-btn pri" onclick="mmzUsar('${p.id}')">Usar como base do orçamento</button></div>`+h;
+    }catch(e){return h;}
+  };}
+})();
+</script>
+
+<script>
+// ══ 🔭 RADAR DE GARGALOS + 🧠 ANÁLISE DA IA (2026-11-13, a pedido do Guilherme) ══════════════════════
+// Regras dele (não mudar sem perguntar):
+// - Os prazos de cada setor são os que JÁ existem (_lpCalcEtapas). Nada aqui recalcula prazo nem mexe em
+//   data de pedido: o radar só LÊ e avisa. Nada é gravado no banco.
+// - Não existe "chance de atrasar": o aviso diz o que não vai caber e o que fazer, até quando.
+// - Quando está tudo certo, não aparece nada.
+// - Compras fica fora (o setor não usa o sistema — mesma regra de LP_ETAPAS_SEM_CONTROLE_ATRASO).
+// Onde aparece: chip "🔭 Próximas semanas" no Pipeline de Pedidos; faixa + etiqueta na linha do pedido
+// nos menus Projetos, Produção e Planejamento; número no menu lateral; aviso no sino (setor + admins);
+// linha extra no Simulador. A IA (mesma chave da leitura de projeto, sistema/orcamentosIA) só interpreta
+// os números do radar — nunca sugere mudar a data do cliente.
+(function(){
+'use strict';
+const RDG_SETORES={
+  PROJETOS:{label:'Projetos',etapas:['projeto'],sec:'sec-cat-PROJETOS'},
+  'PRODUÇÃO':{label:'Produção',etapas:['corteGalv','adesivo','producao'],sec:'sec-cat-PRODUCAO'},
+  PLANEJAMENTO:{label:'Planejamento',etapas:['art','embalagem','instalacao'],sec:'sec-cat-PLANEJAMENTO'}
+};
+const RDG_HORIZONTE_DU=30;      // olha até 30 dias úteis pra frente
+const RDG_AVISO_ATRASO_DU=10;   // no sino, etapa atrasada só entra se venceu há até 10 dias úteis
+const RDG_IA_MODELO_PADRAO='claude-sonnet-5-5';
+function _setorDaEtapa(key){for(const s in RDG_SETORES)if(RDG_SETORES[s].etapas.includes(key))return s;return null;}
+function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function dd(iso){try{return fmtD(iso);}catch(e){return iso?iso.slice(8,10)+'/'+iso.slice(5,7)+'/'+iso.slice(0,4):'—';}}
+function ddmm(iso){return iso?iso.slice(8,10)+'/'+iso.slice(5,7):'—';}
+function duTxt(n){return n+' '+(n===1?'dia útil':'dias úteis');}
+function nPed(n){return n+' '+(n===1?'pedido':'pedidos');}
+function nome(p){try{return _pedNome(p);}catch(e){return (p&&(p.cliente||p.job))||'—';}}
+function lim(key){try{return (LP_LIMITE_ATIVIDADES_ETAPA||{})[key]||0;}catch(e){return 0;}}
+function concluida(p,key){try{return _lpEtapaConcluida(p,key);}catch(e){return !!(p.lpBaixas&&p.lpBaixas[key]);}}
+function semControle(p,key){try{return _lpSemControleAtraso(p,key);}catch(e){return false;}}
+function duEntre(a,b){try{return _lpDuEntre(a,b);}catch(e){return 0;}}
+function addDu(iso,n){try{const d=_addDiasUteis(iso,n);return d instanceof Date?_isoLocal(d):(d||iso);}catch(e){return iso;}}
+
+// ── MOTOR ──────────────────────────────────────────────────────────────────────────────────────────
+let _cache=null;
+function _rdgCalcular(forcar){
+  const agora=Date.now();
+  const assin=(typeof pedidos!=='undefined'?pedidos.length:0)+'|'+(typeof simReservas!=='undefined'&&simReservas?simReservas.length:0);
+  if(!forcar&&_cache&&agora-_cache.t<30000&&_cache.assin===assin)return _cache.r;
+  const r=_rdgCalcularBruto();
+  _cache={t:agora,assin,r};
+  return r;
+}
+function _rdgCalcularBruto(){
+  const hoje=_hojeIso();
+  const horiz=addDu(hoje,RDG_HORIZONTE_DU);
+  const out={hoje,horiz,gargalos:[],alertas:[],porSetor:{},carga:{},mapaInst:{},capProd:0,capInst:0};
+  Object.keys(RDG_SETORES).forEach(s=>out.porSetor[s]={r:0,y:0});
+  if(typeof pedidos==='undefined'||typeof _lpPedidosElegiveis!=='function')return out;
+  let mapaProd={};try{mapaProd=_lpMapaProducaoPorDia()||{};}catch(e){console.error('radar prod',e);}
+  let mapaInst={};try{mapaInst=_lpMapaInstalacoesPorDia()||{};}catch(e){console.error('radar inst',e);}
+  const capProd=_lpCapProducaoDia(),capInst=_lpCapInstalacoesDia();
+  out.mapaInst=mapaInst;out.capProd=capProd;out.capInst=capInst;
+  const infos=_lpPedidosElegiveis().filter(p=>!_lpObraFinalizada(p)).map(p=>{let calc;try{calc=_lpCalcEtapas(p);}catch(e){calc={ok:false};}return{p,calc};}).filter(x=>x.calc&&x.calc.ok);
+  // Carga PENDENTE por etapa e dia (só o que ainda não teve baixa) + reservas do Simulador
+  const carga={};
+  const push=(key,iso,item)=>{if(!carga[key])carga[key]={};(carga[key][iso]=carga[key][iso]||[]).push(item);};
+  infos.forEach(x=>x.calc.etapas.forEach(e=>{if(e.aplicavel&&e.iso&&lim(e.key)&&!concluida(x.p,e.key))push(e.key,e.iso,{p:x.p});}));
+  try{_simReservasAtivas().forEach(r=>(r.etapas||[]).forEach(e=>{if(e&&e.iso&&lim(e.key))push(e.key,e.iso,{_reserva:true,cliente:r.cliente});}));}catch(e){}
+  out.carga=carga;
+  const nomeEtapa={};infos.forEach(x=>x.calc.etapas.forEach(e=>{nomeEtapa[e.key]=e.label;}));
+  nomeEtapa.instalacao='Início da Instalação';
+  // Gargalos previstos (hoje → horizonte)
+  Object.keys(carga).forEach(key=>{
+    const setor=_setorDaEtapa(key);if(!setor)return;
+    Object.keys(carga[key]).forEach(iso=>{
+      const l=carga[key][iso];
+      if(iso>=hoje&&iso<=horiz&&l.length>lim(key))out.gargalos.push({setor,key,label:nomeEtapa[key]||key,iso,qtd:l.length,limite:lim(key),itens:l,tipo:'qtd'});
+    });
+  });
+  Object.keys(mapaProd).forEach(iso=>{
+    const d=mapaProd[iso];
+    if(iso>=hoje&&iso<=horiz&&d&&d.soma>capProd+0.005)out.gargalos.push({setor:'PRODUÇÃO',key:'producao',label:'Produção',iso,valor:d.soma,limite:capProd,itens:(d.itens||[]).map(i=>i.p?{p:i.p}:{_reserva:true,cliente:(i.reserva&&i.reserva.cliente)||'reserva'}),tipo:'valor'});
+  });
+  Object.keys(mapaInst).forEach(iso=>{
+    const d=mapaInst[iso];
+    if(iso>=hoje&&iso<=horiz&&d&&d.qtd>capInst)out.gargalos.push({setor:'PLANEJAMENTO',key:'instalacao',label:'Início da Instalação',iso,qtd:d.qtd,limite:capInst,itens:(d.itens||[]).map(i=>i._reserva?i:{p:i}),tipo:'qtd'});
+  });
+  out.gargalos.sort((a,b)=>a.iso.localeCompare(b.iso)||a.setor.localeCompare(b.setor));
+  // Alertas por pedido
+  const porChave={};
+  const add=(p,setor,item)=>{
+    const k=p.id+'|'+setor;
+    if(!porChave[k])porChave[k]={p,setor,nivel:'y',itens:[],prazoFinal:''};
+    porChave[k].itens.push(item);
+    if(item.nivel==='r')porChave[k].nivel='r';
+  };
+  infos.forEach(x=>{
+    const p=x.p,calc=x.calc;
+    const impactoPadrao=`Atrasa as próximas etapas e coloca em risco a entrega de ${dd(calc.prazoIso)}.`;
+    calc.etapas.forEach(e=>{
+      if(!e.aplicavel||!e.iso)return;
+      const setor=_setorDaEtapa(e.key);if(!setor||e.key==='instalacao')return;
+      if(concluida(p,e.key)||semControle(p,e.key))return;
+      const label=e.label||e.key;
+      if(e.iso<hoje){
+        const n=duEntre(e.iso,hoje);
+        const prev=n?addDu(calc.prazoIso,n):calc.prazoIso;
+        add(p,setor,{nivel:'r',key:e.key,label,iso:e.iso,atrasoDu:n,
+          problema:`${label} passou do prazo (${ddmm(e.iso)})${n?' há '+duTxt(n):''} e ainda não teve baixa.`,
+          acao:`Concluir ${label} agora — é a prioridade do setor.`,
+          impacto:prev>calc.prazoIso?`Se nada mudar, a entrega vai pra ~${dd(prev)}, depois do prazo de ${dd(calc.prazoIso)}.`:impactoPadrao});
+        return;
+      }
+      const du=duEntre(hoje,e.iso);
+      if(e.key==='producao'){
+        const al=(typeof _lpProdAlocCache!=='undefined'&&_lpProdAlocCache)?_lpProdAlocCache[p.id]:null;
+        if(al&&al.estourouJanela){
+          const dias=(al.chunks||[]).filter(c=>c.estouro).map(c=>ddmm(c.iso));
+          add(p,setor,{nivel:du<=5?'r':'y',key:e.key,label,iso:e.iso,
+            problema:`A fila da Produção não cabe até ${ddmm(e.iso)} no limite de ${fmtR(capProd)} por dia.`,
+            acao:`Reforçar a Produção (hora extra)${dias.length?' nos dias '+dias.slice(0,4).join(', '):''} ou adiantar este pedido na fila.`,
+            impacto:impactoPadrao});
+          return;
+        }
+      }
+      const L=lim(e.key);
+      const lista=(carga[e.key]&&carga[e.key][e.iso])||[];
+      if(L&&lista.length>L&&e.iso<=horiz){
+        // Dias com folga ANTES do prazo da etapa, sem passar pra antes da etapa anterior do pedido
+        // (nunca sugere data depois do prazo — o prazo é fixo). Procura até 5 dias úteis pra trás.
+        const anteriores=calc.etapas.filter(z=>z.aplicavel&&z.iso&&z.iso<e.iso).map(z=>z.iso).sort();
+        const piso=anteriores.length?anteriores[anteriores.length-1]:hoje;
+        const folgas=[];
+        let d=e.iso;
+        for(let i=0;i<5&&folgas.length<2;i++){
+          d=(typeof _lpSubtraiDiasUteis==='function')?_lpSubtraiDiasUteis(d,1):null;
+          if(d instanceof Date)d=_isoLocal(d);
+          if(!d||d<=piso||d<hoje)break;
+          if(((carga[e.key]&&carga[e.key][d])||[]).length<L)folgas.push(d);
+        }
+        add(p,setor,{nivel:du<=2?'r':'y',key:e.key,label,iso:e.iso,
+          problema:`${lista.length} ${lista.length===1?'pedido':'pedidos'} com ${label} pra ${ddmm(e.iso)} — o limite do setor é ${L} por dia.`,
+          acao:folgas.length?`Adiantar este pedido pra ${folgas.map(ddmm).join(' ou ')} (dia com folga no setor).`:`Reforçar o setor até ${ddmm(e.iso)} — não há dia com folga antes disso.`,
+          impacto:impactoPadrao});
+        return;
+      }
+      if(du===0)add(p,setor,{nivel:'y',key:e.key,label,iso:e.iso,
+        problema:`${label} vence hoje e ainda não teve baixa.`,
+        acao:`Concluir e dar baixa hoje.`,impacto:impactoPadrao});
+    });
+    // Instalação: muitas obras começando no mesmo dia
+    if(calc.temInst&&calc.chegadaIso&&calc.chegadaIso>=hoje&&calc.chegadaIso<=horiz){
+      const d=mapaInst[calc.chegadaIso];
+      if(d&&d.qtd>capInst){
+        const du=duEntre(hoje,calc.chegadaIso);
+        add(p,'PLANEJAMENTO',{nivel:du<=3?'r':'y',key:'instalacao',label:'Início da Instalação',iso:calc.chegadaIso,
+          problema:`${d.qtd} obras começando em ${ddmm(calc.chegadaIso)} — o ideal é até ${capInst} por dia.`,
+          acao:`Garantir instaladores extras pra ${ddmm(calc.chegadaIso)} (contratar já) ou adiantar a saída de algum pedido.`,
+          impacto:`Sem equipe, a obra começa depois e a entrega de ${dd(calc.prazoIso)} estoura.`});
+      }
+    }
+  });
+  out.alertas=Object.values(porChave).map(a=>{
+    a.itens.sort((x,y)=>(x.nivel===y.nivel?0:x.nivel==='r'?-1:1)||x.iso.localeCompare(y.iso));
+    a.iso=a.itens[0].iso;
+    try{const c=_lpCalcEtapas(a.p);a.prazoFinal=c.ok?c.prazoIso:'';}catch(e){}
+    return a;
+  });
+  out.alertas.sort((a,b)=>(a.nivel===b.nivel?0:a.nivel==='r'?-1:1)||a.iso.localeCompare(b.iso));
+  out.alertas.forEach(a=>{out.porSetor[a.setor][a.nivel]++;});
+  return out;
+}
+window._rdgCalcular=_rdgCalcular;
+
+// ── CSS ────────────────────────────────────────────────────────────────────────────────────────────
+function _css(){
+  if(document.getElementById('rdg-css'))return;
+  const st=document.createElement('style');st.id='rdg-css';
+  st.textContent=`
+@keyframes rdgPulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.45)}50%{box-shadow:0 0 0 5px rgba(220,38,38,0)}}
+.rdg-tag{display:inline-flex;align-items:center;gap:4px;border-radius:20px;padding:1px 8px;font-size:.64rem;font-weight:800;white-space:nowrap;cursor:pointer;border:1px solid;vertical-align:middle;line-height:1.5;font-family:inherit}
+.rdg-tag.y{background:#fefce8;color:#a16207;border-color:#fde047}
+.rdg-tag.r{background:#fef2f2;color:#b91c1c;border-color:#fca5a5;animation:rdgPulse 2.4s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.rdg-tag.r{animation:none}}
+.rdg-cel{display:block;margin-top:3px}
+.rdg-faixa{border:1px solid #fecaca;background:#fff7f7;border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:.78rem}
+.rdg-faixa.so-y{border-color:#fde68a;background:#fffdf3}
+.rdg-faixa-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rdg-faixa-top b{color:#0f172a}
+.rdg-faixa-lst{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.rdg-faixa-it{display:flex;align-items:center;gap:8px;padding:5px 8px;background:#fff;border:1px solid #f1f5f9;border-radius:8px;cursor:pointer;min-width:0}
+.rdg-faixa-it:hover{border-color:#cbd5e1}
+.rdg-faixa-it .n{font-weight:700;color:#0f172a;flex-shrink:0;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rdg-faixa-it .t{color:#475569;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:700px){.rdg-faixa-it{flex-wrap:wrap}.rdg-faixa-it .n{max-width:none;flex:1;white-space:normal;overflow-wrap:anywhere}.rdg-faixa-it .t{flex-basis:100%;white-space:normal}}
+.rdg-lnk{background:none;border:none;color:#0369a1;font-weight:700;cursor:pointer;font-size:.74rem;padding:0;font-family:inherit}
+.rdg-sb{position:absolute;top:5px;left:27px;min-width:15px;height:15px;border-radius:10px;background:#dc2626;color:#fff;font-size:.58rem;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 3px;pointer-events:none}
+.rdg-pn{border:1px solid var(--border-lt,#e2e8f0);border-radius:12px;padding:12px 14px;margin:8px 0 12px;background:#fff}
+.rdg-pn table{width:100%;border-collapse:collapse;font-size:.78rem}
+.rdg-pn th{text-align:left;font-size:.66rem;text-transform:uppercase;letter-spacing:.03em;color:#64748b;padding:6px 8px;background:#f8fafc}
+.rdg-pn td{padding:6px 8px;border-top:1px solid #f1f5f9;vertical-align:top}
+.rdg-ia{border:1px solid #ddd6fe;background:#faf5ff;border-radius:10px;padding:12px 14px;font-size:.82rem;color:#1e1b4b;line-height:1.5}
+.rdg-ia ul{margin:4px 0 8px 18px;padding:0}
+.rdg-btn-ia{background:#7c3aed;color:#fff;border:none;border-radius:8px;padding:7px 12px;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit}
+.rdg-btn-ia[disabled]{opacity:.6;cursor:wait}
+.rdg-sim{border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:.8rem;color:#78350f}
+`;
+  document.head.appendChild(st);
+}
+
+// ── ETIQUETA + POPUP ────────────────────────────────────────────────────────────────────────────────
+function _tagHtml(a){
+  const r=a.nivel==='r';
+  return `<span class="rdg-tag ${r?'r':'y'}" role="button" tabindex="0" title="Clique pra ver o problema e o que fazer" onclick="event.stopPropagation();_rdgAbrir('${a.p.id}','${a.setor}')">${r?'🔴 Vai estourar':'🟡 Prazo apertado'}</span>`;
+}
+window._rdgAbrir=function(pid,setor){
+  const R=_rdgCalcular();
+  const a=R.alertas.find(x=>x.p.id===pid&&x.setor===setor);
+  if(!a){toast('Esse alerta já foi resolvido 👍','tok');return;}
+  const old=document.getElementById('rdg-modal');if(old)old.remove();
+  const m=document.createElement('div');m.id='rdg-modal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
+  try{_dynModalSemFechaClique(m);}catch(e){}
+  const it=a.itens.map(i=>`<div style="border:1px solid ${i.nivel==='r'?'#fecaca':'#fde68a'};background:${i.nivel==='r'?'#fff7f7':'#fffdf3'};border-radius:10px;padding:10px 12px;margin-bottom:8px">
+      <div style="font-size:.7rem;font-weight:800;color:${i.nivel==='r'?'#b91c1c':'#a16207'};margin-bottom:4px">${i.nivel==='r'?'🔴 Vai estourar':'🟡 Prazo apertado'} · ${esc(i.label)} · prazo ${dd(i.iso)}</div>
+      <div style="font-size:.82rem;color:#0f172a"><b>Problema:</b> ${esc(i.problema)}</div>
+      <div style="font-size:.82rem;color:#0f172a;margin-top:3px"><b>O que fazer:</b> ${esc(i.acao)}</div>
+      <div style="font-size:.78rem;color:#475569;margin-top:3px"><b>Se não fizer:</b> ${esc(i.impacto)}</div>
+    </div>`).join('');
+  m.innerHTML=`<div style="background:#fff;border-radius:16px;padding:20px 22px;max-width:560px;width:100%;max-height:85vh;overflow:auto;box-shadow:0 8px 40px rgba(0,0,0,.2)">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px">
+      <div><div style="font-size:.7rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em">${esc(RDG_SETORES[a.setor].label)} · OS ${esc(a.p.os||'—')}</div>
+      <div style="font-size:1rem;font-weight:800;color:#0f172a;overflow-wrap:anywhere">${esc(nome(a.p))}</div>
+      ${a.prazoFinal?`<div style="font-size:.74rem;color:#475569">Entrega combinada com o cliente: <b>${dd(a.prazoFinal)}</b></div>`:''}</div>
+      <button type="button" onclick="document.getElementById('rdg-modal').remove()" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.2rem;line-height:1" title="Fechar">✕</button>
+    </div>
+    ${it}
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px">
+      <button type="button" class="rdg-btn-ia" onclick="_rdgIaPedido('${a.p.id}',this)">🧠 Análise da IA</button>
+      <span style="font-size:.7rem;color:#64748b">O aviso some sozinho quando o setor der a baixa.</span>
+    </div>
+    <div id="rdg-ia-out" style="margin-top:10px"></div>
+  </div>`;
+  document.body.appendChild(m);
+};
+
+// ── MENUS DOS SETORES: faixa + etiqueta na linha ────────────────────────────────────────────────────
+const _faixaAberta={};
+window._rdgToggleFaixa=function(setor){_faixaAberta[setor]=!_faixaAberta[setor];_rdgFaixa(setor);};
+function _rdgFaixa(setor){
+  const def=RDG_SETORES[setor];const sec=document.getElementById(def.sec);if(!sec)return;
+  let el=document.getElementById('rdg-faixa-'+def.sec);
+  const R=_rdgCalcular();
+  const lst=R.alertas.filter(a=>a.setor===setor);
+  if(!lst.length){if(el)el.remove();return;}
+  if(!el){el=document.createElement('div');el.id='rdg-faixa-'+def.sec;sec.insertBefore(el,sec.firstChild);}
+  const nr=lst.filter(a=>a.nivel==='r').length,ny=lst.length-nr;
+  const aberto=_faixaAberta[setor]!=null?_faixaAberta[setor]:nr>0;
+  const max=6;
+  el.className='rdg-faixa'+(nr?'':' so-y');
+  el.innerHTML=`<div class="rdg-faixa-top"><span>🔭</span>
+      ${nr?`<b style="color:#b91c1c">🔴 ${nPed(nr)} ${nr===1?'vai':'vão'} estourar</b>`:''}
+      ${nr&&ny?'<span style="color:#cbd5e1">·</span>':''}
+      ${ny?`<b style="color:#a16207">🟡 ${ny} com prazo apertado</b>`:''}
+      <button type="button" class="rdg-lnk" onclick="_rdgToggleFaixa('${setor}')">${aberto?'esconder':'ver pedidos'}</button></div>
+    ${aberto?`<div class="rdg-faixa-lst">${lst.slice(0,_faixaAberta[setor+'_tudo']?999:max).map(a=>`<div class="rdg-faixa-it" onclick="_rdgAbrir('${a.p.id}','${setor}')">${_tagHtml(a)}<span class="n" title="${esc(nome(a.p))}">OS ${esc(a.p.os||'—')} · ${esc(nome(a.p))}</span><span class="t" title="${esc(a.itens[0].problema)}">${esc(a.itens[0].problema)}</span></div>`).join('')}
+      ${lst.length>max&&!_faixaAberta[setor+'_tudo']?`<button type="button" class="rdg-lnk" style="align-self:flex-start;margin-top:2px" onclick="_rdgFaixaTudo('${setor}')">ver mais ${lst.length-max}</button>`:''}</div>`:''}`;
+}
+window._rdgFaixaTudo=function(setor){_faixaAberta[setor+'_tudo']=true;_rdgFaixa(setor);};
+function _rdgDecorar(setor){
+  const def=RDG_SETORES[setor];const sec=document.getElementById(def.sec);if(!sec||sec.style.display==='none')return;
+  _css();
+  try{_rdgFaixa(setor);}catch(e){console.error('radar faixa',e);}
+  const R=_rdgCalcular();
+  R.alertas.filter(a=>a.setor===setor).forEach(a=>{
+    const id=String(a.p.id).replace(/["\\]/g,'');
+    const vistos=new Set();
+    sec.querySelectorAll(`[onclick*="'${id}'"]`).forEach(n=>{
+      const tr=n.closest('tr');if(!tr||vistos.has(tr)||tr.closest('#rdg-modal'))return;vistos.add(tr);
+      if(tr.querySelector('.rdg-tag'))return;
+      const tds=tr.querySelectorAll('td');if(!tds.length)return;
+      let alvo=null;const cli=String(nome(a.p)).slice(0,10).toUpperCase();
+      for(const td of tds){if(cli&&td.textContent.toUpperCase().includes(cli)){alvo=td;break;}}
+      if(!alvo)alvo=tds[Math.min(1,tds.length-1)];
+      const sp=document.createElement('span');sp.className='rdg-cel';sp.innerHTML=_tagHtml(a);
+      alvo.appendChild(sp);
+    });
+  });
+}
+function _rdgDecorarVisiveis(){
+  Object.keys(RDG_SETORES).forEach(s=>{try{_rdgDecorar(s);}catch(e){console.error('radar',s,e);}});
+}
+window._rdgDecorarVisiveis=_rdgDecorarVisiveis;
+
+// ── MENU LATERAL: número de 🔴 por setor ───────────────────────────────────────────────────────────
+function _rdgBadges(){
+  _css();
+  const R=_rdgCalcular();
+  Object.keys(RDG_SETORES).forEach(s=>{
+    const b=document.getElementById('sb-cat-'+s.replace(/\s/g,'_'));if(!b)return;
+    let bd=b.querySelector('.rdg-sb');
+    const n=R.porSetor[s].r;
+    if(!n){if(bd)bd.remove();return;}
+    if(!bd){bd=document.createElement('span');bd.className='rdg-sb';b.appendChild(bd);}
+    bd.textContent=n>99?'99+':String(n);
+    bd.title=`${nPed(n)} que ${n===1?'vai':'vão'} estourar o prazo em ${RDG_SETORES[s].label}`;
+    b.title=(b.title||'').replace(/ — 🔴.*$/,'')+` — 🔴 ${nPed(n)} ${n===1?'vai':'vão'} estourar`;
+  });
+}
+
+// ── PIPELINE DE PEDIDOS: chip "🔭 Próximas semanas" ────────────────────────────────────────────────
+function _rdgPainelHtml(){
+  const R=_rdgCalcular();
+  const g=R.gargalos;
+  const linhaSetor=Object.keys(RDG_SETORES).map(s=>{const c=R.porSetor[s];return (c.r||c.y)?`<span style="margin-right:14px"><b>${RDG_SETORES[s].label}:</b> ${c.r?`<span style="color:#b91c1c;font-weight:700">🔴 ${c.r}</span> `:''}${c.y?`<span style="color:#a16207;font-weight:700">🟡 ${c.y}</span>`:''}</span>`:'';}).join('');
+  let h=`<div class="rdg-pn"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+    <div style="font-weight:800;color:#0f172a">🔭 Próximos ${RDG_HORIZONTE_DU} dias úteis (até ${dd(R.horiz)})</div>
+    <button type="button" class="rdg-btn-ia" onclick="_rdgIaResumo(this)">🧠 Resumo da IA</button></div>`;
+  if(linhaSetor)h+=`<div style="font-size:.78rem;margin-bottom:8px;color:#334155">Pedidos em alerta por setor — ${linhaSetor}<span style="color:#64748b">(a lista de cada um aparece no topo do menu do setor)</span></div>`;
+  if(!g.length)h+=`<div style="font-size:.8rem;color:#16a34a;font-weight:700">✅ Nenhum gargalo previsto: nenhum setor passa do limite em nenhum dia desse período.</div>`;
+  else h+=`<table><thead><tr><th>Dia</th><th>Setor</th><th>Carga no dia</th><th>Pedidos</th></tr></thead><tbody>${g.map(x=>{
+      const peds=x.itens.map(i=>i.p?`OS ${esc(i.p.os||'—')} · ${esc(nome(i.p))}`:`📌 reserva ${esc(i.cliente||'')}`);
+      const carga=x.tipo==='valor'?`${fmtR(x.valor)} <span style="color:#64748b">(limite ${fmtR(x.limite)})</span>`:`${x.qtd} <span style="color:#64748b">(limite ${x.limite})</span>`;
+      return `<tr><td style="white-space:nowrap;font-weight:700">${dd(x.iso)}</td><td>${esc(RDG_SETORES[x.setor].label)} · ${esc(x.label)}</td><td style="white-space:nowrap;color:#b91c1c;font-weight:700">${carga}</td><td style="font-size:.74rem;color:#334155">${peds.slice(0,4).join('<br>')}${peds.length>4?`<br><span style="color:#64748b">+${peds.length-4}</span>`:''}</td></tr>`;
+    }).join('')}</tbody></table>`;
+  h+=`<div id="rdg-ia-resumo" style="margin-top:10px"></div></div>`;
+  return h;
+}
+function _rdgChipHtml(){
+  const R=_rdgCalcular();const n=R.gargalos.length;
+  const on=(typeof _lpPainelTopo!=='undefined'&&_lpPainelTopo==='radar');
+  const st=n?'border-color:#fca5a5;color:#b91c1c;background:#fef2f2':'color:#64748b';
+  return `<button type="button" class="plx-tg${on?' on':''}" style="${on?'':st}" onclick="lpTogglePainelTopo('radar')" title="Dias das próximas semanas em que algum setor passa do limite">🔭 ${n?n+' '+(n===1?'gargalo previsto':'gargalos previstos'):'Próximas semanas: sem gargalo'} ${on?'▴':'▾'}</button>`;
+}
+
+// ── SINO ───────────────────────────────────────────────────────────────────────────────────────────
+function _rdgAvisos(){
+  const R=_rdgCalcular();const out=[];
+  const corte=(typeof _lpSubtraiDiasUteis==='function')?_lpSubtraiDiasUteis(R.hoje,RDG_AVISO_ATRASO_DU):R.hoje;
+  R.alertas.forEach(a=>{
+    const it=a.itens[0];
+    if(it.iso<corte)return; // atraso antigo: já aparece no menu, não enche o sino
+    out.push({
+      id:'radar_'+a.setor+'_'+a.p.id+'_'+a.nivel,
+      automatico:true,tipoAuto:'radar_gargalo',
+      assunto:a.nivel==='r'?'🔴 Vai estourar o prazo':'🟡 Prazo apertado',
+      texto:`OS ${a.p.os||'—'} · ${nome(a.p)} — ${it.problema} O que fazer: ${it.acao} Abra o menu ${RDG_SETORES[a.setor].label} pra ver.`,
+      destinatarioTipo:'setor',destinatarioValor:a.setor
+    });
+  });
+  return out;
+}
+
+// ── SIMULADOR ──────────────────────────────────────────────────────────────────────────────────────
+window._rdgSimVer=function(){const d=document.getElementById('rdg-sim-det');if(d)d.style.display=d.style.display==='none'?'':'none';};
+function _rdgSimExtras(){
+  const out=document.getElementById('sim-resultado');if(!out)return;
+  const x=(typeof _simUltimoExtras!=='undefined')?_simUltimoExtras:null;if(!x||!x.pedido)return;
+  _css();
+  const R=_rdgCalcular(true);
+  const aperta=[];
+  (x.pedido.etapas||[]).forEach(e=>{
+    const L=lim(e.key);const s=_setorDaEtapa(e.key);
+    if(!L||!s||!e.iso)return;
+    const l=(R.carga[e.key]&&R.carga[e.key][e.iso])||[];
+    const reais=l.filter(i=>i.p);
+    if(l.length+1>L&&reais.length)aperta.push({setor:s,label:e.label||e.key,iso:e.iso,qtd:l.length+1,limite:L,reais});
+  });
+  if(x.pedido.chegadaIso){
+    const d=R.mapaInst[x.pedido.chegadaIso];
+    const reais=d?(d.itens||[]).filter(i=>!i._reserva):[];
+    if(d&&d.qtd+1>R.capInst&&reais.length)aperta.push({setor:'PLANEJAMENTO',label:'Início da Instalação',iso:x.pedido.chegadaIso,qtd:d.qtd+1,limite:R.capInst,reais:reais.map(p=>({p}))});
+  }
+  const old=document.getElementById('rdg-sim');if(old)old.remove();
+  const box=document.createElement('div');box.id='rdg-sim';
+  const nAf=new Set();aperta.forEach(a=>a.reais.forEach(i=>nAf.add(i.p.id)));
+  box.innerHTML=(aperta.length?`<div class="rdg-sim">⚠️ <b>Esse pedido aperta ${nPed(nAf.size)} já ${nAf.size===1?'emitido':'emitidos'}</b> — ${aperta.map(a=>`${esc(RDG_SETORES[a.setor].label)} em ${ddmm(a.iso)} (${a.qtd} no dia, limite ${a.limite})`).join(' · ')}
+      <button type="button" class="rdg-lnk" style="margin-left:6px" onclick="_rdgSimVer()">ver</button>
+      <div id="rdg-sim-det" style="display:none;margin-top:6px;font-size:.76rem;color:#334155">${aperta.map(a=>`<div style="margin-top:4px"><b>${esc(a.label)} · ${dd(a.iso)}:</b> ${a.reais.map(i=>`OS ${esc(i.p.os||'—')} · ${esc(nome(i.p))}`).join('; ')}</div>`).join('')}</div></div>`:'')
+    +`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><button type="button" class="rdg-btn-ia" onclick="_rdgIaSim(this)">🧠 Análise da IA</button><span style="font-size:.72rem;color:#64748b">A IA lê esta simulação e a carga dos setores e diz o que fazer pra cumprir a data.</span></div>
+    <div id="rdg-ia-sim" style="margin-bottom:12px"></div>`;
+  const first=out.firstElementChild;
+  if(first&&first.nextSibling)out.insertBefore(box,first.nextSibling);else out.appendChild(box);
+  window._rdgSimAperta=aperta;
+}
+
+// ── IA ─────────────────────────────────────────────────────────────────────────────────────────────
+const RDG_IA_REGRAS=`Você é o analista de prazos da Granda Comunicação Visual (fábrica de comunicação visual em Ponta Grossa/PR).
+Regras que você NUNCA quebra:
+1. A data combinada com o cliente não muda. Nunca sugira renegociar, adiar ou mudar a data de entrega. Se foi vendido, tem que entregar no prazo.
+2. Os prazos de cada setor são fixos e servem de norte. Não sugira dar mais prazo pra setor nenhum.
+3. Use SOMENTE os números e datas dos dados enviados. Não invente número, data, nome ou capacidade. Se faltar dado, diga o que falta.
+4. Sugira só ações práticas pra cumprir o prazo: priorizar pedido, adiantar etapa, reforçar setor (hora extra, pessoa de outro setor), contratar instalador/terceiro, resolver pendência hoje.
+5. Escreva em português do Brasil, direto, curto, sem enrolação, para um gestor ler em 30 segundos. Datas no formato dd/mm.
+Formato da resposta (markdown simples, sem tabelas):
+**Diagnóstico** — 1 a 3 frases.
+**O que fazer** — lista de 2 a 5 itens, cada um com quem faz e até quando.
+**Se não fizer** — 1 frase com o impacto na entrega.`;
+async function _rdgChave(){
+  if(typeof orc2==='undefined')return null;
+  if(orc2.iaCfg&&orc2.iaCfg.chave)return orc2.iaCfg;
+  try{if(typeof _orc2IaWatch==='function')_orc2IaWatch();}catch(e){}
+  for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,200));if(orc2.iaCfg&&orc2.iaCfg.chave)return orc2.iaCfg;}
+  return null;
+}
+function _mdHtml(t){
+  const linhas=esc(t).split('\n');let h='',ul=false;
+  linhas.forEach(l=>{
+    const b=l.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+    if(/^\s*[-•*]\s+/.test(l)){if(!ul){h+='<ul>';ul=true;}h+='<li>'+b.replace(/^\s*[-•*]\s+/,'')+'</li>';}
+    else{if(ul){h+='</ul>';ul=false;}if(/^\s*#{1,4}\s+/.test(l))h+='<div style="font-weight:800;margin-top:6px">'+b.replace(/^\s*#{1,4}\s+/,'')+'</div>';else if(b.trim())h+='<div>'+b+'</div>';}
+  });
+  if(ul)h+='</ul>';return h;
+}
+async function _rdgIaRodar(dados,pedidoTxt,destId,btn){
+  const dest=document.getElementById(destId);if(!dest)return;
+  const txtBtn=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='⏳ Analisando…';}
+  dest.innerHTML='<div class="rdg-ia" style="color:#6d28d9">🧠 A IA está lendo os números… leva uns segundos.</div>';
+  try{
+    const c=await _rdgChave();
+    if(!c){dest.innerHTML='<div class="rdg-ia">A chave da IA não está acessível pro seu usuário. Peça pro administrador conferir em Orçamentos → ⚙️ IA.</div>';return;}
+    const modelo=c.modeloRadar||RDG_IA_MODELO_PADRAO;
+    const ctrl=new AbortController();const to=setTimeout(()=>ctrl.abort(),90000);
+    let r;
+    try{r=await fetch('https://api.anthropic.com/v1/messages',{signal:ctrl.signal,method:'POST',headers:{'content-type':'application/json','x-api-key':c.chave,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:modelo,max_tokens:1500,system:RDG_IA_REGRAS,messages:[{role:'user',content:pedidoTxt+'\n\nDADOS (JSON, gerados pelo GCore hoje '+dd(_hojeIso())+'):\n'+JSON.stringify(dados)}]})});}
+    finally{clearTimeout(to);}
+    const js=await r.json().catch(()=>null);
+    if(!r.ok){const m=(js&&js.error&&js.error.message)||('HTTP '+r.status);throw new Error(r.status===401?'chave da IA inválida':(r.status===429||r.status===529)?'a IA está ocupada agora, tente de novo em 1 minuto':m);}
+    const txt=((js&&js.content)||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+    dest.innerHTML=`<div class="rdg-ia">${_mdHtml(txt||'A IA não devolveu resposta.')}<div style="font-size:.66rem;color:#7c3aed;margin-top:8px">🧠 Análise gerada pela IA a partir dos números do sistema — confira antes de agir.</div></div>`;
+  }catch(e){
+    dest.innerHTML=`<div class="rdg-ia" style="color:#b91c1c">Não consegui rodar a análise: ${esc(e.name==='AbortError'?'a IA demorou demais, tente de novo':(e.message||e))}</div>`;
+  }finally{if(btn){btn.disabled=false;btn.textContent=txtBtn;}}
+}
+function _etapasPedido(p){
+  let c;try{c=_lpCalcEtapas(p);}catch(e){return null;}
+  if(!c||!c.ok)return null;
+  const hoje=_hojeIso();
+  return{emissao:dd(c.emissaoIso),entregaCombinada:dd(c.prazoIso),etapas:c.etapas.filter(e=>e.aplicavel&&e.iso).map(e=>({etapa:e.label,prazo:dd(e.iso),situacao:concluida(p,e.key)?'feita':semControle(p,e.key)?'sem controle no sistema':(e.iso<hoje?'atrasada':'pendente')}))};
+}
+function _cargaResumo(R){
+  return R.gargalos.slice(0,25).map(g=>({dia:dd(g.iso),setor:RDG_SETORES[g.setor].label,etapa:g.label,carga:g.tipo==='valor'?fmtR(g.valor):g.qtd,limite:g.tipo==='valor'?fmtR(g.limite):g.limite,pedidos:g.itens.slice(0,8).map(i=>i.p?('OS '+(i.p.os||'—')+' '+nome(i.p)):'reserva '+(i.cliente||''))}));
+}
+window._rdgIaPedido=function(pid,btn){
+  const R=_rdgCalcular();
+  const p=(pedidos||[]).find(x=>x.id===pid);if(!p)return;
+  const alertas=R.alertas.filter(a=>a.p.id===pid).map(a=>({setor:RDG_SETORES[a.setor].label,nivel:a.nivel==='r'?'vai estourar':'prazo apertado',itens:a.itens.map(i=>({etapa:i.label,prazo:dd(i.iso),problema:i.problema,acaoSugeridaPeloSistema:i.acao}))}));
+  _rdgIaRodar({pedido:{os:p.os||'',cliente:nome(p)},datas:_etapasPedido(p),alertas,gargalosDosSetores:_cargaResumo(R),limitesPorDia:{projetos:lim('projeto'),corteGalvanizado:lim('corteGalv'),adesivo:lim('adesivo'),art:lim('art'),embalagem:lim('embalagem'),producaoValorPorDia:fmtR(R.capProd),obrasComecandoPorDia:R.capInst}},
+    'Analise este pedido e diga o que fazer pra entregar na data combinada.','rdg-ia-out',btn);
+};
+window._rdgIaResumo=function(btn){
+  const R=_rdgCalcular(true);
+  const alertas=R.alertas.slice(0,40).map(a=>({setor:RDG_SETORES[a.setor].label,nivel:a.nivel==='r'?'vai estourar':'prazo apertado',pedido:'OS '+(a.p.os||'—')+' '+nome(a.p),entrega:dd(a.prazoFinal),problema:a.itens[0].problema}));
+  const porSetor={};Object.keys(R.porSetor).forEach(s=>porSetor[RDG_SETORES[s].label]={vaoEstourar:R.porSetor[s].r,prazoApertado:R.porSetor[s].y});
+  _rdgIaRodar({periodo:'hoje até '+dd(R.horiz),porSetor,gargalos:_cargaResumo(R),pedidosEmAlerta:alertas,totalPedidosEmAlerta:R.alertas.length},
+    'Faça o resumo semanal de gargalos da fábrica para o gestor: quais setores e dias são o maior problema, quais pedidos atacar primeiro e o que fazer em cada setor.','rdg-ia-resumo',btn);
+};
+window._rdgIaSim=function(btn){
+  const x=(typeof _simUltimoExtras!=='undefined')?_simUltimoExtras:null;if(!x){toast('Simule antes','terr');return;}
+  const R=_rdgCalcular();
+  const P=x.P||{};
+  _rdgIaRodar({pedidoNovo:{cliente:P.cliente||'',valorLiquido:P.liquido?fmtR(Number(P.liquido)||0):'',dataPedidaPeloCliente:dd(P.prazoCliente),resultadoDoSimulador:x.pedido.status==='ok'?'dá':x.pedido.status==='apertado'?'dá, mas apertado':'não dá',motivos:x.pedido.motivos||[],etapas:(x.pedido.etapas||[]).map(e=>({etapa:e.label,prazo:dd(e.iso)})),dataMaisRapida:x.rapido?dd(x.rapido.prazoIso):null,dataSegura:x.seguro?dd(x.seguro.prazoIso):null},
+      apertaPedidosJaEmitidos:(window._rdgSimAperta||[]).map(a=>({setor:RDG_SETORES[a.setor].label,etapa:a.label,dia:dd(a.iso),cargaComEste:a.qtd,limite:a.limite,pedidos:a.reais.map(i=>'OS '+(i.p.os||'—')+' '+nome(i.p))})),
+      gargalosDosSetores:_cargaResumo(R)},
+    'O vendedor quer fechar este pedido novo na data pedida pelo cliente. Diga se a fábrica cumpre e o que precisa ser feito pra cumprir sem atrasar os pedidos já emitidos. Se o simulador disse que não dá, explique o motivo com os números e o que teria que acontecer.','rdg-ia-sim',btn);
+};
+
+// ── GANCHOS (wrappers — nada do original é removido) ────────────────────────────────────────────────
+function _wrap(nomeFn,depois){
+  const o=window[nomeFn];if(typeof o!=='function')return;
+  window[nomeFn]=function(){const r=o.apply(this,arguments);try{depois.apply(this,[r].concat([].slice.call(arguments)));}catch(e){console.error('radar '+nomeFn,e);}return r;};
+}
+function _instalar(){
+  _css();
+  // Pipeline: chip + painel
+  if(typeof window._lpTopoCompactoHtml==='function'){
+    const o=window._lpTopoCompactoHtml;
+    window._lpTopoCompactoHtml=function(){
+      let h=o.apply(this,arguments);
+      try{
+        const ancora='<button type="button" class="plx-tg" onclick="portalAbrirCompartilhar()"';
+        const chip=_rdgChipHtml();
+        h=h.indexOf(ancora)>=0?h.replace(ancora,chip+ancora):h.replace('<div class="lpx-pn">','<div class="lpx-pn">'+chip);
+        if(typeof _lpPainelTopo!=='undefined'&&_lpPainelTopo==='radar')h+=_rdgPainelHtml();
+      }catch(e){console.error('radar chip',e);}
+      return h;
+    };
+  }
+  // Sino
+  if(typeof window._avisosAutomaticos==='function'){
+    const o=window._avisosAutomaticos;
+    window._avisosAutomaticos=function(){const out=o.apply(this,arguments);try{return out.concat(_rdgAvisos());}catch(e){console.error('radar avisos',e);return out;}};
+  }
+  // Simulador
+  _wrap('_simRenderExtras',()=>_rdgSimExtras());
+  // Menu lateral
+  _wrap('buildSidebarCats',()=>_rdgBadges());
+  // Menus dos setores
+  ['renderProjLista','renderProdLista','prodRenderAtivo','renderPlanejamentoObras','renderPlHoje','projSetTab','planMainSetTab'].forEach(n=>_wrap(n,()=>setTimeout(_rdgDecorarVisiveis,0)));
+  _wrap('setSection',()=>setTimeout(()=>{_rdgDecorarVisiveis();_rdgBadges();},350));
+  // Atualiza a cada minuto (pedidos mudam por outros usuários)
+  setInterval(()=>{try{if(typeof usuarioLogado!=='undefined'&&usuarioLogado){_rdgBadges();_rdgDecorarVisiveis();}}catch(e){}},60000);
+  setTimeout(()=>{try{_rdgBadges();}catch(e){}},4000);
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_instalar);else _instalar();
+})();
+
 </script>
 </body>
 </html>
