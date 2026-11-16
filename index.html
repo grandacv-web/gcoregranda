@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-16.31';</script>
+<script>const APP_BUILD_VERSION='2026-11-16.38';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -43238,6 +43238,20 @@ function _lpComentariosDaEtapa(p,etapaKey){
 function _lpMeuNomeComentario(){
   return usuarioLogado?.nomeExibicao||usuarioLogado?.email||'—';
 }
+// Autor do comentário (2026-11-16): comentário novo grava também o e-mail do autor (porEmail),
+// que não muda se o nome de exibição for alterado. Comentário antigo (sem porEmail) continua
+// sendo reconhecido pelo nome/e-mail salvo em c.por.
+function _lpEhMeuComentario(c){
+  if(!c||!usuarioLogado)return false;
+  const meuEmail=String(usuarioLogado.email||'').trim().toLowerCase();
+  if(c.porEmail)return !!meuEmail&&String(c.porEmail).trim().toLowerCase()===meuEmail;
+  const por=String(c.por||'').trim();
+  if(!por||por==='—')return false;
+  return por===String(usuarioLogado.nomeExibicao||'').trim()||(!!meuEmail&&por.toLowerCase()===meuEmail);
+}
+function _lpBtnsAutorComentHtml(pid,k,idx,fs){
+  return `<span style="margin-left:auto;white-space:nowrap"><button type="button" onclick="event.stopPropagation();lpEditarComentarioEtapa('${pid}','${k}',${idx})" title="Editar meu comentário" style="background:none;border:none;cursor:pointer;color:var(--ink4);font-size:${fs};padding:0 3px">✏️</button><button type="button" onclick="event.stopPropagation();lpApagarComentarioEtapa('${pid}','${k}',${idx})" title="Apagar meu comentário" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:${fs};padding:0 3px">🗑️</button></span>`;
+}
 function _lpComentarioCardHtml(p,etapaKey){
   const lista=_lpComentariosDaEtapa(p,etapaKey);
   const meuNome=_lpMeuNomeComentario();
@@ -43247,7 +43261,7 @@ function _lpComentarioCardHtml(p,etapaKey){
     const textoEsc=String(c.texto||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const longo=textoEsc.length>70;
     const resumo=longo?textoEsc.slice(0,70)+'…':textoEsc;
-    const ehMeu=(c.por||'—')===meuNome;
+    const ehMeu=_lpEhMeuComentario(c);
     const acoesHtml=ehMeu?`<span style="margin-left:auto;white-space:nowrap"><button type="button" onclick="event.stopPropagation();lpEditarComentarioEtapa('${p.id}','${etapaKey}',${idx})" title="Editar" style="background:none;border:none;cursor:pointer;color:var(--ink4);font-size:.66rem;padding:0 3px">✏️</button><button type="button" onclick="event.stopPropagation();lpApagarComentarioEtapa('${p.id}','${etapaKey}',${idx})" title="Apagar" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.66rem;padding:0 3px">🗑️</button></span>`:'';
     return `<div onclick="event.stopPropagation()" style="background:#f1f5f9;border-radius:6px;padding:4px 6px;margin-top:3px">
       <div style="font-size:.6rem;font-weight:700;color:var(--ink3);display:flex;align-items:center">👤 ${(c.por||'—').replace(/</g,'&lt;')} · ${dataHoraTxt}${c.editadoEm?' <span style="font-weight:600;color:var(--ink4)">(editado)</span>':''}${acoesHtml}</div>
@@ -43287,12 +43301,13 @@ function lpAbrirComentarioEtapa(pedidoId,etapaKey){
   const infoEl=document.getElementById('lpc-info');
   if(infoEl)infoEl.innerHTML=`OS Nº <strong>${p.os||'—'}</strong> · ${_pedNome(p)}<br>${etapaKey===LP_COMENT_GERAL?'<strong>Comentário geral do pedido</strong>':`Etapa: <strong>${(def&&def.label)||etapaKey}</strong>`}${_lpComentPrazosHtml(p)}`;
   const txtEl=document.getElementById('lpc-texto');if(txtEl)txtEl.value='';
-  const listaExistente=etapaKey===LP_COMENT_GERAL?_lpTodosComentarios(p).map(o=>Object.assign({},o.c,{_lbl:o.label})):_lpComentariosDaEtapa(p,etapaKey);
+  const listaExistente=etapaKey===LP_COMENT_GERAL?_lpTodosComentarios(p).map(o=>Object.assign({},o.c,{_lbl:o.label,_k:o.k,_idx:o.idx,_orig:o.c})):_lpComentariosDaEtapa(p,etapaKey).map((c,i)=>Object.assign({},c,{_k:etapaKey,_idx:i,_orig:c}));
   const histEl=document.getElementById('lpc-historico');
   if(histEl){
     histEl.innerHTML=listaExistente.length?'<div style="font-weight:700;color:var(--ink3);margin-bottom:4px">Comentários anteriores</div>'+listaExistente.slice().reverse().map(c=>{
       const dt=c.dataHora?new Date(c.dataHora).toLocaleString('pt-BR'):'';
-      return `<div style="padding:6px 0;border-top:1px solid var(--border-lt)"><strong>${(c.por||'—').replace(/</g,'&lt;')}</strong> · <span style="color:var(--ink4)">${dt}</span>${c._lbl?` · <span style="color:#0369a1;font-weight:700">${String(c._lbl).replace(/</g,'&lt;')}</span>`:''}${c.editadoEm?' <span style="color:var(--ink4)">(editado)</span>':''}<div style="margin-top:2px;white-space:pre-wrap">${String(c.texto||'').replace(/</g,'&lt;')}</div></div>`;
+      const acoes=_lpEhMeuComentario(c._orig)?_lpBtnsAutorComentHtml(p.id,c._k,c._idx,'.72rem'):'';
+      return `<div style="padding:6px 0;border-top:1px solid var(--border-lt)"><div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap"><span><strong>${(c.por||'—').replace(/</g,'&lt;')}</strong> · <span style="color:var(--ink4)">${dt}</span>${c._lbl?` · <span style="color:#0369a1;font-weight:700">${String(c._lbl).replace(/</g,'&lt;')}</span>`:''}${c.editadoEm?' <span style="color:var(--ink4)">(editado)</span>':''}</span>${acoes}</div><div style="margin-top:2px;white-space:pre-wrap">${String(c.texto||'').replace(/</g,'&lt;')}</div></div>`;
     }).join(''):'';
   }
   openM('mo-comentario-etapa');
@@ -43311,7 +43326,7 @@ function lpEditarComentarioEtapa(pedidoId,etapaKey,idx){
   const lista=_lpComentariosDaEtapa(p,etapaKey);
   const c=lista[idx];
   if(!c){toast('Comentário não encontrado','terr');return;}
-  if(c.por!==_lpMeuNomeComentario()){toast('Só quem fez o comentário pode editá-lo.','terr');return;}
+  if(!_lpEhMeuComentario(c)){toast('Só quem fez o comentário pode editá-lo.','terr');return;}
   const def=_lpEtapasDefParaPedido(p).find(d=>d.key===etapaKey);
   document.getElementById('lpc-pedido-id').value=pedidoId;
   document.getElementById('lpc-etapa-key').value=etapaKey;
@@ -43331,12 +43346,16 @@ async function lpApagarComentarioEtapa(pedidoId,etapaKey,idx){
   const lista=_lpComentariosDaEtapa(p,etapaKey);
   const c=lista[idx];
   if(!c){toast('Comentário não encontrado','terr');return;}
-  if(c.por!==_lpMeuNomeComentario()){toast('Só quem fez o comentário pode apagá-lo.','terr');return;}
+  if(!_lpEhMeuComentario(c)){toast('Só quem fez o comentário pode apagá-lo.','terr');return;}
   if(!confirm('Apagar este comentário? Essa ação não pode ser desfeita.'))return;
   p.lpComentarios[etapaKey].splice(idx,1);
   await savePedidoFS(p);
   toast('Comentário apagado','twar');
   lpRenderAtivo();
+  const _mo=document.getElementById('mo-comentario-etapa');
+  if(_mo&&_mo.classList.contains('open')&&document.getElementById('lpc-pedido-id')?.value===pedidoId&&(document.getElementById('lpc-editar-idx')?.value||'')===''){
+    lpAbrirComentarioEtapa(pedidoId,document.getElementById('lpc-etapa-key')?.value||etapaKey);
+  }
 }
 async function lpSalvarComentarioEtapa(){
   if(!_isPlanejamentoUser()){toast('Só Planejamento ou administrador pode comentar aqui.','terr');return;}
@@ -43353,13 +43372,13 @@ async function lpSalvarComentarioEtapa(){
     const idx=parseInt(editarIdx,10);
     const c=p.lpComentarios[etapaKey][idx];
     if(!c){toast('Comentário não encontrado','terr');return;}
-    if(c.por!==_lpMeuNomeComentario()){toast('Só quem fez o comentário pode editá-lo.','terr');return;}
+    if(!_lpEhMeuComentario(c)){toast('Só quem fez o comentário pode editá-lo.','terr');return;}
     c.texto=texto;
     c.editadoEm=new Date().toISOString();
     await savePedidoFS(p);
     toast('Comentário atualizado ✅','tok');
   }else{
-    p.lpComentarios[etapaKey].push({texto,por:_lpMeuNomeComentario(),dataHora:new Date().toISOString()});
+    p.lpComentarios[etapaKey].push({texto,por:_lpMeuNomeComentario(),porEmail:String(usuarioLogado?.email||'').trim().toLowerCase(),dataHora:new Date().toISOString()});
     await savePedidoFS(p);
     toast('Comentário adicionado ✅','tok');
   }
@@ -43396,7 +43415,7 @@ function _lpComentariosTodosTexto(p){
 function _lpComentariosPedidoHtml(p){
   const lista=_lpTodosComentarios(p);const meu=_lpMeuNomeComentario();
   const itens=lista.slice().reverse().map(({k,idx,c,label})=>{
-    const ehMeu=(c.por||'—')===meu;
+    const ehMeu=_lpEhMeuComentario(c);
     const acoes=ehMeu?`<span style="margin-left:auto;white-space:nowrap"><button type="button" onclick="event.stopPropagation();lpEditarComentarioEtapa('${p.id}','${k}',${idx})" title="Editar" style="background:none;border:none;cursor:pointer;font-size:.7rem;padding:0 3px">✏️</button><button type="button" onclick="event.stopPropagation();lpApagarComentarioEtapa('${p.id}','${k}',${idx})" title="Apagar" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:.7rem;padding:0 3px">🗑️</button></span>`:'';
     return`<div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:6px 9px;margin-top:5px"><div style="display:flex;align-items:center;gap:6px;font-size:.66rem;color:#475569"><b style="color:#0f172a">👤 ${_plEsc(c.por||'—')}</b><span>${_lpFmtDataHoraComent(c.dataHora)}</span><span style="background:${k===LP_COMENT_GERAL?'#e0f2fe':'#f1f5f9'};color:${k===LP_COMENT_GERAL?'#0369a1':'#475569'};border-radius:20px;padding:0 7px;font-weight:700">${_plEsc(label)}</span>${c.editadoEm?'<span style="color:#94a3b8">(editado)</span>':''}${acoes}</div><div style="font-size:.74rem;color:#334155;white-space:pre-wrap;margin-top:2px">${_plEsc(c.texto||'')}</div></div>`;
   }).join('');
@@ -70535,8 +70554,8 @@ function _orc2Id(){return 'orc_'+Date.now().toString(36)+Math.random().toString(
 // perímetro informado passa bem do contorno de uma letra só (2×(L+A)); sem perímetro, quando uma
 // medida é 4× a outra. Letra única continua usando a altura (e a maior medida no aviso de 4 mm).
 function _orcLetraConjunto(L){const l=_orc2Num(L&&L.largura),a=_orc2Num(L&&L.altura),p=_orc2Num(L&&L.perimetro);if(!(l>0&&a>0))return false;if(p>0)return p>2*(l+a)*1.3;return Math.max(l,a)>=4*Math.min(l,a);}
-function _orcAlturaLetra(L){const l=_orc2Num(L&&L.largura),a=_orc2Num(L&&L.altura);return _orcLetraConjunto(L)?Math.min(l,a):a;}
-function _orcMaiorLetra(L){const l=_orc2Num(L&&L.largura),a=_orc2Num(L&&L.altura);return _orcLetraConjunto(L)?Math.min(l,a):Math.max(l,a);}
+function _orcAlturaLetra(L){if(typeof _orcArteVale==='function'&&_orcArteVale(L))return Number(L.arte.hMax);const l=_orc2Num(L&&L.largura),a=_orc2Num(L&&L.altura);return _orcLetraConjunto(L)?Math.min(l,a):a;}
+function _orcMaiorLetra(L){if(typeof _orcArteVale==='function'&&_orcArteVale(L))return Number(L.arte.maior||L.arte.hMax);const l=_orc2Num(L&&L.largura),a=_orc2Num(L&&L.altura);return _orcLetraConjunto(L)?Math.min(l,a):Math.max(l,a);}
 // ── LETRA CAIXA — cópia fiel do calcular() do sistema antigo (mesmas fórmulas e arredondamentos) ──
 // (2026-10-07, a pedido do usuário) Em cada linha da lista de materiais do orçamento, mostrar pequeno
 // embaixo QUAL matéria-prima da planilha está sendo usada no cálculo (código, nome, preço). Descobre pelo
@@ -70603,9 +70622,10 @@ function orc2CalcLetra(p,P,adesivoPrecos){
     push('🎨',T?'Tinta — '+T.nome:'Tinta ⚠️ escolha a tinta',fmtQtd(qP,1)+' ch. PVC × '+fmtQtd(aP,2)+' m² + '+fmtQtd(q26,1)+' ch. × '+fmtQtd(c26*h26,2)+' m² = '+fmtQtd(m2Ch,2)+' m² × '+fmtQtd(Pm.tintaLm2,2)+' L/m² → '+fmtQtd(lt,2)+' L'+(T?' × '+fmtBRL(pL)+'/L':''),fmtQtd(lt,2)+' L',T?lt*pL:0);
     push('🎨','Tinta PU Branco Fosco (interna)','mesma quantidade da tinta externa → '+fmtQtd(lt,2)+' L × '+fmtBRL(P.tinta)+'/L',fmtQtd(lt,2)+' L',lt*P.tinta);
     const ledCod=p.ledCod,mL=ledCod?_orc8Mat(ledCod):null,prL=mL&&mL.v>0?mL.v:P.led;
-    const nBruto=Math.ceil(perimetro/Pm.moduloM-1e-9),nLed=Math.ceil(nBruto/10)*10;
+    // (2026-11-16) arte importada no 3D: módulos posicionados dentro de cada letra, comprados em correntes de 20
+    const q3=(typeof _orcLed3d==='function'?_orcLed3d(p):0),nBruto=q3||Math.ceil(perimetro/Pm.moduloM-1e-9),nLed=q3?Math.ceil(q3/20)*20:Math.ceil(nBruto/10)*10;
     const nomeL=mL?String(mL.n).trim():((ORC_LED_HALO.find(x=>x[0]===String(ledCod))||[0,''])[1]||'⚠️ escolha a temperatura do LED');
-    push('💡','Módulo LED — '+nomeL,fmtQtd(perimetro,2)+'m ÷ '+fmtQtd(Pm.moduloM,2)+'m = '+nBruto+' → '+nLed+' módulos (arredondado de 10 em 10)',nLed+' un.',ledCod?nLed*prL:0);
+    push('💡','Módulo LED — '+nomeL,q3?(q3+' '+_plural(q3,'módulo posicionado','módulos posicionados')+' dentro das letras (arte 3D, '+fmtQtd(_orc2Num(p.ledRef.passo)*100,0)+' cm entre módulos) → '+nLed+' módulos (correntes de 20)'):(fmtQtd(perimetro,2)+'m ÷ '+fmtQtd(Pm.moduloM,2)+'m = '+nBruto+' → '+nLed+' módulos (arredondado de 10 em 10)'),nLed+' un.',ledCod?nLed*prL:0);
     const pot=arred(nLed*0.72*(1+Pm.reatorFolga/100),2),mr=_orc2MelhorReator(pot,P);
     push('⚡',mr.label+' IP67 12V',fmtQtd(pot,2)+'W ('+nLed+' × 0,72W + '+fmtQtd(Pm.reatorFolga,0)+'%) → '+mr.qty+' × '+mr.watts+'W = '+(mr.qty*mr.watts)+'W',mr.qty+' un.',mr.custo);
     // fiação e conectores do LED (2026-10-06): cabo flexível 1,5mm preto + vermelho por m de perímetro e Wago por reator
@@ -70707,7 +70727,7 @@ function orc2CalcLetra(p,P,adesivoPrecos){
       {const AC=p.acrilCod,mA=AC?_orc8Mat(AC):null,dA=AC&&typeof _orcEmDims==='function'?_orcEmDims(AC):null;
         if(mA){const aA=dA?dA[0]*dA[1]:2,qA=ceilDec(area/aA),pcA=dA?pedacos({cw:dA[0],ch:dA[1]}):null;mf={nome:'Frente — '+String(mA.n).trim(),areaChapa:aA,qty:qA,util:area/(qA*aA),custo:mA.v>0?qA*mA.v:0,pc:pcA==null?1:pcA};}}
       push('🔵',mf.nome,fmtQtd(area,3)+' m² ÷ '+fmtQtd(mf.areaChapa,1)+' m² → '+fmtQtd(mf.qty,1)+' ch. (aprov. '+Math.round(mf.util*100)+'% · '+(mf.pc<=1?'sem emenda':(mf.pc-1)+(mf.pc-1===1?' emenda':' emendas'))+')',fmtQtd(mf.qty,1)+' ch.',mf.custo);
-      const qLed=Math.ceil(perimetro/0.12),_mL=p.ledCod?_orc8Mat(p.ledCod):null;push('💡',_mL?'Módulo LED — '+String(_mL.n).trim():'Módulo LED 6.500K 3P 12V 0,72W (Argia)',fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.',qLed+' un.',qLed*(_mL&&_mL.v>0?_mL.v:P.led));
+      const _q3=(typeof _orcLed3d==='function'?_orcLed3d(p):0),qLed=_q3?Math.ceil(_q3/20)*20:Math.ceil(perimetro/0.12),_mL=p.ledCod?_orc8Mat(p.ledCod):null;push('💡',_mL?'Módulo LED — '+String(_mL.n).trim():'Módulo LED 6.500K 3P 12V 0,72W (Argia)',_q3?(_q3+' '+_plural(_q3,'módulo posicionado','módulos posicionados')+' dentro das letras (arte 3D) → '+qLed+' módulos (correntes de 20)'):(fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.'),qLed+' un.',qLed*(_mL&&_mL.v>0?_mL.v:P.led));
       const pot=arred(qLed*0.72*1.20,1),mr=melhorReator(pot);push('⚡',mr.label+' IP67 12V',fmtQtd(pot,1)+'W (c/ 20% margem) ÷ '+mr.watts+'W → '+mr.qty+' un.',mr.qty+' un.',mr.custo);
     }
     if(usaEstr){
@@ -70783,7 +70803,7 @@ function _orcAcrilLista(){
 function _orcAcrilCampoHtml(L){
   const l=_orcAcrilLista();
   return`<div class="orc2-ades" style="background:${L.acrilCod?'#f0fdf4':'#fff7ed'};border-color:${L.acrilCod?'#86efac':'#fdba74'}"><b style="font-size:.76rem;color:#1a2b5e">🔷 Chapa da frente (acrílico ou policarbonato) <span style="color:#dc2626">*</span></b>
-    <select class="fc" style="margin-top:6px" onchange="orc2Letra('acrilCod',this.value,true)"><option value="">Escolha a chapa…</option>${l.map(x=>`<option value="${x.cod}" ${String(L.acrilCod)===String(x.cod)?'selected':''}>${_orcxEsc(x.nome)} — ${_orcxBRL(x.v)}${x.area?' · '+_orc2Qtd(x.area,2)+' m²':''}</option>`).join('')}</select>
+    ${typeof _l3dAcrilForm==='function'?_l3dAcrilForm(L):''}
     ${l.length?'':'<div class="orcx-hint">Importe a planilha de matéria-prima pra listar os acrílicos.</div>'}
     <div id="orc2-acril-aviso4" class="orcx-hint" style="color:#b45309;font-weight:700;${_orcMaiorLetra(L)>=_orcP().acrilGrossoM?'':'display:none'}">⚠️ Letra com ${_orc2Qtd(_orcP().acrilGrossoM,2).replace(',00','')} m ou mais: use chapa de 4 mm ou mais.</div></div>`;
 }
@@ -70795,7 +70815,7 @@ function _orcTintaCampoHtml(L){
     ${t?`<div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:.8rem"><span>✔ <b>${_orcxEsc(t.nome)}</b> — ${_orcxBRL(_orcTintaPrecoL(t))}/L${t.nova?' (tinta nova)':''}</span><button type="button" class="orcx-link" onclick="orcTintaLimpar()">trocar</button></div>`
     :`<input class="fc no-upper" list="orc-tintas-dl" placeholder="Digite a cor (ex.: amarelo) e escolha na lista…" onchange="orcTintaEscolher(this.value)" style="margin-top:6px">
     <datalist id="orc-tintas-dl">${lista.map(x=>`<option value="${_orcxEsc(_orcTintaRot(x))}">${_orcxBRL(x.precoL)}/L</option>`).join('')}</datalist>
-    <div class="orcx-hint" style="margin-top:4px">${lista.length?lista.length+' tintas na lista.':'Importe a planilha de matéria-prima pra listar as tintas.'} Não achou a cor? <button type="button" class="orcx-link" onclick="orcTintaCriar()">＋ criar tinta nova</button> (R$ 120,00 o litro)</div>`}
+    <div class="orcx-hint" style="margin-top:4px">${lista.length?lista.length+' tintas na lista.':'Importe a planilha de matéria-prima pra listar as tintas.'} Não achou a cor? <button type="button" class="orcx-link" onclick="orcTintaCriar()">＋ criar tinta nova</button> (R$ 120,00 o litro)</div><button type="button" class="orc2-btn sec" style="margin-top:6px" onclick="l3dCorForm()">🎨 Escolher pela tabela RAL ou Pantone C</button>`}
   </div>`;
 }
 function orc2DescLetra(modelo,usaACM,items){
@@ -71745,7 +71765,7 @@ const ORC8_DOC_CFG='orcamentosAjustes',ORC8_DOC_CONF='orcamentosConfigurados';
 let orc8={cfg:{},confs:{},cfgOn:false,confOn:false,form:null,editId:null,bld:null,histT:0,hist:null};
 function _orc8Watch(){
   if(!window._fbOrcWatch)return;
-  if(!orc8.cfgOn){orc8.cfgOn=true;window._fbOrcWatch(ORC8_DOC_CFG,it=>{orc8.cfg=it||{};});}
+  if(!orc8.cfgOn){orc8.cfgOn=true;window._fbOrcWatch(ORC8_DOC_CFG,it=>{orc8.cfg=it||{};try{if(typeof _orcMpNovosAplicar==='function')_orcMpNovosAplicar();}catch(e){}});}
   if(!orc8.confOn){orc8.confOn=true;window._fbOrcWatch(ORC8_DOC_CONF,it=>{orc8.confs=it||{};try{const b=document.getElementById('orc8-cfg-conf');if(b&&!orc8.bld)b.outerHTML=_orc8HtmlCfgConf();}catch(e){}});}
 }
 function _orc8Hoje(){try{return _hojeIso();}catch(e){return _isoLocal(new Date());}}
@@ -72579,7 +72599,7 @@ function _orcTrRender(){
     h+='<div style="font-size:.74rem;font-weight:800;color:#1a2b5e;margin:12px 0 6px">Ou qualquer outro material da planilha</div>';
   }
   h+=`<input class="fc no-upper" id="orc-troca-busca" placeholder="🔍 Buscar por código ou nome" value="${_orcxEsc(_orcTr.busca)}" oninput="_orcTr.busca=this.value;_orcTrLista()"><div style="display:flex;gap:8px;align-items:center;margin:8px 0;font-size:.74rem;color:#64748b">Quantidade <input class="fc no-upper" id="orc-troca-qtd" type="number" min="0" step="0.01" style="width:110px" placeholder="${_orcxEsc(String(_orcTrNum(it.qty)).replace('.',','))}"> <span>em branco = a mesma calculada (${_orcxEsc(it.qty)}), acompanha as medidas</span></div><div id="orc-troca-lista"></div>`;
-  box.innerHTML=h;_orcTrLista();
+  h+=`<div style="margin-top:10px;text-align:right"><button type="button" class="orc2-btn sec" onclick="_orcTrNovoMp()">＋ Não achou? Cadastrar matéria-prima nova</button></div>`;box.innerHTML=h;_orcTrLista();
 }
 function _orcTrLista(){
   const el=document.getElementById('orc-troca-lista');if(!el)return;const b=_orcTr.busca.trim().toUpperCase();
@@ -73281,7 +73301,7 @@ function _orc2LetraVazia(){return{modelo:'galv',nome:'',largura:'',altura:'',per
 // mexer no valor do orçamento, a não ser que eu vá lá no orçamento e atualize") — cada produto
 // guarda o custo do momento em que foi adicionado (p.custo + p.materiais). Nada recalcula sozinho;
 // só o botão "Atualizar preços" (com confirmação) refaz o custo com a base atual.
-function _orc2Recalcular(p){if(p.tipo==='config')return _orc8Recalcular(p);if(p.tipo==='fachada'){const r=orc2CalcFachada({largura:p.largura,altura:p.altura,cor:p.cor,extras:p.extras,trocas:p.trocas},_orc2Precos(),orc2.adesivoPrecos);return r.ok?r:null;}if(p.tipo!=='letra')return null;const r=orc2CalcLetra({modelo:p.modelo,largura:p.largura,altura:p.altura,perimetro:p.perimetro,caixa:p.caixa,adesivos:p.adesivos||[],trocas:p.trocas,tinta:p.tinta,ledCod:p.ledCod,acrilCod:p.acrilCod},_orc2Precos(),orc2.adesivoPrecos);return r.ok?r:null;}
+function _orc2Recalcular(p){if(p.tipo==='config')return _orc8Recalcular(p);if(p.tipo==='fachada'){const r=orc2CalcFachada({largura:p.largura,altura:p.altura,cor:p.cor,extras:p.extras,trocas:p.trocas},_orc2Precos(),orc2.adesivoPrecos);return r.ok?r:null;}if(p.tipo!=='letra')return null;const r=orc2CalcLetra({modelo:p.modelo,largura:p.largura,altura:p.altura,perimetro:p.perimetro,caixa:p.caixa,adesivos:p.adesivos||[],trocas:p.trocas,tinta:p.tinta,ledCod:p.ledCod,acrilCod:p.acrilCod,ledQtd:p.ledQtd,ledRef:p.ledRef,arte:p.arte},_orc2Precos(),orc2.adesivoPrecos);return r.ok?r:null;}
 function _orc2Defasagem(){
   const d=orc2.doc;if(!d||!(d.produtos||[]).length)return null;
   let antes=0,depois=0,n=0;
@@ -73325,6 +73345,7 @@ function _orc2HtmlFormLetra(){
   return`      <div class="dash-sec-title">🔠 ${orc2.letraEditId?'Editando letra caixa':'Nova letra caixa'}</div>
       ${orc2.letraEditId?'<div class="orcx-hint" style="margin:-6px 0 10px;color:#b45309">Ao salvar as alterações, este item é recalculado com os preços de hoje da base.</div>':''}
       <div class="fg"><label>Modelo</label><div class="orcx-chips">${ORC2_MODELOS.map(m=>`<button type="button" class="orcx-chip ${L.modelo===m.k?'on':''}" onclick="orc2Letra('modelo','${m.k}',true)">${m.l}<small>${m.sub}</small></button>`).join('')}</div></div>
+      ${typeof _l3dFormHtml==='function'?_l3dFormHtml(L):''}
       <div class="orcx-campos" style="margin-top:12px">
         ${_orcxCampo('Nome do item (opcional)',`<input class="fc no-upper" id="orc2-l-nome" placeholder="Ex.: Logo fachada principal" value="${_orcxEsc(L.nome)}" oninput="orc2Letra('nome',this.value)">`)}
         ${_orcxCampo('Largura total — m',inp('largura','0,00'))}
@@ -73338,7 +73359,7 @@ function _orc2HtmlFormLetra(){
       <div class="orc2-ades">
         <div style="display:flex;align-items:center;gap:8px"><b style="font-size:.76rem;color:#be185d;flex:1">🏷️ Frente adesivada ${L.adesivos.length?`(${L.adesivos.length})`:''}</b><button type="button" class="orcx-link" style="color:#be185d" onclick="orc2AddAdesivo()">＋ adicionar adesivo</button></div>
         ${L.adesivos.map((a,i)=>`<div class="orc2-ades-row">
-          <select class="fc" onchange="orc2Adesivo(${i},'codigo',this.value)"><option value="">Escolha o adesivo…</option>${ORC2_ADESIVOS.map(([c,n])=>`<option value="${c}" ${String(a.codigo)===String(c)?'selected':''}>${_orcxEsc(n)}</option>`).join('')}</select>
+          ${typeof _l3dAdesivoForm==='function'?_l3dAdesivoForm(i,a):''}
           <input class="fc no-upper" type="number" min="0" step="0.01" placeholder="Larg. m" value="${_orcxEsc(a.largura)}" oninput="orc2Adesivo(${i},'largura',this.value)">
           <input class="fc no-upper" type="number" min="0" step="0.01" placeholder="Alt. m" value="${_orcxEsc(a.altura)}" oninput="orc2Adesivo(${i},'altura',this.value)">
           <button type="button" class="orc2-ic" onclick="orc2RemAdesivo(${i})" title="Tirar">✕</button></div>`).join('')}
@@ -73399,7 +73420,7 @@ function orc2AdicionarLetra(){
   if(L.modelo==='acril'&&L.acrilCod&&_orcMaiorLetra(L)>=_orcP().acrilGrossoM){const m=_orc8Mat(L.acrilCod),esp=_orcEspessuraMm(m&&m.n);if(esp&&esp<4){toast('Letra com '+_orc2Qtd(_orcP().acrilGrossoM,2).replace(',00','')+' m ou mais: use acrílico/policarbonato de 4 mm ou mais (escolhido: '+esp+' mm)','terr');return;}}
   const desc=orc2DescLetra(L.modelo,r.usaACM,r.items);
   const antigo=orc2.letraEditId?orc2.doc.produtos.find(p=>p.id===orc2.letraEditId):null;
-  const item={id:antigo?antigo.id:_orc2Id(),tipo:'letra',modelo:L.modelo,nomeCurto:L.nome||'',nome:(L.nome?L.nome+' — ':'')+desc,descricao:desc,largura:L.largura,altura:L.altura,perimetro:L.perimetro,caixa:L.caixa,adesivos:JSON.parse(JSON.stringify(L.adesivos||[])),trocas:JSON.parse(JSON.stringify(L.trocas||{})),tinta:L.tinta?JSON.parse(JSON.stringify(L.tinta)):null,ledCod:L.ledCod||'',acrilCod:L.acrilCod||'',usaACM:r.usaACM,materiais:r.items.map(i=>({icon:i.icon,nome:i.name,detalhe:i.detail,qtd:i.qty,custo:_orcxArred(i.cost,2)})),custo:_orcxArred(r.totalMat,2),cmv:antigo?antigo.cmv:_orc2Cmv(),qtd:antigo?_orc2Qtd1(antigo):1,precosEm:new Date().toISOString(),precosBase:(orc3.meta&&orc3.meta.em)||null};
+  const item={id:antigo?antigo.id:_orc2Id(),tipo:'letra',modelo:L.modelo,nomeCurto:L.nome||'',nome:(L.nome?L.nome+' — ':'')+desc,descricao:desc,largura:L.largura,altura:L.altura,perimetro:L.perimetro,caixa:L.caixa,adesivos:JSON.parse(JSON.stringify(L.adesivos||[])),trocas:JSON.parse(JSON.stringify(L.trocas||{})),tinta:L.tinta?JSON.parse(JSON.stringify(L.tinta)):null,ledCod:L.ledCod||'',acrilCod:L.acrilCod||'',usaACM:r.usaACM,fundoOk:!!L.fundoOk,ledQtd:Number(L.ledQtd)||0,ledRef:L.ledRef?JSON.parse(JSON.stringify(L.ledRef)):null,arte:L.arte?JSON.parse(JSON.stringify(L.arte)):null,materiais:r.items.map(i=>({icon:i.icon,nome:i.name,detalhe:i.detail,qtd:i.qty,custo:_orcxArred(i.cost,2)})),custo:_orcxArred(r.totalMat,2),cmv:antigo?antigo.cmv:_orc2Cmv(),qtd:antigo?_orc2Qtd1(antigo):1,precosEm:new Date().toISOString(),precosBase:(orc3.meta&&orc3.meta.em)||null};
   if(antigo)orc2.doc.produtos[orc2.doc.produtos.indexOf(antigo)]=item;else orc2.doc.produtos.push(item);
   orc2.letra=_orc2LetraVazia();orc2.letraEditId=null;
   _orc2ReRenderProdutos();_orc2SincronizarValorPedido();orcxCalcular();_orc2AtualizarTotais();_orc2GuardarRascunho();_orc2AtualizarContadorAba();
@@ -73407,7 +73428,7 @@ function orc2AdicionarLetra(){
 }
 function orc2CancelarEdicaoFachada(){orc2.fach=_orc2FachVazia();orc2.fachEditId=null;_orc2ReRenderProdutos();}
 function _orc2AtualizarContadorAba(){const b=[...document.querySelectorAll('#sec-cat-ORCAMENTOS > .dash-tabs .dash-tab')].find(x=>(x.getAttribute('onclick')||'').indexOf("'produtos'")>=0);if(b){const n=orc2.doc.produtos.length;b.textContent='📦 Produtos'+(n?` (${n})`:'');}}
-function orc2EditarProduto(id){const p=orc2.doc.produtos.find(x=>x.id===id);if(!p)return;if(p.tipo==='config'){orc8Editar(p);return;}if(p.tipo==='fachada'){orc2.prodTipo='fachada';orc2.fach={nome:p.nomeCurto||'',largura:p.largura,altura:p.altura,cor:p.cor||ORC2_ACM_PADRAO,trocas:JSON.parse(JSON.stringify(p.trocas||{})),extras:Object.assign(_orc2FachVazia().extras,JSON.parse(JSON.stringify(p.extras||{})))};orc2.fachEditId=id;_orc2ReRenderProdutos();return;}orc2.prodTipo='letra';orc2.letra={modelo:p.modelo,nome:p.nomeCurto||'',largura:p.largura,altura:p.altura,perimetro:p.perimetro,caixa:p.caixa,adesivos:JSON.parse(JSON.stringify(p.adesivos||[])),trocas:JSON.parse(JSON.stringify(p.trocas||{})),tinta:p.tinta?JSON.parse(JSON.stringify(p.tinta)):null,ledCod:p.ledCod||'',acrilCod:p.acrilCod||''};orc2.letraEditId=id;_orc2ReRenderProdutos();}
+function orc2EditarProduto(id){const p=orc2.doc.produtos.find(x=>x.id===id);if(!p)return;if(p.tipo==='config'){orc8Editar(p);return;}if(p.tipo==='fachada'){orc2.prodTipo='fachada';orc2.fach={nome:p.nomeCurto||'',largura:p.largura,altura:p.altura,cor:p.cor||ORC2_ACM_PADRAO,trocas:JSON.parse(JSON.stringify(p.trocas||{})),extras:Object.assign(_orc2FachVazia().extras,JSON.parse(JSON.stringify(p.extras||{})))};orc2.fachEditId=id;_orc2ReRenderProdutos();return;}orc2.prodTipo='letra';orc2.letra={modelo:p.modelo,nome:p.nomeCurto||'',largura:p.largura,altura:p.altura,perimetro:p.perimetro,caixa:p.caixa,adesivos:JSON.parse(JSON.stringify(p.adesivos||[])),trocas:JSON.parse(JSON.stringify(p.trocas||{})),tinta:p.tinta?JSON.parse(JSON.stringify(p.tinta)):null,ledCod:p.ledCod||'',acrilCod:p.acrilCod||'',fundoOk:!!p.fundoOk,ledQtd:Number(p.ledQtd)||0,ledRef:p.ledRef?JSON.parse(JSON.stringify(p.ledRef)):null,arte:p.arte?JSON.parse(JSON.stringify(p.arte)):null};orc2.letraEditId=id;_orc2ReRenderProdutos();}
 function orc2CancelarEdicaoLetra(){orc2.letra=_orc2LetraVazia();orc2.letraEditId=null;_orc2ReRenderProdutos();}
 function orc2RemoverProduto(id){const p=orc2.doc.produtos.find(x=>x.id===id);if(!p)return;if(!confirm('Tirar "'+(p.nomeCurto||p.descricao)+'" do orçamento?'))return;orc2.doc.produtos=orc2.doc.produtos.filter(x=>x.id!==id);if(orc2.letraEditId===id){orc2.letra=_orc2LetraVazia();orc2.letraEditId=null;}if(orc2.fachEditId===id){orc2.fach=_orc2FachVazia();orc2.fachEditId=null;}_orc2ReRenderProdutos();_orc2SincronizarValorPedido();orcxCalcular();_orc2AtualizarTotais();_orc2GuardarRascunho();_orc2AtualizarContadorAba();}
 function orc2Cmv(id,v){const p=orc2.doc.produtos.find(x=>x.id===id);if(!p)return;let n=parseFloat(v);if(!(n>0))n=_orc2Cmv();if(n>100)n=100;p.cmv=n;const el=document.getElementById('orc2-pf-'+id);if(el)el.textContent=_orcxBRL(_orc2PrecoItem(p));_orc2AtualizarTotais();_orc2GuardarRascunho();}
@@ -73534,7 +73555,7 @@ function _orc3Watch(){
 }
 function _orc3Tem(){return Object.keys(orc3.base||{}).length>0;}
 function _orc3Preco(cod){const m=(orc3.base||{})[String(cod)];return m&&m.v>0?m.v:null;}
-function _orc3AplicarAdesivos(){try{const ja=new Set(ORC2_ADESIVOS.map(x=>String(x[0])));Object.entries(orc3.base||{}).forEach(([c,m])=>{if(m&&/^ADESIVO\b/i.test(String(m.n||'').trim())&&!ja.has(String(c))){ORC2_ADESIVOS.push([Number(c)||c,String(m.n).trim()]);ja.add(String(c));}});ORC2_ADESIVOS.sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'pt-BR'));}catch(e){} /* 2026-10-06: lista todos os ADESIVO* da planilha */ ORC2_ADESIVOS.forEach(([c])=>{const v=_orc3Preco(c);if(v)orc2.adesivoPrecos[c]=v;});if(_orc3Tem())orc2.planilhaStatus='ok';}
+function _orc3AplicarAdesivos(){try{if(typeof _orcMpNovosAplicar==='function')_orcMpNovosAplicar(true);}catch(e){}try{const ja=new Set(ORC2_ADESIVOS.map(x=>String(x[0])));Object.entries(orc3.base||{}).forEach(([c,m])=>{if(m&&/^ADESIVO\b/i.test(String(m.n||'').trim())&&!ja.has(String(c))){ORC2_ADESIVOS.push([Number(c)||c,String(m.n).trim()]);ja.add(String(c));}});ORC2_ADESIVOS.sort((a,b)=>String(a[1]).localeCompare(String(b[1]),'pt-BR'));}catch(e){} /* 2026-10-06: lista todos os ADESIVO* da planilha */ ORC2_ADESIVOS.forEach(([c])=>{const v=_orc3Preco(c);if(v)orc2.adesivoPrecos[c]=v;});if(_orc3Tem())orc2.planilhaStatus='ok';}
 // Preço de cada material da Letra Caixa: base importada (pelo código) > valor manual > padrão
 function _orc2Precos(){
   const P=Object.assign({},ORC2_PRECOS_PADRAO,(orc2.cfg&&orc2.cfg.precos)||{});
@@ -91764,6 +91785,756 @@ function _fhAvisoUnificar(out){
     return r;
   };
 })();
+</script>
+<script>
+// Tabelas de cor (2026-11-16): RAL Classic (lista da Wikipedia, pacote ral-colors, MIT) e Pantone C (pacote pantone-table, MIT).
+// Hex é aproximação de tela — a cor final é sempre conferida no catálogo físico.
+const L3D_RAL="1000|Bege esverdeado|cdba88;1001|Bege|d0b084;1002|Amarelo areia|d2aa6d;1003|Amarelo sinal|f9a800;1004|Amarelo ouro|e49e00;1005|Amarelo mel|cb8e00;1006|Amarelo milho|e29000;1007|Amarelo narciso|e88c00;1011|Bege acastanhado|af804f;1012|Amarelo limão|ddaf27;1013|Branco pérola|e3d9c6;1014|Marfim|ddc49a;1015|Marfim claro|e6d2b5;1016|Amarelo enxofre|f1dd38;1017|Amarelo açafrão|f6a950;1018|Amarelo zinco|faca30;1019|Bege acinzentado|a48f7a;1020|Amarelo oliva|a08f65;1021|Amarelo colza|f6b600;1023|Amarelo tráfego|f7b500;1024|Amarelo ocre|ba8f4c;1026|Amarelo luminoso|ffff00;1027|Amarelo caril|a77f0e;1028|Amarelo melão|ff9b00;1032|Amarelo giesta|e2a300;1033|Amarelo dália|f99a1c;1034|Amarelo pastel|eb9c52;1035|Bege pérola|908370;1036|Ouro pérola|80643f;1037|Amarelo sol|f09200;2000|Laranja amarelado|dd7907;2001|Laranja avermelhado|be4e20;2002|Laranja sanguíneo|c63927;2003|Laranja pastel|fa842b;2004|Laranja puro|e75b12;2005|Laranja luminoso|ff2300;2007|Laranja claro luminoso|ffa421;2008|Laranja avermelhado claro|f3752c;2009|Laranja tráfego|e15501;2010|Laranja sinal|d4652f;2011|Laranja profundo|ec7c25;2012|Laranja salmão|db6a50;2013|Laranja pérola|954527;2017|Laranja RAL|fa4402;3000|Vermelho fogo|ab2524;3001|Vermelho sinal|a02128;3002|Vermelho carmim|a1232b;3003|Vermelho rubi|8d1d2c;3004|Vermelho púrpura|701f29;3005|Vermelho vinho|5e2028;3007|Vermelho negro|402225;3009|Vermelho óxido|703731;3011|Vermelho acastanhado|7e292c;3012|Vermelho bege|cb8d73;3013|Vermelho tomate|9c322e;3014|Rosa antigo|d47479;3015|Rosa claro|e1a6ad;3016|Vermelho coral|ac4034;3017|Rosa|d3545f;3018|Vermelho morango|d14152;3020|Vermelho tráfego|c1121c;3022|Rosa salmão|d56d56;3024|Vermelho luminoso|f70000;3026|Vermelho claro luminoso|ff0000;3027|Vermelho framboesa|b42041;3028|Vermelho puro|e72512;3031|Vermelho oriente|ac323b;3032|Vermelho rubi pérola|711521;3033|Rosa pérola|b24c43;4001|Lilás avermelhado|8a5a83;4002|Violeta avermelhado|933d50;4003|Violeta érica|d15b8f;4004|Violeta bordô|691639;4005|Lilás azulado|83639d;4006|Púrpura tráfego|992572;4007|Violeta púrpura|4a203b;4008|Violeta sinal|904684;4009|Violeta pastel|a38995;4010|Telemagenta|c63678;4011|Violeta pérola|8773a1;4012|Amora pérola|6b6880;5000|Azul violeta|384c70;5001|Azul esverdeado|1f4764;5002|Azul ultramarino|2b2c7c;5003|Azul safira|2a3756;5004|Azul negro|1d1f2a;5005|Azul sinal|154889;5007|Azul brilhante|41678d;5008|Azul acinzentado|313c48;5009|Azul celeste|2e5978;5010|Azul genciana|13447c;5011|Azul aço|232c3f;5012|Azul claro|3481b8;5013|Azul cobalto|232d53;5014|Azul pomba|6c7c98;5015|Azul céu|2874b2;5017|Azul tráfego|0e518d;5018|Azul turquesa|21888f;5019|Azul Capri|1a5784;5020|Azul oceano|0b4151;5021|Azul água|07737a;5022|Azul noturno|2f2a5a;5023|Azul distante|4d668e;5024|Azul pastel|6a93b0;5025|Azul genciana pérola|296478;5026|Azul noturno pérola|102c54;6000|Verde pátina|327662;6001|Verde esmeralda|28713e;6002|Verde folha|276235;6003|Verde oliva|4b573e;6004|Verde azulado|0e4243;6005|Verde musgo|0f4336;6006|Oliva acinzentado|40433b;6007|Verde garrafa|283424;6008|Verde acastanhado|35382e;6009|Verde abeto|26392f;6010|Verde grama|3e753b;6011|Verde reseda|68825b;6012|Verde negro|31403d;6013|Verde junco|797c5a;6014|Oliva amarelado|444337;6015|Oliva negro|3d403a;6016|Verde turquesa|026a52;6017|Verde maio|468641;6018|Verde amarelado|48a43f;6019|Verde pastel|b7d9b1;6020|Verde cromo|354733;6021|Verde pálido|86a47c;6022|Oliva acastanhado|3e3c32;6024|Verde tráfego|008754;6025|Verde samambaia|53753c;6026|Verde opala|005d52;6027|Verde claro|81c0bb;6028|Verde pinho|2d5546;6029|Verde menta|007243;6032|Verde sinal|0f8558;6033|Turquesa menta|478a84;6034|Turquesa pastel|7fb0b2;6035|Verde pérola|1b542c;6036|Verde opala pérola|005d4c;6037|Verde puro|25e712;6038|Verde luminoso|00f700;7000|Cinza esquilo|7e8b92;7001|Cinza prata|8f999f;7002|Cinza oliva|817f68;7003|Cinza musgo|7a7b6d;7004|Cinza sinal|9ea0a1;7005|Cinza rato|6b716f;7006|Cinza bege|756f61;7008|Cinza cáqui|746643;7009|Cinza esverdeado|5b6259;7010|Cinza lona|575d57;7011|Cinza ferro|555d61;7012|Cinza basalto|596163;7013|Cinza acastanhado|555548;7015|Cinza ardósia|51565c;7016|Cinza antracite|373f43;7021|Cinza negro|2e3234;7022|Cinza sombra|4b4d46;7023|Cinza concreto|818479;7024|Cinza grafite|474a50;7026|Cinza granito|374447;7030|Cinza pedra|939388;7031|Cinza azulado|5d6970;7032|Cinza seixo|b9b9a8;7033|Cinza cimento|818979;7034|Cinza amarelado|939176;7035|Cinza claro|cbd0cc;7036|Cinza platina|9a9697;7037|Cinza poeira|7c7f7e;7038|Cinza ágata|b4b8b0;7039|Cinza quartzo|6b695f;7040|Cinza janela|9da3a6;7042|Cinza tráfego A|8f9695;7043|Cinza tráfego B|4e5451;7044|Cinza seda|bdbdb2;7045|Cinza telecom 1|91969a;7046|Cinza telecom 2|82898e;7047|Cinza telecom 4|cfd0cf;7048|Cinza rato pérola|888175;8000|Marrom esverdeado|887142;8001|Marrom ocre|9c6b30;8002|Marrom sinal|7b5141;8003|Marrom argila|80542f;8004|Marrom cobre|8f4e35;8007|Marrom corça|6f4a2f;8008|Marrom oliva|6f4f28;8011|Marrom noz|5a3a29;8012|Marrom avermelhado|673831;8014|Marrom sépia|49392d;8015|Marrom castanha|633a34;8016|Marrom mogno|4c2f26;8017|Marrom chocolate|44322d;8019|Marrom acinzentado|3f3a3a;8022|Marrom negro|211f20;8023|Marrom alaranjado|a65e2f;8024|Marrom bege|79553c;8025|Marrom pálido|755c49;8028|Marrom terra|4e3b2b;8029|Cobre pérola|773c27;9001|Branco creme|efebdc;9002|Branco acinzentado|ddded4;9003|Branco sinal|f4f8f4;9004|Preto sinal|2e3032;9005|Preto intenso|0a0a0d;9006|Alumínio branco|a5a8a6;9007|Alumínio cinza|8f8f8c;9010|Branco puro|f7f9ef;9011|Preto grafite|292c2f;9012|Branco sala limpa|fffde6;9016|Branco tráfego|f7fbf5;9017|Preto tráfego|2a2d2f;9018|Branco papiro|cfd3cd;9022|Cinza claro pérola|9c9c9c;9023|Cinza escuro pérola|7e8182";
+const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9800;105 C|897a27;7401 C|f5e1a4;7402 C|ecd898;7403 C|eed484;7404 C|f4da40;7405 C|f2cd00;7406 C|f1c400;7407 C|cba052;106 C|f9e547;107 C|fbe122;108 C|fedb00;109 C|ffd100;110 C|daaa00;111 C|aa8a00;112 C|9c8412;113 C|fae053;114 C|fbdd40;115 C|fdda24;116 C|ffcd00;117 C|c99700;118 C|ac8400;119 C|897322;127 C|f3dd6d;128 C|f3d54e;129 C|f3d03e;130 C|f2a900;131 C|cc8a00;132 C|a07400;133 C|6c571b;1205 C|f8e08e;1215 C|fbd872;1225 C|ffc845;1235 C|ffb81c;1245 C|c69214;1255 C|ad841f;1265 C|886b25;120 C|fbdb65;121 C|fdd757;122 C|fed141;123 C|ffc72c;124 C|eaaa00;125 C|b58500;126 C|9a7611;7548 C|ffc600;7549 C|ffb500;7550 C|d19000;7551 C|b47e00;7552 C|73531d;7553 C|5a4522;7554 C|4b3d2a;7555 C|d29f13;7556 C|b78b20;7557 C|9f7d23;7558 C|967126;7559 C|8f6a2a;7560 C|7d622e;7561 C|6c5d34;134 C|fdd26e;135 C|ffc658;136 C|ffbf3f;137 C|ffa300;138 C|de7c00;139 C|af6d04;140 C|74531c;1345 C|fdd086;1355 C|ffc56e;1365 C|ffb549;1375 C|ff9e1b;1385 C|d57800;1395 C|996017;1405 C|6e4c1e;141 C|f2c75c;142 C|f1be48;143 C|f1b434;144 C|ed8b00;145 C|cf7f00;146 C|a76d11;147 C|715c2a;7408 C|f6be00;7409 C|f0b323;7410 C|fead77;7411 C|e6a65d;7412 C|d38235;7413 C|dc8633;7414 C|c16c18;7562 C|bd9b60;7563 C|d69a2d;7564 C|db8a06;7565 C|cd7925;7566 C|ad6433;7567 C|89532f;7568 C|775135;7569 C|d78825;7570 C|d3832b;7571 C|c67d30;7572 C|b67233;7573 C|a7662b;7574 C|9e6a38;7575 C|835d32;712 C|fcc89b;713 C|fdbe87;714 C|fdaa63;715 C|f68d2e;716 C|ea7600;717 C|d45d00;718 C|be4d00;148 C|fecb8b;149 C|ffc27b;150 C|ffb25b;151 C|ff8200;152 C|e57200;153 C|be6a14;154 C|9b5a1a;155 C|efd19f;156 C|efbe7d;157 C|eca154;158 C|e87722;159 C|cb6015;160 C|a1561c;161 C|603d20;1485 C|ffae62;1495 C|ff8f1c;1505 C|ff6900;1525 C|b94700;1535 C|94450b;1545 C|653819;1555 C|ffb990;1565 C|ffa06a;1575 C|ff7f32;1585 C|ff6a13;1595 C|d86018;1605 C|a65523;1615 C|8b4720;162 C|ffbe9f;163 C|ff9d6e;164 C|ff7f41;165 C|ff671f;166 C|e35205;167 C|be531c;168 C|73381d;7576 C|db864e;7577 C|e07e3c;7578 C|dc6b2f;7579 C|dc582a;7580 C|c05131;7581 C|864a33;7582 C|674736;1625 C|ffa38b;1635 C|ff8d6d;1645 C|ff6a39;1655 C|fc4c02;1665 C|dc4405;1675 C|a9431e;1685 C|833921;169 C|ffb3ab;170 C|ff8674;171 C|ff5c39;172 C|fa4616;173 C|cf4520;174 C|963821;175 C|6b3529;7583 C|c4622d;7584 C|ba5826;7585 C|af5c37;7586 C|9e5330;7587 C|924c2e;7588 C|7b4d35;7589 C|5c4738;7590 C|d4b59e;7591 C|c07d59;7592 C|b15533;7593 C|9d432c;7594 C|7c3a2d;7595 C|6b3d2e;7596 C|5c3d31;7597 C|d14124;7598 C|bd472a;7599 C|b33d26;7600 C|8d3f2b;7601 C|83412c;7602 C|7b4931;7603 C|674230;7604 C|e4d5d3;7605 C|e1bbb4;7606 C|d6938a;7607 C|c26e60;7608 C|a4493d;7609 C|823b34;7610 C|683431;7611 C|ddbcb0;7612 C|ca9a8e;7613 C|bc8a7e;7614 C|a37f74;7615 C|866761;7616 C|6b4c4c;7617 C|583d3e;7520 C|eabeb0;7521 C|c09c83;7522 C|b46a55;7523 C|ab5c57;7524 C|a45248;7525 C|9a6a4f;7526 C|8a391b;489 C|ecc3b2;488 C|ecbaa8;487 C|eaa794;486 C|e8927c;485 C|da291c;484 C|9a3324;483 C|653024;176 C|ffb1bb;177 C|ff808b;178 C|ff585d;179 C|e03c31;180 C|be3a34;181 C|81312f;1765 C|ffa3b5;1775 C|ff8da1;1785 C|f8485e;1788 C|ee2737;1795 C|d22630;1805 C|af272f;1815 C|7c2529;1767 C|fcafc0;1777 C|fb637e;1787 C|f4364c;1797 C|cb333b;1807 C|a4343a;1817 C|643335;7618 C|c66e4e;7619 C|c04c36;7620 C|b7312c;7621 C|ab2328;7622 C|93272c;7623 C|8a2a2b;7624 C|802f2d;7625 C|e1523d;7626 C|c63527;7627 C|a72b2a;7628 C|9e2a2b;7629 C|6d3332;7630 C|633231;7631 C|572d2d;7415 C|e6baa8;7416 C|e56a54;7417 C|e04e39;7418 C|cd545b;7419 C|b04a5a;7420 C|9b2242;7421 C|651d32;182 C|fabbcb;183 C|fc9bb3;184 C|f65275;185 C|e4002b;186 C|c8102e;187 C|a6192e;188 C|76232f;196 C|ecc7cd;197 C|e89cae;198 C|df4661;199 C|d50032;200 C|ba0c2f;201 C|9d2235;202 C|862633;189 C|f8a3bc;190 C|f67599;191 C|ef426f;192 C|e40046;193 C|bf0d3e;194 C|9b2743;195 C|782f40;1895 C|f5b6cd;1905 C|f59bbb;1915 C|ef4a81;1925 C|e0004d;1935 C|c5003e;1945 C|a6093d;1955 C|8a1538;705 C|f5dadf;706 C|f7ced7;707 C|f9b5c4;708 C|f890a5;709 C|ef6079;710 C|e03e52;711 C|cb2c30;698 C|f2d4d7;699 C|f4c3cc;700 C|f2acb9;701 C|e68699;702 C|d25b73;703 C|b83a4b;704 C|9e2a2f;203 C|ecb3cb;204 C|e782a9;205 C|e0457b;206 C|ce0037;207 C|a50034;208 C|861f41;209 C|6f263d;210 C|f99fc9;211 C|f57eb6;212 C|f04e98;213 C|e31c79;214 C|ce0f69;215 C|ac145a;216 C|7d2248;7422 C|f4cdd4;7423 C|e06287;7424 C|e24585;7425 C|b52555;7426 C|a4123f;7427 C|971b2f;7428 C|6a2c3e;7632 C|d6c9ca;7633 C|c4a4a7;7634 C|c16784;7635 C|c63663;7636 C|bc204b;7637 C|912f46;7638 C|7e2d40;217 C|eabedb;218 C|e56db1;219 C|da1884;220 C|a50050;221 C|910048;222 C|6c1d45;7639 C|936d73;7640 C|934054;7641 C|8e2c48;7642 C|732e4a;7643 C|672e45;7644 C|582d40;7645 C|502b3a;223 C|ef95cf;224 C|eb6fbd;225 C|df1995;226 C|d0006f;227 C|aa0061;228 C|890c58;229 C|672146;230 C|f4a6d7;231 C|f277c6;232 C|e93cac;233 C|c6007e;234 C|a20067;235 C|840b55;670 C|ead3e2;671 C|e6bcd8;672 C|dfa0c9;673 C|d986ba;674 C|c6579a;675 C|ae2573;676 C|960051;677 C|e5cedb;678 C|e3c8d8;679 C|debed2;680 C|c996b6;681 C|b06c96;682 C|994878;683 C|7c2855;684 C|e4c6d4;685 C|dcb6c9;686 C|d0a1ba;687 C|be84a3;688 C|a76389;689 C|893b67;690 C|612141;510 C|ebbecb;509 C|e8b3c3;508 C|e4a9bb;507 C|d592aa;506 C|84344e;505 C|6f2c3f;504 C|572932;7429 C|e2bccb;7430 C|dca9bf;7431 C|c9809e;7432 C|b55c80;7433 C|a73a64;7434 C|9b3259;7435 C|872651;691 C|e9cdd0;692 C|e4bec3;693 C|d7a3ab;694 C|c48490;695 C|b46b7a;696 C|984856;697 C|893c47;496 C|f2c6cf;495 C|f1bdc8;494 C|e9a2b2;493 C|dc8699;492 C|8f3237;491 C|7f3035;490 C|5d2a2c;503 C|e9c4c7;502 C|e5bac1;501 C|daa5ad;500 C|c6858f;499 C|7a3e3a;498 C|6a3735;497 C|512f2e;5035 C|dfc2c3;5025 C|dbb7bb;5015 C|cca1a6;5005 C|b07c83;4995 C|9c6169;4985 C|874b52;4975 C|3f2021;236 C|f1a7dc;237 C|ec86d0;238 C|e45dbf;239 C|db3eb1;240 C|c5299b;241 C|af1685;242 C|80225f;2365 C|efbae1;2375 C|e277cd;2385 C|d539b5;2395 C|c800a1;2405 C|b0008e;2415 C|9e007e;2425 C|830065;243 C|eab8e4;244 C|e59bdc;245 C|dd7fd3;246 C|c724b1;247 C|bb16a3;248 C|a51890;249 C|80276c;7646 C|a56e87;7647 C|a83d72;7648 C|991e66;7649 C|8a1b61;7650 C|722257;7651 C|6a2a5b;7652 C|5e2751;250 C|e7bae4;251 C|dd9cdf;252 C|c964cf;253 C|ad1aac;254 C|981d97;255 C|72246c;517 C|ebc6df;516 C|e6bedd;515 C|e2acd7;514 C|d48bc8;513 C|93328e;512 C|833177;511 C|612c51;7436 C|eedaea;7437 C|ccaed0;7438 C|d59ed7;7439 C|b288b9;7440 C|a277a6;7441 C|9f5cc0;7442 C|963cbd;2562 C|d7a9e3;2572 C|c98bdb;2582 C|ac4fc6;2592 C|9b26b6;2602 C|87189d;2612 C|772583;2622 C|653165;7653 C|948794;7654 C|a2789c;7655 C|a15a95;7656 C|8e3a80;7657 C|6e2b62;7658 C|6a3460;7659 C|5d3754;524 C|d5c2d8;523 C|c9b1d0;522 C|ba9cc5;521 C|a57fb2;520 C|642f6c;519 C|59315f;518 C|4b3048;5245 C|dbcdd3;5235 C|d0bec7;5225 C|c6b0bc;5215 C|af95a6;5205 C|86647a;5195 C|66435a;5185 C|4a3041;5175 C|d8c8d1;5165 C|d3c0cd;5155 C|bfa5b8;5145 C|9b7793;5135 C|7e5475;5125 C|693c5e;5115 C|512a44;531 C|dfc8e7;530 C|d7b9e4;529 C|caa2dd;528 C|b580d1;527 C|8031a7;526 C|702f8a;525 C|572c5f;256 C|d6bfdd;257 C|c6a1cf;258 C|8c4799;259 C|6d2077;260 C|642667;261 C|5d285f;262 C|51284f;2563 C|cba3d8;2573 C|b884cb;2583 C|a05eb5;2593 C|84329b;2603 C|702082;2613 C|671e75;2623 C|5f2167;7660 C|9991a4;7661 C|8d6e97;7662 C|7a4183;7663 C|6b3077;7664 C|653279;7665 C|5e366e;7666 C|5c4e63;2567 C|c1a0da;2577 C|a77bca;2587 C|8246af;2597 C|5c068c;2607 C|500778;2617 C|470a68;2627 C|3c1053;263 C|d7c6e6;264 C|c1a7e2;265 C|9063cd;266 C|753bbd;267 C|5f259f;268 C|582c83;269 C|512d6d;2635 C|c5b4e3;2645 C|ad96dc;2655 C|9678d3;2665 C|7d55c7;2685 C|330072;2695 C|2e1a47;270 C|b4b5df;271 C|9595d2;272 C|7474c1;273 C|24135f;274 C|211551;275 C|201747;276 C|221c35;2705 C|a7a4e0;2715 C|8b84d7;2725 C|685bc7;2735 C|2e008b;2745 C|280071;2755 C|250e62;2765 C|201547;7667 C|6e7ca0;7668 C|686e9f;7669 C|615e9b;7670 C|565294;7671 C|514689;7672 C|4c4184;7673 C|535486;7443 C|dddae8;7444 C|b6b8dc;7445 C|a7a2c3;7446 C|8986ca;7447 C|5d4777;7448 C|4b384c;7449 C|41273b;7674 C|878cb4;7675 C|7c7fab;7676 C|7566a0;7677 C|6f5091;7678 C|68478d;7679 C|563d82;7680 C|523178;663 C|e5e1e6;664 C|e0dbe3;665 C|c6bcd0;666 C|a192b2;667 C|7c6992;668 C|614b79;669 C|3f2a56;5315 C|d8d7df;5305 C|c6c4d2;5295 C|b3b0c4;5285 C|8d89a5;5275 C|595478;5265 C|403a60;5255 C|1e1a34;538 C|c5cfda;537 C|bbc7d6;536 C|a2b2c8;535 C|8e9fbc;534 C|1b365d;533 C|1f2a44;532 C|1c1f2a;7541 C|d9e1e2;7542 C|a4bcc2;7543 C|98a4ae;7544 C|768692;7545 C|425563;7546 C|253746;7547 C|131e29;552 C|b9d3dc;551 C|a3c7d2;550 C|8db9ca;549 C|6ba4b8;548 C|003d4c;547 C|00313c;546 C|072b31;5455 C|bfced6;5445 C|b7c9d3;5435 C|a6bbc8;5425 C|7a99ac;5415 C|5b7f95;5405 C|4f758b;5395 C|081f2c;642 C|d1dde6;643 C|c6d6e3;644 C|9bb8d3;645 C|7da1c4;646 C|5e8ab4;647 C|236192;648 C|002e5d;649 C|dbe2e9;650 C|ced9e5;651 C|a7bcd6;652 C|7d9bc1;653 C|326295;654 C|003a70;655 C|002554;656 C|dde5ed;657 C|c8d8eb;658 C|b1c9e8;659 C|7ba4db;660 C|407ec9;661 C|003594;662 C|001a70;7450 C|bdc5db;7451 C|89abe3;7452 C|8094dd;7453 C|7ba6de;7454 C|5f8fb4;7455 C|3a5dae;7456 C|606eb2;2706 C|cbd3eb;2716 C|9faee5;2726 C|485cc7;2736 C|1e22aa;2746 C|171c8f;2756 C|151f6d;2766 C|141b4d;2708 C|b8ccea;2718 C|5c88da;2728 C|0047bb;2738 C|06038d;2748 C|001871;2758 C|001e62;2768 C|071d49;2707 C|c3d7ee;2717 C|a7c6ed;2727 C|307fe2;2747 C|001a72;2757 C|001e60;2767 C|13294b;277 C|abcae9;278 C|8bb8e8;279 C|418fde;280 C|012169;281 C|00205b;282 C|041e42;283 C|92c1e9;284 C|6cace4;285 C|0072ce;286 C|0033a0;287 C|003087;288 C|002d72;289 C|0c2340;7681 C|94a9cb;7682 C|6787b7;7683 C|426da9;7684 C|385e9d;7685 C|2c5697;7686 C|1d4f91;7687 C|1d428a;545 C|c6dae7;544 C|bdd6e6;543 C|a4c8e1;542 C|7bafd4;541 C|003c71;540 C|003057;539 C|00263a;290 C|b9d9eb;291 C|9bcbeb;292 C|69b3e7;293 C|003da5;294 C|002f6c;295 C|002855;296 C|041c2c;2905 C|8dc8e8;2915 C|62b5e5;2925 C|009cde;2935 C|0057b8;2945 C|004c97;2955 C|003865;2965 C|00263e;297 C|71c5e8;298 C|41b6e6;299 C|00a3e0;300 C|005eb8;301 C|004b87;302 C|003b5c;303 C|002a3a;7688 C|4698cb;7689 C|298fc2;7690 C|0076a8;7691 C|006298;7692 C|005587;7693 C|004976;7694 C|01426a;2975 C|99d6ea;2985 C|5bc2e7;2995 C|00a9e0;3005 C|0077c8;3015 C|00629b;3025 C|004f71;3035 C|003e51;7695 C|7ba7bc;7696 C|6399ae;7697 C|4e87a0;7698 C|41748d;7699 C|34657f;7700 C|165c7d;7701 C|005776;7457 C|bbdde6;7458 C|71b2c9;7459 C|4298b5;7460 C|0086bf;7461 C|007dba;7462 C|00558c;7463 C|002b49;304 C|9adbe8;305 C|59cbe8;306 C|00b5e2;307 C|006ba6;308 C|00587c;309 C|003b49;635 C|a4dbe8;636 C|8bd3e6;637 C|4ec3e0;638 C|00afd7;639 C|0095c8;640 C|0082ba;641 C|0067a0;7702 C|48a9c5;7703 C|009cbd;7704 C|0085ad;7705 C|007096;7706 C|006a8e;7707 C|00617f;7708 C|005670;628 C|b8dde1;629 C|9bd3dd;630 C|77c5d5;631 C|3eb1c8;632 C|0093b2;633 C|007396;634 C|005f83;310 C|6ad1e3;311 C|05c3de;312 C|00a9ce;313 C|0092bc;314 C|007fa3;315 C|00677f;316 C|004851;3105 C|68d2df;3115 C|00c1d5;3125 C|00aec7;3135 C|008eaa;3145 C|00778b;3155 C|006272;3165 C|004f59;7709 C|63b1bc;7710 C|00a7b5;7711 C|0097a9;7712 C|00859b;7713 C|007d8a;7714 C|007680;7715 C|006269;317 C|b1e4e3;318 C|88dbdf;319 C|2dccd3;320 C|009ca6;321 C|008c95;322 C|007377;323 C|005f61;7464 C|a0d1ca;7465 C|40c1ac;7466 C|00b0b9;7467 C|00a3ad;7468 C|007398;7469 C|005f86;7470 C|005a70;7471 C|7eddd3;7472 C|5cb8b2;7473 C|279989;7474 C|007681;7475 C|487a7b;7476 C|0d5257;7477 C|244c5a;5523 C|b6cfd0;5513 C|abc7ca;5503 C|94b7bb;5493 C|7fa9ae;5483 C|4f868e;5473 C|115e67;5463 C|07272d;7716 C|00968f;7717 C|00857d;7718 C|007672;7719 C|006d68;7720 C|00635b;7721 C|005e5d;7722 C|005151;324 C|9cdbd9;325 C|64ccc9;326 C|00b2a9;327 C|008675;328 C|007367;329 C|00685e;330 C|00534c;3242 C|71dbd4;3252 C|2ad2c9;3262 C|00bfb3;3272 C|00a499;3282 C|008578;3292 C|00594f;3302 C|004c45;3245 C|7ce0d3;3255 C|2cd5c4;3265 C|00c7b1;3275 C|00b398;3285 C|009681;3295 C|007864;3305 C|004e42;3248 C|6dcdb8;3258 C|49c5b1;3268 C|00ab8e;3278 C|009b77;3288 C|008264;3298 C|006a52;3308 C|034638;566 C|b9dcd2;565 C|a1d6ca;564 C|86c8bc;563 C|6bbbae;562 C|006f62;561 C|00594c;560 C|1d3c34;573 C|b5e3d8;572 C|a5dfd3;571 C|98dbce;570 C|6bcaba;569 C|00816d;568 C|006c5b;567 C|173f35;559 C|adcab8;558 C|9abeaa;557 C|85b09a;556 C|6fa287;555 C|28724f;554 C|205c40;553 C|284734;5595 C|bfcec2;5585 C|a7bdb1;5575 C|92aca0;5565 C|7f9c90;5555 C|5c7f71;5545 C|43695b;5535 C|183028;5665 C|bac5b9;5655 C|b0bdb0;5645 C|a3b2a4;5635 C|94a596;5625 C|708573;5615 C|5e7461;5605 C|22372b;5527 C|bcc9c5;5517 C|b1c0bc;5507 C|9db0ac;5497 C|829995;5487 C|5d7975;5477 C|3e5d58;5467 C|18332f;621 C|d1e0d7;622 C|b7cdc2;623 C|9ab9ad;624 C|789f90;625 C|507f70;626 C|285c4d;627 C|13322b;331 C|a7e6d7;332 C|8ce2d0;333 C|3cdbc0;334 C|009775;335 C|007b5f;336 C|00664f;337 C|8fd6bd;338 C|6eceb2;339 C|00b388;340 C|00965e;341 C|007a53;342 C|006747;343 C|115740;7723 C|50a684;7724 C|00966c;7725 C|008755;7726 C|007b4b;7727 C|006f44;7728 C|006845;7729 C|005844;3375 C|7ae1bf;3385 C|47d7ac;3395 C|00c389;3405 C|00af66;3415 C|007749;3425 C|006341;3435 C|154734;344 C|a0dab3;345 C|91d6ac;346 C|71cc98;347 C|009a44;348 C|00843d;349 C|046a38;350 C|2c5234;351 C|a2e4b8;352 C|8fe2b0;353 C|80e0a7;354 C|00b140;355 C|009639;356 C|007a33;357 C|215732;7478 C|9be3bf;7479 C|26d07c;7480 C|00bf6f;7481 C|00b74f;7482 C|009f4d;7483 C|275d38;7484 C|00573f;7730 C|4b9560;7731 C|228848;7732 C|007a3e;7733 C|007041;7734 C|286140;7735 C|36573b;7736 C|395542;7737 C|6ba539;7738 C|48a23f;7739 C|319b42;7740 C|3a913f;7741 C|44883e;7742 C|4a773c;7743 C|44693d;358 C|addc91;359 C|a1d884;360 C|6cc24a;361 C|43b02a;362 C|509e2f;363 C|4c8c2b;364 C|4a7729;7485 C|d0debb;7486 C|bce194;7487 C|8edd65;7488 C|78d64b;7489 C|74aa50;7490 C|719949;7491 C|79863c;365 C|c2e189;366 C|b7dd79;367 C|a4d65e;368 C|78be20;369 C|64a70b;370 C|658d1b;371 C|546223;372 C|d4eb8e;373 C|cdea80;374 C|c5e86c;375 C|97d700;376 C|84bd00;377 C|7a9a01;378 C|59621d;580 C|c4d6a4;579 C|bcd19b;578 C|b7ce95;577 C|a9c47f;576 C|789d4a;575 C|67823a;574 C|4e5b31;5807 C|d0d1ab;5797 C|c6c89b;5787 C|babd8b;5777 C|a2a569;5767 C|8a8d4a;5757 C|6d712e;5747 C|3d441e;5875 C|d2ce9e;5865 C|cbc793;5855 C|c0bb87;5845 C|afa96e;5835 C|a09958;5825 C|89813d;5815 C|555025;5803 C|c3c6a8;5793 C|b3b995;5783 C|a3aa83;5773 C|899064;5763 C|737b4c;5753 C|5e6738;5743 C|3e4827;7492 C|bfcc80;7493 C|bbc592;7494 C|9caf88;7495 C|8f993e;7496 C|76881d;7497 C|7a7256;7498 C|5b6236;7744 C|babc16;7745 C|abad23;7746 C|999b30;7747 C|888d30;7748 C|7c8034;7749 C|727337;7750 C|656635;379 C|e2e868;380 C|dbe442;381 C|cedc00;382 C|c4d600;383 C|a8ad00;384 C|949300;385 C|787121;386 C|e9ec6b;387 C|e3e935;388 C|e0e721;389 C|d0df00;390 C|b5bd00;391 C|9a9500;392 C|827a04;587 C|e3e48d;586 C|e0e27c;585 C|dbde70;584 C|d2d755;583 C|b7bf10;582 C|8e8c13;581 C|625d20;393 C|f0ec74;394 C|ede939;395 C|ece81a;396 C|e1e000;397 C|bfb800;398 C|ada400;399 C|a09200;3935 C|f3ea5d;3945 C|f3e500;3955 C|efdf00;3965 C|eedc00;3975 C|bba600;3985 C|9a8700;3995 C|685c20;600 C|f1eb9c;601 C|f0e991;602 C|f0e87b;603 C|ede04b;604 C|eada24;605 C|e1cd00;606 C|cfb500;607 C|ebe49a;608 C|e9e186;609 C|e6de77;610 C|e1d555;611 C|d7c826;612 C|c4b000;613 C|b39b00;461 C|e9df97;460 C|e4d77e;459 C|decd63;458 C|d9c756;457 C|b89d18;456 C|a28e2a;455 C|695b24;614 C|dcd59a;615 C|d6cf8d;616 C|d0c883;617 C|c0b561;618 C|ac9f3c;619 C|9f912a;620 C|8a7b19;7751 C|cab64b;7752 C|cfb023;7753 C|c1a01e;7754 C|a08629;7755 C|897630;7756 C|736635;7757 C|675e33;7758 C|d4c304;7759 C|c4b200;7760 C|91852c;7761 C|747136;7762 C|5d6439;7763 C|585c3b;7764 C|535435;7765 C|bbb323;7766 C|b4a91f;7767 C|aa9d2e;7768 C|8f7e35;7769 C|716135;7770 C|635939;7771 C|4e4934;4545 C|d5cb9f;4535 C|cfc493;4525 C|c5b783;4515 C|b3a369;4505 C|998542;4495 C|8c7732;4485 C|614f25;454 C|cac7a7;453 C|bfbb98;452 C|b0aa7e;451 C|9b945f;450 C|594a25;449 C|524727;448 C|4a412a;7499 C|f1e6b2;7500 C|dfd1a7;7501 C|d9c89e;7502 C|ceb888;7503 C|a89968;7504 C|94795d;7505 C|816040;468 C|ddcba4;467 C|d3bc8d;466 C|c6aa76;465 C|b9975b;464 C|8b5b29;463 C|744f28;462 C|5c462b;7506 C|efdbb2;7507 C|fcd299;7508 C|e1b87f;7509 C|d6a461;7510 C|c6893f;7511 C|b77729;7512 C|a6631b;719 C|edc8a3;720 C|e7b78a;721 C|dda46f;722 C|c88242;723 C|b36924;724 C|934d11;725 C|7d3f16;475 C|f3cfb3;474 C|f1c6a7;473 C|f0bf9b;472 C|e59e6d;471 C|b86125;470 C|a45a2a;469 C|693f23;726 C|e0c09f;727 C|d9b48f;728 C|cda077;729 C|b58150;730 C|9e652e;731 C|774212;732 C|623412;4685 C|e0c6ad;4675 C|dcbfa6;4665 C|cda788;4655 C|bf9474;4645 C|ad7c59;4635 C|946037;4625 C|4f2c1d;7513 C|e1b7a7;7514 C|d5a286;7515 C|c58b68;7516 C|99552b;7517 C|85431e;7518 C|6d4f47;7519 C|5e4b3c;4755 C|d7c4b7;4745 C|cdb5a7;4735 C|c0a392;4725 C|ae8a79;4715 C|956c58;4705 C|7c4d3a;4695 C|5b3427;482 C|dbc8b6;481 C|d3bba8;480 C|c6a992;479 C|aa8066;478 C|703f2a;477 C|623b2a;476 C|4e3629;7527 C|d6d2c4;7528 C|c5b9ac;7529 C|b7a99a;7530 C|a39382;7531 C|7a6855;7532 C|63513d;7533 C|473729;7534 C|d1ccbd;7535 C|b7b09c;7536 C|a69f88;7537 C|a7aca2;7538 C|949a90;7539 C|8e9089;7540 C|4b4f54;427 C|d0d3d4;428 C|c1c6c8;429 C|a2aaad;430 C|7c878e;431 C|5b6770;432 C|333f48;433 C|1d252d;420 C|c7c9c7;421 C|b2b4b2;422 C|9ea2a2;423 C|898d8d;424 C|707372;425 C|54585a;426 C|25282a;441 C|bec6c4;442 C|a2acab;443 C|919d9d;444 C|717c7d;445 C|505759;446 C|3f4444;447 C|373a36;413 C|babbb1;414 C|a8a99e;415 C|919388;416 C|7e7f74;417 C|65665c;418 C|51534a;419 C|212322;400 C|c4bfb6;401 C|afa9a0;402 C|9d968d;403 C|8c857b;404 C|776e64;405 C|696158;406 C|c4bcb7;407 C|b2a8a2;408 C|978c87;409 C|857874;410 C|746661;411 C|5e514d;412 C|382f2d;434 C|d0c4c5;435 C|c1b2b6;436 C|ab989d;437 C|7b6469;438 C|584446;439 C|453536;440 C|382e2c;Warm Gray 1 C|d7d2cb;Warm Gray 2 C|cbc4bc;Warm Gray 3 C|bfb8af;Warm Gray 4 C|b6ada5;Warm Gray 5 C|aca39a;Warm Gray 6 C|a59c94;Warm Gray 7 C|968c83;Warm Gray 8 C|8c8279;Warm Gray 9 C|83786f;Warm Gray 10 C|796e65;Warm Gray 11 C|6e6259;Cool Gray 1 C|d9d9d6;Cool Gray 2 C|d0d0ce;Cool Gray 3 C|c8c9c7;Cool Gray 4 C|bbbcbc;Cool Gray 5 C|b1b3b3;Cool Gray 6 C|a7a8aa;Cool Gray 7 C|97999b;Cool Gray 8 C|888b8d;Cool Gray 9 C|75787b;Cool Gray 10 C|63666a;Cool Gray 11 C|53565a;Black 2 C|332f21;Black 3 C|212721;Black 4 C|31261d;Black 5 C|3e2b2e;Black 6 C|101820;Black 7 C|3d3935;Yellow C|fedd00;Yellow 012 C|ffd700;Orange 021 C|fe5000;Warm Red C|f9423a;Red 032 C|ef3340;Rubine Red C|ce0058;Rhodamine Red C|e10098;Purple C|bb29bb;Violet C|440099;Blue 072 C|10069f;Reflex Blue C|001489;Process Blue C|0085ca;Green C|00ab84;Black C|2d2926;Yellow 0131 C|f2f0a1;Red 0331 C|fcaebb;Magenta 0521 C|f1b2dc;Violet 0631 C|bf9bde;Blue 0821 C|74d1ea;Green 0921 C|9de7d7;Black 0961 C|9e978e;801 C|009ace;802 C|44d62c;803 C|ffe900;804 C|ffaa4d;805 C|ff7276;806 C|ff3eb5;807 C|ea27c2;871 C|84754e;872 C|85714d;873 C|866d4b;874 C|8b6f4e;875 C|87674f;876 C|8b634b;877 C|8a8d8f;Medium Yellow C|ffd900;Bright Orange C|ff5e00;Bright Red C|f93822;Strong Red C|ce0056;Pink C|d62598;Medium Purple C|4e008e;Dark Blue C|00239c;Medium Blue C|0084ca;Bright Green C|00b08b;Neutral Black C|222223;8001 C|8d8c8a;8002 C|8d867d;8003 C|8a7e70;8004 C|897966;8005 C|8a745a;8006 C|897054;8020 C|978176;8021 C|9a7a6a;8022 C|a0715b;8023 C|a1664c;8024 C|a75b38;8025 C|aa552a;8040 C|918887;8041 C|99817c;8042 C|9c7971;8043 C|a37063;8044 C|9f634f;8045 C|a35d44;8060 C|98828c;8061 C|9d7b88;8062 C|a2717f;8063 C|a76675;8064 C|a3646a;8065 C|a05d5d;8080 C|928294;8081 C|996a90;8082 C|9a5d8b;8083 C|9c4e85;8084 C|a24178;8085 C|a13769;8100 C|907695;8101 C|8f6992;8102 C|8f5a8f;8103 C|8f4c8c;8104 C|8e3b79;8105 C|8e336d;8120 C|8d8298;8121 C|8a7595;8122 C|886994;8123 C|885b94;8124 C|894e85;8125 C|87467a;8140 C|837698;8141 C|7e6a98;8142 C|795e99;8143 C|715096;8144 C|724f83;8145 C|704a79;8160 C|838495;8161 C|797997;8162 C|666197;8163 C|5b5498;8164 C|584990;8165 C|523e81;8180 C|7c8897;8181 C|5e789c;8182 C|4e6e9f;8183 C|3b62a1;8184 C|315995;8185 C|2b528c;8200 C|6d889a;8201 C|5f839c;8202 C|4c7e9f;8203 C|3177a3;8204 C|3f7590;8205 C|3d6f85;8220 C|6f8c9a;8221 C|5e8a9e;8222 C|4986a1;8223 C|2b80a1;8224 C|117993;8225 C|007287;8240 C|819098;8241 C|628e9c;8242 C|4c8b9b;8243 C|2a8a9f;8244 C|427f86;8245 C|3f7879;8260 C|728f98;8261 C|628b95;8262 C|4d8893;8263 C|338490;8264 C|21797c;8265 C|1c6d6a;8280 C|7c9797;8281 C|709795;8282 C|609a94;8283 C|499c93;8284 C|589382;8285 C|558e77;8300 C|80968e;8301 C|78998b;8302 C|6a9a82;8303 C|549372;8304 C|618c68;8305 C|5f865d;8320 C|8a928c;8321 C|80967a;8322 C|78986e;8323 C|69935e;8324 C|75925b;8325 C|728c4f;8340 C|8d957d;8341 C|8b9570;8342 C|899762;8343 C|859952;8344 C|83913e;8345 C|828d2e;8360 C|939478;8361 C|92926b;8362 C|98955c;8363 C|a19b4b;8364 C|9f9146;8365 C|a28f3d;8380 C|919085;8381 C|969077;8382 C|9b8e68;8383 C|9d8958;8384 C|a48244;8385 C|a47c39;8400 C|818182;8401 C|767575;8402 C|696866;8403 C|5c5b59;8404 C|56504a;8405 C|524942;8420 C|918b8d;8421 C|7d797a;8422 C|746d6e;8423 C|696060;8424 C|625550;8425 C|5f4f49;8440 C|9a8387;8441 C|9e7b7d;8442 C|a27172;8443 C|aa6767;8444 C|ac5b53;8445 C|ad5345;8460 C|89838d;8461 C|857784;8462 C|7f6a7a;8463 C|775e6e;8464 C|74535f;8465 C|714c56;8480 C|456580;8481 C|4c607e;8482 C|355772;8483 C|1f486b;8484 C|255682;8485 C|2c5d8a;8500 C|707f7c;8501 C|5e7d75;8502 C|4b646b;8503 C|33414c;8504 C|374e5f;8505 C|3c566b;8520 C|78765d;8521 C|555849;8522 C|464f45;8523 C|35413a;8524 C|3c4c4a;8525 C|435555;8540 C|834c4d;8541 C|6d4547;8542 C|633238;8543 C|603447;8544 C|643e54;8545 C|604355;8560 C|7f5649;8561 C|794a4a;8562 C|713f44;8563 C|70433c;8564 C|784f4e;8565 C|785556;8580 C|936d41;8581 C|845e3b;8582 C|7e5633;8583 C|6e4627;8584 C|6b4930;8585 C|76553d;8600 C|5d5a59;8601 C|504847;8602 C|423f44;8603 C|34343e;8604 C|393f4e;8605 C|3f485a;8620 C|78634d;8621 C|695644;8622 C|594839;8623 C|4e443c;8624 C|443d36;8625 C|47423d;8640 C|9a7c38;8641 C|a3842c;8642 C|ac8b1a;8643 C|ac8700;8644 C|a68c24;8645 C|a08e35;8660 C|8d7535;8661 C|89791d;8662 C|857d1e;8663 C|7e810d;8664 C|838e2c;8665 C|83913b;8680 C|7d7847;8681 C|787a38;8682 C|6e7f30;8683 C|658f31;8684 C|618a3b;8685 C|648d49;8700 C|72754d;8701 C|6a7b46;8702 C|5a7f44;8703 C|438240;8704 C|498853;8705 C|4e8a5e;8720 C|56735a;8721 C|5d7a5b;8722 C|46785a;8723 C|2e8661;8724 C|379277;8725 C|3d937e;8740 C|4d6c63;8741 C|346e61;8742 C|356f65;8743 C|007171;8744 C|007a82;8745 C|167f8b;8760 C|2e6d70;8761 C|006673;8762 C|355e68;8763 C|06576f;8764 C|1a6280;8765 C|26698a;8780 C|463f5f;8781 C|3c4363;8782 C|3a3c7b;8783 C|2a3a6e;8784 C|2f457c;8785 C|334e8a;8800 C|5b395f;8801 C|553b5f;8802 C|472d60;8803 C|4e2b60;8804 C|543873;8805 C|58417d;8820 C|86415c;8821 C|85335f;8822 C|6a375c;8823 C|622a65;8824 C|663775;8825 C|6a4182;8840 C|8b4153;8841 C|8b3354;8842 C|8d225b;8843 C|842263;8844 C|843072;8845 C|843d7d;8860 C|9a5051;8861 C|93434e;8862 C|95374b;8863 C|962742;8864 C|933554;8865 C|904061;8880 C|985459;8881 C|9d475b;8882 C|a33b5f;8883 C|aa3e50;8884 C|a7495e;8885 C|a24f65;8900 C|a45b43;8901 C|b65b49;8902 C|b85c5c;8903 C|bb4f51;8904 C|b75860;8905 C|b35f6b;8920 C|a0664e;8921 C|b35933;8922 C|b65317;8923 C|b74e23;8924 C|b25637;8925 C|ac5b43;8940 C|a16837;8941 C|ac662d;8942 C|ae5c1c;8943 C|c16014;8944 C|bb6428;8945 C|b76835;8960 C|966e32;8961 C|a26827;8962 C|b37300;8963 C|bf6d10;8964 C|aa6526;8965 C|a36934;9140 C|f2eeca;9284 C|fac9d1;9324 C|f3c9e4;9344 C|d1b6e4;9464 C|9fdded;9524 C|afeadc;9084 C|ada79e;9060 C|f1f0d8;9280 C|f5e2e2;9320 C|f2dee9;9340 C|e7dcea;9460 C|d5ebee;9520 C|d7efe7;9083 C|ccc8bf;9064 C|f1f1de;9285 C|f2ebe7;9061 C|f2e9ea;9345 C|eee9ea;9062 C|e6eeec;9063 C|e7efe7;9081 C|dfdcd4;9043 C|e8e6df;9080 C|e4e2db;9100 C|e7e7e0;9101 C|e3e3dd;9102 C|d9dbd5;9103 C|d5d8d2;9082 C|d2cdc3;9121 C|f1f0b0;9120 C|f1efb7;9141 C|f2edc0;9142 C|e9e4c5;9161 C|e7dbb9;9143 C|e3dfc3;9162 C|e2d9c2;9160 C|f4e5c0;9180 C|f3e4cd;9181 C|f4e3c9;9200 C|f5e1cc;9201 C|f5e3cc;9220 C|f5e0cf;9221 C|edd6c4;9184 C|efe4ce;9185 C|ede1cf;9202 C|eddecd;9182 C|ecdcc8;9183 C|e5d7c5;9203 C|e4d5c4;9186 C|e1d3c4;9224 C|f2e9db;9225 C|f0e6d8;9226 C|ebe3d7;9222 C|e6d5c8;9223 C|e1d3c7;9242 C|e9d5cd;9243 C|e1cec6;9244 C|f3e9e2;9240 C|f4e5de;9260 C|f5deda;9241 C|f0ddd7;9261 C|efd7d4;9262 C|ead5d2;9263 C|e4d1cd;9286 C|f6dfe0;9281 C|f2ddde;9300 C|f4dde2;9282 C|efdadb;9301 C|f0dbe1;9321 C|edd5e2;9302 C|e9ced5;9021 C|f1e7e4;9022 C|f0e7e9;9023 C|eae3ea;9283 C|e9d8d7;9303 C|e7d2d6;9322 C|e9d0dc;9323 C|e2ccd6;9360 C|ded8eb;9341 C|e3d7e6;9342 C|e0d4e2;9343 C|ded1e1;9361 C|dcd3e7;9362 C|dcd4e5;9363 C|d1c7d9;9380 C|dee1ec;9384 C|dadfec;9381 C|d2d9e8;9382 C|cdd2e6;9383 C|d1d5e3;9385 C|ced5df;9403 C|ced9e4;9400 C|d6e1ec;9401 C|d5e1ed;9402 C|d5e0ea;9420 C|d1e2ec;9421 C|cedfe9;9422 C|cad9e3;9423 C|c0d1da;9424 C|c3e3e7;9440 C|c1e0ea;9441 C|c0e0ec;9442 C|bedde7;9461 C|bee2e7;9462 C|b9dbe0;9443 C|b9d5de;9480 C|c8e9e9;9481 C|c5e9ea;9500 C|bee9e7;9482 C|c1e3e4;9501 C|b9e0dd;9483 C|c6dcda;9463 C|bddadd;9042 C|e3e8e3;9041 C|dfece4;9040 C|dcebec;9044 C|c9e2e0;9045 C|c8deda;9503 C|cbdeda;9504 C|c6dad7;9525 C|e5efe2;9540 C|e1f0e5;9541 C|dfece2;9521 C|d5e9e1;9522 C|d6e6df;9523 C|d6e3dc;9502 C|cde3e0;9544 C|e5efda;9560 C|dfefdb;9561 C|d7e8d2;9562 C|d6e2cf;9563 C|d5ddce;9542 C|cddacd;9543 C|c7d7c9;9020 C|eeeec8;9600 C|e7edc8;9601 C|e5e8cd;9122 C|e4e2b7;9602 C|d9dbbd;9603 C|d9d9c3;9123 C|dcd9b9;9580 C|e1efce;9581 C|dee7cd;9584 C|dce1cb;9582 C|d7dbc8;9583 C|cdd2ba;9585 C|d7dbc6;9163 C|d8cfb9;901 C|00aada;902 C|8de971;903 C|fff36d;904 C|ffcd8a;905 C|ff9da7;906 C|ff7cd6;907 C|f469db;908 C|00afdb;909 C|a9ee8a;910 C|fdf38a;911 C|ffd9a4;912 C|ffacb6;913 C|ff92da;914 C|f57fe0;915 C|00bce3;916 C|b9efa3;917 C|f7f4a2;918 C|ffdfb4;919 C|ffc0c8;920 C|ffade3;921 C|f8a3e6;808 C|00b796;809 C|e3e829;810 C|ffd635;811 C|ff8f6c;812 C|ff5fa2;813 C|fb48c4;814 C|8a69d4;922 C|00c0a3;923 C|ecf166;924 C|ffe671;925 C|ffad93;926 C|ff85bd;927 C|fc76d9;928 C|997adb;929 C|2bc9af;930 C|eef386;931 C|ffe983;932 C|ffbba4;933 C|ff9bcb;934 C|fc8de0;935 C|ab92e1;936 C|6dd5c3;937 C|eff4a4;938 C|fceea8;939 C|ffcfbe;940 C|ffb6d9;941 C|fca9e6;942 C|c0aee7";
+// ══ LETRA CAIXA 3D (2026-11-16, pedido do Clabonde) ══
+// O orçamentista importa a arte do Corel (PDF ou SVG, com o texto convertido em curvas), o sistema mede cada letra
+// (área real, contorno externo + miolos, altura de cada letra), monta a letra em 3D com a profundidade da caixa
+// e deixa clicar na frente/lateral/fundo pra escolher o material. Na letra com frente em acrílico, o LED é
+// posicionado DENTRO do formato de cada letra (colado no PVC do fundo) pelo tamanho do módulo
+// Trend 3 VS Quali (7,3 × 1,4 × 0,4 cm, 0,72 W, 70 lm, corrente de 20) — o espaçamento entre módulos é a
+// profundidade da caixa (regra de luz uniforme sem pontos), limitado à faixa indicada pro módulo (8 a 15 cm).
+// A quantidade de LED só vale enquanto largura, altura e profundidade forem as mesmas da importação (ledRef);
+// se alguém mudar a medida depois, o cálculo volta pro perímetro ÷ 0,12 m.
+(function(){
+  const LIB=window._gc3dLibBase||'https://cdn.jsdelivr.net/npm/three@0.147.0/';
+  const MOD={c:0.073,l:0.014,h:0.004,w:0.72,lm:70,corrente:20}; // módulo de LED (m)
+  const FOLGA=0.01;            // folga mínima do módulo até a parede da letra (m)
+  const PASSO_MIN=0.08,PASSO_MAX=0.15; // faixa de caixa indicada pelo fabricante
+  // pc[i] = materiais de cada peça (frente, adesivo, tinta, LED); sel = peças selecionadas; grupos = peças com os
+  // mesmos materiais — cada grupo vira um item do orçamento (ex.: letras DAF numa cor e a tarja em outra)
+  const S={geo:null,modelo:'',pc:[],sel:new Set(),parte:'',fundoOk:false,verDentro:false,verLed:true,larg:'',caixa:'',nomes:{},r3:null};
+  window._l3dS=S;
+  const E=s=>(typeof _orcxEsc==='function'?_orcxEsc(s):String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
+  const N=v=>(typeof _orc2Num==='function'?_orc2Num(v):(parseFloat(String(v==null?'':v).replace(',','.'))||0));
+  const Q=(v,d)=>(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
+  const PL=(n,a,b)=>(typeof _plural==='function'?_plural(n,a,b):(n===1?a:b));
+  const r2=v=>Math.round(v*100)/100;
+  const MODELOS_3D=['galv','halo','acril'];
+
+  // ── bibliotecas (mesma versão do visualizador 3D dos produtos) ──
+  const _js={};
+  function js(url){return _js[url]||(_js[url]=new Promise((ok,er)=>{const s=document.createElement('script');s.src=url;s.onload=()=>ok();s.onerror=()=>{delete _js[url];er(new Error('Não foi possível carregar o visualizador 3D. Confira a internet e tente de novo.'));};document.head.appendChild(s);}));}
+  async function libs(){
+    if(!(window.THREE&&THREE.WebGLRenderer))await js(LIB+'build/three.min.js');
+    if(!THREE.OrbitControls)await js(LIB+'examples/js/controls/OrbitControls.js');
+    if(!THREE.SVGLoader)await js(LIB+'examples/js/loaders/SVGLoader.js');
+  }
+
+  // ── geometria pura (metros, y pra cima) ──
+  function areaAnel(r){let a=0;for(let i=0,j=r.length-1;i<r.length;j=i++)a+=(r[j].x+r[i].x)*(r[j].y-r[i].y);return a/2;}
+  function perAnel(r){let p=0;for(let i=0,j=r.length-1;i<r.length;j=i++)p+=Math.hypot(r[i].x-r[j].x,r[i].y-r[j].y);return p;}
+  function bbAneis(an){let a=Infinity,b=Infinity,c=-Infinity,d=-Infinity;an.forEach(r=>r.forEach(p=>{if(p.x<a)a=p.x;if(p.y<b)b=p.y;if(p.x>c)c=p.x;if(p.y>d)d=p.y;}));return{minX:a,minY:b,maxX:c,maxY:d};}
+  function dentro(x,y,aneis){let c=false;for(const r of aneis){for(let i=0,j=r.length-1;i<r.length;j=i++){const a=r[i],b=r[j];if((a.y>y)!==(b.y>y)&&x<(b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x)c=!c;}}return c;}
+  function cortes(y,aneis){const xs=[];for(const r of aneis){for(let i=0,j=r.length-1;i<r.length;j=i++){const a=r[i],b=r[j];if((a.y>y)!==(b.y>y))xs.push((b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x);}}return xs.sort((p,q)=>p-q);}
+  // o módulo (com folga) cabe inteiro dentro da letra, sem pegar parede nem miolo?
+  function cabe(x,y,rot,aneis){
+    const hw=(rot?MOD.l:MOD.c)/2+FOLGA,hh=(rot?MOD.c:MOD.l)/2+FOLGA;
+    const pts=[[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh],[0,-hh],[0,hh],[-hw,0],[hw,0],[-hw/2,-hh],[hw/2,-hh],[-hw/2,hh],[hw/2,hh]];
+    for(const[dx,dy]of pts)if(!dentro(x+dx,y+dy,aneis))return false;
+    for(const r of aneis)for(const p of r)if(p.x>x-hw&&p.x<x+hw&&p.y>y-hh&&p.y<y+hh)return false;
+    return true;
+  }
+  function sobrepoe(x,y,rot,leds){
+    const hw=(rot?MOD.l:MOD.c)/2+0.005,hh=(rot?MOD.c:MOD.l)/2+0.005;
+    return leds.some(l=>{const w=(l.rot?MOD.l:MOD.c)/2,h=(l.rot?MOD.c:MOD.l)/2;return Math.abs(l.x-x)<hw+w&&Math.abs(l.y-y)<hh+h;});
+  }
+  // Distribui os módulos dentro de UMA peça — regra do Clabonde (2026-11-16) pro módulo de 3 pontos:
+  // UM MÓDULO A CADA 12 CM, contando da borda e entre um e outro, nos dois eixos.
+  //  • fileiras horizontais distribuídas na altura da peça com ~12 cm entre elas e da borda de cima/baixo;
+  //  • em cada fileira, cada trecho de dentro da letra recebe módulos deitados com ~12 cm da parede e entre eles
+  //    (trecho com menos de 24 cm ganha 1 módulo no meio);
+  //  • perna estreita demais pro módulo deitado (< 9,3 cm) recebe o módulo em pé, no meio da perna;
+  //  • travessão que ficou entre duas fileiras (ex.: braço do F) ganha a própria fileira, no meio dele.
+  // Nada de módulo solto fora de fileira.
+  const PASSO_REGRA=0.12;
+  function distribui(a,b,passo){const len=b-a;if(len<=0)return[];let n=Math.round(len/passo)-1;if(n<1)n=1;const r=[];for(let j=1;j<=n;j++)r.push(a+len*j/(n+1));return r;}
+  function layoutPeca(aneis,passo){
+    passo=PASSO_REGRA;
+    const bb=bbAneis(aneis),leds=[],H=bb.maxY-bb.minY;
+    const longe=(x,y,d)=>!leds.some(l=>Math.hypot(l.x-x,l.y-y)<d);
+    const fileira=(y,dmin)=>{
+      dmin=dmin||passo*0.6;
+      const xs=cortes(y,aneis);let n=0;
+      for(let i=0;i+1<xs.length;i+=2){
+        const a=xs[i],b=xs[i+1],len=b-a;
+        if(len>=MOD.c+2*FOLGA){for(const x of distribui(a,b,passo)){if(cabe(x,y,0,aneis)&&!sobrepoe(x,y,0,leds)&&longe(x,y,dmin)){leds.push({x,y,rot:0});n++;}}}
+        else if(len>=MOD.l+2*FOLGA){const x=(a+b)/2;if(cabe(x,y,1,aneis)&&!sobrepoe(x,y,1,leds)&&longe(x,y,dmin)){leds.push({x,y,rot:1});n++;}}
+      }
+      return n;
+    };
+    distribui(bb.minY,bb.maxY,passo).forEach(y=>fileira(y));
+    // travessões / pontas que nenhuma fileira pegou: fileira própria no meio do trecho vertical
+    const g=0.02,am=[];
+    for(let y=bb.minY+g/2;y<bb.maxY;y+=g)for(let x=bb.minX+g/2;x<bb.maxX;x+=g)if(dentro(x,y,aneis))am.push({x,y});
+    const lim=passo*1.05;
+    for(let it=0;it<60;it++){
+      const falta=am.filter(p=>!p.morta&&longe(p.x,p.y,lim));if(!falta.length)break;
+      const p=falta[0],ys=cortesV(p.x,aneis);let c=p.y,d=p.y;
+      for(let k=0;k+1<ys.length;k+=2)if(p.y>=ys[k]&&p.y<=ys[k+1]){c=ys[k];d=ys[k+1];break;}
+      // só travessão (trecho vertical com menos de 24 cm que nenhuma fileira pegou) ganha fileira própria, no meio;
+      // e o módulo novo tem de ficar a pelo menos 9 cm dos que já existem (nada de módulo encaixado entre fileiras)
+      let foi=0;if((d-c)<2*passo)foi=fileira((c+d)/2,passo*0.75);
+      if(!foi)p.morta=true;
+    }
+    const semLuz=am.filter(p=>longe(p.x,p.y,lim)).length*g*g;
+    return{leds,semLuz};
+  }
+  function cortesV(x,aneis){const ys=[];for(const r of aneis){for(let i=0,j=r.length-1;i<r.length;j=i++){const a=r[i],b=r[j];if((a.x>x)!==(b.x>x))ys.push((b.y-a.y)*(x-a.x)/(b.x-a.x)+a.y);}}return ys.sort((p,q)=>p-q);}
+  window._l3dLayoutPeca=layoutPeca; // usado nos testes
+
+  // ── leitura do SVG ──
+  function mmPorUnidade(doc){
+    const svg=doc.documentElement,vb=(svg.getAttribute('viewBox')||'').trim().split(/[\s,]+/).map(Number);
+    const um=v=>{const m=String(v||'').trim().match(/^([\d.]+)\s*(mm|cm|m|in|pt|pc|px)?$/i);if(!m)return 0;const n=parseFloat(m[1]),u=(m[2]||'px').toLowerCase();return n*({mm:1,cm:10,m:1000,in:25.4,pt:25.4/72,pc:25.4/6,px:25.4/96}[u]||0);};
+    const wmm=um(svg.getAttribute('width'));
+    if(vb.length===4&&vb[2]>0&&wmm>0)return{k:wmm/vb[2],certo:/mm|cm|in|pt|pc|m\b/i.test(svg.getAttribute('width')||'')};
+    return{k:25.4/96,certo:false};
+  }
+  function lerSvg(txt,nome){
+    const doc=new DOMParser().parseFromString(txt,'image/svg+xml');
+    if(doc.getElementsByTagName('parsererror').length||!doc.documentElement||doc.documentElement.nodeName.toLowerCase()!=='svg')throw new Error('Não consegui ler o arquivo. No Corel: Arquivo → Exportar → PDF ou SVG.');
+    const textos=doc.getElementsByTagName('text').length;
+    const un=mmPorUnidade(doc);
+    const data=new THREE.SVGLoader().parse(txt);
+    let pecas=[];
+    data.paths.forEach(p=>{
+      const st=(p.userData&&p.userData.style)||{};if(st.display==='none'||st.visibility==='hidden')return;
+      // cada contorno (subpath) vira um anel; miolo = anel dentro de um número ímpar de outros anéis do mesmo
+      // objeto (regra par/ímpar, que é como o Corel recorta o miolo do D, A, O ao combinar as curvas)
+      const fix=pts=>{const r=pts.map(v=>({x:v.x*un.k/1000,y:-v.y*un.k/1000}));while(r.length>2&&Math.hypot(r[0].x-r[r.length-1].x,r[0].y-r[r.length-1].y)<1e-9)r.pop();return r;};
+      const an=(p.subPaths||[]).map(sp=>fix(sp.getPoints(24))).filter(r=>r.length>=3&&Math.abs(areaAnel(r))>1e-8).map(r=>({r,a:Math.abs(areaAnel(r)),d:0,pai:null}));
+      an.forEach((x,i)=>{an.forEach((y,j)=>{if(i!==j&&y.a>x.a&&dentro(x.r[0].x,x.r[0].y,[y.r])&&dentro(x.r[Math.floor(x.r.length/2)].x,x.r[Math.floor(x.r.length/2)].y,[y.r]))x.d++;});});
+      an.forEach(x=>{if(x.d%2===1){let best=null;an.forEach(y=>{if(y!==x&&y.d===x.d-1&&y.a>x.a&&dentro(x.r[0].x,x.r[0].y,[y.r])&&(!best||y.a<best.a))best=y;});x.pai=best;}});
+      an.filter(x=>x.d%2===0).forEach(o=>{
+        const ext=o.r,furos=an.filter(h=>h.pai===o).map(h=>h.r);
+        const area=o.a-furos.reduce((s,h)=>s+Math.abs(areaAnel(h)),0);
+        if(!(area>1e-6))return; // traço solto / linha
+        pecas.push({ext,furos,area,perExt:perAnel(ext),perFuros:furos.reduce((s,h)=>s+perAnel(h),0),bb:bbAneis([ext])});
+      });
+    });
+    // tira duplicado (mesmo objeto exportado 2×) e moldura/retângulo de fundo que cobre tudo
+    const vistos={};pecas=pecas.filter(p=>{const k=[p.bb.minX,p.bb.minY,p.bb.maxX,p.bb.maxY,p.area].map(v=>Math.round(v*1e5)).join('|');if(vistos[k])return false;vistos[k]=1;return true;});
+    let moldura=0;
+    if(pecas.length>1){const T=bbAneis(pecas.map(p=>p.ext)),W=T.maxX-T.minX,H=T.maxY-T.minY;
+      pecas=pecas.filter(p=>{const w=p.bb.maxX-p.bb.minX,h=p.bb.maxY-p.bb.minY;const ret=p.ext.length<=6&&p.area>=0.97*w*h;if(ret&&w>=0.98*W&&h>=0.98*H){moldura++;return false;}return true;});}
+    if(!pecas.length)throw new Error(textos?'O texto do arquivo não está em curvas. No Corel, selecione tudo, aperte Ctrl+Q (converter em curvas) e exporte o SVG de novo.':'Não achei nenhuma forma fechada no arquivo. Confira se as letras estão em curvas e fechadas.');
+    const T=bbAneis(pecas.map(p=>p.ext));
+    pecas.sort((a,b)=>(a.bb.minX-b.bb.minX)||(b.bb.maxY-a.bb.maxY));
+    return{nome:nome||'arte.svg',pecas,bb:T,W:T.maxX-T.minX,H:T.maxY-T.minY,unidadeCerta:un.certo,textos,moldura};
+  }
+  window._l3dLerSvg=lerSvg;
+
+  // ── leitura do PDF (2026-11-16): pega os contornos vetoriais da 1ª página (o que o Corel exporta em curvas)
+  // e monta um SVG equivalente em pontos (1/72 pol.), que segue pelo mesmo caminho do SVG. Texto que não foi
+  // convertido em curvas não vira contorno (é contado e avisado). Clipes (máscaras) são ignorados.
+  async function pdfParaSvg(buf){
+    if(!window.pdfjsLib){await js('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');}
+    const lib=window.pdfjsLib;if(!lib)throw new Error('Não foi possível carregar o leitor de PDF. Confira a internet e tente de novo.');
+    if(!lib.GlobalWorkerOptions.workerSrc)lib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const doc=await lib.getDocument({data:buf}).promise;
+    const pg=await doc.getPage(1),vp=pg.getViewport({scale:1}),ops=await pg.getOperatorList(),O=lib.OPS;
+    const H=vp.viewBox[3],X0=vp.viewBox[0],Y0=vp.viewBox[1],W=vp.viewBox[2]-X0,HH=H-Y0;
+    const mul=(m,n)=>[m[0]*n[0]+m[2]*n[1],m[1]*n[0]+m[3]*n[1],m[0]*n[2]+m[2]*n[3],m[1]*n[2]+m[3]*n[3],m[0]*n[4]+m[2]*n[5]+m[4],m[1]*n[4]+m[3]*n[5]+m[5]];
+    let ctm=[1,0,0,1,0,0];const pilha=[];let atual='',textos=0;const paths=[];
+    const pt=(x,y)=>{const a=ctm[0]*x+ctm[2]*y+ctm[4],b=ctm[1]*x+ctm[3]*y+ctm[5];return (a-X0).toFixed(3)+' '+(H-b).toFixed(3);};
+    const pinta=new Set([O.fill,O.eoFill,O.fillStroke,O.eoFillStroke,O.closeFillStroke,O.closeEOFillStroke,O.stroke,O.closeStroke]);
+    for(let i=0;i<ops.fnArray.length;i++){
+      const f=ops.fnArray[i],a=ops.argsArray[i];
+      if(f===O.save)pilha.push(ctm.slice());
+      else if(f===O.restore){if(pilha.length)ctm=pilha.pop();}
+      else if(f===O.transform)ctm=mul(ctm,a);
+      else if(f===O.paintFormXObjectBegin){pilha.push(ctm.slice());if(a&&a[0])ctm=mul(ctm,a[0]);}
+      else if(f===O.paintFormXObjectEnd){if(pilha.length)ctm=pilha.pop();}
+      else if(f===O.showText||f===O.showSpacedText||f===O.nextLineShowText||f===O.nextLineSetSpacingShowText)textos++;
+      else if(f===O.constructPath){
+        const sub=a[0],c=a[1];let k=0,cx=0,cy=0;
+        for(const op of sub){
+          if(op===O.moveTo){cx=c[k];cy=c[k+1];atual+='M'+pt(cx,cy)+' ';k+=2;}
+          else if(op===O.lineTo){cx=c[k];cy=c[k+1];atual+='L'+pt(cx,cy)+' ';k+=2;}
+          else if(op===O.curveTo){atual+='C'+pt(c[k],c[k+1])+' '+pt(c[k+2],c[k+3])+' '+pt(c[k+4],c[k+5])+' ';cx=c[k+4];cy=c[k+5];k+=6;}
+          else if(op===O.curveTo2){atual+='C'+pt(cx,cy)+' '+pt(c[k],c[k+1])+' '+pt(c[k+2],c[k+3])+' ';cx=c[k+2];cy=c[k+3];k+=4;}
+          else if(op===O.curveTo3){atual+='C'+pt(c[k],c[k+1])+' '+pt(c[k+2],c[k+3])+' '+pt(c[k+2],c[k+3])+' ';cx=c[k+2];cy=c[k+3];k+=4;}
+          else if(op===O.closePath){atual+='Z ';}
+          else if(op===O.rectangle){const x=c[k],y=c[k+1],w=c[k+2],h=c[k+3];atual+='M'+pt(x,y)+' L'+pt(x+w,y)+' L'+pt(x+w,y+h)+' L'+pt(x,y+h)+' Z ';cx=x;cy=y;k+=4;}
+        }
+      }
+      else if(pinta.has(f)){if(atual.trim())paths.push(atual.trim());atual='';}
+      else if(f===O.endPath){atual='';} // caminho de recorte: não é desenho
+    }
+    const paginas=doc.numPages;try{doc.destroy();}catch(e){}
+    if(!paths.length)throw new Error(textos?'O texto do PDF não está em curvas. No Corel, selecione as letras, aperte Ctrl+Q e exporte o PDF de novo.':'Não achei nenhum desenho vetorial no PDF. Se for imagem (foto ou escaneado), exporte do Corel em PDF ou SVG com as letras em curvas.');
+    const mm=v=>(v*25.4/72).toFixed(3)+'mm';
+    const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${mm(W)}" height="${mm(HH)}" viewBox="0 0 ${W} ${HH}">`+paths.map(d=>`<path fill-rule="evenodd" d="${d}"/>`).join('')+(textos?Array(textos).fill('<text>t</text>').join(''):'')+'</svg>';
+    return{svg,paginas};
+  }
+
+  // ── medidas na escala da largura informada ──
+  function escala(){const g=S.geo;if(!g)return 1;const l=N(S.larg);return l>0?l/g.W:1;}
+  function passoLed(){return PASSO_REGRA;}
+  function aneisEsc(p,k){const t=a=>a.map(v=>({x:v.x*k,y:v.y*k}));return[t(p.ext)].concat(p.furos.map(t));}
+  let _ledCache={k:'',v:null};
+  function medir(){
+    const g=S.geo,k=escala(),passo=passoLed();
+    const r={k,pecas:g.pecas.length,larg:g.W*k,alt:g.H*k,area:0,perExt:0,perFuros:0,hMax:0,leds:[],semLuz:0,passo,porPeca:[]};
+    g.pecas.forEach((p,i)=>{
+      const w=(p.bb.maxX-p.bb.minX)*k,h=(p.bb.maxY-p.bb.minY)*k;
+      r.porPeca[i]={area:p.area*k*k,perExt:p.perExt*k,perFuros:p.perFuros*k,w,h,bb:{minX:p.bb.minX*k,minY:p.bb.minY*k,maxX:p.bb.maxX*k,maxY:p.bb.maxY*k},leds:0,semLuz:0};
+      r.area+=p.area*k*k;r.perExt+=p.perExt*k;r.perFuros+=p.perFuros*k;if(h>r.hMax)r.hMax=h;
+    });
+    r.per=r.perExt+r.perFuros;
+    if(S.modelo==='acril'){
+      const ck=k.toFixed(6)+'|'+passo+'|v3';
+      if(_ledCache.k!==ck||_ledCache.g!==g){
+        const leds=[],pp=[];
+        g.pecas.forEach((p,i)=>{const L=layoutPeca(aneisEsc(p,k),passo);L.leds.forEach(l=>leds.push({x:l.x,y:l.y,rot:l.rot,peca:i}));pp[i]={n:L.leds.length,semLuz:L.semLuz};});
+        _ledCache={k:ck,g,v:{leds,pp}};
+      }
+      r.leds=_ledCache.v.leds;_ledCache.v.pp.forEach((x,i)=>{r.porPeca[i].leds=x.n;r.porPeca[i].semLuz=x.semLuz;r.semLuz+=x.semLuz;});
+    }
+    r.nLed=r.leds.length;
+    return r;
+  }
+  // grupos: peças com os mesmos materiais (frente, adesivo, tinta, LED) → 1 item do orçamento cada
+  function chavePc(p){return[p.acrilCod||'',p.adesCod||'',p.tinta?(p.tinta.cod||p.tinta.nome):'',p.ledCod||'',p.latCod||''].join('|');}
+  function grupos(){
+    const M=S.med,mp={},ord=[];
+    S.pc.forEach((p,i)=>{const k=chavePc(p);if(!mp[k]){mp[k]={k,pecas:[],pc:p};ord.push(mp[k]);}mp[k].pecas.push(i);});
+    return ord.map((G,gi)=>{
+      let a=Infinity,b=Infinity,c=-Infinity,d=-Infinity,area=0,perExt=0,perFuros=0,leds=0,hMax=0,maior=0,semLuz=0;
+      G.pecas.forEach(i=>{const q=M.porPeca[i];a=Math.min(a,q.bb.minX);b=Math.min(b,q.bb.minY);c=Math.max(c,q.bb.maxX);d=Math.max(d,q.bb.maxY);area+=q.area;perExt+=q.perExt;perFuros+=q.perFuros;leds+=q.leds;semLuz+=q.semLuz;hMax=Math.max(hMax,q.h);maior=Math.max(maior,q.w,q.h);});
+      return Object.assign(G,{n:gi+1,larg:c-a,alt:d-b,area,perExt,perFuros,per:perExt+perFuros,leds,hMax,maior,semLuz,nome:S.nomes[G.k]||''});
+    });
+  }
+  function nomePeca(i){return'Peça '+(i+1);}
+
+  // ── tela ──
+  function css(){
+    if(document.getElementById('l3d-css'))return;
+    const s=document.createElement('style');s.id='l3d-css';
+    s.textContent=`#l3d-modal{position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,.55);display:flex;align-items:stretch;justify-content:center;padding:14px;font-family:inherit}
+#l3d-modal .l3d-box{background:#fff;border-radius:16px;display:flex;flex-direction:column;width:100%;max-width:1500px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+#l3d-modal .l3d-top{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#1a2b5e;color:#fff;flex-wrap:wrap}
+#l3d-modal .l3d-top b{font-size:.95rem;flex:1;min-width:200px}
+#l3d-modal .l3d-top label{font-size:.72rem;opacity:.9;display:flex;flex-direction:column;gap:2px}
+#l3d-modal .l3d-top input{width:96px;border:none;border-radius:8px;padding:6px 8px;font-family:inherit;font-weight:700}
+#l3d-modal .l3d-top .l3d-x{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:8px;padding:6px 12px;cursor:pointer;font-family:inherit}
+#l3d-modal .l3d-corpo{flex:1;display:flex;min-height:0}
+#l3d-modal .l3d-cena{flex:1;position:relative;background:linear-gradient(#eef2f7,#dfe6ef);min-width:0}
+#l3d-modal .l3d-cena canvas{display:block;width:100%;height:100%}
+#l3d-modal .l3d-tools{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:6px;flex-wrap:wrap}
+#l3d-modal .l3d-tools button{border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:6px 10px;font-family:inherit;font-size:.74rem;font-weight:600;color:#334155;cursor:pointer;white-space:nowrap}
+#l3d-modal .l3d-tools button.on{background:#1a2b5e;color:#fff;border-color:#1a2b5e}
+#l3d-modal .l3d-dica{position:absolute;bottom:10px;left:10px;right:10px;font-size:.72rem;color:#475569;text-align:center;pointer-events:none}
+#l3d-modal .l3d-lado{width:420px;max-width:46%;overflow-y:auto;padding:14px;border-left:1px solid #e5e7eb;display:flex;flex-direction:column;gap:10px}
+#l3d-modal .l3d-res{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+#l3d-modal .l3d-res div{background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:7px 9px;font-size:.7rem;color:#64748b}
+#l3d-modal .l3d-res b{display:block;font-size:.86rem;color:#1a2b5e;white-space:nowrap}
+#l3d-modal .l3d-pecas{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+#l3d-modal .l3d-pecas button{border:1.5px solid #cbd5e1;background:#fff;border-radius:999px;padding:4px 10px;font-family:inherit;font-size:.72rem;font-weight:700;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+#l3d-modal .l3d-pecas button.on{border-color:#2563eb;background:#eff6ff;color:#1d4ed8}
+#l3d-modal .l3d-pecas i{width:10px;height:10px;border-radius:3px;display:inline-block;border:1px solid rgba(0,0,0,.2)}
+#l3d-modal .l3d-sec{font-size:.7rem;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+#l3d-modal .l3d-card{border:1.5px solid #e5e7eb;border-radius:12px;padding:10px 12px;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+#l3d-modal .l3d-card.on{border-color:#2563eb;box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+#l3d-modal .l3d-card h4{margin:0 0 4px;font-size:.8rem;color:#1a2b5e;display:flex;align-items:center;gap:6px}
+#l3d-modal .l3d-card .fx{font-size:.76rem;color:#334155}
+#l3d-modal .l3d-card select,#l3d-modal .l3d-card input,#l3d-modal .l3d-grp input{margin-top:6px;width:100%;box-sizing:border-box}
+#l3d-modal .l3d-ok{color:#15803d;font-weight:700}
+#l3d-modal .l3d-pend{color:#b45309;font-weight:700}
+#l3d-modal .l3d-grp{border:1.5px solid #e5e7eb;border-radius:12px;padding:10px 12px;background:#fafbfd}
+#l3d-modal .l3d-grp h4{margin:0;font-size:.8rem;color:#1a2b5e;display:flex;align-items:center;gap:6px}
+#l3d-modal .l3d-grp .fx{font-size:.72rem;color:#475569;margin-top:3px}
+#l3d-modal .l3d-pe{display:flex;gap:8px;padding:12px 16px;border-top:1px solid #e5e7eb;justify-content:flex-end;align-items:center;flex-wrap:wrap}
+#l3d-modal .l3d-pe .orcx-hint{flex:1;min-width:200px;margin:0}
+@media(max-width:820px){#l3d-modal{padding:0}#l3d-modal .l3d-box{border-radius:0}#l3d-modal .l3d-corpo{flex-direction:column;overflow-y:auto}#l3d-modal .l3d-cena{flex:0 0 46vh}#l3d-modal .l3d-lado{width:auto;max-width:none;border-left:none;border-top:1px solid #e5e7eb;overflow:visible}}`;
+    document.head.appendChild(s);
+  }
+
+  // cor aproximada pelo nome (tinta/adesivo), só pra visualização
+  function corNome(nome,pad){
+    const n=String(nome||'').toUpperCase();
+    const t=[[/PRETO|BLACK/,0x1f2328],[/BRANCO|WHITE/,0xf4f4f2],[/VERMELH|RED|CARMIM/,0xc8102e],[/AMAREL|YELLOW/,0xf2c200],[/LARANJA|ORANGE/,0xf07c00],[/AZUL|BLUE/,0x1f4ea8],[/VERDE|GREEN/,0x1f8a3b],[/CINZA|GRAFITE|GRAY|GREY/,0x6b7280],[/PRATA|ALUM|SILVER|ESCOVADO/,0xb8bec6],[/DOURAD|OURO|GOLD\b/,0xc9a43a],[/ROSA|PINK|MAGENTA/,0xd63384],[/MARROM|BROWN|AMADEIRADO|WOOD/,0x8b5a2b],[/ROXO|VIOLETA|PURPLE/,0x6b21a8]];
+    for(const[r,c]of t)if(r.test(n))return c;return pad;
+  }
+  function corLed(cod){const n=String(cod||'');return n==='1399'?0xffb340:n==='1395'?0x7fb2ff:0xfff7c2;}
+  function adesNome(cod){const a=(typeof ORC2_ADESIVOS!=='undefined'?ORC2_ADESIVOS:[]).find(x=>String(x[0])===String(cod));if(a)return a[1];const m=(typeof orc3!=='undefined'&&orc3.base||{})[String(cod)];return m?String(m.n).trim():'';}
+  const corTinta=t=>t?(t.hex?parseInt(String(t.hex).replace('#',''),16):corNome(t.nome,0x9aa3ad)):0x9aa3ad;
+  function corFrente(p){
+    if(p.adesCod)return corNome(adesNome(p.adesCod),0xf4f4f2);
+    if(S.modelo==='acril'){const m=(typeof _orc8Mat==='function'&&p.acrilCod)?_orc8Mat(p.acrilCod):null;return corNome(m&&m.n,0xffffff);}
+    return corTinta(p.tinta);
+  }
+  function corLat(p){return corTinta(p.tinta);}
+  const hex=c=>'#'+c.toString(16).padStart(6,'0');
+
+  // ── cena 3D ──
+  function montarCena(){
+    const host=document.getElementById('l3d-cena');if(!host)return;
+    limparCena();
+    const W=host.clientWidth||600,H=host.clientHeight||400;
+    const ren=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});
+    ren.setPixelRatio(Math.min(2,window.devicePixelRatio||1));ren.setSize(W,H);host.insertBefore(ren.domElement,host.firstChild);
+    const cena=new THREE.Scene();
+    cena.add(new THREE.HemisphereLight(0xffffff,0x8899aa,0.8));
+    const dl=new THREE.DirectionalLight(0xffffff,0.8);dl.position.set(-2,3,5);cena.add(dl);
+    const dl2=new THREE.DirectionalLight(0xffffff,0.35);dl2.position.set(3,-1,2);cena.add(dl2);
+    const cam=new THREE.PerspectiveCamera(35,W/H,0.01,500);
+    const ctl=new THREE.OrbitControls(cam,ren.domElement);ctl.enableDamping=true;ctl.dampingFactor=0.12;
+    S.r3={ren,cena,cam,ctl,host,grupo:null,raf:0,meshes:[]};
+    construirLetras();enquadrar(false);
+    const loop=()=>{if(!S.r3)return;S.r3.raf=requestAnimationFrame(loop);ctl.update();ren.render(cena,cam);};loop();
+    let dn=null;
+    ren.domElement.addEventListener('pointerdown',e=>{dn={x:e.clientX,y:e.clientY};});
+    ren.domElement.addEventListener('pointerup',e=>{if(!dn)return;const mv=Math.hypot(e.clientX-dn.x,e.clientY-dn.y);dn=null;if(mv>5)return;const h=pick(e);clicou(h,e.ctrlKey||e.shiftKey||e.metaKey);});
+    ren.domElement.addEventListener('pointermove',e=>{if(dn)return;const h=pick(e);S.hover=h?h.peca+'|'+h.parte:'';destacar();ren.domElement.style.cursor=h?'pointer':'grab';});
+    ren.domElement.addEventListener('pointerleave',()=>{S.hover='';destacar();});
+    S.r3.ro=new ResizeObserver(()=>{if(!S.r3)return;const w=host.clientWidth,h=host.clientHeight;if(!w||!h)return;ren.setSize(w,h);cam.aspect=w/h;cam.updateProjectionMatrix();});
+    S.r3.ro.observe(host);
+  }
+  function limparCena(){
+    if(!S.r3)return;cancelAnimationFrame(S.r3.raf);try{S.r3.ro.disconnect();}catch(e){}
+    try{S.r3.cena.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material)[].concat(o.material).forEach(m=>m.dispose&&m.dispose());});}catch(e){}
+    try{S.r3.ctl.dispose();S.r3.ren.dispose();S.r3.ren.domElement.remove();}catch(e){}
+    S.r3=null;
+  }
+  function pick(e){
+    const r=S.r3;if(!r||!r.grupo)return null;
+    const b=r.ren.domElement.getBoundingClientRect(),m=new THREE.Vector2(((e.clientX-b.left)/b.width)*2-1,-((e.clientY-b.top)/b.height)*2+1);
+    const rc=new THREE.Raycaster();rc.setFromCamera(m,r.cam);
+    const hits=rc.intersectObjects(r.meshes.filter(o=>o.visible),false).filter(h=>h.object.userData.parte!=='lateral'||(h.face&&h.face.materialIndex===1));
+    if(!hits.length)return null;
+    const h=hits[0],u=h.object.userData;
+    if(u.inst){const l=S.med.leds[h.instanceId];return l?{parte:'led',peca:l.peca}:null;}
+    return{parte:u.parte,peca:u.peca};
+  }
+  // clique: escolhe a peça e a parte; Ctrl/Shift soma peças à seleção
+  function clicou(h,somar){
+    if(!h){if(!somar){S.sel.clear();S.parte='';}}
+    else{
+      if(somar){if(S.sel.has(h.peca)&&S.parte===h.parte)S.sel.delete(h.peca);else S.sel.add(h.peca);}
+      else{S.sel.clear();S.sel.add(h.peca);}
+      S.parte=h.parte;
+      if(h.parte==='frente'&&S.verDentro){S.verDentro=false;visibilidade();}
+    }
+    destacar();renderPainel(true);
+  }
+  function construirLetras(){
+    const r=S.r3;if(!r||!S.geo)return;
+    if(r.grupo){r.cena.remove(r.grupo);r.grupo.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material)[].concat(o.material).forEach(m=>m.dispose&&m.dispose());});}
+    const M=S.med,k=M.k,prof=Math.max(0.01,N(S.caixa)||0.10),acril=S.modelo==='acril';
+    const cx=(S.geo.bb.minX+S.geo.bb.maxX)/2*k,cy=(S.geo.bb.minY+S.geo.bb.maxY)/2*k;
+    const g=new THREE.Group(),meshes=[],nada=new THREE.MeshBasicMaterial({visible:false});r.pl=null;r.nada=nada;
+    S.geo.pecas.forEach((p,i)=>{
+      const pc=S.pc[i];
+      const sh=new THREE.Shape(p.ext.map(v=>new THREE.Vector2(v.x*k-cx,v.y*k-cy)));
+      p.furos.forEach(f=>sh.holes.push(new THREE.Path(f.map(v=>new THREE.Vector2(v.x*k-cx,v.y*k-cy)))));
+      const mLat=new THREE.MeshStandardMaterial({color:corLat(pc),roughness:0.5,metalness:0.2,side:THREE.DoubleSide});
+      const lat=new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{depth:prof,bevelEnabled:false,steps:1}),[nada,mLat]);lat.userData={parte:'lateral',peca:i,mat:mLat};g.add(lat);meshes.push(lat);
+      // frente: acrílico/policarbonato aceso (levemente translúcido) ou a cor do adesivo/tinta
+      const cf=corFrente(pc),mFr=new THREE.MeshStandardMaterial({color:cf,roughness:0.35,side:THREE.DoubleSide,transparent:acril,opacity:acril?0.92:1,emissive:acril?cf:0x000000,emissiveIntensity:acril?0.18:0});
+      const sg=new THREE.ShapeGeometry(sh);
+      const fr=new THREE.Mesh(sg,mFr);fr.position.z=prof+0.0008;fr.renderOrder=2;fr.userData={parte:'frente',peca:i,mat:mFr,base:{e:acril?cf:0x000000,i:acril?0.18:0}};g.add(fr);meshes.push(fr);
+      const ed=new THREE.LineSegments(new THREE.EdgesGeometry(sg),new THREE.LineBasicMaterial({color:0x334155}));ed.position.z=prof+0.0015;ed.userData={parte:'borda',peca:i};g.add(ed);
+      if(acril){const mFu=new THREE.MeshStandardMaterial({color:0xf8fafc,roughness:0.9,side:THREE.DoubleSide});const fu=new THREE.Mesh(sg.clone(),mFu);fu.position.z=0;fu.userData={parte:'fundo',peca:i,mat:mFu};g.add(fu);meshes.push(fu);}
+    });
+    if(acril&&M.leds.length){
+      const n=M.leds.length,o=new THREE.Object3D();
+      const pl=new THREE.InstancedMesh(new THREE.BoxGeometry(MOD.c,MOD.l,MOD.h*2),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.6}),n);
+      const pt=new THREE.InstancedMesh(new THREE.BoxGeometry(0.008,0.008,0.003),new THREE.MeshBasicMaterial({color:corLed((S.pc[0]||{}).ledCod)}),n*3);
+      M.leds.forEach((l,i)=>{
+        o.position.set(l.x-cx,l.y-cy,MOD.h/2+0.001);o.rotation.set(0,0,l.rot?Math.PI/2:0);o.updateMatrix();pl.setMatrixAt(i,o.matrix);
+        [-0.024,0,0.024].forEach((d,j)=>{o.position.set(l.x-cx+(l.rot?0:d),l.y-cy+(l.rot?d:0),MOD.h+0.0025);o.rotation.set(0,0,0);o.updateMatrix();pt.setMatrixAt(i*3+j,o.matrix);});
+      });
+      for(let i=0;i<n;i++)pl.setColorAt(i,new THREE.Color(0x2b3440));
+      pl.frustumCulled=false;pt.frustumCulled=false;pl.userData={parte:'led',inst:true};pt.userData={parte:'led'};g.add(pl);g.add(pt);meshes.push(pl);r.pl=pl;
+    }
+    r.grupo=g;r.meshes=meshes;r.over=null;r.cena.add(g);visibilidade();
+  }
+  function visibilidade(){
+    const r=S.r3;if(!r||!r.grupo)return;
+    r.grupo.children.forEach(o=>{const p=o.userData.parte;if(p==='frente'||p==='borda')o.visible=!S.verDentro;if(p==='led')o.visible=S.verDentro&&S.verLed;});
+    const b=document.getElementById('l3d-b-dentro');if(b)b.classList.toggle('on',S.verDentro);
+    destacar();
+  }
+  // seleção = camada azul por cima da parte (frente/lateral/fundo) e módulos azuis no LED; passar o mouse = azul claro
+  function destacar(){
+    const r=S.r3;if(!r||!r.grupo)return;
+    if(r.over){r.grupo.remove(r.over);r.over.children.forEach(o=>[].concat(o.material).forEach(m=>m!==r.nada&&m.dispose()));}
+    const ov=new THREE.Group();
+    const ativo=(u,parte)=>S.sel.has(u.peca)&&(S.parte?S.parte===parte:parte!=='led');
+    r.meshes.forEach(o=>{
+      const u=o.userData;if(u.inst||!o.visible)return;
+      const sel=ativo(u,u.parte),hv=S.hover===u.peca+'|'+u.parte;if(!sel&&!hv)return;
+      const m=new THREE.MeshBasicMaterial({color:sel?0x2563eb:0x60a5fa,transparent:true,opacity:sel?0.42:0.22,depthWrite:false,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-4,polygonOffsetUnits:-4});
+      const x=new THREE.Mesh(o.geometry,u.parte==='lateral'?[r.nada,m]:m);x.position.copy(o.position);x.renderOrder=6;ov.add(x);
+    });
+    r.over=ov;r.grupo.add(ov);
+    if(r.pl){const c1=new THREE.Color(0x2b3440),c2=new THREE.Color(0x2563eb),c3=new THREE.Color(0x60a5fa);
+      S.med.leds.forEach((l,i)=>{const u={peca:l.peca};r.pl.setColorAt(i,(S.sel.has(l.peca)&&S.parte==='led')?c2:(S.hover===l.peca+'|led'?c3:c1));});
+      if(r.pl.instanceColor)r.pl.instanceColor.needsUpdate=true;}
+  }
+  function enquadrar(frente){
+    const r=S.r3;if(!r||!S.med)return;
+    const w=Math.max(0.2,S.med.larg),h=Math.max(0.2,S.med.alt),fov=r.cam.fov*Math.PI/180;
+    const d=Math.max(h/(2*Math.tan(fov/2)),w/(2*Math.tan(fov/2)*r.cam.aspect))*1.2+0.3;
+    r.ctl.target.set(0,0,0.05);
+    if(frente)r.cam.position.set(0,0,d);else r.cam.position.set(-d*0.35,d*0.18,d*0.92);
+    r.cam.near=d/200;r.cam.far=d*20;r.cam.updateProjectionMatrix();r.ctl.update();
+  }
+
+  // ── painel ──
+  function regraEstrutura(h){
+    if(h>2.00)return{t:'⚠️ Leva estrutura metálica interna',d:'Maior letra com '+Q(h,2)+' m de altura (acima de 2,00 m): entra metalon 20×30 mm por dentro e a caixa é em ACM.',c:'#b91c1c'};
+    if(h>1.20)return{t:'Não leva estrutura metálica',d:'Maior letra com '+Q(h,2)+' m de altura (acima de 1,20 m): a caixa é em ACM. Estrutura interna só acima de 2,00 m.',c:'#b45309'};
+    return{t:'Não leva estrutura metálica',d:'Maior letra com '+Q(h,2)+' m de altura (até 1,20 m): caixa em chapa galvanizada, sem estrutura interna.',c:'#15803d'};
+  }
+  // valor comum das peças selecionadas (ou "VARIOS" quando diferem)
+  function comum(campo){const v=[...S.sel].map(i=>{const x=S.pc[i][campo];return x&&typeof x==='object'?JSON.stringify(x):(x||'');});if(!v.length)return'';return v.every(x=>x===v[0])?v[0]:'VARIOS';}
+  function htmlPainel(){
+    const M=S.med,acril=S.modelo==='acril',halo=S.modelo==='halo',G=grupos();
+    const P=(typeof _orcP==='function')?_orcP():{};
+    const ret=M.larg*M.alt;
+    const nSel=S.sel.size,todas=nSel===S.pc.length;
+    const chips=S.geo.pecas.map((p,i)=>{const pc=S.pc[i];return`<button type="button" class="${S.sel.has(i)?'on':''}" onclick="l3dPeca(${i},event)" title="Ctrl+clique pra somar"><i style="background:${hex(corFrente(pc))}"></i><i style="background:${hex(corLat(pc))}"></i>${nomePeca(i)}</button>`;}).join('');
+    const selTxt=nSel?(todas?'Todas as peças selecionadas':nSel+' de '+S.pc.length+' peças '+PL(nSel,'selecionada','selecionadas')):'Nenhuma peça selecionada';
+    const cab=`<div class="l3d-sec">Peças do desenho</div>
+      <div class="orcx-hint" style="margin:0">Clique numa peça (no 3D ou aqui) pra escolher o material dela. <b>Ctrl+clique</b> soma mais peças. Peças com materiais diferentes viram itens separados no orçamento.</div>
+      <div class="l3d-pecas">${chips}<button type="button" onclick="l3dTodas()">${todas?'✕ Limpar seleção':'☑ Selecionar todas'}</button></div>`;
+    let corpo='';
+    if(!nSel){corpo=`<div class="orc2-vazio" style="padding:14px;font-size:.78rem">👆 Clique numa letra (frente, lateral ou fundo) pra escolher os materiais.</div>`;}
+    else{
+      const card=(k,ic,tit,html)=>`<div class="l3d-card ${S.parte===k?'on':''}" data-parte="${k}" onclick="l3dParte('${k}')"><h4>${ic} ${tit}</h4>${html}</div>`;
+      const v=s=>s==='VARIOS';
+      const acl=(typeof _orcAcrilLista==='function')?_orcAcrilLista():[],cA=comum('acrilCod');
+      const ads=(typeof ORC2_ADESIVOS!=='undefined'?ORC2_ADESIVOS:[]),cD=comum('adesCod');
+      const vHint=t=>`<div class="fx l3d-pend" style="margin-top:4px">As peças selecionadas têm ${t} diferentes. O que você escolher vale pra todas.</div>`;
+      const frente=(acril?`<div class="fx">Chapa da frente (por onde a luz sai)</div>${v(cA)?vHint('chapas'):''}${_orcMpBuscaHtml('3d-acril',{tipo:'acril',on:c=>l3dSel('acrilCod',c),limpar:()=>l3dSel('acrilCod','')},v(cA)?'':cA,'🔍 Chapa: nome ou código…')}${!cA?'<div class="fx l3d-pend" style="margin-top:4px">Falta escolher a chapa da frente.</div>':''}`
+          :`<div class="fx">${M.hMax>1.20?'ACM':'Chapa galvanizada 20'} pintada com a tinta da lateral.</div>`)
+        +`<div class="fx" style="margin-top:8px">Adesivo na frente (cor da letra) — opcional${cD&&!v(cD)?` · <button type="button" class="orcx-link" onclick="event.stopPropagation();l3dSel('adesCod','')">tirar adesivo</button>`:''}</div>${v(cD)?vHint('adesivos'):''}${_orcMpBuscaHtml('3d-ades',{tipo:'adesivo',on:c=>l3dSel('adesCod',c),limpar:()=>l3dSel('adesCod','')},v(cD)?'':cD,'🔍 Adesivo: nome ou código (vazio = sem adesivo)…')}`;
+      const cT=comum('tinta'),tSel=cT&&!v(cT)?JSON.parse(cT):null;
+      const sw=t=>`<i style="display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:5px;border:1px solid #0003;background:${hex(corTinta(t))}"></i>`;
+      const tinta=(tSel?`<div class="fx l3d-ok">${sw(tSel)}${E(tSel.nome)}${tSel.nova?' (tinta especial)':''}</div>`:v(cT)?'<div class="fx l3d-pend">As peças selecionadas têm tintas diferentes. A que você escolher vale pra todas.</div>':'<div class="fx l3d-pend">Falta escolher a tinta.</div>')
+        +`<button type="button" class="orc2-btn sec" style="margin-top:6px;width:100%" onclick="event.stopPropagation();l3dCor()">🎨 ${tSel?'Trocar a cor':'Escolher a cor'} — RAL, Pantone C ou tinta da planilha</button>`;
+      const cLc=comum('latCod'),cLo=comum('latOk'),padraoLat=M.hMax>1.20?'ACM (letra acima de 1,20 m de altura)':'Chapa galvanizada 26 — padrão do sistema';
+      const latNome=c=>{const m=(typeof orc3!=='undefined'&&orc3.base||{})[c];return m?String(m.n).trim()+' · cód. '+c:'cód. '+c;};
+      const latMat=(cLo===true&&!v(cLc))
+        ?`<div class="fx l3d-ok">✔ ${E(cLc?latNome(cLc):padraoLat)} — confirmado <button type="button" class="orcx-link" onclick="event.stopPropagation();l3dLat(null)">trocar</button></div>`
+        :`<div class="fx">O sistema usa <b>${E(padraoLat)}</b> na lateral. É isso mesmo?</div><button type="button" class="orc2-btn pri" style="margin-top:8px;width:100%" onclick="event.stopPropagation();l3dLat('')">✔ Confirmo o material da lateral</button>
+          <div class="fx" style="margin-top:8px">Ou escolha outro material:</div>${_orcMpBuscaHtml('3d-lat',{tipo:'geral',on:c=>l3dLat(c)},'','🔍 Material da lateral: nome ou código…')}`;
+      const lateral=`<div class="fx" style="font-weight:700">Material</div>${latMat}<div class="fx" style="margin-top:10px;font-weight:700">Cor (tinta)</div>${tinta}`;
+      const fundo=acril?(S.fundoOk?`<div class="fx l3d-ok">✔ PVC expandido 10 mm confirmado (vale pra todas as peças) <button type="button" class="orcx-link" onclick="event.stopPropagation();l3dFundo(false)">desfazer</button></div>`
+          :`<div class="fx">O sistema usa <b>PVC expandido 10 mm</b> no fundo (o LED vai colado nele). É isso mesmo?</div><button type="button" class="orc2-btn pri" style="margin-top:8px;width:100%" onclick="event.stopPropagation();l3dFundo(true)">✔ Confirmo: fundo em PVC 10 mm</button><div class="fx" style="margin-top:6px;color:#64748b">Se for outro material, confirme e troque depois na lista de materiais pelo 🔁.</div>`)
+        :`<div class="fx">${halo?'Sem fundo: a luz do efeito halo sai por trás, na parede.':'Este modelo não leva fundo.'}</div>`;
+      const leds=(typeof ORC_LED_HALO!=='undefined'?ORC_LED_HALO:[]),cL=comum('ledCod');
+      const ledSel=`<select class="fc" onclick="event.stopPropagation()" onchange="l3dSel('ledCod',this.value)">${v(cL)?'<option value="" selected>— temperaturas diferentes —</option>':'<option value="">Temperatura do LED…</option>'}${leds.map(([c,n])=>`<option value="${c}" ${!v(cL)&&String(cL)===c?'selected':''}>${E(n)}</option>`).join('')}</select>`;
+      const nSelLed=[...S.sel].reduce((s,i)=>s+M.porPeca[i].leds,0);
+      const led=acril?`<div class="fx"><b>${nSelLed} ${PL(nSelLed,'módulo','módulos')}</b> nas peças selecionadas: 1 módulo a cada 12 cm, da borda e entre um e outro, nos dois eixos. Clique num módulo no 3D pra ver os de cada peça.</div>${ledSel}`
+        :halo?`<div class="fx">No efeito halo o LED vai pelo contorno da letra (contorno ÷ ${Q(P.moduloM||0.12,2)} m por módulo).</div>${ledSel}`
+        :`<div class="fx">Este modelo não leva LED.</div>`;
+      corpo=`<div class="l3d-sec">${E(selTxt)}</div>${card('frente','🔷','Frente',frente)}${card('lateral','🔩','Lateral (retorno)',lateral)}${card('fundo','🟦','Fundo',fundo)}${card('led','💡','LED',led)}`;
+    }
+    const caixa=N(S.caixa),fora=acril&&caixa>0&&(caixa<PASSO_MIN-1e-9||caixa>PASSO_MAX+1e-9);
+    const gr=G.map(g=>{
+      const pc=g.pc,es=regraEstrutura(g.hMax),nC=Math.ceil(g.leds/MOD.corrente)*MOD.corrente;
+      const falta=[];if(acril&&!pc.acrilCod)falta.push('chapa da frente');if(!S.pc[g.pecas[0]].latOk||g.pecas.some(i=>!S.pc[i].latOk))falta.push('confirmar o material da lateral');if(!pc.tinta)falta.push('tinta');if((acril||halo)&&!pc.ledCod)falta.push('LED');
+      return`<div class="l3d-grp"><h4><i style="width:12px;height:12px;border-radius:3px;background:${hex(corFrente(pc))};border:1px solid #0002"></i>Item ${g.n} · ${g.pecas.map(nomePeca).join(', ')}</h4>
+        <input class="fc no-upper" placeholder="Nome do item (ex.: Letras DAF, Tarja)" value="${E(g.nome)}" oninput="l3dNome('${E(g.k)}',this.value)">
+        <div class="fx">${Q(g.larg,2)} × ${Q(g.alt,2)} m · área real ${Q(g.area,3)} m² · contorno ${Q(g.per,2)} m${acril?` · 💡 ${g.leds} ${PL(g.leds,'módulo','módulos')} (compra ${nC})`:''}</div>
+        <div class="fx">${E([pc.acrilCod&&acril?(acl=>{const m=acl.find(x=>String(x.cod)===String(pc.acrilCod));return m?m.nome:'';})((typeof _orcAcrilLista==='function')?_orcAcrilLista():[]):'',pc.adesCod?adesNome(pc.adesCod):'',pc.latCod?'lateral: '+adesNome(pc.latCod):'',pc.tinta?pc.tinta.nome:''].filter(Boolean).join(' · '))}</div>
+        <div class="fx" style="color:${es.c};font-weight:700">🏗️ ${es.t}</div>
+        ${g.semLuz>Math.max(0.01,g.area*0.04)?`<div class="fx l3d-pend">⚠️ ${Q(g.semLuz,3)} m² com parte fina demais pro módulo (menos de ${Q((MOD.l+2*FOLGA)*100,1)} cm).</div>`:''}
+        ${falta.length?`<div class="fx l3d-pend">Falta: ${falta.join(', ')}.</div>`:'<div class="fx l3d-ok">✔ Pronto</div>'}</div>`;
+    }).join('');
+    return`<div class="l3d-res">
+      <div>Peças no desenho<b>${M.pecas}</b></div><div>Maior letra (altura)<b>${Q(M.hMax,2)} m</b></div>
+      <div>Área real das letras<b>${Q(M.area,3)} m²</b></div><div>Retângulo largura × altura<b>${Q(ret,3)} m²</b></div>
+      <div>Contorno total<b>${Q(M.per,2)} m</b></div><div>Externo + miolos<b>${Q(M.perExt,2)} + ${Q(M.perFuros,2)} m</b></div></div>
+    ${S.geo.moldura?`<div class="orcx-hint" style="margin:0">Ignorei ${S.geo.moldura===1?'1 retângulo':S.geo.moldura+' retângulos'} que cobria o desenho inteiro (moldura ou fundo da página).</div>`:''}
+    ${S.geo.textos?`<div class="orcx-hint" style="margin:0;color:#b45309">⚠️ O arquivo tem ${S.geo.textos} ${PL(S.geo.textos,'texto que não está','textos que não estão')} em curvas e ${S.geo.textos===1?'ficou':'ficaram'} de fora. No Corel: Ctrl+Q antes de exportar.</div>`:''}
+    ${fora?`<div class="orcx-hint" style="margin:0;color:#b45309">⚠️ O módulo de LED é indicado pra caixas de 8 a 15 cm de profundidade (a caixa tem ${Q(caixa*100,0)} cm).</div>`:''}
+    ${cab}${corpo}
+    <div class="l3d-sec">Vai pro orçamento como ${G.length} ${PL(G.length,'item','itens')}</div>${gr}`;
+  }
+  function renderPainel(rolarCard){
+    const el=document.getElementById('l3d-lado');
+    if(el){const st=el.scrollTop;el.innerHTML=htmlPainel();el.scrollTop=st;
+      if(rolarCard&&S.parte){const c=el.querySelector(`.l3d-card[data-parte="${S.parte}"]`);if(c)c.scrollIntoView({behavior:'smooth',block:'nearest'});}}
+    const a=document.getElementById('l3d-alt');if(a)a.textContent=Q(S.med.alt,2)+' m';
+    const n=grupos().length,b=document.getElementById('l3d-aplicar');if(b)b.textContent=n>1?'✔ Adicionar '+n+' itens ao orçamento':'✔ Usar no orçamento';
+  }
+
+  function abrirModal(){
+    css();fecharModal();
+    const d=document.createElement('div');d.id='l3d-modal';
+    d.innerHTML=`<div class="l3d-box">
+      <div class="l3d-top"><b>🧊 ${E(S.geo.nome)}</b>
+        <label>Largura total — m<input class="no-upper" id="l3d-larg" type="number" min="0" step="0.01" value="${E(S.larg)}" oninput="l3dMedida('larg',this.value)"></label>
+        <label>Altura (pelo desenho)<span id="l3d-alt" style="font-weight:800;font-size:.95rem;padding:5px 0;white-space:nowrap"></span></label>
+        <label>Profundidade da caixa — m<input class="no-upper" id="l3d-caixa" type="number" min="0" step="0.01" value="${E(S.caixa)}" oninput="l3dMedida('caixa',this.value)"></label>
+        <button type="button" class="l3d-x" onclick="l3dFechar()">✕ Fechar</button></div>
+      <div class="l3d-corpo">
+        <div class="l3d-cena" id="l3d-cena"><div class="l3d-tools">
+          <button type="button" onclick="l3dVista(true)">⬜ De frente</button><button type="button" onclick="l3dVista(false)">🧊 Em perspectiva</button>
+          <button type="button" id="l3d-b-dentro" class="${S.verDentro?'on':''}" onclick="l3dDentro()">👁 Ver por dentro${S.modelo==='acril'?' (LEDs)':''}</button>
+        </div><div class="l3d-dica">Arraste pra girar · roda do mouse pra aproximar · clique numa peça · Ctrl+clique soma peças</div></div>
+        <div class="l3d-lado" id="l3d-lado"></div>
+      </div>
+      <div class="l3d-pe"><div class="orcx-hint">${S.modelo==='acril'?'O LED é contado pelo desenho; a compra arredonda em correntes de 20.':''}</div><button type="button" class="orc2-btn sec" onclick="l3dFechar()">Cancelar</button><button type="button" class="orc2-btn pri" id="l3d-aplicar" onclick="l3dAplicar()">✔ Usar no orçamento</button></div></div>`;
+    document.body.appendChild(d);
+    S.med=medir();renderPainel();
+    requestAnimationFrame(()=>{try{montarCena();}catch(e){console.error('letra 3D',e);const c=document.getElementById('l3d-cena');if(c)c.insertAdjacentHTML('beforeend','<div class="orc2-vazio" style="padding:30px">Não consegui abrir o 3D neste navegador. As medidas ao lado continuam valendo.</div>');}});
+  }
+  function fecharModal(){limparCena();const d=document.getElementById('l3d-modal');if(d)d.remove();}
+
+  function iniciarPecas(L){
+    const base={acrilCod:L.acrilCod||'',adesCod:'',tinta:L.tinta?JSON.parse(JSON.stringify(L.tinta)):null,ledCod:L.ledCod||'',latCod:'',latOk:false};
+    if((L.adesivos||[]).length===1&&L.adesivos[0].codigo)base.adesCod=String(L.adesivos[0].codigo);
+    S.pc=S.geo.pecas.map(()=>JSON.parse(JSON.stringify(base)));
+    S.sel=new Set();S.parte='';S.nomes={};S.fundoOk=!!L.fundoOk;S.modelo=L.modelo;
+    if(L.nome)S.nomes[chavePc(base)]=L.nome;
+  }
+
+  // ── ações (chamadas pelo HTML) ──
+  window.l3dEscolherArquivo=function(){const i=document.getElementById('l3d-file');if(i){i.value='';i.click();}};
+  window.l3dArquivo=async function(inp){
+    const f=inp&&inp.files&&inp.files[0];if(!f)return;
+    const ehPdf=/\.pdf$/i.test(f.name)||f.type==='application/pdf',ehSvg=/\.svg$/i.test(f.name)||f.type==='image/svg+xml';
+    if(!ehPdf&&!ehSvg){toast(/\.cdr$/i.test(f.name)?'O arquivo .CDR não abre fora do Corel. No Corel: Ctrl+Q nas letras e exporte em PDF ou SVG.':'Envie a arte em PDF ou SVG (no Corel: Arquivo → Exportar).','terr');return;}
+    try{
+      toast('Lendo a arte…','tinf');
+      await libs();
+      let txt,paginas=1;
+      if(ehPdf){const r=await pdfParaSvg(await f.arrayBuffer());txt=r.svg;paginas=r.paginas;}else txt=await f.text();
+      const geo=lerSvg(txt,f.name);
+      if(paginas>1)toast('O PDF tem '+paginas+' páginas: usei só a 1ª. Deixe a letra sozinha numa página pra garantir.','tinf');
+      const L=orc2.letra||(orc2.letra=_orc2LetraVazia());
+      S.geo=geo;S.verDentro=false;S.verLed=true;
+      iniciarPecas(L);
+      S.larg=N(L.largura)>0?String(L.largura):String(r2(geo.W));
+      S.caixa=N(L.caixa)>0?String(L.caixa):'0.10';
+      abrirModal();
+      if(!(N(L.largura)>0))toast(geo.unidadeCerta?'Largura pega do tamanho do desenho no arquivo ('+Q(geo.W,2)+' m) — confira se a arte está em escala real':'O arquivo não diz a unidade: digite a largura total real da letra','tinf');
+    }catch(e){console.error('letra 3D',e);toast(e.message||'Não consegui ler o arquivo','terr');}
+  };
+  window.l3dReabrir=function(){
+    const L=orc2.letra||{};
+    if(!S.geo||!L.arte||S.geo.nome!==L.arte.nome){l3dEscolherArquivo();return;}
+    if(S.modelo!==L.modelo||!S.pc.length)iniciarPecas(L);
+    if(N(L.largura)>0)S.larg=String(L.largura);if(N(L.caixa)>0)S.caixa=String(L.caixa);
+    libs().then(abrirModal).catch(e=>toast(e.message,'terr'));
+  };
+  window.l3dFechar=function(){fecharModal();};
+  let _t=0;
+  window.l3dMedida=function(k,v){S[k]=v;clearTimeout(_t);_t=setTimeout(()=>{if(!(N(S.larg)>0))return;S.med=medir();renderPainel();construirLetras();if(k==='larg')enquadrar(false);},300);};
+  window.l3dPeca=function(i,ev){const somar=ev&&(ev.ctrlKey||ev.shiftKey||ev.metaKey);if(somar){if(S.sel.has(i))S.sel.delete(i);else S.sel.add(i);}else{S.sel.clear();S.sel.add(i);}destacar();renderPainel();};
+  window.l3dTodas=function(){if(S.sel.size===S.pc.length)S.sel.clear();else S.sel=new Set(S.pc.map((p,i)=>i));destacar();renderPainel();};
+  window.l3dParte=function(p){S.parte=p;if((p==='fundo'||p==='led')&&S.modelo==='acril'&&!S.verDentro){S.verDentro=true;visibilidade();}if((p==='frente'||p==='lateral')&&S.verDentro&&p==='frente'){S.verDentro=false;visibilidade();}destacar();document.querySelectorAll('#l3d-modal .l3d-card[data-parte]').forEach(c=>c.classList.toggle('on',c.dataset.parte===p));};
+  window.l3dSel=function(k,v){
+    if(!S.sel.size){toast('Selecione uma peça primeiro','terr');return;}
+    let val=v;
+    if(k==='tinta'){
+      if(!v)val=null;
+      else{const t=((typeof _orcTintasLista==='function')?_orcTintasLista():[]).find(x=>_orcTintaRot(x)===v);if(!t){toast('Escolha a tinta na lista','terr');return;}val={cod:t.cod||'',nome:t.nome,precoL:t.precoL,nova:!!t.nova};}
+    }
+    if(k==='adesCod'&&v==='VARIOS')return;
+    S.sel.forEach(i=>{S.pc[i][k]=val&&typeof val==='object'?JSON.parse(JSON.stringify(val)):val;});
+    renderPainel();construirLetras();
+  };
+  window.l3dFundo=function(ok){S.fundoOk=!!ok;renderPainel();};
+  // material da lateral: '' = confirma o padrão do sistema; código = outro material (troca no cálculo); null = desfaz
+  window.l3dLat=function(cod){if(!S.sel.size){toast('Selecione uma peça primeiro','terr');return;}S.sel.forEach(i=>{S.pc[i].latCod=cod||'';S.pc[i].latOk=cod!==null;});renderPainel();construirLetras();};
+  window.l3dCor=function(){if(!S.sel.size){toast('Selecione uma peça primeiro','terr');return;}window._orcMpCtx['3d-tinta']={tipo:'tinta',on:t=>{S.sel.forEach(i=>{S.pc[i].tinta=JSON.parse(JSON.stringify(t));});renderPainel();construirLetras();}};corAbrir('3d-tinta');};
+  window.l3dNome=function(k,v){S.nomes[k]=v;};
+  window.l3dVista=function(f){enquadrar(f);};
+  window.l3dDentro=function(){S.verDentro=!S.verDentro;visibilidade();};
+  // monta os dados de um item (letra) a partir de um grupo de peças
+  function itemDoGrupo(g,L,M){
+    const pc=g.pc,larg=String(r2(g.larg)),alt=String(r2(g.alt)),caixa=String(r2(N(S.caixa)));
+    const it={modelo:S.modelo,nome:g.nome||'',largura:larg,altura:alt,perimetro:String(r2(g.per)),caixa,
+      adesivos:pc.adesCod?[{codigo:pc.adesCod,largura:larg,altura:alt}]:[],trocas:{},tinta:pc.tinta?JSON.parse(JSON.stringify(pc.tinta)):null,
+      ledCod:pc.ledCod||'',acrilCod:pc.acrilCod||'',fundoOk:!!S.fundoOk,
+      arte:{nome:S.geo.nome,pecas:g.pecas.length,area:Math.round(g.area*1000)/1000,perExt:r2(g.perExt),perFuros:r2(g.perFuros),hMax:r2(g.hMax),maior:r2(g.maior),ref:{largura:larg,altura:alt}}};
+    if(S.modelo==='acril'){it.ledQtd=g.leds;it.ledRef={largura:larg,altura:alt,caixa,passo:r2(M.passo)};}
+    // lateral em outro material: troca a linha da lateral no cálculo (mesmo mecanismo do 🔁)
+    if(pc.latCod&&typeof orc2CalcLetra==='function'&&typeof _orcTrChave==='function'){
+      try{const r=orc2CalcLetra(Object.assign({},it,{trocas:{}}),_orc2Precos(),orc2.adesivoPrecos);const li=r&&r.ok?r.items.find(x=>/\(later|lateral/i.test(x.name)):null;
+        if(li){const m=(orc3.base||{})[pc.latCod];it.trocas[_orcTrChave(li.name)]={cod:String(pc.latCod),nome:m?m.n:'',modo:'livre',qtd:''};}}catch(e){console.warn('troca lateral',e);}
+    }
+    return it;
+  }
+  window.l3dAplicar=function(){
+    if(!(N(S.larg)>0)){toast('Digite a largura total da letra','terr');return;}
+    if(!(N(S.caixa)>0)){toast('Digite a profundidade da caixa','terr');return;}
+    const M=S.med=medir(),G=grupos();
+    if(S.modelo==='acril'&&!S.fundoOk){S.sel=new Set(S.pc.map((p,i)=>i));S.parte='fundo';renderPainel(true);destacar();toast('Confirme o material do fundo (PVC 10 mm) antes de usar no orçamento','terr');return;}
+    const semLat=S.pc.map((p,i)=>p.latOk?-1:i).filter(i=>i>=0);
+    if(semLat.length){S.sel=new Set(semLat);S.parte='lateral';destacar();renderPainel(true);toast('Confirme o material da lateral ('+semLat.map(nomePeca).join(', ')+')','terr');return;}
+    const L=orc2.letra||(orc2.letra=_orc2LetraVazia());
+    if(G.length===1){
+      // um item só: preenche o formulário (o orçamentista confere e clica em Adicionar)
+      const it=itemDoGrupo(G[0],L,M);
+      const manterAdes=!G[0].pc.adesCod&&(L.adesivos||[]).length;
+      Object.assign(L,it,{nome:G[0].nome||L.nome||'',adesivos:manterAdes?L.adesivos:it.adesivos,trocas:Object.assign({},L.trocas||{},it.trocas||{})});
+      if(S.modelo!=='acril'){delete L.ledQtd;delete L.ledRef;}
+      fecharModal();if(typeof _orc2ReRenderProdutos==='function')_orc2ReRenderProdutos();
+      toast('Medidas e materiais da arte aplicados ✔ — confira e clique em Adicionar','tok');return;
+    }
+    // vários grupos: cada um vira um item do orçamento
+    if(orc2.letraEditId){toast('Pra separar em vários itens, cancele a edição deste item e importe a arte como item novo','terr');return;}
+    for(const g of G){
+      const pc=g.pc,falta=[];if(S.modelo==='acril'&&!pc.acrilCod)falta.push('chapa da frente');if(!pc.tinta)falta.push('tinta');if((S.modelo==='acril'||S.modelo==='halo')&&!pc.ledCod)falta.push('LED');
+      if(falta.length){S.sel=new Set(g.pecas);S.parte='';destacar();renderPainel();toast('Item '+g.n+' ('+g.pecas.map(nomePeca).join(', ')+'): falta '+falta.join(', '),'terr');return;}
+    }
+    const antes=(orc2.doc&&orc2.doc.produtos||[]).length;let ok=0;
+    for(const g of G){
+      orc2.letra=itemDoGrupo(g,L,M);if(!orc2.letra.nome)orc2.letra.nome='Item '+g.n+' da arte';
+      const n0=orc2.doc.produtos.length;orc2AdicionarLetra();
+      if(orc2.doc.produtos.length>n0)ok++;else{toast('Parei no item '+g.n+': confira os dados dele','terr');break;}
+    }
+    if(ok===G.length){fecharModal();toast(ok+' itens adicionados ao orçamento ✔','tok');}
+    else if(ok>0)toast(ok+' de '+G.length+' itens foram adicionados','terr');
+  };
+
+  // ── bloco no formulário da letra caixa ──
+  window._l3dFormHtml=function(L){
+    if(!L||MODELOS_3D.indexOf(L.modelo)<0)return'';
+    const inp=`<input type="file" id="l3d-file" accept=".pdf,application/pdf,.svg,image/svg+xml,.cdr" style="display:none" onchange="l3dArquivo(this)">`;
+    const a=L.arte;
+    if(!a)return`${inp}<div class="orc2-ades" style="background:#f8fafc;border-color:#cbd5e1;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="flex:1;min-width:200px"><b style="font-size:.78rem;color:#1a2b5e">📐 Tem a arte no Corel?</b><div class="orcx-hint" style="margin:2px 0 0">Exporte em PDF ou SVG (Ctrl+Q nas letras antes) e veja a letra em 3D: o sistema mede a área e o contorno reais${L.modelo==='acril'?' e posiciona o LED dentro de cada letra':''}. Dá pra separar peças com materiais diferentes (ex.: letras numa cor e tarja em outra).</div></div><button type="button" class="orc2-btn pri" onclick="l3dEscolherArquivo()">📐 Importar arte (PDF ou SVG)</button></div>`;
+    const q3=(typeof _orcLed3d==='function')?_orcLed3d(L):0,perdeu=L.modelo==='acril'&&Number(L.ledQtd)>0&&!q3;
+    return`${inp}<div class="orc2-ades" style="background:#f0fdf4;border-color:#86efac">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:.78rem;color:#1a2b5e;flex:1;min-width:180px">📐 Arte: ${E(a.nome)}</b>
+      <button type="button" class="orcx-link" onclick="l3dReabrir()">🧊 ${S.geo&&S.geo.nome===a.nome?'Ver em 3D':'Abrir de novo (importe a arte)'}</button><button type="button" class="orcx-link" onclick="l3dEscolherArquivo()">trocar arte</button></div>
+      <div class="orcx-hint" style="margin:4px 0 0">${a.pecas} ${PL(a.pecas,'peça','peças')} · área real ${Q(a.area,3)} m² · contorno ${Q((a.perExt||0)+(a.perFuros||0),2)} m · maior letra ${Q(a.hMax,2)} m${q3?` · 💡 ${q3} ${PL(q3,'módulo','módulos')} de LED posicionados no desenho`:''}${L.fundoOk?' · fundo PVC 10 mm confirmado':''}</div>
+      ${perdeu?'<div class="orcx-hint" style="margin:4px 0 0;color:#b45309;font-weight:700">⚠️ As medidas mudaram depois da importação: o LED voltou a ser calculado pelo perímetro. Abra o 3D de novo pra refazer.</div>':''}
+    </div>`;
+  };
+})();
+// LED posicionado no desenho (arte 3D) só vale se as medidas são as mesmas da importação
+function _orcLed3d(p){const r=p&&p.ledRef,q=Number(p&&p.ledQtd)||0;if(!(q>0)||!r)return 0;const eq=(a,b)=>Math.abs(_orc2Num(a)-_orc2Num(b))<0.006;return eq(r.largura,p.largura)&&eq(r.altura,p.altura)&&eq(r.caixa,p.caixa)?q:0;}
+// altura de cada letra / maior medida de uma letra: com arte importada (e as mesmas medidas), vale o desenho
+function _orcArteVale(L){const a=L&&L.arte,r=a&&a.ref;if(!r||!(Number(a.hMax)>0))return false;const eq=(x,y)=>Math.abs(_orc2Num(x)-_orc2Num(y))<0.006;return eq(r.largura,L.largura)&&eq(r.altura,L.altura);}
+
+// ══ BUSCA DE MATÉRIA-PRIMA, MATÉRIA-PRIMA NOVA E CORES RAL / PANTONE C (2026-11-16, pedido do Clabonde) ══
+// • Busca: um campo só, digita parte do nome OU o código e escolhe na lista (adesivo, chapa, material da lateral).
+// • "＋ Novo": cadastra a matéria-prima que não está na planilha (nome, unidade, preço). Fica guardada em
+//   orcamentosAjustes (mp_*, mpCustom) com código N… e entra na base de preços junto com a planilha — a planilha
+//   continua mandando nos itens dela (o código novo nunca sobrescreve um código da planilha).
+// • Cores: tabela RAL Classic e Pantone C (com amostra). Se a planilha já tem a tinta daquela referência, usa o
+//   preço dela; senão vira tinta nova com o preço de tinta especial dos números da letra caixa.
+function _orcMpNovosAplicar(semAdes){
+  try{
+    if(typeof orc3==='undefined'||!orc3.base)return;let mudou=false;
+    Object.values((typeof orc8!=='undefined'&&orc8.cfg)||{}).forEach(e=>{if(e&&e.mpCustom&&e.cod&&!orc3.base[e.cod]){orc3.base[e.cod]={n:e.n,v:Number(e.v)||0,u:e.u||'UNIDADE',novo:true};mudou=true;}});
+    if(mudou&&!semAdes&&typeof _orc3AplicarAdesivos==='function')_orc3AplicarAdesivos();
+  }catch(e){console.warn('mp novas',e);}
+}
+function _orcMpLista(re){return Object.entries((typeof orc3!=='undefined'&&orc3.base)||{}).filter(([c,m])=>m&&m.n&&(!re||re.test(String(m.n).trim()))).map(([c,m])=>({cod:String(c),nome:String(m.n).trim(),v:Number(m.v)||0,u:m.u||'',novo:!!m.novo})).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'));}
+const _ORC_MP_RE={adesivo:/^ADESIVO\b/i,acril:/^(ACRILICO|ACRÍLICO|POLICARBONATO COMPACTO)\b/i};
+window._orcMpCtx=window._orcMpCtx||{};
+let _orcMpSeq=0;
+// campo de busca + botão "＋ Novo"; ctx = {tipo:'adesivo'|'acril'|'geral', on:function(cod)}
+function _orcMpBuscaHtml(nomeCtx,ctx,codAtual,ph){
+  window._orcMpCtx[nomeCtx]=ctx;
+  const lista=_orcMpLista(_ORC_MP_RE[ctx.tipo]||null),id='orcmp-dl-'+(++_orcMpSeq),E=_orcxEsc;
+  const at=codAtual&&(orc3.base||{})[codAtual]?String(codAtual)+' · '+String(orc3.base[codAtual].n).trim():'';
+  return`<div style="display:flex;gap:6px;margin-top:6px;align-items:center" onclick="event.stopPropagation()"><input class="fc no-upper" style="flex:1;min-width:0;margin:0" list="${id}" value="${E(at)}" placeholder="${E(ph||'🔍 Digite o nome ou o código…')}" onfocus="this.select()" onchange="_orcMpEscolheu(this,'${nomeCtx}')"><button type="button" class="orc2-btn sec" style="white-space:nowrap;padding:7px 10px" title="Cadastrar uma matéria-prima que não está na lista" onclick="mpNovoAbrir('${nomeCtx}')">＋ Novo</button></div><datalist id="${id}">${lista.map(x=>`<option value="${E(x.cod+' · '+x.nome)}">${x.novo?'novo · ':''}${_orcxBRL(x.v)}${x.u?' / '+E(_orc8Un(x.u)):''}</option>`).join('')}</datalist>`;
+}
+function _orcMpEscolheu(inp,nomeCtx){
+  const v=String(inp.value||'').trim(),c=v.split(' · ')[0].trim(),ctx=window._orcMpCtx[nomeCtx];if(!ctx)return;
+  if(!v){if(ctx.limpar)ctx.limpar();return;}
+  if(!(orc3.base||{})[c]){toast('Não achei "'+v+'" na lista. Escolha uma opção da lista ou clique em ＋ Novo','terr');return;}
+  ctx.on(c);
+}
+// ── cadastro de matéria-prima nova ──
+const _ORC_MP_UN=[['METRO QUADRADO','m²'],['METRO','metro linear'],['UNIDADE','unidade'],['CHAPA','chapa inteira'],['LITRO','litro'],['QUILO','quilo'],['BARRA','barra'],['ROLO','rolo']];
+function mpNovoAbrir(nomeCtx){
+  const ctx=window._orcMpCtx[nomeCtx]||{tipo:'geral'},t=ctx.tipo,E=_orcxEsc;
+  let el=document.getElementById('mo-mp-novo');if(el)el.remove();
+  el=document.createElement('div');el.id='mo-mp-novo';el.style.cssText='position:fixed;inset:0;z-index:10100;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;padding:14px';
+  const campo=(l,h,dica)=>`<div class="fg" style="margin:0 0 10px"><label style="font-size:.74rem;font-weight:700;color:#334155">${l}</label>${h}${dica?`<div class="orcx-hint" style="margin:3px 0 0">${dica}</div>`:''}</div>`;
+  const inp=(id,ph,tp)=>`<input class="fc no-upper" id="${id}" ${tp?`type="${tp}" min="0" step="0.01"`:''} placeholder="${E(ph)}" style="width:100%;box-sizing:border-box">`;
+  let corpo='';
+  if(t==='adesivo')corpo=campo('Nome do adesivo',`<div style="display:flex;gap:6px;align-items:center"><b style="font-size:.8rem;color:#475569">ADESIVO</b>${inp('mpn-nome','Ex.: VERMELHO 1260MM 651 031 - ORACAL')}</div>`)+campo('Preço por m² (R$)',inp('mpn-preco','0,00','number'),'O adesivo é calculado por m² aplicado.');
+  else if(t==='acril')corpo=campo('Tipo',`<select class="fc" id="mpn-pref"><option>ACRILICO</option><option>POLICARBONATO COMPACTO</option></select>`)+campo('Descrição (cor, acabamento)',inp('mpn-nome','Ex.: LEITOSO BRANCO'))+`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">${campo('Espessura (mm)',inp('mpn-esp','3','number'))}${campo('Largura da chapa (mm)',inp('mpn-larg','1000','number'))}${campo('Comprimento (mm)',inp('mpn-comp','2000','number'))}</div>`+campo('Preço da chapa inteira (R$)',inp('mpn-preco','0,00','number'),'As medidas da chapa entram no nome, que é como o sistema calcula quantas chapas usar.');
+  else corpo=campo('Nome da matéria-prima',inp('mpn-nome','Ex.: CHAPA ALUMINIO COMPOSTO 3MM 1220X5000 PRATA'),'Se for chapa, coloque as medidas no nome (ex.: 1220X5000) pra o sistema calcular as chapas.')+`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${campo('Unidade de medida',`<select class="fc" id="mpn-un">${_ORC_MP_UN.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>`)}${campo('Preço por unidade (R$)',inp('mpn-preco','0,00','number'))}</div>`;
+  el.innerHTML=`<div style="background:#fff;border-radius:16px;padding:16px 18px;max-width:520px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="font-weight:800;color:#1a2b5e;margin-bottom:4px">＋ Nova matéria-prima${t==='adesivo'?' (adesivo)':t==='acril'?' (acrílico ou policarbonato)':''}</div>
+    <div class="orcx-hint" style="margin:0 0 12px">Pra material que ainda não está na planilha. Fica disponível pra todos os orçamentos, com código começando em N.</div>
+    ${corpo}
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px"><button type="button" class="orc2-btn sec" onclick="document.getElementById('mo-mp-novo').remove()">Cancelar</button><button type="button" class="orc2-btn pri" id="mpn-salvar" onclick="mpNovoSalvar('${nomeCtx}')">✔ Cadastrar e usar</button></div></div>`;
+  document.body.appendChild(el);setTimeout(()=>{const f=document.getElementById('mpn-nome');if(f)f.focus();},50);
+}
+async function mpNovoSalvar(nomeCtx){
+  const ctx=window._orcMpCtx[nomeCtx]||{tipo:'geral'},t=ctx.tipo,g=id=>(document.getElementById(id)||{}).value||'';
+  let nome=g('mpn-nome').trim().toUpperCase().replace(/\s+/g,' '),un=g('mpn-un')||'UNIDADE';const preco=_orc2Num(g('mpn-preco'));
+  if(!nome){toast('Digite o nome da matéria-prima','terr');return;}
+  if(!(preco>0)){toast('Digite o preço','terr');return;}
+  if(t==='adesivo'){nome='ADESIVO '+nome.replace(/^ADESIVO\s+/,'');un='METRO QUADRADO';}
+  if(t==='acril'){const esp=_orc2Num(g('mpn-esp')),l=_orc2Num(g('mpn-larg')),c=_orc2Num(g('mpn-comp'));if(!(esp>0&&l>0&&c>0)){toast('Preencha espessura, largura e comprimento da chapa','terr');return;}nome=g('mpn-pref')+' '+nome.replace(/^(ACRILICO|POLICARBONATO COMPACTO)\s+/,'')+' '+String(esp).replace('.',',')+'MM '+Math.round(l)+'X'+Math.round(c);un='CHAPA';}
+  const igual=_orcMpLista().find(x=>x.nome===nome);if(igual){toast('Já existe: cód. '+igual.cod+' — usei ele','tinf');document.getElementById('mo-mp-novo').remove();ctx.on&&ctx.on(igual.cod);return;}
+  const cod='N'+Date.now().toString(36).toUpperCase().slice(-6),id='mp_'+cod;
+  const e={mpCustom:true,cod,n:nome,v:Math.round(preco*100)/100,u:un,por:(typeof usuarioLogado!=='undefined'&&usuarioLogado&&usuarioLogado.nomeExibicao)||'—',em:new Date().toISOString()};
+  const b=document.getElementById('mpn-salvar');if(b){b.disabled=true;b.textContent='Salvando…';}
+  try{if(window._fbOrcSalvar)await window._fbOrcSalvar(ORC8_DOC_CFG,id,e);else throw new Error('sem conexão com o banco');}
+  catch(err){console.error('mp nova',err);toast('Não consegui salvar a matéria-prima: '+(err.message||err),'terr');if(b){b.disabled=false;b.textContent='✔ Cadastrar e usar';}return;}
+  orc8.cfg=Object.assign({},orc8.cfg||{},{[id]:e});_orcMpNovosAplicar();
+  document.getElementById('mo-mp-novo').remove();
+  toast('Matéria-prima cadastrada: cód. '+cod+' ✔','tok');
+  if(ctx.on)ctx.on(cod);
+}
+// ── cores RAL / Pantone C ──
+function _orcCoresLista(tab){
+  if(tab==='ral')return L3D_RAL.split(';').map(s=>{const[c,n,h]=s.split('|');return{ref:'RAL '+c,nome:n,hex:'#'+h};});
+  if(tab==='pantone')return L3D_PANTONE.split(';').map(s=>{const[c,h]=s.split('|');return{ref:'PANTONE '+c.toUpperCase(),nome:'',hex:'#'+h};});
+  return(typeof _orcTintasLista==='function'?_orcTintasLista():[]).map(t=>({ref:'',nome:t.nome,hex:'',tinta:t}));
+}
+let _orcCor={tab:'ral',busca:'',ctx:''};
+function corAbrir(nomeCtx){
+  _orcCor.ctx=nomeCtx;let el=document.getElementById('mo-cor');if(el)el.remove();
+  el=document.createElement('div');el.id='mo-cor';el.style.cssText='position:fixed;inset:0;z-index:10100;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;padding:14px';
+  el.innerHTML=`<div style="background:#fff;border-radius:16px;padding:16px 18px;max-width:760px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><div style="font-weight:800;color:#1a2b5e;flex:1">🎨 Cor da tinta</div><button type="button" class="orc2-btn sec" onclick="document.getElementById('mo-cor').remove()">Fechar</button></div>
+    <div class="dash-tabs" style="margin:0 0 10px" id="cor-tabs"></div>
+    <input class="fc no-upper" id="cor-busca" placeholder="🔍 Código ou nome (ex.: 3020, vermelho, 186)" oninput="_orcCor.busca=this.value;_orcCorLista()" style="width:100%;box-sizing:border-box">
+    <div class="orcx-hint" style="margin:6px 0 8px">A amostra é aproximada (tela). Confira sempre no catálogo físico. Cor que não tem tinta na planilha entra como tinta especial a ${_orcxBRL(_orcP().tintaNovaL||120)} o litro.</div>
+    <div id="cor-lista" style="overflow-y:auto;flex:1;min-height:200px"></div></div>`;
+  document.body.appendChild(el);_orcCorTabs();_orcCorLista();setTimeout(()=>{const f=document.getElementById('cor-busca');if(f)f.focus();},50);
+}
+function _orcCorTabs(){const t=document.getElementById('cor-tabs');if(!t)return;t.innerHTML=[['ral','RAL'],['pantone','Pantone C'],['planilha','Tintas da planilha']].map(([k,l])=>`<button type="button" class="dash-tab ${_orcCor.tab===k?'active':''}" onclick="_orcCor.tab='${k}';_orcCorTabs();_orcCorLista()">${l}</button>`).join('');}
+function _orcCorLista(){
+  const box=document.getElementById('cor-lista');if(!box)return;
+  const q=String(_orcCor.busca||'').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  let l=_orcCoresLista(_orcCor.tab).filter(x=>!q||q.split(/\s+/).every(w=>norm(x.ref+' '+x.nome).includes(w)));
+  const tot=l.length;l=l.slice(0,240);
+  if(_orcCor.tab==='planilha'){box.innerHTML=l.length?l.map((x,i)=>`<div onclick="_orcCorEscolher(${i})" style="display:flex;justify-content:space-between;gap:10px;padding:8px 10px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:.8rem"><span>${_orcxEsc(x.nome)}</span><span style="color:#64748b;white-space:nowrap">${_orcxBRL(x.tinta.precoL)}/L</span></div>`).join(''):'<div class="orc2-vazio" style="padding:20px">Nenhuma tinta encontrada.</div>';}
+  else box.innerHTML=l.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px">${l.map((x,i)=>`<div onclick="_orcCorEscolher(${i})" style="border:1.5px solid #e5e7eb;border-radius:10px;overflow:hidden;cursor:pointer;font-size:.72rem"><div style="height:46px;background:${x.hex}"></div><div style="padding:6px 8px"><b style="color:#1a2b5e;white-space:nowrap">${_orcxEsc(x.ref)}</b>${x.nome?`<div style="color:#475569">${_orcxEsc(x.nome)}</div>`:''}</div></div>`).join('')}</div>${tot>l.length?`<div class="orcx-hint" style="margin-top:8px">Mostrando ${l.length} de ${tot}. Digite pra filtrar.</div>`:''}`:'<div class="orc2-vazio" style="padding:20px">Nenhuma cor encontrada.</div>';
+  _orcCor.vis=l;
+}
+function _orcCorEscolher(i){
+  const x=(_orcCor.vis||[])[i],ctx=window._orcMpCtx[_orcCor.ctx];if(!x||!ctx)return;
+  let t;
+  if(x.tinta)t={cod:x.tinta.cod||'',nome:x.tinta.nome,precoL:x.tinta.precoL,nova:!!x.tinta.nova};
+  else{
+    const ref=x.ref,ach=(typeof _orcTintasLista==='function'?_orcTintasLista():[]).find(tn=>String(tn.nome).toUpperCase().replace(/\s+/g,' ').includes(ref.toUpperCase()));
+    t=ach?{cod:ach.cod||'',nome:ach.nome,precoL:ach.precoL,nova:!!ach.nova,hex:x.hex,ref}
+      :{cod:'',nome:('TINTA PU '+ref+(x.nome?' '+x.nome:'')).toUpperCase(),precoL:_orcP().tintaNovaL,nova:true,hex:x.hex,ref};
+  }
+  const el=document.getElementById('mo-cor');if(el)el.remove();
+  ctx.on(t);
+}
+// ── formulário normal da letra (fora do 3D): adesivo com busca, chapa com busca, tinta pela tabela ──
+function _l3dAdesivoForm(i,a){return _orcMpBuscaHtml('form-ades-'+i,{tipo:'adesivo',on:cod=>{orc2Adesivo(i,'codigo',cod);_orc2ReRenderProdutos();},limpar:()=>{orc2Adesivo(i,'codigo','');}},a.codigo,'🔍 Adesivo: nome ou código…');}
+function _l3dAcrilForm(L){return _orcMpBuscaHtml('form-acril',{tipo:'acril',on:cod=>orc2Letra('acrilCod',cod,true),limpar:()=>orc2Letra('acrilCod','',true)},L.acrilCod,'🔍 Chapa: nome ou código…');}
+function l3dCorForm(){window._orcMpCtx['form-tinta']={tipo:'tinta',on:t=>{orc2.letra=orc2.letra||_orc2LetraVazia();orc2.letra.tinta=t;_orc2ReRenderProdutos();toast('Tinta escolhida: '+t.nome,'tok');}};corAbrir('form-tinta');}
+function _orcTrNovoMp(){window._orcMpCtx['troca']={tipo:'geral',on:cod=>orcTrEscolher(cod,'livre')};mpNovoAbrir('troca');}
+
 </script>
 </body>
 </html>
