@@ -33,7 +33,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-17.7';</script>
+<script>const APP_BUILD_VERSION='2026-11-17.8';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -39233,17 +39233,38 @@ const PROD_CHECKLIST_ITENS=[
 // Pedido cujo projeto já tinha sido encaminhado antes de 17/11/2026 não ganha a etapa (não reabre
 // nada que já estava andando nem cria atraso retroativo).
 const PROD_APROV_PROJ_DESDE='2026-11-17';
+// (2026-11-17, a pedido do usuário) Pedidos com projeto encaminhado ANTES de 17/11 também ganham
+// a etapa, desde que a Produção ainda não tenha iniciado nada neles (nenhuma baixa de Corte
+// Galvanizado/Adesivos/Produzir, nenhum item com % produzido e obra não finalizada). Pedido que
+// já começou a ser produzido continua sem a etapa (não reabre o que já está andando).
+const PROD_APROV_PROJ_PRAZO_MIN_ANTIGOS='2026-11-18';
+function _prodJaIniciada(p){
+  if(!p)return false;
+  if(typeof _lpObraFinalizada==='function'&&_lpObraFinalizada(p))return true;
+  const b=p.lpBaixas||{};
+  if(b.corteGalv||b.adesivo||b.producao)return true;
+  const itens=p.itensProducao||[];
+  return itens.some(i=>{
+    if((Number(i.percentual)||0)>0)return true;
+    const st=i.setores||{};
+    return Object.keys(st).some(k=>(Number(st[k])||0)>0);
+  });
+}
 function _prodAprovProjEtapa(p,calc){
   if(!calc||!calc.ok)return null;
   const bp=p&&p.lpBaixas&&p.lpBaixas.projeto;
   const dataBp=bp?String(bp.data||(bp.dataHora?_isoLocal(new Date(bp.dataHora)):'')).slice(0,10):'';
-  if(dataBp&&dataBp<PROD_APROV_PROJ_DESDE&&!(p.lpBaixas&&p.lpBaixas.aprovProj))return null;
+  const antigo=!!(dataBp&&dataBp<PROD_APROV_PROJ_DESDE&&!(p.lpBaixas&&p.lpBaixas.aprovProj));
+  if(antigo&&_prodJaIniciada(p))return null;
   const fab=calc.etapas.filter(e=>e.aplicavel&&['corteGalv','adesivo','producao'].includes(e.key));
   if(!fab.length)return null;
   const proj=calc.etapas.find(e=>e.key==='projeto'&&e.aplicavel);
   let d=new Date((proj?proj.iso:calc.emissaoIso)+'T00:00:00'),n=1;
   while(n>0){d.setDate(d.getDate()+1);const dow=d.getDay();if(dow!==0&&dow!==6&&!getFeriadosTodos(d.getFullYear()).has(fmtISOLocal(d)))n--;}
   let iso=fmtISOLocal(d);
+  // Pedido antigo que entrou na etapa agora: prazo nunca antes de 18/11/2026 (1 dia útil depois
+  // da regra nascer) pra não aparecer atrasado de forma retroativa.
+  if(antigo&&iso<PROD_APROV_PROJ_PRAZO_MIN_ANTIGOS)iso=PROD_APROV_PROJ_PRAZO_MIN_ANTIGOS;
   const teto=fab.reduce((m,e)=>(!m||e.iso<m)?e.iso:m,'');
   if(teto&&iso>teto)iso=teto;
   return{key:'aprovProj',label:'Aprovação de Projetos',iso,aplicavel:true};
