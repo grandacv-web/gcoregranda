@@ -34,7 +34,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-17.28';</script>
+<script>const APP_BUILD_VERSION='2026-11-17.31';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -92401,7 +92401,15 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         itens.push({p,area:Math.max(0,ar),emenda:true,ors:[{rot:o.o.rot,an:o.o.an,ras:{rows,nx,ny,bb:{minX:0,minY:0,maxX:nx*g,maxY:ny*g}},off:{x:x0,y:y0},win:{w:nx*g,h:ny*g}}]});}
     });
     itens.forEach(it=>it.ors.forEach(o=>{if(o.ras)return;o.ras=nestRaster(o.an,g);if(it.p.margem)o.ras=nestDilata(o.ras,Math.max(1,Math.round(it.p.margem/g)));}));
-    itens.sort((a,b)=>b.area-a.area);
+    // (2026-11-17, a pedido do Clabonde — "pula pra outra chapa letra que cabia na anterior") várias tentativas:
+    // ordem das peças (maior área / maior lado / mais alta) × encosto (pra esquerda, deixando o fim da chapa inteiro;
+    // ou pra cima) — fica a que usa menos chapa e, empatando, a que deixa mais sobra inteira no fim da última chapa
+    const bbIt=it=>{const R=it.ors[0].ras;return{a:Math.max(R.nx,R.ny),b:Math.min(R.nx,R.ny)};};
+    const ORDENS=[(a,b)=>b.area-a.area,(a,b)=>bbIt(b).a-bbIt(a).a||b.area-a.area,(a,b)=>bbIt(b).b-bbIt(a).b||b.area-a.area];
+    const tentativas=[];for(const grav of ['x','y'])for(const ord of ORDENS)tentativas.push({grav,ord});
+    let melhorR=null,GRAV='y';
+    for(const T of (semMeia||itens.length<=1?[tentativas[0]]:tentativas)){
+    GRAV=T.grav;itens.sort(T.ord);
     const chapas=[];
     const nova=()=>{const occ=[];for(let r=0;r<NY;r++){const row=new Uint8Array(NX);for(let c=0;c<NX;c++)if(r<bor||r>=NY-bor||c<bor||c>=NX-bor)row[c]=1;occ.push(row);}const c={bor:0,pos:[],occ,raster:true,g};chapas.push(c);return c;};
     const livreEm=(c,ras,cx,cy)=>{ // devolve -1 se cabe, senão a próxima coluna a tentar
@@ -92410,8 +92418,10 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
       return -1;};
     const acha=(c,it)=>{let best=null;
       for(const o of it.ors){const R=o.ras;
-        for(let cy=0;cy+R.ny<=NY;cy++){if(best&&cy>best.cy)break;
-          for(let cx=0;cx+R.nx<=NX;){const v=livreEm(c,R,cx,cy);if(v<0){if(!best||cy<best.cy||(cy===best.cy&&cx<best.cx))best={cx,cy,o};break;}cx=Math.max(cx+1,v);}
+        for(let cy=0;cy+R.ny<=NY;cy++){if(GRAV==='y'&&best&&cy>best.cy)break;
+          for(let cx=0;cx+R.nx<=NX;){if(GRAV==='x'&&best&&cx>best.cx)break;const v=livreEm(c,R,cx,cy);if(v<0){
+              const melhor=!best||(GRAV==='y'?(cy<best.cy||(cy===best.cy&&cx<best.cx)):(cx<best.cx||(cx===best.cx&&(cx+R.nx<best.cx+best.o.ras.nx||(cx+R.nx===best.cx+best.o.ras.nx&&cy<best.cy)))));
+              if(melhor)best={cx,cy,o};break;}cx=Math.max(cx+1,v);}
         }}
       return best;};
     const marca=(c,R,cx,cy)=>{for(let r=0;r<R.ny;r++)for(const [a,b] of R.rows[r])for(let dr=-fc;dr<=fc;dr++){const row=c.occ[cy+r+dr];if(!row)continue;for(let x=Math.max(0,cx+a-fc);x<=Math.min(NX-1,cx+b+fc);x++)row[x]=1;}};
@@ -92455,7 +92465,13 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         for(const [L2,W2,lado] of [[ch.L/2,ch.W,'comprimento'],[ch.L,ch.W/2,'largura']]){const r=apvNestFormas(ps,{L:L2,W:W2},true);
           if(r.chapas.length===1&&r.chapas[0].pos.length===u.pos.length){u.pos=r.chapas[0].pos;u.meia=lado;ult=0.5;break;}}}}
     const qCorte=Math.max(0.5,(chapas.length-1)+ult),qArea=Math.max(0.5,Math.ceil(frac*2-1e-9)/2),qtd=Math.max(qCorte,qArea);
-    return{chapas,soTira:false,formas:true,qtd,frac,qArea,qCorte,uso:qtd>0?areaPecas/(qtd*ch.L*ch.W):0,areaPecas};
+    const R0={chapas,soTira:false,formas:true,qtd,frac,qArea,qCorte,uso:qtd>0?areaPecas/(qtd*ch.L*ch.W):0,areaPecas};
+    // nota: menos chapa; depois a última chapa mais "curta" (sobra inteira maior); depois menos emendas na tira
+    const uC=chapas[chapas.length-1],ext=uC&&uC.pos.length?Math.min(Math.max(...uC.pos.map(q=>q.x+q.w))/ch.L,Math.max(...uC.pos.map(q=>q.y+q.h))/ch.W):0;
+    R0._nota=qCorte*1000+ext*10;
+    if(!melhorR||R0._nota<melhorR._nota-1e-9)melhorR=R0;
+    }
+    return melhorR;
   }
   // recorta anéis (regra par/ímpar) num retângulo — Sutherland-Hodgman em cada anel
   function nestRecorta(an,x0,y0,x1,y1){
@@ -92576,6 +92592,18 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         let b=null;barras.forEach(x=>{if(x.livre>=seg-1e-9&&(!b||x.livre<b.livre))b=x;}); // melhor encaixe: a barra que sobra menos
         if(!b){b={livre:BARRA,cortes:[]};barras.push(b);}
         b.cortes.push(Object.assign({},c,{L:seg,emenda:n>1}));b.livre-=seg+SERRA;}});
+    // (2026-11-17) melhora: tenta esvaziar a barra menos usada (passando os cortes dela pros espaços das outras) e,
+    // se não der, troca cortes entre barras pra deixar a menos usada o mais vazia possível (vira meia barra / sobra boa)
+    const usoBr=b=>b.cortes.reduce((s2,c)=>s2+c.L,0)+Math.max(0,b.cortes.length-1)*SERRA;
+    const refaz=b=>{b.livre=BARRA-usoBr(b)-(b.cortes.length?SERRA:0);};
+    for(let volta=0;volta<3&&barras.length>1;volta++){
+      barras.sort((x,y)=>usoBr(y)-usoBr(x));const u=barras[barras.length-1],outras=barras.slice(0,-1);
+      const fica=[];u.cortes.slice().sort((x,y)=>y.L-x.L).forEach(c=>{let alvo=null;outras.forEach(x=>{if(x.livre>=c.L+1e-9&&(!alvo||x.livre<alvo.livre))alvo=x;});if(alvo){alvo.cortes.push(c);refaz(alvo);}else fica.push(c);});
+      u.cortes=fica;refaz(u);if(!u.cortes.length){barras.pop();continue;}
+      // troca 1×1: corte grande da barra cheia ↔ corte pequeno da última, se a cheia comporta e a última encolhe
+      let mexeu=false;for(const x of outras){for(let i=0;i<x.cortes.length&&!mexeu;i++)for(let j=0;j<u.cortes.length&&!mexeu;j++){const A=x.cortes[i],Bc=u.cortes[j];if(Bc.L>A.L+1e-9&&x.livre+A.L-Bc.L>=-1e-9){x.cortes[i]=Bc;u.cortes[j]=A;refaz(x);refaz(u);mexeu=true;}}if(mexeu)break;}
+      if(!mexeu)break;}
+    barras.sort((x,y)=>usoBr(y)-usoBr(x));
     const usado=cortes.reduce((s2,c)=>s2+c.L,0)+cortes.length*SERRA;
     // (2026-11-16, auditoria) quantidade = o que o PLANO usa: as barras do plano, e a barra menos usada conta meia
     // se o que vai nela cabe em 3 m — nunca menos que os metros ÷ 6 de meia em meia
@@ -93050,7 +93078,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     [perfil,cant].forEach(lista=>{const pos={},cont={};
       lista.slice().sort((a,b)=>a.pi-b.pi||['quadro','reforço','trava','diagonal'].indexOf(a.tipo)-['quadro','reforço','trava','diagonal'].indexOf(b.tipo)||b.L-a.L).forEach(c=>{
         const k=c.pi+'|'+c.tipo+'|'+Math.round(c.L*1000)+'|'+c.ang.join('/');
-        if(!pos[k]){cont[c.pi]=(cont[c.pi]||0)+1;pos[k]='P'+(c.pi+1)+'-'+String(cont[c.pi]).padStart(2,'0');}c.pos=pos[k];});});
+        if(!pos[k]){cont[c.pi]=(cont[c.pi]||0)+1;pos[k]=rotuloApv(c.pi)+'-'+String(cont[c.pi]).padStart(2,'0');}c.pos=pos[k];});});
     return{perfil,cant};
   }
   // soma da estrutura de um conjunto de peças
@@ -93748,6 +93776,16 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     return html;
   }
   // ── desenho 2D do aproveitamento ──
+  // cores por peça (pastel) e rótulo curto "P16" — os mesmos no desenho das chapas e no plano de corte das barras
+  const PAL_APV=[[214,'#dbeafe','#2563eb','#1e3a8a'],[152,'#d1fae5','#059669','#064e3b'],[38,'#fef3c7','#d97706','#78350f'],[330,'#fce7f3','#db2777','#831843'],[262,'#ede9fe','#7c3aed','#4c1d95'],[190,'#cffafe','#0891b2','#164e63'],[12,'#ffe4e6','#e11d48','#881337'],[90,'#ecfccb','#65a30d','#365314'],[24,'#ffedd5','#ea580c','#7c2d12'],[200,'#e0f2fe','#0284c7','#0c4a6e']];
+  function corPecaApv(i){const r=S._rank&&S._rank[i]!=null?S._rank[i]:i,c=PAL_APV[r%PAL_APV.length];return{f:c[1],s:c[2],t:c[3]};}
+  function rotuloApv(i){try{ordemPecas();return'P'+(S._rank[i]+1);}catch(e){return'P'+(i+1);}}
+  // ponto bom pro rótulo: o ponto de dentro da peça (externo menos miolos) mais longe das bordas, numa grade 16×16
+  function pontoRotulo(an,clip){const bb=clip?{minX:clip.x,minY:clip.y,maxX:clip.x+clip.w,maxY:clip.y+clip.h}:bbAneis(an);let best={x:(bb.minX+bb.maxX)/2,y:(bb.minY+bb.maxY)/2,r:0};
+    const dentro=(x,y)=>{let c=0;an.forEach(r=>{for(let i=0,j=r.length-1;i<r.length;j=i++){const a=r[i],b=r[j];if((a.y>y)!==(b.y>y)&&x<(b.x-a.x)*(y-a.y)/(b.y-a.y)+a.x)c++;}});return c%2===1;};
+    const dist=(x,y)=>{let m=Math.min(x-bb.minX,bb.maxX-x,y-bb.minY,bb.maxY-y);an.forEach(r=>{for(let i=0,j=r.length-1;i<r.length;j=i++){const a=r[j],b=r[i],dx=b.x-a.x,dy=b.y-a.y,L2=dx*dx+dy*dy||1e-12,t=Math.max(0,Math.min(1,((x-a.x)*dx+(y-a.y)*dy)/L2)),ex=a.x+t*dx-x,ey=a.y+t*dy-y;m=Math.min(m,Math.hypot(ex,ey));}});return m;};
+    const n=16;for(let i=0;i<n;i++)for(let j=0;j<n;j++){const x=bb.minX+(i+0.5)*(bb.maxX-bb.minX)/n,y=bb.minY+(j+0.5)*(bb.maxY-bb.minY)/n;if(!dentro(x,y))continue;const r=dist(x,y);if(r>best.r)best={x,y,r};}
+    return best;}
   function svgChapa(c,ch,placados,acor){
     const mm=v=>Math.round(v*1000),B=c&&c.bor!=null?c.bor:APV_BORDA,M=S.med,k=M.k;
     let clip=0;
@@ -93759,17 +93797,33 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     const els=placados.map(it=>{
       const X=mm(B+it.x),Y=mm(B+it.y),W=mm(it.w),H=mm(it.h),id='l3dclip'+(++_apvClip),nome=nomePeca(it.ref.peca);
       const cor=it.cor||acor;
-      if(it.forma){const cor2=it.cor||acor,cc=it.an.reduce((s2,r)=>s2.concat(r),[]),cxm=cc.reduce((s2,q)=>s2+q.x,0)/cc.length,cym=cc.reduce((s2,q)=>s2+q.y,0)/cc.length;
-        const d=it.an.map(r=>'M'+r.map(q=>mm(q.x)+' '+mm(q.y)).join(' L')+' Z').join(' ');
-        if(it.clip){const cid='l3dcp'+(++_apvClip),k2=it.clip,fs2=Math.max(28,Math.min(k2.w,k2.h)*1000*0.16);return`<clipPath id="${cid}"><rect x="${mm(k2.x)}" y="${mm(k2.y)}" width="${mm(k2.w)}" height="${mm(k2.h)}"/></clipPath><g clip-path="url(#${cid})">${it.margem?`<path d="${it.an.slice(0,1).map(r=>'M'+r.map(q=>mm(q.x)+' '+mm(q.y)).join(' L')+' Z').join('')}" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="${mm(it.margem)*2}" stroke-linejoin="round"/>`:''}<path d="${d}" fill="${cor2}" fill-rule="evenodd" stroke="#1e3a8a" stroke-width="4"/></g><rect x="${mm(k2.x)}" y="${mm(k2.y)}" width="${mm(k2.w)}" height="${mm(k2.h)}" fill="none" stroke="#dc2626" stroke-width="5" stroke-dasharray="18 12"/><text x="${mm(k2.x+k2.w/2)}" y="${mm(k2.y+k2.h/2)}" font-size="${fs2}" text-anchor="middle" dominant-baseline="central" fill="#0f172a" font-weight="700" paint-order="stroke" stroke="#ffffffcc" stroke-width="${fs2/6}">${nome} ✂</text>`;}
-        const fs=Math.max(28,Math.min(it.w,it.h)*1000*0.16);
-        return`${it.margem?`<path d="${it.an.slice(0,1).map(r=>'M'+r.map(q=>mm(q.x)+' '+mm(q.y)).join(' L')+' Z').join('')}" fill="#e0f2fe" stroke="#7dd3fc" stroke-width="${mm(it.margem)*2}" stroke-linejoin="round"/>`:''}<path d="${d}" fill="${cor2}" fill-rule="evenodd" stroke="#1e3a8a" stroke-width="4"/>${it.emenda?`<path d="${d}" fill="none" stroke="#dc2626" stroke-width="5" stroke-dasharray="18 12"/>`:''}<text x="${mm(it.x+it.w/2)}" y="${mm(it.y+it.h/2)}" font-size="${fs}" text-anchor="middle" dominant-baseline="central" fill="${it.claro?'#fff':'#0f172a'}" font-weight="700" paint-order="stroke" stroke="${it.claro?'#0006':'#ffffffcc'}" stroke-width="${fs/6}">${nome}${it.tira?' · '+Q(it.L,2)+' m':''}${it.emenda?' ✂':''}</text>`;}
+      if(it.forma){
+        // (2026-11-17, redesenho) cada peça com a sua cor clara, contorno na mesma cor mais forte, rótulo curto no
+        // miolo da peça (não no meio do retângulo, que pode cair no buraco); pedaço com emenda mostra só a LINHA do
+        // corte em vermelho tracejado (não mais o retângulo inteiro por cima das outras peças)
+        const pi=it.ref&&it.ref.peca!=null?it.ref.peca:0,cp=corPecaApv(pi),d=it.an.map(r=>'M'+r.map(q=>mm(q.x)+' '+mm(q.y)).join(' L')+' Z').join(' ');
+        const k2=it.clip,lp=pontoRotulo(it.an,k2),bx=k2||bbAneis(it.an);const bw=k2?k2.w:bx.maxX-bx.minX,bh=k2?k2.h:bx.maxY-bx.minY;
+        const fs=Math.max(0,Math.min(150,lp.r*1000*0.9,Math.min(bw,bh)*1000*0.32)),tx=rotuloApv(pi);
+        const mk=Math.min(34,Math.min(bw,bh)*1000*0.45);const lbl=fs>=34?`<text x="${mm(lp.x)}" y="${mm(lp.y)}" font-size="${fs}" text-anchor="middle" dominant-baseline="central" fill="${cp.t}" font-weight="800" paint-order="stroke" stroke="#fff" stroke-width="${fs/5}">${tx}${it.emenda?' ✂':''}</text>`:mk>=14?`<circle cx="${mm(lp.x)}" cy="${mm(lp.y)}" r="${mk}" fill="${cp.t}"/><text x="${mm(lp.x)}" y="${mm(lp.y)}" font-size="${mk}" text-anchor="middle" dominant-baseline="central" fill="#fff" font-weight="800">${S._rank?S._rank[pi]+1:pi+1}</text>`:'';
+        const marg=it.margem?`<path d="${it.an.slice(0,1).map(r=>'M'+r.map(q=>mm(q.x)+' '+mm(q.y)).join(' L')+' Z').join('')}" fill="none" stroke="${cp.f}" stroke-opacity=".55" stroke-width="${mm(it.margem)*2}" stroke-linejoin="round"/>`:'';
+        if(k2){const cid='l3dcp'+(++_apvClip),full=bbAneis(it.an),e=0.002,cut=[];
+          if(k2.x>full.minX+e)cut.push([k2.x,k2.y,k2.x,k2.y+k2.h]);if(k2.x+k2.w<full.maxX-e)cut.push([k2.x+k2.w,k2.y,k2.x+k2.w,k2.y+k2.h]);
+          if(k2.y>full.minY+e)cut.push([k2.x,k2.y,k2.x+k2.w,k2.y]);if(k2.y+k2.h<full.maxY-e)cut.push([k2.x,k2.y+k2.h,k2.x+k2.w,k2.y+k2.h]);
+          const pid=cid+'p';return`<clipPath id="${cid}"><rect x="${mm(k2.x)}" y="${mm(k2.y)}" width="${mm(k2.w)}" height="${mm(k2.h)}"/></clipPath><clipPath id="${pid}"><path d="${d}" clip-rule="evenodd"/></clipPath><g clip-path="url(#${cid})">${marg}<path d="${d}" fill="${cp.f}" fill-rule="evenodd" stroke="${cp.s}" stroke-width="5"/></g><g clip-path="url(#${pid})">${cut.map(([x1,y1,x2,y2])=>`<line x1="${mm(x1)}" y1="${mm(y1)}" x2="${mm(x2)}" y2="${mm(y2)}" stroke="#dc2626" stroke-width="14" stroke-dasharray="26 16"/>`).join('')}</g>${lbl}`;}
+        return`${marg}<path d="${d}" fill="${cp.f}" fill-rule="evenodd" stroke="${cp.s}" stroke-width="5"/>${lbl}`;}
       if(it.faixa){let x0=0;const fs=Math.min(H*0.55,58);return`<g transform="translate(${X} ${Y})">${it.segs.map(z=>{const w=mm(z.L),cor2=z.cor||acor,t=`${nomePeca(z.ref.peca)}${z.ref.miolo?' miolo':''} · ${Q(z.L,2)} m${z.emenda?' ✂':''}`,cabeT=t.length*fs*0.55<w-20;const r=`<g transform="translate(${x0} 0)"><rect width="${w}" height="${H}" fill="${cor2}" stroke="#7c2d12" stroke-width="3"/><rect width="${w}" height="${mm(APV_ABA)}" fill="#0000000f"/><rect y="${H-mm(APV_ABA)}" width="${w}" height="${mm(APV_ABA)}" fill="#0000000f"/>${cabeT?`<text x="${w/2}" y="${H/2}" font-size="${fs}" text-anchor="middle" dominant-baseline="central" fill="${z.claro?'#ffffff':'#0f172a'}">${t}</text>`:w>fs*2?`<text x="${w/2}" y="${H/2}" font-size="${fs}" text-anchor="middle" dominant-baseline="central" fill="${z.claro?'#ffffff':'#0f172a'}">${nomePeca(z.ref.peca).replace('Peça ','P')}</text>`:''}</g>`;x0+=w;return r;}).join('')}</g>`;}
       if(it.ref.tira)return`<g transform="translate(${X} ${Y})"><rect width="${W}" height="${H}" fill="${cor}" stroke="#9a3412" stroke-width="3"/><rect y="0" width="${W}" height="${mm(APV_ABA)}" fill="#0000000f"/><rect y="${H-mm(APV_ABA)}" width="${W}" height="${mm(APV_ABA)}" fill="#0000000f"/><text x="${W/2}" y="${H/2}" font-size="${Math.min(H*0.7,60)}" text-anchor="middle" dominant-baseline="central" fill="${it.claro?'#ffffff':'#0f172a'}">${nome}${it.ref.miolo?' (miolo)':''} · ${Q(it.w,2)} m${it.emenda?' · emenda':''}</text></g>`;
       return`<g transform="translate(${X} ${Y})"><clipPath id="${id}"><rect width="${W}" height="${H}"/></clipPath><rect width="${W}" height="${H}" fill="none" stroke="#94a3b8" stroke-width="3" stroke-dasharray="12 8"/><path d="${pecaPath(it.ref.peca,it)}" fill="${cor}" fill-rule="evenodd" stroke="#1e3a8a" stroke-width="4" clip-path="url(#${id})"/><text x="${W/2}" y="${H/2}" font-size="${Math.max(30,Math.min(H,W)*0.18)}" text-anchor="middle" dominant-baseline="central" fill="#0f172a" font-weight="700">${nome}${it.emenda?' (emenda)':''}</text></g>`;
     }).join('');
     const meia=c&&c.meia?(c.meia==='comprimento'?`<rect x="${mm(ch.L/2)}" y="0" width="${mm(ch.L/2)}" height="${mm(ch.W)}" fill="#e2e8f0"/><line x1="${mm(ch.L/2)}" y1="-20" x2="${mm(ch.L/2)}" y2="${mm(ch.W)+20}" stroke="#dc2626" stroke-width="8" stroke-dasharray="40 24"/><text x="${mm(ch.L*0.75)}" y="${mm(ch.W/2)}" font-size="${Math.min(mm(ch.W)/8,120)}" text-anchor="middle" dominant-baseline="central" fill="#64748b">meia chapa livre</text>`:`<rect x="0" y="${mm(ch.W/2)}" width="${mm(ch.L)}" height="${mm(ch.W/2)}" fill="#e2e8f0"/><line x1="-20" y1="${mm(ch.W/2)}" x2="${mm(ch.L)+20}" y2="${mm(ch.W/2)}" stroke="#dc2626" stroke-width="8" stroke-dasharray="40 24"/><text x="${mm(ch.L/2)}" y="${mm(ch.W*0.75)}" font-size="${Math.min(mm(ch.W)/8,120)}" text-anchor="middle" dominant-baseline="central" fill="#64748b">meia chapa livre</text>`):'';
-    return`<svg viewBox="-20 -20 ${mm(ch.L)+40} ${mm(ch.W)+40}" style="width:100%;height:auto;background:#fff;border-radius:8px;display:block"><rect x="0" y="0" width="${mm(ch.L)}" height="${mm(ch.W)}" fill="#f8fafc" stroke="#0f172a" stroke-width="6"/>${meia}${els}</svg>`;
+    // sobra inteira (à direita e embaixo do que foi usado) com a medida — o que dá pra guardar
+    let sob='';if(!(c&&c.meia)&&placados.length){const mx=Math.max(...placados.map(q=>B+q.x+q.w))+APV_GAP,my=Math.max(...placados.map(q=>B+q.y+q.h))+APV_GAP;
+      const R=[];if(ch.L-mx>=0.15)R.push([mx,0,ch.L-mx,ch.W]);else if(ch.W-my>=0.15)R.push([0,my,ch.L,ch.W-my]);
+      sob=R.map(([x,y,w,h])=>{const t1='sobra '+Q(w,2)+' × '+Q(h,2)+' m',fs=Math.max(24,Math.min(110,h*1000*0.3,w*1000/(t1.length*0.62)));return`<rect x="${mm(x)}" y="${mm(y)}" width="${mm(w)}" height="${mm(h)}" fill="url(#l3dsob)" stroke="#16a34a" stroke-width="5" stroke-dasharray="20 12"/><text x="${mm(x+w/2)}" y="${mm(y+h/2)}" font-size="${fs}" text-anchor="middle" dominant-baseline="central" fill="#15803d" font-weight="800" paint-order="stroke" stroke="#fff" stroke-width="${fs/5}">${t1}</text>`;}).join('');}
+    const fsD=Math.max(50,mm(ch.W)*0.05);
+    return`<svg viewBox="${-fsD*1.6} ${-fsD*1.6} ${mm(ch.L)+fsD*1.6+20} ${mm(ch.W)+fsD*1.6+20}" style="width:100%;height:auto;background:#fff;border-radius:8px;display:block"><defs><pattern id="l3dsob" width="50" height="50" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="50" height="50" fill="#f0fdf4"/><line x1="0" y1="0" x2="0" y2="50" stroke="#bbf7d0" stroke-width="14"/></pattern></defs>
+      <text x="${mm(ch.L)/2}" y="${-fsD*0.55}" font-size="${fsD}" text-anchor="middle" fill="#64748b" font-weight="700">${Q(ch.L,2)} m</text><text transform="translate(${-fsD*0.55} ${mm(ch.W)/2}) rotate(-90)" font-size="${fsD}" text-anchor="middle" fill="#64748b" font-weight="700">${Q(ch.W,2)} m</text>
+      <rect x="0" y="0" width="${mm(ch.L)}" height="${mm(ch.W)}" fill="#fff" stroke="#0f172a" stroke-width="8"/>${meia}${sob}${els}</svg>`;
   }
   let _apvClip=0;
   // usos de um material (chapa) em todos os itens
@@ -93786,11 +93840,21 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     us.forEach(({g,c})=>{const cor=corParte(c),claro=ehEscura(cor);
       partsChapa(g,c).forEach(p=>parts.push(Object.assign(p,{cor,claro})));});
     const res=apvEncaixar(parts,ch),tot=Math.round(us.reduce((s2,u)=>s2+u.c.res.qtd,0)*100)/100;
-    const linhas=us.map(({g,c})=>`<div class="l3d-mat" style="font-size:.76rem"><span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${corParte(c)};border:1px solid #0003;margin-right:5px"></i>Item ${g.n}${g.nome?' — '+E(g.nome):''} · ${PAPEL[c.papel]}${c.papel==='lateral'?` (tiras de ${Q(caixa*100,0)} cm + abas de ${Q(APV_ABA*100,1)} cm)`:''} · ${g.pecas.map(nomePeca).join(', ')}</span><b>área ${Q(c.res.frac,2)} ch. → ${c.res.compart?Q(c.res.qtd,2)+' ch. (parte dele)':Q(c.res.qtd,1).replace(',0','')+' ch.'}</b></div>`).join('');
-    return`<div style="display:flex;align-items:center;gap:10px;position:sticky;top:0;background:#fff;padding:8px 0;z-index:1"><b style="flex:1;color:#1a2b5e;font-size:.9rem">📐 Aproveitamento — ${E(nomeM)} · chapa ${Q(ch.L,2)} × ${Q(ch.W,2)} m</b><span style="font-size:.8rem;color:#1a2b5e">No orçamento: <b>${Q(tot,tot%0.5?2:1).replace(',0','')} ${PL(tot,'chapa','chapas')}</b></span><button type="button" class="orc2-btn sec" onclick="l3dApv('')">✕ Voltar ao 3D</button></div>
-      <div class="l3d-mats" style="border:none;margin:0 0 6px">${linhas}</div>
-      <div class="orcx-hint" style="margin:0 0 6px">${res.soTira?'Tiras cortadas na guilhotina, emendadas e correndo o comprimento inteiro da chapa (3 mm por corte).':res.formas?'Encaixe pelo formato real das peças (como no router), girando quando ajuda, com 1 cm entre elas e da borda; peça maior que a chapa vai em pedaços com emenda (✂).':'Peças pelo retângulo de cada uma, com 1 cm entre elas e da borda, podendo girar; peça maior que a chapa vai com emenda.'} No corte: ${res.chapas.length>1?(res.chapas.length-1)+' '+PL(res.chapas.length-1,'chapa cheia','chapas cheias')+' + ':''}${res.chapas.length&&res.chapas[res.chapas.length-1].meia?'meia chapa':'1 chapa'} = <b>${Q(res.qCorte,1).replace(',0','')} ${PL(res.qCorte,'chapa','chapas')}</b> (área real das peças: ${Q(res.frac,2)} ${PL(res.frac<=1?1:2,'chapa','chapas')}).${us.length>1?' O total é dividido entre os itens pela área de cada um.':''}</div>
-      ${res.chapas.map((cc,ix)=>`<div style="font-size:.7rem;color:#64748b;margin:6px 0 3px">Chapa ${ix+1} de ${res.chapas.length}${cc.meia?' — usa meia chapa (corte no '+cc.meia+')':''}</div>${svgChapa(cc,ch,cc.pos,'#bfdbfe')}`).join('')}`;
+    // (2026-11-17, redesenho) cabeçalho com números, cada chapa com título claro e legenda das peças dela
+    const nCh=res.chapas.length,ultMeia=nCh&&res.chapas[nCh-1].meia,nEm=res.chapas.reduce((s2,cc)=>s2+cc.pos.filter(q=>q.emenda).length,0);
+    const kpi=(t,v,sub)=>`<div class="l3d-kpi"><span>${t}</span><b>${v}</b>${sub?`<small>${sub}</small>`:''}</div>`;
+    const itensH=us.map(({g,c})=>`<span class="l3d-apv-it"><i style="background:${corParte(c)}"></i>Item ${g.n}${g.nome?' — '+E(g.nome):''} · ${PAPEL[c.papel]}${c.papel==='lateral'?` (tiras de ${Q(caixa*100,0)} cm + abas)`:''} · <b>${c.res.compart?Q(c.res.qtd,2):Q(c.res.qtd,1).replace(',0','')} ch.</b></span>`).join('');
+    const legenda=cc=>{const vis={},out=[];cc.pos.forEach(q=>{const segs=q.faixa?q.segs:[q];segs.forEach(z=>{const r=z.ref||q.ref;if(!r||r.peca==null)return;const k2=r.peca+(r.miolo?'m':'');if(vis[k2]){vis[k2].n++;return;}const pq=M.porPeca[r.peca];vis[k2]={n:1,i:r.peca,miolo:r.miolo,tira:!!q.faixa,dim:pq?Q(pq.w,2)+' × '+Q(pq.h,2)+' m':''};out.push(vis[k2]);});});
+      return`<div class="l3d-apv-leg">${out.sort((x,y)=>(S._rank?S._rank[x.i]-S._rank[y.i]:x.i-y.i)).map(o=>{const cp=corPecaApv(o.i);return`<span><i style="background:${cp.f};border-color:${cp.s}"></i><b>${rotuloApv(o.i)}</b> ${E(nomePeca(o.i))}${o.miolo?' (miolo)':''}${o.tira?'':' · '+o.dim}${o.n>1?` · <em>${o.n} ${o.tira?'pedaços':'partes com emenda'}</em>`:''}</span>`;}).join('')}</div>`;};
+    return`<style>.l3d-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:4px 0 10px}.l3d-kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:7px 10px}.l3d-kpi span{display:block;font-size:.66rem;color:#64748b;text-transform:uppercase;letter-spacing:.03em}.l3d-kpi b{font-size:1.05rem;color:#0f172a}.l3d-kpi small{display:block;font-size:.66rem;color:#64748b}
+      .l3d-apv-it{display:inline-flex;align-items:center;gap:5px;font-size:.74rem;color:#334155;background:#f8fafc;border:1px solid #e2e8f0;border-radius:999px;padding:3px 10px;margin:0 6px 6px 0}.l3d-apv-it i{width:10px;height:10px;border-radius:3px;border:1px solid #0003}
+      .l3d-apv-ch{margin:14px 0 4px;display:flex;align-items:baseline;gap:8px}.l3d-apv-ch b{color:#1a2b5e;font-size:.86rem}.l3d-apv-ch span{font-size:.72rem;color:#64748b}
+      .l3d-apv-leg{display:flex;flex-wrap:wrap;gap:4px 14px;margin:6px 2px 4px;font-size:.72rem;color:#334155}.l3d-apv-leg span{display:inline-flex;align-items:center;gap:5px}.l3d-apv-leg i{width:12px;height:12px;border-radius:3px;border:2px solid}.l3d-apv-leg em{color:#dc2626;font-style:normal}</style>
+      <div style="display:flex;align-items:center;gap:10px;position:sticky;top:0;background:#fff;padding:8px 0;z-index:1"><b style="flex:1;color:#1a2b5e;font-size:.9rem">📐 ${E(nomeM)}</b><span style="font-size:.8rem;color:#1a2b5e">No orçamento: <b>${Q(tot,tot%0.5?2:1).replace(',0','')} ${PL(tot,'chapa','chapas')}</b></span><button type="button" class="orc2-btn sec" onclick="l3dApv('')">✕ Voltar ao 3D</button></div>
+      <div class="l3d-kpis">${kpi('Chapa',Q(ch.L,2)+' × '+Q(ch.W,2)+' m',Q(ch.L*ch.W,2)+' m² cada')}${kpi('No corte',(nCh>1?(nCh-1)+(ultMeia?' + ½':' + 1'):(ultMeia?'½':'1'))+' '+(res.qCorte<=1?'chapa':'chapas'),'= '+Q(res.qCorte,1).replace(',0','')+' no orçamento')}${kpi('Área das peças',Q(res.frac,2)+' chapa',Q(res.areaPecas||res.frac*ch.L*ch.W,2)+' m²')}${kpi('Aproveitamento',Q((res.uso||0)*100,0)+'%',nEm?nEm+' '+PL(nEm,'pedaço com emenda','pedaços com emenda'):'sem emenda')}</div>
+      <div>${itensH}</div>
+      <div class="orcx-hint" style="margin:0 0 4px">${res.soTira?'Tiras da lateral cortadas na guilhotina, correndo o comprimento da chapa (3 mm por corte); ✂ = continua no próximo pedaço.':'Encaixe pelo formato real (como no router), girando quando ajuda, 1 cm entre as peças e da borda. Peça maior que a chapa vai em partes: a linha <b style="color:#dc2626">vermelha tracejada</b> é a emenda. Em verde, a sobra inteira que dá pra guardar.'}${us.length>1?' O total é dividido entre os itens pela área de cada um.':''}</div>
+      ${res.chapas.map((cc,ix)=>`<div class="l3d-apv-ch"><b>Chapa ${ix+1} de ${nCh}</b><span>${cc.meia?'usa meia chapa (corte no '+cc.meia+') — a outra metade fica livre':''}</span></div>${svgChapa(cc,ch,cc.pos,'#bfdbfe')}${legenda(cc)}`).join('')}`;
   }
   // aproveitamento das barras da estrutura: desenho de cada barra de 6 m com os cortes + lista de corte
   const COR_CORTE={quadro:'#93c5fd',reforço:'#34d399',trava:'#fbbf24',diagonal:'#f87171'};
@@ -93804,29 +93868,39 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     const res=apvBarras(cortes),mm=v=>Math.round(v*1000),nB=res.barras.length,mPerf=cortes.reduce((s2,c)=>s2+c.L,0);
     const sobras=res.barras.map(b=>Math.max(0,b.livre)),aprov=sobras.filter(x=>x>=0.40),aprovPct=nB?mPerf/(nB*BARRA)*100:0;
     const ang=c=>c.ang[0]===0&&c.ang[1]===0?'reto':c.ang.map(a=>a===0?'reto':a+'°').join(' / ');
-    const barraSvg=b=>{
-      // junta cortes iguais seguidos num bloco só (ex.: 12 travas iguais)
-      const bl=[];b.cortes.forEach(c=>{const u=bl[bl.length-1];if(u&&u.pos===c.pos&&!c.emenda)u.n++;else bl.push({pos:c.pos,tipo:c.tipo,L:c.L,n:1,emenda:c.emenda});});
-      let x=0;const H=300;
-      const els=bl.map(k=>{const w=mm(k.L)*k.n+mm(SERRA)*(k.n-1),cor=COR_CORTE[k.tipo]||'#cbd5e1';
-        let div='';for(let t=1;t<k.n;t++){const xx=t*(mm(k.L)+mm(SERRA));div+=`<line x1="${xx}" y1="0" x2="${xx}" y2="${H}" stroke="#0f172a" stroke-width="3" opacity=".5"/>`;}
-        const t1=(k.n>1?k.n+'× ':'')+k.pos,t2=mm(k.L)+' mm'+(k.emenda?' ✂':''),fs=Math.min(120,Math.max(0,(w-20)/Math.max(t1.length,t2.length)/0.58));
-        const r=`<g transform="translate(${x} 0)"><rect width="${w}" height="${H}" fill="${cor}" stroke="#0f172a" stroke-width="5"/>${div}${fs>=45?`<text x="${w/2}" y="${H*0.36}" font-size="${fs}" text-anchor="middle" dominant-baseline="central" font-weight="700" fill="#0f172a">${t1}</text><text x="${w/2}" y="${H*0.72}" font-size="${fs*0.85}" text-anchor="middle" dominant-baseline="central" fill="#0f172a">${t2}</text>`:''}</g>`;x+=w+mm(SERRA);return r;}).join('');
+    // (2026-11-17, redesenho a pedido do Clabonde — "plano de corte feio e ruim de entender")
+    // cada barra: os cortes agrupados por peça (cor da peça, a mesma do desenho das chapas), a medida grande dentro do
+    // corte, a sobra no fim; embaixo, a sequência de corte em etiquetas legíveis. Barras iguais aparecem uma vez só (N×).
+    const SIG={quadro:'quadro',reforço:'trava',trava:'trava prof.',diagonal:'diagonal'};
+    const ordBarra=b=>b.cortes.slice().sort((x,y)=>((S._rank?S._rank[x.pi]:x.pi)-(S._rank?S._rank[y.pi]:y.pi))||y.L-x.L||String(x.pos).localeCompare(String(y.pos)));
+    const blocos=b=>{const bl=[];ordBarra(b).forEach(c=>{const u=bl[bl.length-1];if(u&&u.pos===c.pos&&!c.emenda&&!u.emenda)u.n++;else bl.push({pos:c.pos,tipo:c.tipo,L:c.L,n:1,emenda:c.emenda,pi:c.pi,ang:c.ang});});return bl;};
+    const usoB=b=>b.cortes.reduce((s2,c)=>s2+c.L,0)+Math.max(0,b.cortes.length-1)*SERRA;
+    const barraSvg=b=>{const bl=blocos(b),H=260;let x=0;
+      const els=bl.map(k=>{let r='';for(let t=0;t<k.n;t++){const w=mm(k.L),cp=corPecaApv(k.pi),fs=Math.min(110,Math.max(0,(w-16)/((String(mm(k.L)).length+(k.emenda?2:0))*0.6)));
+          r+=`<g transform="translate(${x} 0)"><rect width="${w}" height="${H}" fill="${cp.f}" stroke="${cp.s}" stroke-width="6"/>${k.tipo!=='quadro'?`<rect width="${w}" height="${H*0.16}" fill="${cp.s}" opacity=".35"/>`:''}${fs>=40?`<text x="${w/2}" y="${H*0.48}" font-size="${fs}" text-anchor="middle" dominant-baseline="central" font-weight="800" fill="${cp.t}">${mm(k.L)}${k.emenda?' ✂':''}</text>`:''}${fs>=40&&w>=260?`<text x="${w/2}" y="${H*0.82}" font-size="${Math.min(52,fs*0.5)}" text-anchor="middle" dominant-baseline="central" fill="${cp.t}" opacity=".8">${k.pos}</text>`:''}</g>`;
+          x+=w+mm(SERRA);}return r;}).join('');
       const sob=Math.max(0,mm(BARRA)-x),ok=sob>=400;
-      return`<svg viewBox="-6 -6 ${mm(BARRA)+12} ${H+12}" style="width:100%;height:auto;display:block"><defs><pattern id="l3dhach" width="60" height="60" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="60" height="60" fill="#f1f5f9"/><line x1="0" y1="0" x2="0" y2="60" stroke="#cbd5e1" stroke-width="18"/></pattern></defs><rect x="0" y="0" width="${mm(BARRA)}" height="${H}" fill="url(#l3dhach)" stroke="#0f172a" stroke-width="6"/>${els}${sob>250?`<text x="${x+sob/2}" y="${H/2}" font-size="${Math.min(110,sob/6)}" text-anchor="middle" dominant-baseline="central" fill="${ok?'#15803d':'#94a3b8'}" font-weight="700">${ok?'sobra '+Q(sob/1000,2)+' m · guardar':'sobra '+sob+' mm'}</text>`:''}</svg>`;};
+      return`<svg viewBox="-6 -6 ${mm(BARRA)+12} ${H+12}" style="width:100%;height:auto;display:block"><defs><pattern id="l3dhach" width="60" height="60" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="60" height="60" fill="${ok?'#f0fdf4':'#f8fafc'}"/><line x1="0" y1="0" x2="0" y2="60" stroke="${ok?'#bbf7d0':'#e2e8f0'}" stroke-width="18"/></pattern></defs><rect x="0" y="0" width="${mm(BARRA)}" height="${H}" fill="url(#l3dhach)" stroke="#0f172a" stroke-width="6"/>${els}${sob>220?`<text x="${x+sob/2}" y="${H/2}" font-size="${Math.min(100,sob/7)}" text-anchor="middle" dominant-baseline="central" fill="${ok?'#15803d':'#94a3b8'}" font-weight="800">${ok?'sobra '+Q(sob/1000,2)+' m':'perda '+sob+' mm'}</text>`:''}</svg>`;};
+    const seqBarra=b=>`<div class="l3d-seq">${blocos(b).map(k=>{const cp=corPecaApv(k.pi);return`<span style="background:${cp.f};border-color:${cp.s};color:${cp.t}">${k.n>1?'<em>'+k.n+'×</em> ':''}<b>${mm(k.L)}</b> mm · ${k.pos}${k.tipo!=='quadro'?' · '+SIG[k.tipo]:''}${k.emenda?' ✂':''}</span>`;}).join('<i>›</i>')}</div>`;
+    // barras iguais juntas
+    const grpB=[];res.barras.forEach((b,ix)=>{const k2=blocos(b).map(k=>k.pos+':'+k.n+':'+mm(k.L)).join('|'),u=grpB.find(g=>g.k===k2);if(u)u.ix.push(ix+1);else grpB.push({k:k2,b,ix:[ix+1]});});
+    const barrasH=grpB.map(g=>{const uso=usoB(g.b),sob=Math.max(0,BARRA-uso);return`<div class="l3d-barbl"><div class="l3d-barcab"><b>${g.ix.length>1?'Barras '+g.ix.join(', ')+' <span class="x">'+g.ix.length+'× iguais</span>':'Barra '+g.ix[0]}</b><span>${g.b.cortes.length} ${PL(g.b.cortes.length,'corte','cortes')} · usa ${Q(uso,2)} m · ${sob>=0.40?'<b style="color:#15803d">sobra '+Q(sob,2)+' m pra guardar</b>':'perda '+Q(sob*1000,0)+' mm'}</span></div>${barraSvg(g.b)}${seqBarra(g.b)}</div>`;}).join('');
     // lista de corte por posição
     const L={};cortes.forEach(c=>{const k=c.pos;if(!L[k])L[k]={pos:c.pos,peca:c.peca,pi:c.pi,tipo:c.tipo,L:c.L,ang:ang(c),n:0,item:c.item};L[k].n++;});
-    const lin=Object.values(L).sort((a,b)=>a.pi-b.pi||a.pos.localeCompare(b.pos));
+    const rk=i=>S._rank&&S._rank[i]!=null?S._rank[i]:i;const lin=Object.values(L).sort((a,b)=>rk(a.pi)-rk(b.pi)||a.pos.localeCompare(b.pos));
     let tbl='',ult='';lin.forEach(r=>{if(r.peca!==ult){const tot=lin.filter(x=>x.peca===r.peca).reduce((s2,x)=>s2+x.n*x.L,0),nc=lin.filter(x=>x.peca===r.peca).reduce((s2,x)=>s2+x.n,0);tbl+=`<tr class="sub"><td colspan="6">${E(r.peca)}${G.length>1?' · item '+r.item:''} — ${nc} ${PL(nc,'corte','cortes')}, ${Q(tot,2)} m</td></tr>`;ult=r.peca;}
-      tbl+=`<tr><td><i style="background:${COR_CORTE[r.tipo]||'#cbd5e1'}"></i><b>${r.pos}</b></td><td>${DESC_CORTE[r.tipo]||E(r.tipo)}</td><td class="n">${r.n}</td><td class="n"><b>${mm(r.L)}</b> mm</td><td>${r.ang}</td><td class="n">${Q(r.n*r.L,2)} m</td></tr>`;});
+      tbl+=`<tr><td><i style="background:${corPecaApv(r.pi).f};border-color:${corPecaApv(r.pi).s}"></i><b>${r.pos}</b></td><td>${DESC_CORTE[r.tipo]||E(r.tipo)}</td><td class="n">${r.n}</td><td class="n"><b>${mm(r.L)}</b> mm</td><td>${r.ang}</td><td class="n">${Q(r.n*r.L,2)} m</td></tr>`;});
     const kpi=(t,v,sub)=>`<div class="l3d-kpi"><span>${t}</span><b>${v}</b>${sub?`<small>${sub}</small>`:''}</div>`;
     return`<style>.l3d-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:4px 0 10px}.l3d-kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:7px 10px}.l3d-kpi span{display:block;font-size:.66rem;color:#64748b;text-transform:uppercase;letter-spacing:.03em}.l3d-kpi b{font-size:1.02rem;color:#1a2b5e}.l3d-kpi small{display:block;font-size:.68rem;color:#64748b}
-      .l3d-bar{display:grid;grid-template-columns:62px 1fr;gap:8px;align-items:center;margin:3px 0}.l3d-bar>span{font-size:.72rem;color:#475569;font-weight:700}
+      .l3d-barbl{margin:0 0 14px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:12px;background:#fff}.l3d-barcab{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}.l3d-barcab b{color:#1a2b5e;font-size:.84rem}.l3d-barcab .x{background:#1a2b5e;color:#fff;border-radius:999px;padding:1px 8px;font-size:.68rem;margin-left:4px}.l3d-barcab>span{font-size:.72rem;color:#64748b;margin-left:auto}
+      .l3d-seq{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:6px}.l3d-seq span{border:1.5px solid;border-radius:7px;padding:2px 7px;font-size:.7rem;white-space:nowrap}.l3d-seq em{font-style:normal;font-weight:800}.l3d-seq i{color:#94a3b8;font-style:normal;font-size:.7rem}
+      .l3d-apv-leg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.72rem;color:#334155}.l3d-apv-leg span{display:inline-flex;align-items:center;gap:5px}.l3d-apv-leg i{width:12px;height:12px;border-radius:3px;border:2px solid}
       .l3d-tc{width:100%;border-collapse:collapse;font-size:.76rem}.l3d-tc th{text-align:left;font-size:.66rem;color:#64748b;text-transform:uppercase;border-bottom:2px solid #e2e8f0;padding:5px 6px;background:#fff}.l3d-tc td{padding:4px 6px;border-bottom:1px solid #f1f5f9}.l3d-tc td.n,.l3d-tc th.n{text-align:right;white-space:nowrap}.l3d-tc tr.sub td{background:#f1f5f9;font-weight:700;color:#1a2b5e;font-size:.74rem}.l3d-tc i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;border:1px solid #0003}</style>
       <div style="display:flex;align-items:center;gap:10px;position:sticky;top:0;background:#fff;padding:8px 0;z-index:2"><b style="flex:1;color:#1a2b5e;font-size:.9rem">🏗️ Plano de corte — ${E(matNome(cod)||'perfil')}</b><span style="font-size:.8rem;color:#1a2b5e">No orçamento: <b>${Q(res.qtd,1).replace(',0','')} ${PL(res.qtd,'barra','barras')} de 6 m</b></span><button type="button" class="orc2-btn sec" onclick="l3dApv('')">✕ Voltar ao 3D</button></div>
       <div class="l3d-kpis">${kpi('Barras de 6 m',nB,'no orçamento '+Q(res.qtd,1).replace(',0',''))}${kpi('Perfil cortado',Q(mPerf,2)+' m',Q(res.usado,2)+' m com a serra')}${kpi('Aproveitamento',Q(aprovPct,0)+'%','do perfil comprado')}${kpi('Cortes',cortes.length,lin.length+' '+PL(lin.length,'posição','posições'))}${kpi('Sobras para guardar',aprov.length?Q(aprov.reduce((s2,x)=>s2+x,0),2)+' m':'nenhuma',aprov.length?aprov.length+' '+PL(aprov.length,'pedaço','pedaços')+' de 40 cm ou mais':'')}</div>
-      <div class="orcx-hint" style="margin:0 0 6px">Quadro em meia-esquadria (o ângulo de cada ponta está na lista), medido pela face de fora do perfil; reforços e travas em corte reto, de face a face do quadro; 3 mm de serra por corte. Corte primeiro as peças maiores de cada barra.</div>
-      ${res.barras.map((b,ix)=>`<div class="l3d-bar"><span>Barra ${ix+1}</span>${barraSvg(b)}</div>`).join('')}
+      <div class="orcx-hint" style="margin:0 0 6px">Cada cor é uma peça (a mesma cor do desenho das chapas). Números = medida em mm. Quadro em meia-esquadria (ângulos na lista abaixo), medido pela face de fora; travas em corte reto, de face a face (faixa escura em cima); 3 mm de serra por corte. ✂ = peça maior que a barra, vai emendada.</div>
+      <div class="l3d-apv-leg" style="margin:0 0 8px">${[...new Set(cortes.map(c=>c.pi))].sort((x,y)=>(S._rank?S._rank[x]-S._rank[y]:x-y)).map(i=>{const cp=corPecaApv(i);return`<span><i style="background:${cp.f};border-color:${cp.s}"></i><b>${rotuloApv(i)}</b> ${E(nomePeca(i))}</span>`;}).join('')}</div>
+      ${barrasH}
       <div style="margin:14px 0 4px;font-weight:700;color:#1a2b5e;font-size:.85rem">📋 Lista de corte</div>
       <table class="l3d-tc"><thead><tr><th>Posição</th><th>Descrição</th><th class="n">Qtd</th><th class="n">Comprimento</th><th>Pontas</th><th class="n">Total</th></tr></thead><tbody>${tbl}</tbody></table>`;
   }
@@ -94777,7 +94851,10 @@ const _NAT_COL='natalArvore';
 const _NAT_COR={COMERCIAL:'#2563eb',PROJETOS:'#7c3aed','PRODUÇÃO':'#ea580c',FINANCEIRO:'#059669',PLANEJAMENTO:'#db2777',COMPRAS:'#0891b2',RH:'#ca8a04',ADMINISTRADOR:'#dc2626',QUALIDADE:'#4f46e5',ADMINISTRATIVO:'#be123c','INSTALAÇÃO':'#65a30d',OUTRO:'#64748b'};
 function _natHoje(){try{return _uxHoje();}catch(e){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}}
 function _natAno(){return Number(_natHoje().slice(0,4));}
-function _natAtivo(){const h=_natHoje(),a=h.slice(0,4);return h>=a+'-11-15'&&h<=a+'-12-25';}
+// (2026-11-17, pedido do Guilherme) Tudo do Natal (árvore, vídeo, enfeites, avisos, link de fora) só liga
+// na semana de 14/12 — liga sozinho nessa data, sem precisar publicar de novo. Termina em 25/12.
+const _NAT_INICIO='12-14',_NAT_FIM='12-25';
+function _natAtivo(){const h=_natHoje(),a=h.slice(0,4);return h>=a+'-'+_NAT_INICIO&&h<=a+'-'+_NAT_FIM;}
 function _natEmail(){try{return String((usuarioLogado&&usuarioLogado.email)||'').toLowerCase();}catch(e){return'';}}
 function _natDocId(email){return _natAno()+'_'+String(email||'').toLowerCase().replace(/[^a-z0-9]/g,'_');}
 function _natEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
@@ -95031,7 +95108,7 @@ async function _natPublicoBoot(chave){
   _natPubMsg('Carregando a árvore…');
   let n=0;while(typeof window._fbCall!=='function'&&n<80){await new Promise(r=>setTimeout(r,150));n++;}
   try{const d=await _natPubCarregar();
-    if(!d.ativo){_natPubMsg('A Árvore de Natal Granda já encerrou. Feliz Natal e um ótimo ano novo!');return;}
+    if(!d.ativo||!_natAtivo()){const h=_natHoje();_natPubMsg(h<h.slice(0,4)+'-'+_NAT_INICIO?'A Árvore de Natal Granda abre no dia 14 de dezembro. Volte nesse dia pra pendurar a sua bolinha! 🎄':'A Árvore de Natal Granda já encerrou. Feliz Natal e um ótimo ano novo!');return;}
   }catch(e){console.warn('natal público',e);_natPubMsg(/permission|invalid|inválido/i.test(String(e&&(e.code||e.message)))?'Este link não é válido. Peça o link certo pra quem te enviou.':'Não consegui abrir a árvore agora. Confira a internet e tente de novo daqui a pouco.');return;}
   const r=document.getElementById('portal-root');if(r)r.innerHTML='';
   _natAbrir();
