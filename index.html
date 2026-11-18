@@ -34,7 +34,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-18.7';</script>
+<script>const APP_BUILD_VERSION='2026-11-18.10';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -83220,6 +83220,8 @@ window.chNovo=function(){
 };
 // (2026-11-18, Clabonde) chamado direto pra uma pessoa: Supervisor+ manda pros operadores da PRÓPRIA equipe (setor)
 // e pra qualquer Supervisor, Gestor ou Diretoria; nunca pra operador de outra equipe. Diretoria/admin: qualquer pessoa.
+// (2026-11-18.10, Guilherme) Entre setores é só Supervisor para cima — operador NUNCA aparece como destino (nem da própria equipe).
+// Demanda pra operador de Projetos vai pelos Chamados internos de Projetos.
 function _chSetorDe(email){const e=String(email||'').toLowerCase();let nv='OPERADOR';try{nv=_nivelDe(e);}catch(x){}const cat=(cfg.usuarioCats||{})[e]||'';const ex=(cfg.usuarioCatsExtras||{})[e];
   if(nv==='DIRETORIA'||(cat==='ADMINISTRADOR'&&!(Array.isArray(ex)&&ex.length)))return'DIRETORIA';return cat==='ADMINISTRADOR'?ex[0]:cat;}
 function _chPessoasPossiveis(){
@@ -83227,7 +83229,7 @@ function _chPessoasPossiveis(){
   Object.entries(cfg.usuarioNomes||{}).forEach(([em,nome])=>{const e=String(em).toLowerCase();if(!e||e===eu||desl[em])return;
     let r=1;try{r=_nivelRank(_nivelDe(e));}catch(x){}const cats=[(cfg.usuarioCats||{})[e]].concat((cfg.usuarioCatsExtras||{})[e]||[]).filter(Boolean);
     const minhaEquipe=cats.some(c=>meus.includes(c));
-    if(r>=2||minhaEquipe||tudo)out.push({email:e,nome,setor:_chSetorDe(e),equipe:minhaEquipe&&r<2,rank:r});});
+    if(r>=2)out.push({email:e,nome,setor:_chSetorDe(e),equipe:minhaEquipe&&r<2,rank:r});});
   return out.sort((a,b)=>(b.equipe-a.equipe)||(a.rank-b.rank)||String(a.nome).localeCompare(String(b.nome),'pt-BR'));}
 function _chParaQuemHtml(){
   const L=_chPessoasPossiveis();if(!L.length)return'';
@@ -83236,7 +83238,7 @@ function _chParaQuemHtml(){
   const opt=x=>`<option value="${esc(x.email)}">${esc(_tcNome(x.nome))} — ${esc(nvL(x.rank))} · ${esc(setorLbl(x.setor))}</option>`;
   return`<div class="fg"><label>Para quem? <span class="r">*</span></label><div class="chx-prio" id="chn-modo" data-v="setor"><button type="button" class="plx-tg on" data-m="setor" onclick="chModoPara('setor')">🏢 Um setor</button><button type="button" class="plx-tg" data-m="pessoa" onclick="chModoPara('pessoa')">👤 Uma pessoa</button></div></div>
     <div class="fg" id="chn-w-pessoa" style="display:none"><label>Pessoa que vai resolver <span class="r">*</span></label><select id="chn-pessoa" class="fc"><option value="">Escolha…</option>${eq.length?`<optgroup label="Minha equipe">${eq.map(opt).join('')}</optgroup>`:''}${out.length?`<optgroup label="Supervisores, gestores e diretoria">${out.map(opt).join('')}</optgroup>`:''}</select>
-    <div class="chx-sub" style="margin-top:6px">Operador só aparece se for da sua equipe. Quem você escolher recebe o chamado e o e-mail.</div></div>`;}
+    <div class="chx-sub" style="margin-top:6px">Só Supervisor, Gestor ou Diretoria. Quem você escolher recebe o chamado e o e-mail.</div></div>`;}
 window.chModoPara=function(m){const w=document.getElementById('chn-modo');if(!w)return;w.dataset.v=m;w.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
   const a=document.getElementById('chn-w-setores'),b=document.getElementById('chn-w-pessoa');if(a)a.style.display=m==='setor'?'':'none';if(b)b.style.display=m==='pessoa'?'':'none';};
 window.chAtualizarDestinos=function(){
@@ -89280,7 +89282,9 @@ function rank(){try{if(isAdm())return 99;return _nivelRank(_nivelDe(meuEmail()))
 function souProjetos(){try{return _minhasCats().includes('PROJETOS');}catch(e){return false;}}
 function podeAbrir(){try{if(!_ul())return false;if(isAdm())return true;if(_nivelDe(meuEmail())==='DIRETORIA')return true;return souProjetos()&&rank()>=2;}catch(e){return false;}}
 // (2026-11-17.12) Chamados internos só de Supervisor para cima — operador comum não abre, não recebe e não vê a aba.
-function temAcesso(){try{return podeAbrir();}catch(e){return false;}}
+// (2026-11-18) Corrigido: Supervisor abre chamado pros operadores da PRÓPRIA equipe. Operador de Projetos vê a aba
+// (só os chamados dele) pra poder começar/resolver; continua sem poder abrir.
+function temAcesso(){try{return podeAbrir()||souProjetos();}catch(e){return false;}}
 const veTudo=podeAbrir;
 const souDest=c=>!!c&&c.destEmail===meuEmail();
 const souOrig=c=>!!c&&c.criadoPorEmail===meuEmail();
@@ -89294,7 +89298,7 @@ function projetistas(){
     const e=String(em||'').toLowerCase();if(!e.includes('@'))return;
     const l=[cats[em]].concat(Array.isArray(ext[em])?ext[em]:[]);
     if(!l.includes('PROJETOS'))return;
-    try{if(_nivelRank(_nivelDe(e))<2&&_nivelRank(_nivelDe(em))<2)return;}catch(x){return;} // só Supervisor ou acima recebe chamado
+    try{if((cfg.vendDesligados||{})[em]||(cfg.vendDesligados||{})[e])return;}catch(x){} // (2026-11-18) operador da equipe de Projetos também recebe
     out.add(e);
   });
   return[...out].sort((a,b)=>nomeDe(a).localeCompare(nomeDe(b)));
@@ -89451,7 +89455,7 @@ function listaDaAba(){
 }
 function render(soLista){
   const el=document.getElementById('proj-sec-chamados');if(!el)return;
-  if(!temAcesso()){el.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700;font-size:.85rem">🔒 ACESSO NÃO PERMITIDO — só Supervisor ou acima de Projetos.</div>';return;}
+  if(!temAcesso()){el.innerHTML='<div style="padding:24px 4px;color:#dc2626;font-weight:700;font-size:.85rem">🔒 ACESSO NÃO PERMITIDO — só usuários de Projetos.</div>';return;}
   try{atualizarBadge();}catch(e){}
   const todos=Object.values(_itens).filter(visivel);
   const ve=veTudo(),abre=podeAbrir();
@@ -95157,8 +95161,10 @@ if(typeof orc2AtualizarPreviewLetra==='function'){const _orcPrevOrig=orc2Atualiz
 (function(){try{if(document.getElementById('orc-prod-layout-css'))return;const st=document.createElement('style');st.id='orc-prod-layout-css';st.textContent=`
   #sec-cat-ORCAMENTOS .orc2-add-tit{font-size:.82rem;font-weight:800;color:#1a2b5e;margin:6px 0 10px;padding-top:16px;border-top:2px dashed #e2e8f0}
   #sec-cat-ORCAMENTOS .orc2-letra.sem-prev{grid-template-columns:minmax(0,1fr)!important}
-  #sec-cat-ORCAMENTOS .orc2-letra>div:last-child{position:sticky;top:12px}
-  @media(max-width:1000px){#sec-cat-ORCAMENTOS .orc2-letra>div:last-child{position:static}}`;document.head.appendChild(st);}catch(e){}})();
+  #sec-cat-ORCAMENTOS .orc2-letra>div:last-child{position:static}
+  /* (2026-11-18, Clabonde) formulário do produto na largura toda da página — sem coluna estreita rolando sozinha;
+     o card de materiais e preço do item fica logo abaixo, também na largura toda */
+  #sec-cat-ORCAMENTOS .orc2-letra{grid-template-columns:minmax(0,1fr)!important}`;document.head.appendChild(st);}catch(e){}})();
 
 </script>
 
