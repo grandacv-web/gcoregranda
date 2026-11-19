@@ -34,7 +34,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-19.18';</script>
+<script>const APP_BUILD_VERSION='2026-11-19.21';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -27548,7 +27548,7 @@ function _projTopbarMontar(){
       const ban=document.getElementById('proj-info-banner');
       const txt=ban?ban.textContent.replace(/\s+/g,' ').replace(/^[^A-Za-zÀ-ú]+/,'').trim():'';
       if(txt)tabs.insertAdjacentHTML('afterend',`<span class="proj-info-i" title="${String(txt).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;')}">i</span>`);}
-    const m=document.getElementById('meta-sem-PROJETOS');if(m&&m.parentNode!==bar)bar.appendChild(m);
+    try{_projIndMover();}catch(e){}
   }catch(e){console.warn('topo projetos',e);}
 }
 (function(){
@@ -37140,8 +37140,8 @@ function _projxDiasPausa(p,de,ate){
 // Filtros próprios — só na aba Lista (Kanban/Calendário/exportações continuam iguais)
 function _projxAplicarFiltros(infos,hoje){
   if(typeof _projTabAtiva!=='undefined'&&_projTabAtiva!=='lista')return infos;
-  if(_projxResp==='__sem')infos=infos.filter(x=>!_projxProjetistaDe(x.p));
-  else if(_projxResp)infos=infos.filter(x=>_projxProjetistaDe(x.p)===_projxResp);
+  if(_projxResp==='__sem')infos=infos.filter(x=>!_projxDonoDaVez(x.p));
+  else if(_projxResp)infos=infos.filter(x=>_projxDonoBate(x.p,_projxResp));
   if(_projxFila){const lim2=_projxLim2(hoje);infos=infos.filter(x=>_projxClasse(x,hoje,lim2)===_projxFila);}
   return infos;
 }
@@ -37330,8 +37330,8 @@ function _projxTopoHtml(){
   const hoje=_hojeIso(),lim2=_projxLim2(hoje);
   const todos=_lpPedidosElegiveis().map(p=>_projInfo(p,hoje)).filter(x=>x.ok&&x.statusPedido!=='concluido');
   let base=todos;
-  if(_projxResp==='__sem')base=base.filter(x=>!x.p.projResponsavel);
-  else if(_projxResp)base=base.filter(x=>(x.p.projResponsavel||'')===_projxResp);
+  if(_projxResp==='__sem')base=base.filter(x=>!_projxDonoDaVez(x.p));
+  else if(_projxResp)base=base.filter(x=>_projxDonoBate(x.p,_projxResp));
   const grupos={atrasado:[],vence:[],proximo:[],pausado:[]};
   base.forEach(x=>{const c=_projxClasse(x,hoje,lim2);if(grupos[c])grupos[c].push(x);});
   Object.values(grupos).forEach(g=>g.sort((a,b)=>String(a.etapa.iso).localeCompare(b.etapa.iso)));
@@ -37344,12 +37344,14 @@ function _projxTopoHtml(){
   // Projetistas: usuários do setor PROJETOS + quem já foi atribuído
   const nomes=new Set();
   todos.forEach(x=>{if(x.p.projResponsavel)nomes.add(x.p.projResponsavel);});
+  {const nz=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();try{_projxProjetistas().forEach(n=>nomes.add(n));}catch(e){}
+   todos.forEach(x=>{const dv=_projxDonoDaVez(x.p);if(dv&&![...nomes].some(n=>nz(n)===nz(dv)))nomes.add(dv);});}
   try{_projxProjetistas().forEach(n=>nomes.add(n));}catch(e){}
   const meu=_projxMeuNome();
   const opts=[`<option value="">👥 Todos os projetistas</option>`,`<option value="__sem" ${_projxResp==='__sem'?'selected':''}>⚠️ Sem projetista</option>`]
     .concat([...nomes].sort().map(n=>`<option value="${_projxEsc(n)}" ${_projxResp===n?'selected':''}>👤 ${_projxEsc(n)}${n===meu?' (eu)':''}</option>`)).join('');
   // Carga por projetista (abertos)
-  const carga={};todos.forEach(x=>{const n=x.p.projResponsavel||'— sem projetista';carga[n]=carga[n]||{t:0,a:0};carga[n].t++;if(_projxClasse(x,hoje,lim2)==='atrasado')carga[n].a++;});
+  const carga={};todos.forEach(x=>{const n=_projxDonoDaVez(x.p)||'— sem projetista';carga[n]=carga[n]||{t:0,a:0};carga[n].t++;if(_projxClasse(x,hoje,lim2)==='atrasado')carga[n].a++;});
   const cargaHtml=Object.entries(carga).sort((a,b)=>b[1].t-a[1].t).map(([n,c])=>`<span class="projx-carga-i" onclick="projxSetResp(${_projxJs(n.startsWith('—')?'__sem':n)})">${_projxEsc(n)} <b>${c.t}</b>${c.a?` <em>🔴${c.a}</em>`:''}</span>`).join('');
   return `<div class="projx-fila">
     <div class="projx-fila-h"><b>📥 Minha fila</b><span>clique pra filtrar a lista · ordenado pelo prazo do projeto</span>
@@ -37784,6 +37786,21 @@ function _projDataRealConclusao(p){
   }catch(e){return'';}
 }
 // Projetista "efetivo": o atribuído; se o projeto foi concluído sem ninguém atribuído, quem concluiu.
+// (2026-11-19, Clabonde) "quando o projetista passa o projeto pra revisão, o projeto sai da lista do projetista e vai
+// pra lista do supervisor; quando o supervisor devolve, volta pra lista do projetista". Dono da vez = o supervisor
+// (quem revisa) enquanto o projeto está 🔍 Em revisão; nos demais casos, o projetista. Vale pro filtro de projetista,
+// "Só os meus", Minha fila e Carga por projetista.
+function _projxRevisores(){try{return(window._projRevisoresNomes?window._projRevisoresNomes():[]).filter(Boolean);}catch(e){return[];}}
+function _projxEmRevisao(p){try{return!!(window._projRevStatus&&window._projRevStatus(p)==='aguardando');}catch(e){return false;}}
+function _projxDonoDaVez(p){
+  if(_projxEmRevisao(p)){const r=_projxRevisores();return r.length===1?r[0]:(r.length?'🔍 SUPERVISOR (REVISÃO)':_projxProjetistaDe(p));}
+  return _projxProjetistaDe(p);
+}
+function _projxDonoBate(p,resp){
+  const nz=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+  if(_projxEmRevisao(p)){const r=_projxRevisores();if(r.length)return r.some(n=>nz(n)===nz(resp))||nz(resp)===nz('🔍 SUPERVISOR (REVISÃO)');}
+  return nz(_projxProjetistaDe(p))===nz(resp);
+}
 function _projxProjetistaDe(p){
   if(!p)return'';
   if(p.projResponsavel)return p.projResponsavel;
@@ -79079,6 +79096,7 @@ function _cqxCss(){
   }
   const nomeDe=e=>(cfg.usuarioNomes&&cfg.usuarioNomes[e])||e;
   const revisoresNomes=()=>revisoresEmails().map(nomeDe);
+  window._projRevisoresNomes=revisoresNomes;
   function souRevisor(){try{const u=_getUserCat();return u.isAdm||revisoresEmails().includes(u.email);}catch(e){return false;}}
   function possoRevisar(p){
     if(!souRevisor())return false;
@@ -99294,6 +99312,7 @@ function _orcOpLinhas(d,t,comIcone){
 // quando o valor dos produtos muda de verdade (aí o valor do pedido mudou e a instalação acompanha).
 (function(){
   let F=null;
+  const aj=r=>{try{return window._orcAplicarAjustes?window._orcAplicarAjustes(r):r;}catch(e){return r;}};
   const vpAgora=()=>{try{return Math.round((window._orc2ValorVendaProdutos?window._orc2ValorVendaProdutos(orc2.doc):0)*100)/100;}catch(e){return null;}};
   const solta=()=>{F=null;};
   if(typeof orc2Abrir==='function'){const _a=orc2Abrir;window.orc2Abrir=orc2Abrir=function(fonte,id){F=null;
@@ -99303,15 +99322,128 @@ function _orcOpLinhas(d,t,comIcone){
   if(typeof orcxCalcular==='function'){const _c=orcxCalcular;window.orcxCalcular=orcxCalcular=function(){
     if(F&&orc2.doc&&orc2.doc.id===F.doc&&document.getElementById('orcx-distancia')){
       const v=vpAgora();if(F.vp==null&&v!=null)F.vp=v;
-      if(v==null||Math.abs(v-F.vp)<0.01){orcxEstado.resultado=JSON.parse(JSON.stringify(F.res));try{orcxRenderResultado();}catch(e){}return orcxEstado.resultado;}
+      if(v==null||Math.abs(v-F.vp)<0.01){orcxEstado.resultado=aj(JSON.parse(JSON.stringify(F.res)));try{orcxRenderResultado();}catch(e){}return orcxEstado.resultado;}
       F=null;}
     else if(F&&(!orc2.doc||orc2.doc.id!==F.doc))F=null;
-    return _c.apply(this,arguments);};}
+    const r=_c.apply(this,arguments);
+    try{if(orcxEstado.resultado&&(orcxEstado.resultado.itens||[]).length){orcxEstado.resultado=aj(orcxEstado.resultado);orcxRenderResultado();return orcxEstado.resultado;}}catch(e){console.warn('ajuste operacionais',e);}
+    return r;};}
   // mexeu nos operacionais → volta a calcular normalmente
   const daJanela=()=>{const e=window.event;const t=e&&e.isTrusted&&e.target;return!!(t&&t.closest&&t.closest('.orcx-bloco,.oxt,.orcx-alerta,.orcx-chips'));};
   ['orcxAoMudar','orcxEscopo','orc2Conta','orcxAdicionarElevacao','orcxRemoverElevacao','orcxCalcularDistancia'].forEach(n=>{const f=window[n];if(typeof f!=='function')return;
     window[n]=function(){if((n==='orcxAoMudar'||n==='orcxCalcularDistancia')?daJanela():true)solta();return f.apply(this,arguments);};});
   ['orc2Fechar','orc5Orcar'].forEach(n=>{const f=window[n];if(typeof f!=='function')return;window[n]=function(){solta();return f.apply(this,arguments);};});
+})();
+</script>
+<script>
+// ══ (2026-11-19, Bruno/Clabonde) "podemos remover essas informações da tela de projetos, polui muito — manter só na
+// tela de Indicadores": o radar "🔭 N pedidos vão estourar" e a faixa "🏆 Semana · Meta · Ranking" do setor Projetos
+// moram agora dentro da aba 📊 Indicadores de Projetos (somem da Lista/Kanban/Calendário). As etiquetas
+// 🔴 Vai estourar nas linhas continuam.
+function _projIndMover(){
+  const si=document.getElementById('proj-sec-indicadores');if(!si)return;
+  ['rdg-faixa-sec-cat-PROJETOS','meta-sem-PROJETOS'].reverse().forEach(id=>{const el=document.getElementById(id);
+    if(el&&el.parentNode!==si){si.insertBefore(el,si.firstChild);}});
+  const f=document.getElementById('rdg-faixa-sec-cat-PROJETOS'),m=document.getElementById('meta-sem-PROJETOS');
+  if(f&&m&&f.parentNode===si&&m.parentNode===si&&si.firstChild!==f)si.insertBefore(f,si.firstChild);
+  if(m)m.style.marginBottom='14px';
+}
+(function(){
+  let vigia=null;
+  function ligar(){const sec=document.getElementById('sec-cat-PROJETOS');if(!sec||vigia)return;
+    vigia=new MutationObserver(()=>{const f=document.getElementById('rdg-faixa-sec-cat-PROJETOS'),m=document.getElementById('meta-sem-PROJETOS'),si=document.getElementById('proj-sec-indicadores');
+      if(si&&((f&&f.parentNode!==si)||(m&&m.parentNode!==si)))try{_projIndMover();}catch(e){}});
+    vigia.observe(sec,{childList:true,subtree:true});}
+  ligar();setTimeout(ligar,2000);
+  if(typeof projRenderAtivo==='function'){const _r=projRenderAtivo;window.projRenderAtivo=projRenderAtivo=function(){const r=_r.apply(this,arguments);try{ligar();_projIndMover();}catch(e){}return r;};}
+})();
+</script>
+<script>
+// ══ (2026-11-19, Clabonde) OPERACIONAIS: O ADMINISTRADOR PODE AJUSTAR O VALOR DE CADA LINHA, ORÇAMENTO POR ORÇAMENTO ══
+// "eu que sou adm quero poder alterar o valor se eu quiser. De orçamento por orçamento eu posso deixar o que o sistema
+// calculou ou então mudar." Cada linha do resultado (instalação, adicional, mobilização, elevação, ART, frete…) ganha
+// ✏️ pro admin. O valor digitado fica guardado no orçamento (operacionais.ajustes[nome da linha]) e entra no total,
+// no resumo, no PDF e na emissão. A linha mostra "ajustado · sistema R$ X" e ↺ volta pro valor calculado.
+(function(){
+  const adm=()=>{try{return _getUserCat().isAdm;}catch(e){return false;}};
+  const A=()=>{const d=orc2&&orc2.doc;if(!d)return null;d.operacionais=d.operacionais||{};return d.operacionais.ajustes=d.operacionais.ajustes||{};};
+  const ar=v=>Math.round((Number(v)||0)*100)/100;
+  window._orcAplicarAjustes=function(r){
+    if(!r||!Array.isArray(r.itens))return r;
+    const aj=(orc2&&orc2.doc&&orc2.doc.operacionais&&orc2.doc.operacionais.ajustes)||{};
+    const o=Object.assign({},r,{itens:r.itens.map(it=>{const x=Object.assign({},it);const base=x.ajustado&&x.valorCalc!=null?x.valorCalc:x.valor;
+      x.valor=base;delete x.ajustado;delete x.valorCalc;
+      if(aj[x.nome]!=null&&isFinite(aj[x.nome])){x.valorCalc=base;x.valor=ar(aj[x.nome]);x.ajustado=true;}return x;})});
+    o.total=ar(o.itens.reduce((s,i)=>s+(Number(i.valor)||0),0));
+    o.totalFrete=ar(o.itens.filter(i=>i.categoria==='frete').reduce((s,i)=>s+(Number(i.valor)||0),0));
+    o.totalInstalacao=ar(o.total-o.totalFrete);
+    return o;
+  };
+  function depois(){try{orcxCalcular();}catch(e){}try{_orc2PuxarOperacionais();}catch(e){}
+    ['_orc2AtualizarTotais','_orc2GuardarRascunho'].forEach(n=>{try{if(typeof window[n]==='function')window[n]();}catch(e){}});
+    try{const rs=document.getElementById('orc2-aba-resumo');if(rs&&rs.style.display!=='none')_orc2RenderResumo();}catch(e){}}
+  window.orcxAjEditar=function(i,ev){if(ev)ev.stopPropagation();if(!adm())return;
+    const r=orcxEstado.resultado,it=r&&r.itens[i];if(!it)return;
+    const h=document.querySelectorAll('#orcx-resultado .orcx-item')[i];if(!h)return;const b=h.querySelector('.orcx-item-h > b');if(!b)return;
+    b.outerHTML=`<span class="oxa-ed" onclick="event.stopPropagation()"><input class="fc no-upper" id="oxa-in-${i}" inputmode="numeric" value="${(Number(it.valor)||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}" oninput="orcxMascaraMoeda(this)" onkeydown="if(event.key==='Enter')orcxAjSalvar(${i});if(event.key==='Escape')orcxRenderResultado();"><button type="button" class="oxa-ok" title="Salvar" onclick="orcxAjSalvar(${i})">✔</button><button type="button" class="oxa-x" title="Cancelar" onclick="orcxRenderResultado()">✕</button></span>`;
+    const inp=document.getElementById('oxa-in-'+i);if(inp){inp.focus();inp.select();}};
+  window.orcxAjSalvar=function(i){if(!adm())return;const r=orcxEstado.resultado,it=r&&r.itens[i];if(!it)return;
+    const inp=document.getElementById('oxa-in-'+i);const v=inp?moneyToNum(inp.value):NaN;
+    if(!(v>=0)){toast('Digite um valor válido','terr');return;}
+    const base=it.ajustado&&it.valorCalc!=null?it.valorCalc:it.valor;const a=A();if(!a)return;
+    if(Math.abs(ar(v)-ar(base))<0.005)delete a[it.nome];else a[it.nome]=ar(v);
+    depois();toast('Valor de "'+it.nome+'" ajustado ✔','tok');};
+  window.orcxAjVoltar=function(i,ev){if(ev)ev.stopPropagation();if(!adm())return;const r=orcxEstado.resultado,it=r&&r.itens[i];const a=A();if(!it||!a)return;
+    delete a[it.nome];depois();toast('Voltou pro valor calculado pelo sistema','tok');};
+  if(typeof orcxRenderResultado==='function'){const _r=orcxRenderResultado;window.orcxRenderResultado=orcxRenderResultado=function(){
+    const res=_r.apply(this,arguments);
+    try{const r=orcxEstado.resultado;if(!r||!r.itens)return res;const els=document.querySelectorAll('#orcx-resultado .orcx-item');const ad=adm();
+      r.itens.forEach((it,i)=>{const el=els[i];if(!el)return;const hd=el.querySelector('.orcx-item-h');if(!hd)return;
+        if(it.ajustado){el.classList.add('oxa-aj');const n=hd.querySelector('.n');if(n&&!n.querySelector('.oxa-tag'))n.insertAdjacentHTML('beforeend',`<small class="oxa-tag">✏️ ajustado · sistema <span style="white-space:nowrap">${_orcxBRL(it.valorCalc)}</span></small>`);}
+        if(ad&&!hd.querySelector('.oxa-bt')){hd.insertAdjacentHTML('beforeend',(it.ajustado?`<button type="button" class="oxa-bt" title="Voltar pro valor calculado pelo sistema" onclick="orcxAjVoltar(${i},event)">↺</button>`:'')+`<button type="button" class="oxa-bt" title="Alterar este valor só neste orçamento" onclick="orcxAjEditar(${i},event)">✏️</button>`);}});
+      if(r.itens.some(i=>i.ajustado)){const t=document.querySelector('#orcx-resultado .orcx-total small');if(t&&!t.querySelector('.oxa-t'))t.insertAdjacentHTML('beforeend',' <span class="oxa-t">· com ajuste manual</span>');}
+    }catch(e){console.warn('ajuste operacionais (tela)',e);}
+    return res;};}
+  const st=document.createElement('style');st.textContent=`
+    #orcx-resultado .oxa-bt{border:1px solid #cbd5e1;background:#fff;border-radius:8px;padding:2px 7px;margin-left:6px;cursor:pointer;font-size:.72rem;line-height:1.4;flex-shrink:0}
+    #orcx-resultado .oxa-bt:hover{background:#f1f5f9}
+    #orcx-resultado .oxa-tag{display:block;font-size:.66rem;font-weight:700;color:#b45309;white-space:normal;margin-top:2px}
+    #orcx-resultado .orcx-item-h .n{min-width:0}
+    #orcx-resultado .orcx-item-h > b{white-space:nowrap}
+    #orcx-resultado .oxa-aj{border-color:#fcd34d!important;background:#fffbeb}
+    #orcx-resultado .oxa-ed{display:flex;gap:4px;align-items:center;margin-left:auto}
+    #orcx-resultado .oxa-ed input{width:110px;padding:4px 8px;font-size:.8rem;text-align:right}
+    #orcx-resultado .oxa-ed button{border:none;border-radius:7px;padding:4px 8px;cursor:pointer;font-weight:800;font-size:.75rem}
+    #orcx-resultado .oxa-ok{background:#16a34a;color:#fff}#orcx-resultado .oxa-x{background:#e2e8f0;color:#334155}
+    #orcx-resultado .oxa-t{color:#fcd34d;font-weight:700}`;
+  document.head.appendChild(st);
+})();
+</script>
+<script>
+// ══ (2026-11-19, Clabonde) "quando marcar que instalação, elevações ou frete é POR CONTA DO CLIENTE isso deve sair na
+// proposta escrito e com o valor zerado pra mostrar pro cliente" — o bloco "Outros" da proposta em PDF ganha a linha
+// "… — por conta do cliente" com R$ 0,00 (instalação, elevação e frete). Some a linha "Não incluso" repetida.
+(function(){
+  if(typeof _orc6Outros!=='function')return;
+  const _o=_orc6Outros;
+  function escopo(d){const op=(d&&d.operacionais)||{},e=op.escopo||{};
+    const v=k=>e[k]||'';return{inst:v('inst')||(op.instConta==='NÃO'?'cliente':''),frete:v('frete')||(op.freteConta==='NÃO'?'cliente':''),elev:v('elev')};}
+  window._orcPorContaCliente=function(d){
+    if(!d||d.tipo==='produto'||d.tipo==='operacionais')return[];
+    const e=escopo(d),L=[];
+    if(e.inst==='cliente')L.push({k:'inst',t:'Instalação — por conta do cliente'});
+    if(e.inst!=='cliente'&&e.inst!=='nao'&&e.elev==='cliente')L.push({k:'elev',t:'Elevação — por conta do cliente'});
+    if(e.frete==='cliente')L.push({k:'frete',t:'Frete — por conta do cliente'});
+    return L;
+  };
+  _orc6Outros=window._orc6Outros=function(d,t){
+    let L=[];try{L=_o.apply(this,arguments)||[];}catch(err){L=[];}
+    try{const cli=window._orcPorContaCliente(d);if(!cli.length)return L;
+      const tem=k=>cli.some(x=>x.k===k);
+      L=L.filter(o=>{if(o.on||o.info)return true;const ehFrete=/^Frete/i.test(o.t||'');return!(ehFrete?tem('frete'):tem('inst'));});
+      cli.forEach(x=>L.push({t:x.t,v:0,on:true,info:true,porContaCliente:true}));}
+    catch(err){console.warn('por conta do cliente (pdf)',err);}
+    return L;};
 })();
 </script>
 </body>
