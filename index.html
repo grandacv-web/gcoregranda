@@ -34,7 +34,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-19.16';</script>
+<script>const APP_BUILD_VERSION='2026-11-19.18';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -94751,7 +94751,12 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     try{if(typeof window._orcDesenhoDaArte==='function')window._orcDesenhoDaArte(novos,typeof grupos==='function'?grupos():[],S);}catch(e){console.warn('desenho do item',e);}
     if(!novos.length&&orc2.letra&&orc2.letra.arte)orc2.letra.arte.est=est;
     if(velhos){
-      novos.forEach((p,i)=>{const v=velhos.find(x=>(x.nomeCurto||'')===(p.nomeCurto||''))||velhos[i];if(v){if(v.cmv)p.cmv=v.cmv;if(v.qtd)p.qtd=v.qtd;if(v.opcao)p.opcao=v.opcao;}});
+      // (2026-11-19, Clabonde) "quando faço uma revisão tá mudando nome dos produtos e mudando valor": reaplicar o 3D
+      // refazia os itens como "Item N da arte" e com o preço de hoje. Agora cada item mantém o nome que tinha, a imagem
+      // colocada à mão e — se os materiais e as quantidades não mudaram — o mesmo custo de quando foi orçado.
+      const usados=new Set();
+      novos.forEach((p,i)=>{let v=velhos.find(x=>!usados.has(x)&&(x.nomeCurto||'')===(p.nomeCurto||''));if(!v&&velhos[i]&&!usados.has(velhos[i]))v=velhos[i];if(!v)v=velhos.find(x=>!usados.has(x));
+        if(v){usados.add(v);if(v.cmv)p.cmv=v.cmv;if(v.qtd)p.qtd=v.qtd;if(v.opcao)p.opcao=v.opcao;try{window._orcMantemDoAntigo(p,v);}catch(e){console.warn('manter item',e);}}});
       d.produtos=d.produtos.filter(p=>antes.has(p.id));d.produtos.splice(pos<0?d.produtos.length:Math.min(pos,d.produtos.length),0,...novos);
       S.reabrir=null;orc2.letra=_orc2LetraVazia();orc2.fach=_orc2FachVazia();
       ['_orc2ReRenderProdutos','_orc2SincronizarValorPedido','orcxCalcular','_orc2AtualizarTotais','_orc2GuardarRascunho','_orc2AtualizarContadorAba'].forEach(f=>{try{if(typeof window[f]==='function')window[f]();}catch(e){}});
@@ -96120,8 +96125,10 @@ function _orc2ValorVendaProdutos(d){d=d||orc2.doc;if(!d)return 0;try{return _orc
       // já está editando: atualiza só os outros itens (o formulário não sai do lugar, o cursor não pula)
       box.id='orc2-lista-prod-real';const tmp=document.createElement('div');tmp.id='orc2-lista-prod';tmp.style.display='none';document.body.appendChild(tmp);
       try{_rl.apply(this,arguments);}finally{box.id='orc2-lista-prod';}
+      // (2026-11-19) o bloco do formulário NUNCA é tirado do lugar (antes ia pro fim e voltava a cada letra digitada:
+      // o campo perdia o foco e a tela pulava pro final). Os itens são encaixados antes e depois dele.
       try{marcar(tmp,ps);[...box.children].forEach(c=>{if(c!==slot)c.remove();});
-        const novos=[...tmp.children];novos.forEach(c=>box.insertBefore(c,slot));
+        let antes=true;[...tmp.children].forEach(c=>{if(antes){box.insertBefore(c,slot);if(c.dataset.pid===id)antes=false;}else box.appendChild(c);});
         const alvo=box.querySelector('[data-pid="'+id+'"]');if(alvo&&alvo.nextSibling!==slot)alvo.after(slot);
         if(alvo)alvo.classList.add('ed');}catch(e){console.warn('editar no item',e);}
       tmp.remove();return;
@@ -99238,6 +99245,73 @@ function _orcOpLinhas(d,t,comIcone){
     #orc2-lista-prod .oim-th{width:46px;height:46px;object-fit:contain;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:2px;box-sizing:border-box;flex-shrink:0;cursor:pointer}
     #orc2-lista-prod .oim-th.vazio{border:1.5px dashed #93c5fd;background:#eff6ff;color:#1d4ed8;font-size:.58rem;font-weight:800;line-height:1.15;font-family:inherit;padding:0}
     #orc2-lista-prod .oim-th.vazio:hover{background:#dbeafe}`;document.head.appendChild(st);
+})();
+</script>
+<script>
+// ══ (2026-11-19, Clabonde) REVISÃO NÃO MUDA NOME NEM VALOR DO QUE NÃO FOI MEXIDO ══
+// Editar um item (✏️) ou reaplicar a arte 3D refazia o item do zero: perdia a imagem colocada à mão e recalculava com
+// o preço de hoje mesmo sem mudar nada. Agora: nome dado pelo usuário fica; imagem manual fica; e se a lista de
+// materiais e as quantidades continuam iguais, o custo continua o do orçamento original. Mudou material ou medida →
+// recalcula com o preço de hoje (como o aviso do formulário diz).
+(function(){
+  const r4=v=>Math.round((Number(v)||0)*10000)/10000;
+  const assin=p=>JSON.stringify(((p&&p.materiais)||[]).map(m=>[String(m.nome||''),String(m.qtd==null?'':m.qtd).replace(/\s+/g,' ').trim()]).sort());
+  // configuração do item (tudo o que muda o preço) — sem nome, descrição, materiais/custo calculados, CMV, qtd, imagem
+  const VOL=new Set(['id','nome','nomeCurto','descricao','materiais','custo','precosEm','precosBase','cmv','qtd','fotoUrl','fotoAuto','opcao','medida']);
+  const nz=v=>{if(v==null||v===''||v===false||v===0)return null;if(typeof v==='string'&&/^-?\d+([.,]\d+)?$/.test(v.trim()))return r4(parseFloat(v.replace(',','.')));
+    if(typeof v==='number')return r4(v);if(Array.isArray(v)){const a=v.map(nz);return a.length?a:null;}
+    if(typeof v==='object'){const o={};Object.keys(v).sort().forEach(k=>{const x=nz(v[k]);if(x!=null)o[k]=x;});return Object.keys(o).length?o:null;}return v;};
+  const mesmaCfg=(novo,velho)=>Object.keys(novo).every(k=>VOL.has(k)||JSON.stringify(nz(novo[k]))===JSON.stringify(nz(velho[k])));
+  window._orcMantemDoAntigo=function(novo,velho,semNome){
+    if(!novo||!velho)return;
+    const nm=String(velho.nomeCurto||'').trim();
+    if(!semNome&&nm&&nm!==String(novo.nomeCurto||'').trim()){const d=novo.descricao||'';novo.nomeCurto=nm;novo.nome=nm+(d?' — '+d:'');}
+    if(velho.fotoUrl&&!velho.fotoAuto){novo.fotoUrl=velho.fotoUrl;delete novo.fotoAuto;}
+    else if(velho.fotoUrl&&!novo.fotoUrl){novo.fotoUrl=velho.fotoUrl;if(velho.fotoAuto)novo.fotoAuto=velho.fotoAuto;}
+    if((velho.materiais||[]).length&&(mesmaCfg(novo,velho)||assin(novo)===assin(velho))){
+      novo.materiais=JSON.parse(JSON.stringify(velho.materiais));novo.custo=velho.custo;
+      if(velho.precosEm)novo.precosEm=velho.precosEm;else delete novo.precosEm;
+      if(velho.precosBase)novo.precosBase=velho.precosBase;else delete novo.precosBase;}
+  };
+  function embrulha(nome,editId){const f=window[nome];if(typeof f!=='function')return;
+    window[nome]=function(){
+      const id=editId(),lista=(orc2.doc&&orc2.doc.produtos)||[],a=id?lista.find(x=>x.id===id):null,velho=a?JSON.parse(JSON.stringify(a)):null;
+      const r=f.apply(this,arguments);
+      try{if(velho){const it=((orc2.doc&&orc2.doc.produtos)||[]).find(x=>x.id===velho.id);
+        if(it&&it!==a){const c0=it.custo;window._orcMantemDoAntigo(it,velho,true);
+          if(it.custo!==c0){['_orc2ReRenderProdutos','_orc2SincronizarValorPedido','orcxCalcular','_orc2AtualizarTotais'].forEach(n=>{try{if(typeof window[n]==='function')window[n]();}catch(e){}});}
+          try{_orc2GuardarRascunho();}catch(e){}}}}catch(e){console.warn('manter item na edição',e);}
+      return r;};}
+  embrulha('orc2AdicionarLetra',()=>orc2.letraEditId);
+  embrulha('orc2AdicionarFachada',()=>orc2.fachEditId);
+  if(typeof orc8!=='undefined')embrulha('orc8Adicionar',()=>orc8.editId);
+})();
+</script>
+<script>
+// ══ (2026-11-19, Clabonde) "fui editar o negócio e mudou a instalação do orçamento que eu já tinha feito" ══
+// Ao abrir um orçamento salvo, os operacionais (instalação, mobilização, elevação, ART, frete) ficam EXATAMENTE como
+// foram salvos. Só recalculam quando alguém mexe nos operacionais (qualquer campo, botão ou escolha da janela) ou
+// quando o valor dos produtos muda de verdade (aí o valor do pedido mudou e a instalação acompanha).
+(function(){
+  let F=null;
+  const vpAgora=()=>{try{return Math.round((window._orc2ValorVendaProdutos?window._orc2ValorVendaProdutos(orc2.doc):0)*100)/100;}catch(e){return null;}};
+  const solta=()=>{F=null;};
+  if(typeof orc2Abrir==='function'){const _a=orc2Abrir;window.orc2Abrir=orc2Abrir=function(fonte,id){F=null;
+    try{const x=fonte!=='legado'&&orc2.salvos&&orc2.salvos[id];const res=x&&x.operacionais&&x.operacionais.resultado;
+      if(res&&(res.itens||[]).length)F={doc:id,res:JSON.parse(JSON.stringify(res)),vp:null};}catch(e){}
+    return _a.apply(this,arguments);};}
+  if(typeof orcxCalcular==='function'){const _c=orcxCalcular;window.orcxCalcular=orcxCalcular=function(){
+    if(F&&orc2.doc&&orc2.doc.id===F.doc&&document.getElementById('orcx-distancia')){
+      const v=vpAgora();if(F.vp==null&&v!=null)F.vp=v;
+      if(v==null||Math.abs(v-F.vp)<0.01){orcxEstado.resultado=JSON.parse(JSON.stringify(F.res));try{orcxRenderResultado();}catch(e){}return orcxEstado.resultado;}
+      F=null;}
+    else if(F&&(!orc2.doc||orc2.doc.id!==F.doc))F=null;
+    return _c.apply(this,arguments);};}
+  // mexeu nos operacionais → volta a calcular normalmente
+  const daJanela=()=>{const e=window.event;const t=e&&e.isTrusted&&e.target;return!!(t&&t.closest&&t.closest('.orcx-bloco,.oxt,.orcx-alerta,.orcx-chips'));};
+  ['orcxAoMudar','orcxEscopo','orc2Conta','orcxAdicionarElevacao','orcxRemoverElevacao','orcxCalcularDistancia'].forEach(n=>{const f=window[n];if(typeof f!=='function')return;
+    window[n]=function(){if((n==='orcxAoMudar'||n==='orcxCalcularDistancia')?daJanela():true)solta();return f.apply(this,arguments);};});
+  ['orc2Fechar','orc5Orcar'].forEach(n=>{const f=window[n];if(typeof f!=='function')return;window[n]=function(){solta();return f.apply(this,arguments);};});
 })();
 </script>
 </body>
