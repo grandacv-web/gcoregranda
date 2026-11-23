@@ -34,7 +34,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-19.21';</script>
+<script>const APP_BUILD_VERSION='2026-11-23.4';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -1299,6 +1299,7 @@ select.fc{cursor:pointer}
 .btn-mv{background:var(--brand-lt);color:var(--brand-d);border:none;padding:9px 16px;border-radius:10px;cursor:pointer;font-size:.79rem;font-weight:700;transition:all .2s;font-family:inherit}
 .btn-mv:hover{background:var(--brand);color:#fff}
 .btn-ed{background:var(--ink);color:#fff;border:none;padding:9px 16px;border-radius:10px;cursor:pointer;font-size:.79rem;font-weight:700;transition:all .2s;font-family:inherit}
+.btn-ed:disabled{opacity:.5;cursor:not-allowed}
 .btn-ed:hover{background:#1e293b}
 
 /* ── MOVE MODAL ── */
@@ -3879,7 +3880,7 @@ select.fc{cursor:pointer}
   </div>
   <div style="display:flex;gap:8px;justify-content:flex-end;padding:14px 24px;border-top:1px solid var(--border-lt);background:#fafbfc;flex-shrink:0">
     <button class="btn-mv" onclick="fecharFinalizacaoObra()">Cancelar</button>
-    <button class="btn-ed" onclick="salvarFinalizacaoObra()">💾 Salvar e Enviar E-mail</button>
+    <button class="btn-ed" id="btn-pl-salvar-fin" onclick="salvarFinalizacaoObra()">💾 Salvar e Enviar E-mail</button>
   </div>
 </div>
 </div>
@@ -5922,6 +5923,18 @@ window._fbWatchPedidos=(cb)=>onSnapshot(collection(db,'pedidos'),snap=>{_fbGuard
 // só deixar UMA das chamadas "ganhar" o direito de mandar o e-mail, não importa quantas abas/
 // sessões tentem ao mesmo tempo. Retorna true (ganhou, pode mandar) ou false (alguém já
 // reivindicou este pedido primeiro).
+// (2026-11-23) Mesma trava atômica, pro e-mail de Finalização de Obra (OS 383 chegou 2x). Bloqueia
+// só envios automáticos repetidos em menos de 3 minutos — re-finalizar mais tarde ou "Reenviar E-mail"
+// continuam funcionando normalmente.
+window._fbClaimEmailFinalizacao=(pedidoId)=>runTransaction(db,async(tx)=>{
+  const ref=doc(db,'pedidos',String(pedidoId));
+  const snap=await tx.get(ref);
+  const ult=snap.exists()?Date.parse(snap.data().emailFinalizacaoClaimEm||''):NaN;
+  if(!isNaN(ult)&&(Date.now()-ult)<180000)return false;
+  const agora=new Date().toISOString();
+  tx.set(ref,{emailFinalizacaoClaimEm:agora},{merge:true});
+  return agora;
+});
 window._fbClaimEmailEmissao=(pedidoId)=>runTransaction(db,async(tx)=>{
   const ref=doc(db,'pedidos',String(pedidoId));
   const snap=await tx.get(ref);
@@ -53721,7 +53734,23 @@ async function uploadFinalizacaoFotos(input){
   _plSalvarRascunhoAgora(); // já subiram pro Cloudinary — salva o rascunho na hora, sem esperar o debounce
 }
 
+// (2026-11-23) Trava contra envio duplicado do e-mail de finalização: flag em memória + botão
+// desabilitado de verdade enquanto processa (mesmo padrão do submit() da emissão).
+let _plSalvarFinEmAndamento=false;
 async function salvarFinalizacaoObra(){
+  if(_plSalvarFinEmAndamento){toast('Aguarde — já estamos salvando esta finalização, não clique de novo...','tinf');return;}
+  _plSalvarFinEmAndamento=true;
+  const _btnFin=document.getElementById('btn-pl-salvar-fin');
+  if(_btnFin)_btnFin.disabled=true;
+  try{return await _salvarFinalizacaoObraInterno();}
+  finally{_plSalvarFinEmAndamento=false;if(_btnFin)_btnFin.disabled=false;}
+}
+async function _claimEmailFinalizacaoAutomatico(p){
+  if(!window._fbClaimEmailFinalizacao)return true;
+  try{const r=await window._fbClaimEmailFinalizacao(p.id);if(r)p.emailFinalizacaoClaimEm=r;return !!r;}
+  catch(e){console.warn('Trava de e-mail de finalização indisponível — enviando assim mesmo',e);return true;}
+}
+async function _salvarFinalizacaoObraInterno(){
   const p=pedidos.find(x=>x.id===_plFinalizandoId);
   if(!p){toast('Pedido não encontrado','terr');return;}
   if(!p.isChumbador&&!(p.finalizacao&&p.finalizacao.dataFinalizacao)){
@@ -53798,6 +53827,7 @@ async function salvarFinalizacaoObra(){
   closeM('mo-finalizacao');
   renderPlanejamentoObras();
 
+  if(!(await _claimEmailFinalizacaoAutomatico(p))){console.warn('E-mail de finalização da OS '+p.os+' já foi enviado agora há pouco — não duplica.');return;}
   const envio=await _enviarEmailFinalizacao(p);
   if(envio.ok)toast('E-mail de finalização enviado para: '+envio.destinatarios.join(', '),'tok');
   else toast('Finalização salva, mas o e-mail não foi enviado: '+envio.erro,'terr');
@@ -53948,7 +53978,7 @@ function buildFinalizacaoEmailContent(p){
 // Destinatários: os 3 e-mails de contato da emissão (comprador/engenheiro/financeiro) +
 // pedidos@granda.ind.br, exatamente como pedido pelo usuário.
 async function _enviarEmailFinalizacao(p){
-  const destEmails=_emComVendedor([p.email_comprador,p.email_engenheiro,p.email_financeiro,'pedidos@granda.ind.br'].filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i),p);
+  const destEmails=_emComVendedor([p.email_comprador,p.email_engenheiro,p.email_financeiro,'pedidos@granda.ind.br'].map(v=>String(v||'').trim().toLowerCase()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i),p);
   if(!destEmails.length){
     return{ok:false,destinatarios:[],erro:'Nenhum e-mail de destino cadastrado neste pedido.'};
   }
@@ -66248,12 +66278,7 @@ function _crmRenderCard(e){
          arrastar e soltar), valores em grade 2x2, e o Líquido em destaque com a conta montada
          + alerta de valor estranho (ver _crmCardPropostaResumo). -->
     <div id="crm-tab-proposta" class="dash-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
-        <button type="button" id="crm-card-historico-toggle" onclick="crmCardToggleHistorico('${e.id}')" style="text-align:left;background:none;border:none;cursor:pointer;font-weight:800;font-size:.8rem;color:var(--ink);padding:0">${_crmCardHistoricoExpandido?'▲ ':'▼ '}Histórico de propostas (${(e.propostaHistorico||[]).length})</button>
-        <span style="font-size:.72rem;font-weight:700;color:var(--ink3);white-space:nowrap">💼 ${e.tipoNegocio||'Venda'}</span>
-      </div>
-      <div id="crm-card-historico-wrap" style="${_crmCardHistoricoExpandido?'':'display:none'}">${_crmPropostaHistoricoHtml(e)}</div>
-      <div class="crm-prop-drop" onclick="document.getElementById('crm-card-proposta-pdf-input').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="event.preventDefault();this.classList.remove('over');crmCardPropostaDrop(event)" style="margin:8px 0 6px">
+            <div class="crm-prop-drop" onclick="document.getElementById('crm-card-proposta-pdf-input').click()" ondragover="event.preventDefault();this.classList.add('over')" ondragleave="this.classList.remove('over')" ondrop="event.preventDefault();this.classList.remove('over');crmCardPropostaDrop(event)" style="margin:8px 0 6px">
         <span class="crm-prop-drop-btn">📎 Anexar proposta atualizada</span><br><span style="font-size:.7rem">clique aqui ou arraste o arquivo · PDF tem os valores lidos sozinhos · planilha/outros: preencha os valores abaixo</span>
       </div>
       <input type="file" id="crm-card-proposta-pdf-input" accept=".pdf,application/pdf,.xls,.xlsx,.csv,.ods,.doc,.docx,image/*" style="display:none" onchange="crmCardPropostaPdfSelecionado(this)">
@@ -66267,6 +66292,14 @@ function _crmRenderCard(e){
         </div>
         <div id="crm-card-proposta-resumo" style="margin-top:12px"></div>
         <div style="font-size:.66rem;color:var(--ink4);margin-top:8px">✓ Salvo automaticamente ao sair do campo.</div>
+      </div>
+      <!-- Histórico de propostas logo abaixo dos valores (2026-11-23, a pedido do Guilherme) -->
+      <div style="border-top:1px solid var(--border-lt);margin-top:12px;padding-top:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px">
+        <button type="button" id="crm-card-historico-toggle" onclick="crmCardToggleHistorico('${e.id}')" style="text-align:left;background:none;border:none;cursor:pointer;font-weight:800;font-size:.8rem;color:var(--ink);padding:0">${_crmCardHistoricoExpandido?'▲ ':'▼ '}Histórico de propostas (${(e.propostaHistorico||[]).length})</button>
+        <span style="font-size:.72rem;font-weight:700;color:var(--ink3);white-space:nowrap">💼 ${e.tipoNegocio||'Venda'}</span>
+      </div>
+      <div id="crm-card-historico-wrap" style="${_crmCardHistoricoExpandido?'':'display:none'}">${_crmPropostaHistoricoHtml(e)}</div>
       </div>
     </div>
     <div id="crm-tab-fechamento" class="dash-card">${fechamentoHtml}</div>
@@ -88359,9 +88392,9 @@ function E2(s){return _orcxEsc(s);}
     const lbl='font-size:.62rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:3px';
     const ops=_crmCkOpcoes();const antigo=it.key&&!ops.some(d=>d.key===it.key)?_crmCkDef(it.key):null;
     return`<div class="crm-ck-row" style="border:1.5px solid #fbcfe8;background:#fdf2f8;border-radius:10px;padding:10px 12px">
-    <div style="display:grid;grid-template-columns:1fr 80px 34px;gap:8px;align-items:end">
+    <div style="display:grid;grid-template-columns:1fr 104px 34px;gap:8px;align-items:end">
       <div><label style="${lbl}">Produto *</label><select class="crm-ck-prod" onchange="_crmCkProdMudou(this)" style="${inp}"><option value="">Escolha o produto…</option>${ops.map(d=>`<option value="${d.key}" ${it.key===d.key?'selected':''}>${d.ic} ${esc(d.l)}</option>`).join('')}${antigo?`<option value="${antigo.key}" selected>${antigo.ic} ${esc(antigo.l)} (pedido antigo)</option>`:''}</select></div>
-      <div><label style="${lbl}">Qtd *</label><input type="number" min="1" step="1" class="crm-ck-qtd" value="${it.qtd||1}" style="${inp}"></div>
+      <div><label style="${lbl}">Quantidade *</label><input type="number" min="1" step="1" inputmode="numeric" class="crm-ck-qtd" value="${it.qtd||''}" placeholder="Qtd." oninput="this.style.borderColor='#e5e7eb'" style="${inp}"></div>
       <button type="button" onclick="this.closest('.crm-ck-row').remove();_crmCkContar()" title="Remover este produto" style="background:#fff;border:1px solid #fecaca;color:#dc2626;border-radius:8px;height:34px;cursor:pointer;font-size:.85rem">🗑️</button>
     </div>
     <div class="crm-ck-modelo-wrap" style="margin-top:8px;${it.key&&_crmCkModeloHtml(it.key,it)?'':'display:none'}">${it.key?_crmCkModeloHtml(it.key,it):''}</div>
@@ -88411,7 +88444,7 @@ function E2(s){return _orcxEsc(s);}
       let msg='';
       if(!key)msg='escolha o produto';
       else if(temModelos&&!mv)msg=key==='caderno'?'escolha o produto do caderno':'escolha o modelo';
-      else if(!(qtd>=1))msg='informe a quantidade';
+      else if(!(qtd>=1)){msg='informe quantas unidades o cliente quer';const q=row.querySelector('.crm-ck-qtd');if(q)q.style.borderColor='#dc2626';}
       else if(!(larg>0)||!(alt>0)||prof==null||prof<0)msg='preencha largura, altura e profundidade (em metros)';
       else if(larg>50||alt>50||prof>10)msg='as medidas são em METROS (ex.: 1,20 × 0,60 × 0,08) — parece que foi digitado em cm';
       else if(d&&d.obsObrig&&!obs)msg='descreva o que é no campo Detalhe';
@@ -89106,13 +89139,13 @@ const CORES_PANTONE_U=[["100","FEF380"],["101","FFF166"],["102","FFEC2D"],["103"
     // 2026-11-12 (Guilherme: "embaixo do negócio uma medida e embaixo no modelo caderno outra") — quando a
     // variação do caderno é só uma medida e o item já tem a medida dele, mostra uma medida só (a do item).
     if(sub&&medida(it)&&/^[\d.,\s×xX]+M?$/i.test(sub.trim()))sub='';
-    return{grupo,cod,titulo:titulo||'Item',sub,med:medida(it),qtd:it.qtd>1?it.qtd:0,obs:it.obs||'',mats};
+    return{grupo,cod,titulo:titulo||'Item',sub,med:medida(it),qtd:Number(it.qtd)>=1?Number(it.qtd):0,obs:it.obs||'',mats};
   }
   function linha(n,x){
     const tags=[];
+    if(x.qtd)tags.push(`<span class="ckv-tag qtd">${x.qtd} ${x.qtd===1?'unidade':'unidades'}</span>`);
     if(x.cod)tags.push(`<span class="ckv-tag cod">${esc(x.cod)}</span>`);
     if(x.med)tags.push(`<span class="ckv-tag med">${esc(x.med)}</span>`);
-    if(x.qtd)tags.push(`<span class="ckv-tag qtd">${x.qtd} unidades</span>`);
     if(x.mats)x.mats.split(' · ').forEach(m=>{if(m.trim())tags.push(`<span class="ckv-tag mat">${esc(m.trim())}</span>`);});
     if(x.obs)tags.push(`<span class="ckv-tag obs">${esc(x.obs)}</span>`);
     return`<div class="ckv-it"><span class="ckv-num">Item ${n}</span><div class="ckv-c">
@@ -99073,22 +99106,29 @@ function _orcOpLinhas(d,t,comIcone){
   if(typeof _orc2SincronizarValorPedido!=='function')return;
   // soma de TODOS os produtos do orçamento (inclui catálogo/caderno e tabela) — o mesmo "Produtos" do painel
   _orc2ValorVendaProdutos=function(d){d=d||orc2.doc;if(!d)return 0;try{return _orc8Ativos(d).reduce((s,p)=>s+_orc2PrecoItem(p),0);}catch(e){return 0;}};
+  // (2026-11-23, Clabonde: "permitir o usuário colocar o valor manual quando é uma cotação somente dos operacionais e não
+  // tem produto") — no "Só serviço" o valor do pedido fica liberado pra digitar; com valor, ele vira a base da instalação e
+  // da ART (igual a um pedido com produto); vazio, continua valendo instalação e frete informados à mão.
   function travar(){
     const el=document.getElementById('orcx-valor-pedido');if(!el)return;
+    const vh=document.getElementById('orcx-vp-hint');
+    if(orc2&&orc2.doc&&orc2.doc.tipo==='operacionais'){
+      el.readOnly=false;el.removeAttribute('tabindex');el.style.background='';el.style.color='';el.style.cursor='';
+      el.title='Sem produto: digite o valor do pedido, se tiver';
+      if(vh)vh.innerHTML=_orcxMoney('orcx-valor-pedido')>0?'✏️ Valor informado à mão — base da instalação e da ART':'✏️ Sem produto: digite o valor do pedido ou deixe vazio e informe abaixo a instalação e o frete';
+      return;}
     el.readOnly=true;el.tabIndex=-1;el.style.background='#f1f5f9';el.style.color='#334155';el.style.cursor='not-allowed';
     el.title='Puxado automaticamente da soma dos produtos — não dá pra alterar';
-    const vh=document.getElementById('orcx-vp-hint');
-    if(vh&&orc2&&orc2.doc)vh.innerHTML=orc2.doc.tipo==='operacionais'?'🔒 Sem produto — o valor do pedido fica zerado':'🔒 Soma dos produtos (valor de venda) — atualiza sozinho';
+    if(vh&&orc2&&orc2.doc)vh.innerHTML='🔒 Soma dos produtos (valor de venda) — atualiza sozinho';
   }
   const _s=_orc2SincronizarValorPedido;
   _orc2SincronizarValorPedido=function(){
     const d=orc2&&orc2.doc;
-    if(d&&d.operacionais){d.operacionais.vpAuto=true;
-      if(d.tipo==='operacionais'){const el=document.getElementById('orcx-valor-pedido');if(el&&el.value){el.value='';}}}
+    if(d&&d.operacionais&&d.tipo!=='operacionais')d.operacionais.vpAuto=true;
     const r=_s.apply(this,arguments);try{travar();}catch(e){}return r;};
   if(typeof orcxAoMudar==='function'){const _o=orcxAoMudar;orcxAoMudar=function(){
     const d=orc2&&orc2.doc;
-    if(d&&d.operacionais){d.operacionais.vpAuto=true;try{_orc2SincronizarValorPedido();}catch(e){}}
+    if(d&&d.operacionais&&d.tipo!=='operacionais'){d.operacionais.vpAuto=true;try{_orc2SincronizarValorPedido();}catch(e){}}
     return _o.apply(this,arguments);};}
   if(typeof orcxAtualizarVisibilidade==='function'){const _v=orcxAtualizarVisibilidade;orcxAtualizarVisibilidade=function(){const r=_v.apply(this,arguments);try{travar();}catch(e){}return r;};}
   // ao montar o editor (operacionais fica na janela da tela única) já sincroniza
