@@ -34,7 +34,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-23.4';</script>
+<script>const APP_BUILD_VERSION='2026-11-23.11';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -18117,7 +18117,27 @@ function _mostrarBloqueioAtualizacao(){
   try{new MutationObserver(()=>{if(_bloqueioAtualizacaoAtivo&&!b.classList.contains('open'))b.classList.add('open');}).observe(b,{attributes:true,attributeFilter:['class','style']});}catch(e){}
   setTimeout(()=>{try{b.querySelector('.sub-btn').focus();}catch(e){}},50);
 }
+// 2026-11-23 (a pedido do usuário): a tela de "Atualizar agora" NÃO aparece mais no meio de
+// uma edição. Detectou versão nova → espera a pessoa terminar: nenhum modal aberto, nenhum
+// campo com foco, nenhuma emissão de pedido em andamento e 5s sem digitar. Só então mostra a
+// tela (que continua obrigatória). Checa de novo a cada 3s enquanto espera.
+let _ultimaDigitacaoSistema=0;
+['keydown','input','paste'].forEach(ev=>document.addEventListener(ev,()=>{if(!_bloqueioAtualizacaoAtivo)_ultimaDigitacaoSistema=Date.now();},true));
+let _esperandoFimEdicaoAtualizacao=null;
+function _usuarioEditandoAlgo(){
+  if(!_sistemaEstaSeguroPraRecarregar())return true;
+  if(typeof _submitPedidoEmAndamento!=='undefined'&&_submitPedidoEmAndamento)return true;
+  if(Date.now()-_ultimaDigitacaoSistema<5000)return true;
+  return false;
+}
 function _tentarAutoAtualizar(){
+  if(_bloqueioAtualizacaoAtivo)return;
+  if(_usuarioEditandoAlgo()){
+    if(!_esperandoFimEdicaoAtualizacao)_esperandoFimEdicaoAtualizacao=setInterval(()=>{
+      if(!_usuarioEditandoAlgo()){clearInterval(_esperandoFimEdicaoAtualizacao);_esperandoFimEdicaoAtualizacao=null;_mostrarBloqueioAtualizacao();}
+    },3000);
+    return;
+  }
   _mostrarBloqueioAtualizacao();
 }
 async function _checarNovaVersaoSistema(){
@@ -18154,7 +18174,10 @@ async function _checarNovaVersaoSistema(){
     }
   }catch(e){/* falha de rede na checagem não deve incomodar ninguém — tenta de novo no próximo ciclo */}
 }
-function _aplicarNovaVersaoSistema(){
+async function _aplicarNovaVersaoSistema(){
+  // 2026-11-23: antes de recarregar, espera as gravações pendentes chegarem no servidor (máx 15s).
+  try{const b=document.querySelector('#sys-update-banner .sub-btn');if(b){b.disabled=true;b.textContent='Salvando e atualizando...';}}catch(e){}
+  try{if(window._fbAguardarGravacoes)await Promise.race([window._fbAguardarGravacoes(),new Promise(r=>setTimeout(r,15000))]);}catch(e){}
   location.replace(location.pathname+'?'+(window.__GCORE_PORTAL_QS||'')+'_v='+Date.now());
 }
 setTimeout(_checarNovaVersaoSistema,15000);
@@ -20065,7 +20088,16 @@ function _prodAgendarSync(){clearTimeout(_prodSyncTimer);_prodSyncTimer=setTimeo
 const PROD_CARGAS_MP=[
   {id:'bottom154h_20261016',arquivo:'BOTTOM_154H.xlsx (O.S 84, 2 unidades → quantidades ÷ 2)',
    acha:p=>{const n=_normNomeProduto(p.nome);return _cadNorm(p.categoria)==='BURGER KING'&&n.includes('BOTTOM BK')&&n.includes('ACM VAZADO')&&/1,40X1,54/.test(n);},
-   linhas:[[2103,0.75],[1804,0.5],[1826,0.75],[1473,0.15],[1683,0.2],[1060,0.35],[1072,0.125],[1098,0.25],[1139,0.75],[1144,0.75],[1864,0.5],[1524,0.5],[1396,72.5],[1431,0.5],[1338,1],[1270,7.5],[1263,7.5],[1254,7.5],[1293,7.5],[1294,7.5]]}
+   linhas:[[2103,0.75],[1804,0.5],[1826,0.75],[1473,0.15],[1683,0.2],[1060,0.35],[1072,0.125],[1098,0.25],[1139,0.75],[1144,0.75],[1864,0.5],[1524,0.5],[1396,72.5],[1431,0.5],[1338,1],[1270,7.5],[1263,7.5],[1254,7.5],[1293,7.5],[1294,7.5]]},
+  // C&A — LOGO C&A FACE ÚNICA 1,30 × 1,00 m: planilha enviada pelo usuário em 23/11/2026 (QTD. 02 → quantidades ÷ 2).
+  // Códigos conferidos pelo nome exato na lista do Mubsys.
+  {id:'ca_logo130x100_20261123',arquivo:'Planilha LOGO DE LOJA C&A face única 1,30 × 1,00 m (2 unidades → quantidades ÷ 2)',
+   acha:p=>_cadNorm(p.categoria)==='C&A'&&_prodCatTxt(p.tipoProduto)==='LOGO C&A FACE ÚNICA'&&Math.round(+p.largura)===130&&Math.round(+p.altura)===100,
+   linhas:[[1079,0.4],[1949,1.5],[1825,1],[1826,1],[1785,0.5],[1524,0.5],[1864,1],[1132,3],[1399,130],[1320,2],[1332,2],[1431,1]]},
+  // C&A — LOGO C&A FACE ÚNICA 0,97 × 0,74 m: planilha enviada pelo usuário em 23/11/2026 (QTD. 03 → quantidades ÷ 3).
+  {id:'ca_logo097x074_20261123',arquivo:'Planilha LOGO DE LOJA C&A face única 0,97 × 0,74 m (3 unidades → quantidades ÷ 3)',
+   acha:p=>_cadNorm(p.categoria)==='C&A'&&_prodCatTxt(p.tipoProduto)==='LOGO C&A FACE ÚNICA'&&Math.round(+p.largura)===97&&Math.round(+p.altura)===74,
+   linhas:[[1079,0.2667],[1949,1],[1825,0.6667],[1826,0.6667],[1785,0.3333],[1524,0.3333],[1864,0.6667],[1132,2.6667],[1399,60],[1320,2],[1332,2],[1431,1]]}
 ];
 function _prodAplicarCargas(){
   const b=_mpbBase();if(!Object.keys(b).length)return 0;
@@ -27238,6 +27270,7 @@ async function _prodCargaCaderno(def){
         precoFinal:Number(preco)||0,modoPreco:'tabela',precoTabelaEm:agora,precoTabelaPor:quem,um,custo:null,etapasProducao:[],nomeAuto:true,
         criadoEm:agora,criadoPor:quem,origemCarga:def.origem+(codCli?' · '+codCli:'')};
       if(codCli)p.codigoCliente=String(codCli);
+      if(def.foto)p.fotoUrl=def.foto;
       const f=n=>Number(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:3});
       p.medida=_prodDimsTxt(p)||(L&&A?`${f(L)} × ${f(A)} m`:(A?`altura ${f(A)} m`:''));
       cfg.produtos.push(p);_prodGerarCodigo(p);
@@ -27288,6 +27321,21 @@ const CARGA_DAF_2025={flag:'migDaf20261018',caderno:'DAF CAMINHÕES',aliases:['D
   desc:{}};
 (function(){let n=0;const t=setInterval(()=>{n++;if(n>360){clearInterval(t);return;}
   try{if(cfg&&cfg[CARGA_DAF_2025.flag]){clearInterval(t);return;}if(typeof _prodCargaCaderno==='function')_prodCargaCaderno(CARGA_DAF_2025);}catch(e){}},7000);})();
+
+// ── Caderno C&A — tabela de preços enviada pelo usuário (2026-11-23) ──
+// Pedido: "crie um caderno para o cliente C&A; produtos ali e as variações são as medidas; o desenho do logo é
+// tanto a logo do caderno quanto a imagem de referência dos dois produtos; coloca esses preços já como tabela".
+// Usa a carga padrão _prodCargaCaderno. Logo e foto EMBUTIDAS (base64), nada de link externo.
+// 2 produtos: LOGO C&A FACE ÚNICA (12 medidas) e LOGO C&A DUPLA FACE E VINHETES (3 medidas). Preço travado (tabela).
+const _CA_LOGO='data:image/png;base64,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';
+const _CA_FOTO='data:image/jpeg;base64,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';
+try{if(typeof CADERNO_LOGOS_EMB!=='undefined'&&!CADERNO_LOGOS_EMB.some(x=>x.ca))CADERNO_LOGOS_EMB.push({ca:1,teste:k=>k==='CA'||/^CA /.test(k),larg:1.3,url:_CA_LOGO});}catch(e){}
+const CARGA_CA_2026={flag:'migCA20261123',caderno:'C&A',aliases:['C & A','C&A MODAS'],sigla:'CA',tabela:true,
+  origem:'Tabela C&A (enviada em 23/11/2026)',garantia:'',foto:_CA_FOTO,
+  itens:[["LOGO C&A FACE ÚNICA", "0,59 × 0,45 M", 0.59, 0.45, null, "UNITÁRIO", null, "Face única.", 1002.0, "", "LOGO 0,59X0,45M"], ["LOGO C&A FACE ÚNICA", "0,80 × 0,61 M", 0.8, 0.61, null, "UNITÁRIO", null, "Face única.", 1812.0, "", "LOGO 0,80X0,61M"], ["LOGO C&A FACE ÚNICA", "0,97 × 0,74 M", 0.97, 0.74, null, "UNITÁRIO", null, "Face única.", 2666.67, "", "LOGO 0,97X0,74M"], ["LOGO C&A FACE ÚNICA", "1,30 × 1,00 M", 1.3, 1.0, null, "UNITÁRIO", null, "Face única.", 3000.0, "", "LOGO 1,30X1,00M"], ["LOGO C&A FACE ÚNICA", "1,57 × 1,20 M", 1.57, 1.2, null, "UNITÁRIO", null, "Face única.", 4016.67, "", "LOGO 1,57X1,20M"], ["LOGO C&A FACE ÚNICA", "1,95 × 1,49 M", 1.95, 1.49, null, "UNITÁRIO", null, "Face única.", 5316.67, "", "LOGO 1,95X1,49M"], ["LOGO C&A FACE ÚNICA", "2,10 × 1,61 M", 2.1, 1.61, null, "UNITÁRIO", null, "Face única.", 5666.67, "", "LOGO 2,10X1,61M"], ["LOGO C&A FACE ÚNICA", "2,34 × 1,79 M", 2.34, 1.79, null, "UNITÁRIO", null, "Face única.", 12600.0, "", "LOGO 2,34X1,79M"], ["LOGO C&A FACE ÚNICA", "2,48 × 1,90 M", 2.48, 1.9, null, "UNITÁRIO", null, "Face única.", 12700.0, "", "LOGO 2,48X1,90M"], ["LOGO C&A FACE ÚNICA", "3,25 × 2,49 M", 3.25, 2.49, null, "UNITÁRIO", null, "Face única.", 21793.0, "", "LOGO 3,25X2,49M"], ["LOGO C&A FACE ÚNICA", "4,06 × 3,11 M", 4.06, 3.11, null, "UNITÁRIO", null, "Face única.", 27676.67, "", "LOGO 4,06X3,11M"], ["LOGO C&A FACE ÚNICA", "4,95 × 3,79 M", 4.95, 3.79, null, "UNITÁRIO", null, "Face única.", 55141.0, "", "LOGO 4,95X3,79M"], ["LOGO C&A DUPLA FACE E VINHETES", "0,71 × 0,54 M", 0.71, 0.54, null, "UNITÁRIO", null, "Dupla face.", 2600.0, "", "VINHETE C&A 0,71X0,54M"], ["LOGO C&A DUPLA FACE E VINHETES", "0,80 × 0,61 M", 0.8, 0.61, null, "UNITÁRIO", null, "Dupla face.", 2998.0, "", "VINHETE C&A 0,80X0,61M"], ["LOGO C&A DUPLA FACE E VINHETES", "0,97 × 0,74 M", 0.97, 0.74, null, "UNITÁRIO", null, "Dupla face.", 3000.0, "", "VINHETE C&A 0,97X0,74M"]],
+  desc:{}};
+(function(){let n=0;const t=setInterval(()=>{n++;if(n>360){clearInterval(t);return;}
+  try{if(cfg&&cfg[CARGA_CA_2026.flag]){clearInterval(t);return;}if(typeof _prodCargaCaderno==='function')_prodCargaCaderno(CARGA_CA_2026);}catch(e){}},7500);})();
 
 // ── CABEÇALHO DE PRODUTOS MAIS LIMPO (2026-10-19, a pedido do usuário: "achei meio bagunçado esse
 // cabeçalho… não deixar assim poluído"). Chips dos cadernos só com logo + nome + quantidade; selecionado
@@ -70870,7 +70918,125 @@ function renderProdIndicadores(){
         <td style="${th};white-space:nowrap;${o.atrasado?'color:#b91c1c;font-weight:700':''}">${fmtD(x.etapa.iso)}</td>
         <td style="${th};white-space:nowrap">${x.calc.prazoIso?fmtD(x.calc.prazoIso):'—'}</td></tr>`;}).join('')}
       </tbody></table></div>`:`<div style="color:var(--ink4);font-size:.8rem;padding:6px 0">Nada a produzir programado neste período.</div>`}`;
-  wrap.innerHTML=tlHtml+tiles+'<div id="prod-ind-extra"></div>'+secProd+secA;
+  wrap.innerHTML=tlHtml+tiles+_prodSetoresHtml(r,base,c)+'<div id="prod-ind-extra"></div>'+secProd+secA;
+}
+// ===================== CARGA POR SETOR (2026-11-23, a pedido do Clabonde) =====================
+// "lá em indicadores de produção eu quero todos os setores e a quantidade de produção de cada um, por
+// mês ou por período selecionado". Usa o MESMO filtro (mês/período/todos) e a MESMA lista de "A produzir"
+// dos cards de cima (_prodVCalc), só que aberta por setor (PROD_SETORES_ITEM):
+//  • A produzir no setor = valor líquido de cada item (fatia do líquido do pedido pelo subtotal do item)
+//    × o que falta naquele setor (100% − % do setor), só nos setores que o item usa. Um item passa por
+//    vários setores, então a soma dos setores é maior que o total a produzir.
+//  • Produzido no setor = cada baixa por setor do histórico (p.historicoProducao), pela data em que foi
+//    lançada, refeita de trás pra frente a partir do estado atual do item (mesma técnica de _prodRealEntradas).
+//  • Quais setores o item usa: se a Produção já marcou N/A em algum setor do item, vale o que está marcado.
+//    Senão o sistema ESTIMA pela descrição do item, comparando com os itens já marcados de outros pedidos
+//    (os 5 mais parecidos) — e mostra quanto do valor é estimado, pra Produção confirmar no checklist.
+const PROD_SET_AUTO=['letraCaixa','plasma'];
+const PROD_SET_PALAVRAS={router:/\bACM\b|ACR[ÍI]LICO|PVC|MDF|POLICARBONATO|VAZAD|RECORT|ROUTER|PETG|COMPOSTO/i,
+  plasma:/PLASMA|CHAPA (DE )?(A[ÇC]O|GALV|FERRO)/i,solda:/ESTRUTURA MET|METALON|SOLDA|TUBO|FERRO|A[ÇC]O |CANTONEIRA|TOTEM|PERFIL MET|GALVANIZ/i,
+  acm:/\bACM\b/i,letraCaixa:/LETRAS? CAIXA/i,adesivoP1:/ADESIV|IMPRESS|LONA|VINIL|PLOT|\bP1\b|BACKLIGHT|FRONTLIGHT/i,
+  acabamento:/ACABAMENTO/i,eletrica:/\bLED\b|ILUMINA|LUMINOS|NEON|EL[ÉE]TRIC|L[ÂA]MPADA|BACKLIGHT/i,pintura:/PINTURA|PINTAD|\bPU\b|EP[ÓO]XI|ESMALTE|AUTOMOTIV/i};
+function _prodSetTok(t){return new Set(String(t||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^A-Z0-9 ]/g,' ').split(/\s+/).filter(w=>w.length>2&&!/^\d+$/.test(w)&&['COM','PARA','DOS','DAS','UND'].indexOf(w)<0));}
+function _prodSetItemConfirmado(it){const na=(it&&it.setoresNA)||{};return Object.keys(na).some(k=>na[k]&&PROD_SET_AUTO.indexOf(k)<0);}
+let _prodSetTreinoCache={n:-1,t:0,lista:[]};
+function _prodSetTreino(){
+  const agora=Date.now();
+  if(_prodSetTreinoCache.n===pedidos.length&&agora-_prodSetTreinoCache.t<60000)return _prodSetTreinoCache.lista;
+  const lista=[];
+  pedidos.forEach(p=>(p.itensProducao||[]).forEach(it=>{if(!it||it.foraEscopo||!_prodSetItemConfirmado(it))return;
+    const lab={};PROD_SETORES_ITEM.forEach(k=>{lab[k.key]=!_prodItemSetorNA(it,k.key);});lista.push({t:_prodSetTok(it.nome),lab});}));
+  _prodSetTreinoCache={n:pedidos.length,t:agora,lista};return lista;
+}
+// {k:true/false} = setores que o item usa; estimado=true quando a Produção ainda não marcou o item
+function _prodSetAplica(it,treino){
+  const m={};
+  if(_prodSetItemConfirmado(it)){PROD_SETORES_ITEM.forEach(k=>{m[k.key]=!_prodItemSetorNA(it,k.key);});return{m,estimado:false};}
+  const t=_prodSetTok(it.nome);let viz=[];
+  if(t.size)viz=treino.map(x=>{let i=0;t.forEach(w=>{if(x.t.has(w))i++;});return{x,s:i/((t.size+x.t.size-i)||1)};}).sort((a,b)=>b.s-a.s).slice(0,5);
+  const usaViz=viz.length&&viz[0].s>=0.2,W=viz.reduce((s,v)=>s+v.s,0)||1;
+  PROD_SETORES_ITEM.forEach(k=>{
+    m[k.key]=usaViz?(viz.reduce((s,v)=>s+(v.x.lab[k.key]?v.s:0),0)/W>=0.5):PROD_SET_PALAVRAS[k.key].test(String(it.nome||''));
+    if(_prodItemSetorNA(it,k.key))m[k.key]=false;
+    if(it.setores&&Number(it.setores[k.key])>0)m[k.key]=true; // setor já trabalhou no item
+  });
+  return{m,estimado:true};
+}
+function _prodSetCalc(r,base,c){
+  const treino=_prodSetTreino();
+  const acc={};PROD_SETORES_ITEM.forEach(k=>{acc[k.key]={key:k.key,label:k.label,aprod:0,aprodEst:0,itens:0,peds:{},prod:0};});
+  let semItens=0,semItensN=0,est=0,totItens=0;
+  const itensDe=p=>(p.itensProducao||[]).filter(i=>i&&!i.foraEscopo);
+  (c.aprod||[]).filter(o=>!o.pendenteDoPassado).forEach(o=>{
+    const x=o.x,p=x.p,its=itensDe(p);
+    if(!its.length){semItens+=o.valor;semItensN++;return;}
+    const tot=its.reduce((s,i)=>s+(Number(i.valor)||0),0),L=x.valorLiquidoTotal||0;
+    its.forEach(it=>{
+      const share=tot>0?L*(Number(it.valor)||0)/tot:L/its.length;
+      const ap=_prodSetAplica(it,treino);let pendItem=0;
+      PROD_SETORES_ITEM.forEach(k=>{if(!ap.m[k.key])return;
+        const v=share*(1-_prodItemSetorValor(it,k.key)/100);if(!(v>0.005))return;
+        const a=acc[k.key];a.aprod+=v;a.itens++;a.peds[p.id]=(a.peds[p.id]||0)+v;if(ap.estimado)a.aprodEst+=v;pendItem=Math.max(pendItem,v);});
+      const falta=share*(1-Math.min(100,Number(it.percentual)||0)/100);totItens+=falta;if(ap.estimado)est+=falta;
+    });
+  });
+  // produzido por setor, pela data da baixa
+  (base||[]).forEach(x=>{
+    const p=x.p,its=itensDe(p);if(!its.length)return;
+    const logs=(p.historicoProducao||[]).filter(h=>h&&h.em);if(!logs.length)return;
+    const tot=its.reduce((s,i)=>s+(Number(i.valor)||0),0),L=x.valorLiquidoTotal||0;
+    its.forEach(it=>{
+      const nome=String(it.nome||'').slice(0,120);
+      const meus=logs.filter(h=>h.item===nome).sort((a,b)=>String(b.em).localeCompare(String(a.em)));if(!meus.length)return;
+      const share=tot>0?L*(Number(it.valor)||0)/tot:L/its.length;
+      const v={};PROD_SETORES_ITEM.forEach(k=>{v[k.key]=_prodItemSetorValor(it,k.key);});
+      meus.forEach(h=>{
+        const setor=String(h.setor||''),d=new Date(h.em);const iso=isNaN(d)?'':_isoLocal(d);
+        const dentro=iso&&iso>=r.ini&&iso<=r.fim;
+        const aplicar=k=>{const de=Number(h.de)||0,delta=(v[k]||0)-de;v[k]=de;if(dentro&&delta)acc[k].prod+=share*delta/100;};
+        if(setor==='TODOS OS SETORES'){PROD_SETORES_ITEM.forEach(k=>{if(!_prodItemSetorNA(it,k.key))aplicar(k.key);});return;}
+        const k=PROD_SETORES_ITEM.find(z=>setor===z.label||setor.indexOf(z.label+' →')===0);
+        if(!k||setor.indexOf('→ N/A')>0||setor.indexOf('→ voltou a contar')>0)return;
+        aplicar(k.key);
+      });
+    });
+  });
+  const lista=Object.values(acc).map(a=>Object.assign(a,{prod:Math.max(0,a.prod),nPed:Object.keys(a.peds).length})).sort((a,b)=>b.aprod-a.aprod);
+  return{lista,semItens,semItensN,estPct:totItens>0?est/totItens*100:0,total:c.aProduzir||0};
+}
+function _prodSetCor(pct){return pct>=65?'#dc2626':pct>=50?'#ea580c':pct>=30?'#ca8a04':pct>0.5?'#16a34a':'#94a3b8';}
+function _prodSetoresHtml(r,base,c){
+  let S;try{S=_prodSetCalc(r,base,c);}catch(e){console.error('carga por setor',e);return'';}
+  window._prodSetUltimo={S,r,c};
+  const tot=S.total,maxV=Math.max(1,...S.lista.map(a=>a.aprod));
+  const th='padding:7px 10px;font-size:.66rem;text-transform:uppercase;color:#64748b;font-weight:800;text-align:left';
+  const td='padding:8px 10px;border-top:1px solid #f1f5f9;vertical-align:middle';
+  const linhas=S.lista.map(a=>{const pct=tot>0?a.aprod/tot*100:0,cor=_prodSetCor(pct),estP=a.aprod>0?a.aprodEst/a.aprod*100:0;
+    return`<tr onclick="prodSetAbrir('${a.key}')" style="cursor:pointer" title="Clique pra ver os pedidos">
+      <td style="${td};font-weight:800;color:#1e293b;white-space:nowrap">${a.label}</td>
+      <td style="${td};width:34%"><div style="background:#f1f5f9;border-radius:6px;height:14px;overflow:hidden"><div style="width:${(a.aprod/maxV*100).toFixed(1)}%;height:100%;background:${cor};border-radius:6px"></div></div></td>
+      <td style="${td};text-align:right;font-weight:800;color:${cor};white-space:nowrap">${c.passado?'—':fmtR(a.aprod)}${estP>=50&&a.aprod>0?'<div style="font-size:.6rem;font-weight:600;color:#94a3b8">estimado</div>':''}</td>
+      <td style="${td};text-align:right;font-weight:700;color:${cor};white-space:nowrap">${c.passado||!tot?'—':Math.round(pct)+'%'}</td>
+      <td style="${td};text-align:right;color:#475569;white-space:nowrap">${c.passado?'—':a.itens+' / '+a.nPed}</td>
+      <td style="${td};text-align:right;color:#166534;font-weight:700;white-space:nowrap">${fmtR(a.prod)}</td></tr>`;}).join('');
+  const avisos=[];
+  if(!c.passado&&S.estPct>=1)avisos.push(`⚠️ <b>${Math.round(S.estPct)}%</b> do valor a produzir está com os setores <b>estimados pela descrição do item</b> — a Produção ainda não marcou N/A nos setores que não se aplicam. Marcando no checklist do pedido, o número fica exato.`);
+  if(!c.passado&&S.semItensN)avisos.push(`📦 ${S.semItensN} ${_plural(S.semItensN,'pedido','pedidos')} sem itens cadastrados na Produção (${fmtR(S.semItens)}) — fora da conta por setor.`);
+  return`<div class="dash-card" style="margin:0 0 18px">
+    <div class="dash-sec-title" style="margin:0 0 4px">🔧 Carga por setor — ${r.label}</div>
+    <div style="font-size:.72rem;color:#64748b;margin-bottom:10px">Quanto do valor líquido ainda passa por cada setor (o mesmo "A produzir" de ${c.passado?'—':fmtR(tot)} dos cards acima) e quanto cada setor produziu no período. Um item passa por vários setores, por isso a soma dos setores é maior que o total.</div>
+    <table style="width:100%;border-collapse:collapse;font-size:.8rem;table-layout:auto"><thead><tr>
+      <th style="${th}">Setor</th><th style="${th}"></th><th style="${th};text-align:right">A produzir</th><th style="${th};text-align:right">% do mês</th><th style="${th};text-align:right">Itens / pedidos</th><th style="${th};text-align:right">Produzido</th>
+    </tr></thead><tbody>${linhas}</tbody></table>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:.64rem;color:#64748b;margin-top:8px"><span><b style="color:#dc2626">■</b> 65% ou mais</span><span><b style="color:#ea580c">■</b> 50 a 64%</span><span><b style="color:#ca8a04">■</b> 30 a 49%</span><span><b style="color:#16a34a">■</b> abaixo de 30%</span><span>Produzido = baixas por setor lançadas no período</span></div>
+    ${avisos.map(a=>`<div style="font-size:.72rem;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:7px 11px;margin-top:8px">${a}</div>`).join('')}
+  </div>`.replace('% do mês',_prodIndView.modo==='mes'?'% do mês':'% do período');
+}
+function prodSetAbrir(key){
+  const u=window._prodSetUltimo;if(!u)return;const a=u.S.lista.find(x=>x.key===key);if(!a)return;
+  const lista=Object.keys(a.peds).map(id=>({p:pedidos.find(p=>p.id===id),valor:a.peds[id],cor:'#b45309'})).filter(o=>o.p).sort((x,y)=>y.valor-x.valor);
+  if(!lista.length){toast('Nada a produzir neste setor no período','tinf');return;}
+  _prodVGAbrirListaPedidos('🔧 '+a.label+' — a produzir em '+u.r.label,lista);
 }
 function prodIndAbrirTile(key){
   const r=_prodIndRange();const c=_prodVCalc(_prodVBase(),r.ini,r.fim);
@@ -70915,6 +71081,10 @@ function _prodIndExportTudo(){
       rows:d.entregues.map(o=>[o.p.os||'',nomeP(o),o.valor,fmtD(o.prog),fmtD(o.fim),o.dias]),
       total:['','TOTAL',d.entregues.reduce((s,o)=>s+o.valor,0),'','',d.entreguesDias],moeda:[2],dir:[5]}
   ];
+  try{const S=_prodSetCalc(r,d.base,c);const tot=S.total;
+    secs.splice(0,0,{nome:'Por setor',titulo:'🔧 Carga por setor em '+r.label,head:['Setor','A produzir','% do total a produzir','Itens pendentes','Pedidos','Produzido no período'],
+      rows:S.lista.map(a=>[a.label,c.passado?0:a.aprod,c.passado||!tot?'—':Math.round(a.aprod/tot*100)+'%',a.itens,a.nPed,a.prod]),
+      total:['Total a produzir do período (um item passa por vários setores)',c.passado?0:tot,'','','',''],moeda:[1,5]});}catch(e){console.error('export setores',e);}
   return{d,r,resumo,secs};
 }
 function prodIndExportarListaExcel(){
@@ -70977,6 +71147,17 @@ const ORCX_REGIAO_POR_UF={AC:'NORTE',AP:'NORTE',AM:'NORTE',PA:'NORTE',RO:'NORTE'
 const ORCX_INDICE_REGIAO={'SUL':1,'SUDESTE':1,'CENTRO OESTE':1.2,'NORTE':1.4,'NORDESTE':1.2};
 const ORCX_INDICE_CAMINHAO={'TRUCK':1,'VAN':0.75,'CARRETA':1.25,'FRACIONADO':0};
 const ORCX_PRAZO_CAMINHAO_KM_DIA={'TRUCK':550,'CARRETA':480,'VAN':650};
+// (2026-11-23, Clabonde) "VAN" passa a se chamar "VAN / CAMINHÃO BAÚ" na tela — o valor gravado continua 'VAN'
+// (mesmo índice 0,75), então nada salvo muda.
+const ORCX_CAMINHAO_ROTULO={VAN:'VAN / CAMINHÃO BAÚ'};
+function _orcxCaminhaoRot(t){return ORCX_CAMINHAO_ROTULO[t]||t;}
+// (2026-11-23, Clabonde) Mobilização aérea automática: acima de ORCX_KM_AEREO km (só ida) o sistema liga a passagem
+// aérea sozinho. Passagem = instaladores × passagem ida e volta cotada na hora pela IA (busca na internet) pra daqui
+// ORCX_AEREO_ANTECEDENCIA_DIAS dias (prazo médio até a instalação se o pedido fechar hoje); o carro alugado entra
+// sempre junto: dias de instalação + 1 de folga × diária média. Regra nova só vale pra orçamento novo
+// (orcx-mob-v=2); orçamento salvo antes continua com a conta antiga (não muda valor só por abrir).
+const ORCX_KM_AEREO=2000,ORCX_AEREO_ANTECEDENCIA_DIAS=40,ORCX_AEREO_INSTALADORES_PADRAO=2;
+function _orcxMobV2(){return _orcxVal('orcx-mob-v')!=='1';}
 const ORCX_CONDICOES=[{nome:'INSTALAÇÃO NORMAL',taxa:0},{nome:'INSTALAÇÃO NOTURNA',taxa:0.2},{nome:'INSTALAÇÃO NOTURNA SHOPPING',taxa:0.3},{nome:'INSTALAÇÃO NOTURNA AEROPORTO',taxa:0.4},{nome:'TRABALHOS ESPECÍFICOS - MÃO DE OBRA DIFERENCIADA',taxa:0.5},{nome:'INSTALAÇÃO INDÚSTRIA',taxa:1.0}];
 const ORCX_ELEVACOES=[{nome:'NENHUM',custo:0,indice:0,cobrar:0},{nome:'MUNCK',custo:3500,indice:0.3,cobrar:4550},{nome:'GUINDASTE',custo:4500,indice:0.3,cobrar:5850},{nome:'ANDAIME (POR METRO)',custo:80,indice:0.3,cobrar:104},{nome:'MUNCK NOTURNO',custo:4000,indice:0.3,cobrar:5200},{nome:'GUINDASTE NOTURNO',custo:5500,indice:0.3,cobrar:7150},{nome:'PTA',custo:0,indice:0,cobrar:0}];
 const ORCX_TABELA_INSTALACAO=[[1000,2500],[2000,2500],[3000,2500],[4000,2500],[5000,2500],[10000,2500],[20000,2500],[30000,2550],[40000,3600],[50000,4000],[60000,5400],[70000,6300],[80000,7200],[90000,8100],[100000,9000],[110000,8272],[120000,8928],[130000,9568],[140000,10192],[150000,10800],[160000,11392],[170000,11968],[180000,12528],[190000,13072],[200000,13600],[210000,14112],[220000,14608],[230000,15088],[240000,15552],[250000,16000],[260000,16432],[270000,16848],[280000,17248],[290000,17632],[300000,18000]];
@@ -71009,10 +71190,11 @@ function _orcxVal(id){const el=document.getElementById(id);return el?el.value:''
 function _orcxNum(id){return parseFloat(String(_orcxVal(id)||'').replace(',','.'))||0;}
 function _orcxMoney(id){const s=String(_orcxVal(id)||'').replace(/[^\d,.-]/g,'');if(!s)return 0;return s.indexOf(',')>=0?parseFloat(s.replace(/\./g,'').replace(',','.'))||0:parseFloat(s)||0;}
 function _orcxSim(id){return(_orcxVal(id)||'NÃO').toUpperCase()==='SIM';}
-const ORCX_CAMPOS=['orcx-inst-manual','orcx-frete-manual','orcx-empresa','orcx-solicitante','orcx-cidade','orcx-uf','orcx-job','orcx-pedido','orcx-distancia','orcx-valor-pedido','orcx-condicao','orcx-caminhao','orcx-fracionado','orcx-aereo','orcx-dias','orcx-carro','orcx-km-aero','orcx-m2-acm','orcx-rigging','orcx-art','orcx-remocao','orcx-seguro','orcx-el-tipo-1','orcx-el-qtd-1','orcx-el-dias-1','orcx-el-pta-1','orcx-el-tipo-2','orcx-el-qtd-2','orcx-el-dias-2','orcx-el-pta-2','orcx-el-tipo-3','orcx-el-qtd-3','orcx-el-dias-3','orcx-el-pta-3'];
+const ORCX_CAMPOS=['orcx-mob-v','orcx-aereo-pessoas','orcx-aereo-pass','orcx-aereo-cot','orcx-inst-manual','orcx-frete-manual','orcx-empresa','orcx-solicitante','orcx-cidade','orcx-uf','orcx-job','orcx-pedido','orcx-distancia','orcx-valor-pedido','orcx-condicao','orcx-caminhao','orcx-fracionado','orcx-aereo','orcx-dias','orcx-carro','orcx-km-aero','orcx-m2-acm','orcx-rigging','orcx-art','orcx-remocao','orcx-seguro','orcx-el-tipo-1','orcx-el-qtd-1','orcx-el-dias-1','orcx-el-pta-1','orcx-el-tipo-2','orcx-el-qtd-2','orcx-el-dias-2','orcx-el-pta-2','orcx-el-tipo-3','orcx-el-qtd-3','orcx-el-dias-3','orcx-el-pta-3'];
 
 // ── Cálculo (cópia fiel do sistema antigo) ──
 function orcxCalcular(){
+  _orcxAereoAuto();
   const uf=(_orcxVal('orcx-uf')||'').trim().toUpperCase();
   const regiao=ORCX_REGIAO_POR_UF[uf]||null;
   const indiceRegiao=regiao?(ORCX_INDICE_REGIAO[regiao]||1):1;
@@ -71040,8 +71222,20 @@ function orcxCalcular(){
     mobRod=distanciaKm*ORCX_VALOR_KM_MOBILIZACAO*2;
     add('🚐','Mobilização de equipe de instalação',distanciaKm+'km × '+_orcxBRL(ORCX_VALOR_KM_MOBILIZACAO)+'/km × 2 (ida e volta)',mobRod,'mobilizacao');
   }else{
+    if(_orcxMobV2()){
+      const pessoas=Math.max(1,Math.round(_orcxNum('orcx-aereo-pessoas')||ORCX_AEREO_INSTALADORES_PADRAO));
+      const pass=_orcxMoney('orcx-aereo-pass');
+      const vPass=pass>0?pass*pessoas:ORCX_PASSAGEM_AEREA_BASE;
+      const diasCarro=dias>0?Math.ceil(dias)+1:0,vCarro=diasCarro*ORCX_ALUGUEL_CARRO_DIARIA,vKm=kmAero*ORCX_VALOR_KM_MOBILIZACAO;
+      mobAer=vPass+vCarro+vKm;
+      const cot=_orcxVal('orcx-aereo-cot');
+      add('✈️','Mobilização aérea',(pass>0?'Passagens: '+pessoas+(pessoas===1?' instalador':' instaladores')+' × '+_orcxBRL(pass)+' (ida e volta)'+(cot?' — '+cot:''):'Passagens: valor padrão '+_orcxBRL(ORCX_PASSAGEM_AEREA_BASE)+' (passagem ainda não cotada)')+
+        ' + carro alugado '+(diasCarro?diasCarro+' diárias ('+Math.ceil(dias)+' '+(Math.ceil(dias)===1?'dia':'dias')+' de instalação + 1 de folga) × '+_orcxBRL(ORCX_ALUGUEL_CARRO_DIARIA):'— informe os dias de instalação')+
+        (kmAero>0?' + deslocamento '+kmAero+'km × '+_orcxBRL(ORCX_VALOR_KM_MOBILIZACAO):''),mobAer,'mobilizacao');
+    }else{
     mobAer=ORCX_PASSAGEM_AEREA_BASE+(carro?dias*ORCX_ALUGUEL_CARRO_DIARIA:0)+(kmAero*ORCX_VALOR_KM_MOBILIZACAO);
     add('✈️','Mobilização aérea','Passagem '+_orcxBRL(ORCX_PASSAGEM_AEREA_BASE)+(carro?' + aluguel de carro '+dias+'d × '+_orcxBRL(ORCX_ALUGUEL_CARRO_DIARIA):'')+(kmAero>0?' + deslocamento '+kmAero+'km × '+_orcxBRL(ORCX_VALOR_KM_MOBILIZACAO):''),mobAer,'mobilizacao');
+    }
   }
   let frete=0;
   if(freteManual>0&&caminhao!=='FRACIONADO'){frete=freteManual;add('🚛','Frete','Valor informado à mão (orçamento sem produto)',frete,'frete');}
@@ -71050,7 +71244,7 @@ function orcxCalcular(){
     const ic=ORCX_INDICE_CAMINHAO[caminhao]??1;
     const base=distanciaKm>0?_orcxBracket(ORCX_TABELA_FRETE_KM,distanciaKm):0;
     frete=base*ic;
-    add('🚛','Frete — '+caminhao,distanciaKm+'km → base '+_orcxBRL(base)+' × índice '+caminhao+' ('+ic+'×)',frete,'frete');
+    add('🚛','Frete — '+_orcxCaminhaoRot(caminhao),distanciaKm+'km → base '+_orcxBRL(base)+' × índice '+_orcxCaminhaoRot(caminhao)+' ('+ic+'×)',frete,'frete');
   }
   let elev=0;
   for(let i=1;i<=3;i++){
@@ -71128,6 +71322,59 @@ async function orcxCalcularDistancia(forcar){
     orcxCalcular();
   }catch(err){console.warn('orcx distancia',err);if(st)st.textContent='⚠️ Não deu pra calcular sozinho ('+err.message+'). Digite a distância.';}
 }
+// ── Passagem aérea automática (2026-11-23, Clabonde) ──
+// Liga/desliga a passagem SÓ quando a distância muda (nunca ao abrir um orçamento salvo): acima de ORCX_KM_AEREO liga,
+// voltando pra baixo desliga. Se a distância mudou com a passagem ligada, cota de novo pro destino novo.
+function _orcxAereoAuto(){
+  try{
+    if(!_orcxMobV2()||!document.getElementById('orcx-aereo'))return;
+    const km=_orcxNum('orcx-distancia'),visto=orcxEstado.aereoKmVisto;
+    if(visto!==undefined&&visto===km)return;
+    orcxEstado.aereoKmVisto=km;
+    if(visto===undefined&&!(km>0))return;
+    const el=document.getElementById('orcx-aereo'),ligada=el.value==='SIM';
+    if(km>ORCX_KM_AEREO){
+      if(!ligada)el.value='SIM';
+      const p=document.getElementById('orcx-aereo-pass'),c=document.getElementById('orcx-aereo-cot');
+      if(ligada&&visto!==undefined&&visto>0&&p&&p.value&&c&&c.value){p.value='';c.value='';}
+      setTimeout(()=>{orcxAtualizarVisibilidade();_orcxCotarSeFaltar();},0);
+    }else if(ligada&&visto!==undefined&&visto>ORCX_KM_AEREO){el.value='NÃO';setTimeout(orcxAtualizarVisibilidade,0);}
+  }catch(e){console.warn('orcx aereo auto',e);}
+}
+function _orcxCotarSeFaltar(){if(_orcxMobV2()&&_orcxSim('orcx-aereo')&&!_orcxMoney('orcx-aereo-pass')&&!orcxEstado.cotando)orcxCotarPassagem();}
+function _orcxIsoMaisDias(n){const d=new Date();d.setHours(12,0,0,0);d.setDate(d.getDate()+n);return _isoLocal(d);}
+async function orcxCotarPassagem(){
+  const setSt=h=>{orcxEstado.cotStatus=h;const st=document.getElementById('orcx-aereo-status');if(st)st.innerHTML=h||'';};
+  if(orcxEstado.cotando)return;
+  const cidade=(_orcxVal('orcx-cidade')||'').trim(),uf=(_orcxVal('orcx-uf')||'').trim().toUpperCase();
+  if(!cidade||!uf){setSt('<b style="color:#b45309">Informe a cidade e a UF da obra pra cotar.</b>');return;}
+  try{_orc2IaWatch();}catch(e){}
+  if(!_piaChave()){await new Promise(r=>setTimeout(r,1500));}
+  if(!_piaChave()){setSt('<b style="color:#b45309">A IA não está configurada (Orçamentos → ⚙️). Digite o valor da passagem.</b>');return;}
+  const dias=Math.max(1,Math.ceil(_orcxNum('orcx-dias'))||1);
+  const ida=_orcxIsoMaisDias(ORCX_AEREO_ANTECEDENCIA_DIAS),volta=_orcxIsoMaisDias(ORCX_AEREO_ANTECEDENCIA_DIAS+dias+1);
+  const br=iso=>iso.split('-').reverse().join('/');
+  orcxEstado.cotando=true;setSt('🔄 Cotando passagem pra '+_orcxEsc(cidade)+'/'+uf+' (ida '+br(ida)+', volta '+br(volta)+')...');
+  const sistema='Você cota passagens aéreas nacionais para a equipe de instalação da Granda Comunicação Visual, que sai de Ponta Grossa/PR e embarca em Curitiba (CWB) — ou em Ponta Grossa (PGZ) se houver voo mais barato. Pesquise na internet o preço real de hoje (Google Flights, Decolar, 123milhas, Kayak, Skyscanner ou os sites da LATAM, GOL e Azul) para as datas pedidas. Use o aeroporto comercial mais próximo da cidade da obra. Considere classe econômica com bagagem de mão, a tarifa mais barata que esteja de fato à venda (não promoção relâmpago). Responda SOMENTE com um JSON.';
+  const pedido='Cidade da obra: '+cidade+'/'+uf+'.\nIda: '+br(ida)+'. Volta: '+br(volta)+'.\nQuero o preço POR PESSOA, ida e volta somadas, em reais.\nFormato:\n{"aeroportoOrigem":"CWB","aeroportoDestino":"sigla – cidade","kmAeroportoAteObra":número (km de estrada do aeroporto de destino até a cidade da obra; 0 se for na mesma cidade),"precoIdaVoltaPorPessoa":número,"companhia":"nome","observacao":"curta"}';
+  try{
+    const {out,fontes}=await _piaChamar(sistema,pedido,4,{},null);
+    const preco=Number(String(out&&out.precoIdaVoltaPorPessoa!=null?out.precoIdaVoltaPorPessoa:'').replace(/[^\d.,]/g,'').replace(/\.(?=\d{3}(\D|$))/g,'').replace(',','.'));
+    if(!(preco>=150&&preco<=30000))throw new Error('a IA não achou um preço confiável');
+    if(!_orcxSim('orcx-aereo'))return;
+    const p=document.getElementById('orcx-aereo-pass');if(p)p.value=preco.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const ka=document.getElementById('orcx-km-aero'),kmA=Math.round(Number(out.kmAeroportoAteObra));
+    if(ka&&!(_orcxNum('orcx-km-aero')>0)&&kmA>0&&kmA<1000)ka.value=kmA;
+    const hoje=new Date().toLocaleDateString('pt-BR');
+    const c=document.getElementById('orcx-aereo-cot');
+    if(c)c.value='Cotada em '+hoje+': '+(out.aeroportoOrigem||'CWB')+' → '+(out.aeroportoDestino||cidade)+', ida '+br(ida)+' e volta '+br(volta)+(out.companhia?' ('+String(out.companhia).slice(0,40)+')':'')+(fontes&&fontes[0]?' — fonte: '+String(fontes[0].titulo||fontes[0].url).slice(0,60):'');
+    orcxEstado.cotStatus='';
+    orcxAoMudar();
+  }catch(e){
+    console.warn('orcx cotar passagem',e);
+    setSt('<b style="color:#b45309">⚠️ Não deu pra cotar sozinho ('+_orcxEsc(e.message||e)+'). Digite o valor da passagem ou tente de novo.</b>');
+  }finally{orcxEstado.cotando=false;}
+}
 function orcxAgendarDistancia(){clearTimeout(orcxEstado.geoTimer);orcxEstado.geoTimer=setTimeout(()=>orcxCalcularDistancia(false),900);}
 
 // ── Tela ──
@@ -71188,8 +71435,8 @@ function _orcxSimNao(id){return `<input type="hidden" id="${id}" value="NÃO">`;
 // Chave liga/desliga (2026-09-30) — o valor continua num campo escondido SIM/NÃO com o MESMO id
 // de antes, então cálculo, salvar e reabrir não mudam nada.
 function _orcxToggle(id,label){return `<input type="hidden" id="${id}" value="NÃO"><button type="button" class="orcx-tg" data-tg="${id}" onclick="orcxAlternar('${id}')"><i></i>${label}</button>`;}
-function orcxAlternar(id){const el=document.getElementById(id);if(!el)return;el.value=el.value==='SIM'?'NÃO':'SIM';orcxAoMudar();}
-function orcxDefinir(id,v){const el=document.getElementById(id);if(!el)return;el.value=v;orcxAoMudar();}
+function orcxAlternar(id){const el=document.getElementById(id);if(!el)return;el.value=el.value==='SIM'?'NÃO':'SIM';orcxAoMudar();if(id==='orcx-aereo'&&el.value==='SIM')_orcxCotarSeFaltar();}
+function orcxDefinir(id,v){const el=document.getElementById(id);if(!el)return;el.value=v;orcxAoMudar();if(id==='orcx-aereo'&&v==='SIM')_orcxCotarSeFaltar();}
 // Botões de opção (condição de instalação / caminhão) — também gravam no campo escondido de sempre
 function _orcxChips(id,opcoes,padrao){return `<input type="hidden" id="${id}" value="${_orcxEsc(padrao)}"><div class="orcx-chips" data-chips="${id}">${opcoes.map(o=>`<button type="button" class="orcx-chip" data-v="${_orcxEsc(o.v)}" onclick="orcxDefinir('${id}',this.dataset.v)">${o.l}${o.sub!=null?`<small data-sub>${o.sub}</small>`:''}</button>`).join('')}</div>`;}
 // Máscara de dinheiro: digita só números, vira R$ 1.234,56
@@ -71220,16 +71467,20 @@ function _orcxHtmlOperacionais(){
           ${_orcxCampo('Valor do frete — R$',_orcxInpMoeda('orcx-frete-manual'),'Sem produto: valor fechado do frete (vazio = calculado pela distância)','orcx-w-freteman')}
         </div>
         <div class="fg" style="margin-top:12px"><label>Condição de instalação</label>${_orcxChips('orcx-condicao',ORCX_CONDICOES.map(c=>({v:c.nome,l:c.nome.replace('INSTALAÇÃO ','').replace('TRABALHOS ESPECÍFICOS - MÃO DE OBRA DIFERENCIADA','MÃO DE OBRA DIFERENCIADA'),sub:c.taxa?'+'+Math.round(c.taxa*100)+'%':'sem acréscimo'})),ORCX_CONDICOES[0].nome)}</div>
-        <div class="fg" style="margin-top:12px"><label>Tipo de caminhão</label>${_orcxChips('orcx-caminhao',['TRUCK','VAN','CARRETA','FRACIONADO'].map(t=>({v:t,l:t,sub:'—'})),'TRUCK')}</div>
+        <div class="fg" style="margin-top:12px"><label>Tipo de caminhão</label>${_orcxChips('orcx-caminhao',['TRUCK','VAN','CARRETA','FRACIONADO'].map(t=>({v:t,l:_orcxCaminhaoRot(t),sub:'—'})),'TRUCK')}</div>
         <div class="orcx-campos" style="margin-top:10px">${_orcxCampo('Frete fracionado (cotação) — R$',_orcxInpMoeda('orcx-fracionado'),'',"orcx-w-frac")}</div>
         <div id="orcx-alerta-aereo"></div>
       </div>
       <div class="orcx-bloco">
         <div class="orcx-bloco-t">✈️ Deslocamento da equipe</div>
+        <input type="hidden" id="orcx-mob-v" value="2"><input type="hidden" id="orcx-aereo-cot" value="">
         <div class="orcx-tgs">${_orcxToggle('orcx-aereo','✈️ Passagem aérea')}<span id="orcx-w-carro">${_orcxToggle('orcx-carro','🚗 Aluguel de carro')}</span></div>
+        <div class="orcx-hint" id="orcx-aereo-regra">Acima de ${ORCX_KM_AEREO.toLocaleString('pt-BR')} km a passagem aérea liga sozinha, com o carro alugado junto.</div>
         <div class="orcx-campos" style="margin-top:10px">
-          ${_orcxCampo('Dias de instalação',_orcxInp('orcx-dias','0','number','min="0"'))}
-          ${_orcxCampo('Km cidade → aeroporto',_orcxInp('orcx-km-aero','0','number','min="0"'),'','orcx-w-aero')}
+          ${_orcxCampo('Dias de instalação',_orcxInp('orcx-dias','0','number','min="0"'),'<span id="orcx-carro-hint"></span>')}
+          ${_orcxCampo('Instaladores na viagem',_orcxInp('orcx-aereo-pessoas',String(ORCX_AEREO_INSTALADORES_PADRAO),'number','min="1"'),'','orcx-w-pessoas')}
+          ${_orcxCampo('Passagem ida e volta por pessoa — R$',_orcxInpMoeda('orcx-aereo-pass'),'<span id="orcx-aereo-status"></span> <a href="javascript:void(0)" onclick="orcxCotarPassagem()">Cotar agora</a>','orcx-w-pass')}
+          ${_orcxCampo('Km aeroporto → obra',_orcxInp('orcx-km-aero','0','number','min="0"'),'','orcx-w-aero')}
         </div>
       </div>
       <div class="orcx-bloco">
@@ -71263,7 +71514,9 @@ function _orcxHtmlOperacionais(){
 function orcxAtualizarVisibilidade(){
   const vis=(id,on)=>{const el=document.getElementById(id);if(el)el.style.display=on?'':'none';};
   vis('orcx-w-frac',_orcxVal('orcx-caminhao')==='FRACIONADO');
-  const aer=_orcxSim('orcx-aereo');vis('orcx-w-carro',aer);vis('orcx-w-aero',aer);
+  const aer=_orcxSim('orcx-aereo'),v2=_orcxMobV2();vis('orcx-w-carro',aer&&!v2);vis('orcx-w-aero',aer);vis('orcx-w-pessoas',aer&&v2);vis('orcx-w-pass',aer&&v2);vis('orcx-aereo-regra',v2);
+  {const ch=document.getElementById('orcx-carro-hint');if(ch){const dd=Math.ceil(_orcxNum('orcx-dias'));ch.innerHTML=(aer&&v2)?(dd>0?'🚗 Carro alugado: '+(dd+1)+' diárias ('+dd+' + 1 de folga) × '+_orcxBRL(ORCX_ALUGUEL_CARRO_DIARIA):'<b style="color:#b45309">Informe os dias — o carro alugado conta dias + 1 de folga</b>'):'';}}
+  {const st=document.getElementById('orcx-aereo-status');if(st)st.innerHTML=orcxEstado.cotStatus||(_orcxVal('orcx-aereo-cot')?'✅ '+_orcxEsc(_orcxVal('orcx-aereo-cot'))+'.':'Cotada sozinha pela IA pra daqui '+ORCX_AEREO_ANTECEDENCIA_DIAS+' dias.');}
   [1,2,3].forEach(n=>vis('orcx-w-pta-'+n,_orcxVal('orcx-el-tipo-'+n)==='PTA'));
   [1,2,3].forEach(n=>{const t=_orcxVal('orcx-el-tipo-'+n);vis('orcx-w-dias-'+n,!!t&&t!=='NENHUM'&&t!=='PTA');});
   // chaves e botões de opção refletem o valor dos campos escondidos
@@ -71277,7 +71530,7 @@ function orcxAtualizarVisibilidade(){
   [2,3].forEach(n=>vis('orcx-el-row-'+n,n<=usadas));vis('orcx-el-add',usadas<3);
   // aviso de longa distância
   const al=document.getElementById('orcx-alerta-aereo');
-  if(al)al.innerHTML=(km>2000&&!aer)?`<div class="orcx-alerta">✈️ Longa distância (${km} km) — considerar passagem aérea? <button type="button" class="dash-btn-conf" style="background:#92400e" onclick="orcxDefinir('orcx-aereo','SIM')">Ligar passagem aérea</button></div>`:'';
+  if(al)al.innerHTML=(km>ORCX_KM_AEREO&&!aer)?`<div class="orcx-alerta">✈️ Longa distância (${km} km) — acima de ${ORCX_KM_AEREO.toLocaleString('pt-BR')} km o padrão é passagem aérea. <button type="button" class="dash-btn-conf" style="background:#92400e" onclick="orcxDefinir('orcx-aereo','SIM')">Ligar passagem aérea</button></div>`:'';
   const vh=document.getElementById('orcx-vp-hint');
   if(vh)vh.innerHTML=_orcxMoney('orcx-valor-pedido')>0?'Base da instalação e da ART':'<b style="color:#b45309">Sem produto? Informe abaixo o valor da instalação e do frete</b>';
 }
@@ -71311,7 +71564,11 @@ function orcxRenderResultado(){
     <div class="orcx-info"><span>📍 Região: <b>${r.regiao||'—'}</b> (índice ${r.indiceRegiao}×)</span><span>🕒 Prazo estimado do frete dedicado: <b>${r.prazoDedicado||'—'}</b> ${r.prazoDedicado===1?'dia':'dias'}</span><span>🕒 Prazo estimado do frete fracionado: <b>${r.prazoFracionado||'—'}</b> ${r.prazoFracionado===1?'dia':'dias'}</span></div>`;
 }
 function _orcxColetar(){const d={};ORCX_CAMPOS.forEach(id=>{const el=document.getElementById(id);if(el)d[id]=el.value;});return d;}
-function _orcxRestaurar(d){if(!d)return;orcxEstado.elevExtra=1;ORCX_CAMPOS.forEach(id=>{const el=document.getElementById(id);if(el&&d[id]!==undefined)el.value=d[id];});
+function _orcxRestaurar(d){if(!d)return;orcxEstado.elevExtra=1;orcxEstado.cotStatus='';
+  // orçamento salvo antes da regra nova de passagem aérea (2026-11-23) continua na conta antiga
+  if(d['orcx-distancia']!==undefined&&d['orcx-mob-v']===undefined)d=Object.assign({},d,{'orcx-mob-v':'1'});
+  if(d['orcx-mob-v']==='2'&&d['orcx-aereo-pessoas']===undefined)d=Object.assign({},d,{'orcx-aereo-pessoas':String(ORCX_AEREO_INSTALADORES_PADRAO)});
+  orcxEstado.aereoKmVisto=parseFloat(String(d['orcx-distancia']==null?'':d['orcx-distancia']).replace(',','.'))||0;ORCX_CAMPOS.forEach(id=>{const el=document.getElementById(id);if(el&&d[id]!==undefined)el.value=d[id];});
   // salvos antigos gravaram "SIM"/"NÃO" e máscara pode faltar — normaliza os campos de dinheiro
   ['orcx-valor-pedido','orcx-inst-manual','orcx-frete-manual','orcx-fracionado','orcx-el-pta-1','orcx-el-pta-2','orcx-el-pta-3'].forEach(id=>{const el=document.getElementById(id);if(el&&el.value&&el.value.indexOf(',')<0){const n=parseFloat(el.value);if(!isNaN(n))el.value=n.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}});orcxEstado.ultimaCidadeUF=((d['orcx-cidade']||'').toLowerCase()+'|'+(d['orcx-uf']||''));orcxAoMudar();}
 function _MESX_MESES_ORCX(){return['JANEIRO','FEVEREIRO','MARÇO','ABRIL','MAIO','JUNHO','JULHO','AGOSTO','SETEMBRO','OUTUBRO','NOVEMBRO','DEZEMBRO'];}
@@ -87194,7 +87451,7 @@ _pfSalvarEtapas=function(){
       <div class="dash-card"><div class="gm-sec">Operacionais e desconto</div>
         <div class="gm-g" style="grid-template-columns:repeat(5,1fr)">
           ${d.calcGranda?`<label>${(d.ops||{}).mobGranda?'Distância (km, só ida)':'Frete (km, só ida)'}<input class="fc" id="gm-km-frete" type="number" min="0" ${dis} value="${E((d.ops||{}).kmFrete)}" oninput="gmSetOp('kmFrete',this.value)" placeholder="km">
-            <select class="fc" ${dis} onchange="gmSetCaminhao(this.value)" style="margin-top:4px">${['TRUCK','VAN','CARRETA','FRACIONADO'].map(k=>`<option value="${k}" ${((d.ops||{}).caminhao||'TRUCK')===k?'selected':''}>🚛 ${k==='FRACIONADO'?'FRACIONADO (cotação)':k}</option>`).join('')}</select>
+            <select class="fc" ${dis} onchange="gmSetCaminhao(this.value)" style="margin-top:4px">${['TRUCK','VAN','CARRETA','FRACIONADO'].map(k=>`<option value="${k}" ${((d.ops||{}).caminhao||'TRUCK')===k?'selected':''}>🚛 ${k==='FRACIONADO'?'FRACIONADO (cotação)':_orcxCaminhaoRot(k)}</option>`).join('')}</select>
             ${((d.ops||{}).caminhao)==='FRACIONADO'?`<input class="fc" inputmode="decimal" ${dis} value="${E((d.ops||{}).freteFrac)}" oninput="gmSetOp('freteFrac',this.value)" placeholder="Valor da cotação (R$)" style="margin-top:4px">`:''}</label>
           ${(d.ops||{}).mobGranda?`<label>Mobilização da equipe<select class="fc" ${dis} onchange="gmSetMob('mobTipo',this.value)">${[['RODOVIARIA','🚐 Rodoviária (ida e volta)'],['AEREA','✈️ Aérea']].map(([k,l])=>`<option value="${k}" ${((d.ops||{}).mobTipo||'RODOVIARIA')===k?'selected':''}>${l}</option>`).join('')}</select>
             ${(d.ops||{}).mobTipo==='AEREA'?`<select class="fc" ${dis} onchange="gmSetMob('mobCarro',this.value)" style="margin-top:4px"><option value="NAO" ${(d.ops||{}).mobCarro!=='SIM'?'selected':''}>Sem aluguel de carro</option><option value="SIM" ${(d.ops||{}).mobCarro==='SIM'?'selected':''}>Com aluguel de carro</option></select>
@@ -99484,6 +99741,45 @@ function _projIndMover(){
       cli.forEach(x=>L.push({t:x.t,v:0,on:true,info:true,porContaCliente:true}));}
     catch(err){console.warn('por conta do cliente (pdf)',err);}
     return L;};
+})();
+</script>
+<script>
+// ══ ORDEM DA ABA "ORÇAMENTOS REALIZADOS" NO CARD DO CRM (2026-11-23, a pedido do Guilherme) ══
+// 1º Valores (bruto/operacionais/desconto/líquido) · 2º Histórico de propostas · depois o resto
+// (orçamentos do sistema, planilha do cliente, Anexar proposta) · por último Avaliação do
+// orçamento e Granda Mob. Os blocos que se atualizam sozinhos entram no topo da aba, então um
+// observador reaplica a ordem sempre que algo muda (só mexe se a ordem estiver errada).
+(function(){
+  function ordenar(pReal){
+    try{
+      if(!pReal||pReal._ordOcup)return;
+      const v=document.getElementById('crm-prop-valores');
+      const tg=document.getElementById('crm-card-historico-toggle');
+      const h=tg&&tg.parentElement&&tg.parentElement.parentElement;
+      if(!v||v.parentElement!==pReal)return;
+      pReal._ordOcup=true;
+      if(h&&h.parentElement===pReal){
+        if(!h.id){h.id='crm-prop-historico';h.style.borderTop='none';h.style.marginTop='0';h.style.paddingTop='0';
+          h.style.borderBottom='1px solid var(--border-lt)';h.style.paddingBottom='12px';h.style.marginBottom='12px';}
+        if(v.nextElementSibling!==h)v.insertAdjacentElement('afterend',h);
+      }
+      ['orcav-bloco','gm-crm-bloco'].forEach(id=>{const b=document.getElementById(id);
+        if(b&&b.parentElement===pReal){b.style.marginTop='10px';}});
+      const av=document.getElementById('orcav-bloco'),gm=document.getElementById('gm-crm-bloco');
+      const fim=[av,gm].filter(b=>b&&b.parentElement===pReal);
+      const ok=fim.length===0||(()=>{const kids=Array.from(pReal.children);return fim.every((b,i)=>kids[kids.length-fim.length+i]===b);})();
+      if(!ok)fim.forEach(b=>pReal.appendChild(b));
+    }catch(err){console.error('ordem aba orçamentos',err);}
+    finally{if(pReal)pReal._ordOcup=false;}
+  }
+  function instalar(){
+    const pReal=document.getElementById('crm-tab-proposta');if(!pReal)return;
+    ordenar(pReal);
+    if(!pReal._ordObs){pReal._ordObs=new MutationObserver(()=>ordenar(pReal));pReal._ordObs.observe(pReal,{childList:true});}
+  }
+  if(typeof _crmRenderCard==='function'){const _o=_crmRenderCard;_crmRenderCard=function(){const r=_o.apply(this,arguments);try{instalar();}catch(e){}return r;};}
+  if(typeof _orc10RefreshCardBloco==='function'){const _o=_orc10RefreshCardBloco;_orc10RefreshCardBloco=function(){const r=_o.apply(this,arguments);try{instalar();}catch(e){}return r;};}
+  if(typeof window._gmCrmRefresh==='function'){const _o=window._gmCrmRefresh;window._gmCrmRefresh=function(){const r=_o.apply(this,arguments);try{instalar();}catch(e){}return r;};}
 })();
 </script>
 </body>
