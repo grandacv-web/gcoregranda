@@ -34,7 +34,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-23.25';</script>
+<script>const APP_BUILD_VERSION='2026-11-24.22';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -3239,6 +3239,11 @@ select.fc{cursor:pointer}
           <div class="dash-mes-label" id="hp-mes-lbl" style="min-width:150px">—</div>
           <button onclick="_hpMesMov(1)" type="button">▶</button>
         </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin:0 0 10px;font-size:.72rem;color:#94a3b8;font-weight:700">
+        <span>Exportar a lista (com o filtro atual)</span>
+        <button onclick="hpExportarExcel()" class="dash-btn-conf" style="background:#16a34a;padding:6px 12px;font-size:.74rem" type="button">📊 Excel</button>
+        <button onclick="hpExportarPDF()" class="dash-btn-conf" style="background:#dc2626;padding:6px 12px;font-size:.74rem" type="button">📄 PDF</button>
       </div>
       <div id="hp-cards" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px"></div>
       <input id="hp-fil-busca" placeholder="🔍 Buscar por OS, cliente ou JOB..." oninput="renderHistoricoPedidos()" style="width:100%;padding:10px 12px;border-radius:8px;border:1.5px solid #e5e7eb;font-size:.83rem;font-family:inherit;margin-bottom:14px;box-sizing:border-box">
@@ -22003,7 +22008,7 @@ async function _pfNovaVarCriar(){
   if(_prodFamilia(o,true).some(f=>_prodN(f.x.variacao)===_prodN(variacao))){toast('Este produto já tem a variação '+variacao,'terr');return;}
   const L=_prodNumCm(v('pfnv-l')),A=_prodNumCm(v('pfnv-a')),Pr=_prodNumCm(v('pfnv-p'));
   if(L==null||A==null||Pr==null){toast('Preencha largura, altura e profundidade (em metros, maiores que zero)','terr');return;}
-  if(L>5000||A>5000){toast('As medidas são em METROS (ex.: 1,20) — parece que foi digitado em cm','terr');return;}
+  if((L>5000||A>5000)&&!confirm('Confira as medidas — estão em METROS: '+String(L/100).replace('.',',')+' × '+String(A/100).replace('.',',')+' m.\n\nÉ isso mesmo? (OK = sim, são metros · Cancelar = corrigir)'))return;
   const modo=(document.querySelector('input[name="pfnv-modo"]:checked')||{}).value==='tabela'?'tabela':'mp';
   let cmv=null,preco=0;
   if(modo==='mp'){cmv=Number(v('pfnv-cmv').replace(',','.'));if(!(cmv>=1&&cmv<=80)){toast('Informe o CMV de 1% a 80%','terr');return;}}
@@ -39552,6 +39557,8 @@ function comprasAbrirDia(iso){
 // Diferença do checklist de Projetos: lá um prazo só é repartido em 8 pedaços de hora; aqui
 // cada subtarefa JÁ tem seu próprio prazo de verdade (a etapa correspondente calculada por
 // _lpCalcEtapas), então cada uma mostra sua própria janela de horas úteis, sem reparto nenhum.
+const _PROD_ETAPA_CURTA={aprovProj:'Aprovação do projeto',corteGalv:'Corte galvanizado',adesivo:'Adesivos',producao:'Produzir'};
+function _prodAtrasoTxt(x){const l=(x&&x.etapasAtrasadas)||[];return l.length?'Atrasado · '+l.map(e=>e.label).join(' + '):'Atrasado';}
 const PROD_CHECKLIST_ITENS=[
   {key:'aprovProj',label:'APROVAÇÃO DE PROJETOS'},
   {key:'corteGalv',label:'RECEBIMENTO DE CORTE GALVANIZADO'},
@@ -39719,6 +39726,8 @@ function _prodInfo(p,hojeIso){
     return sum+(s.feito?1:0);
   },0);
   const temPendenteAtrasada=subs.some(s=>!s.feito&&s.etapa.iso<hojeIso);
+  // (2026-11-24, Clabonde) "Atrasado" diz QUAL etapa atrasou (ex.: aprovação do projeto vencida antes da data de produzir)
+  const etapasAtrasadas=subs.filter(s=>!s.feito&&s.etapa.iso<hojeIso).map(s=>({key:s.key,label:_PROD_ETAPA_CURTA[s.key]||s.label,iso:s.etapa.iso}));
   const statusPedido=subs.every(s=>s.feito)?'concluido':temPendenteAtrasada?'atrasado':feitos>0?'andamento':'nao_iniciado';
   // Etapa "âncora" pra ordenar/mostrar prazo principal na Lista/Kanban — sempre 'producao'
   // quando aplicável (é ela que manda no resto do fluxo e na capacidade), senão a 1ª disponível.
@@ -39737,7 +39746,7 @@ function _prodInfo(p,hojeIso){
   const _subProd=subs.find(s=>s.key==='producao');
   const pctValor=progItens.temItens?progItens.progresso:(_subProd?(_subProd.feito?100:0):(subs.length?Math.min(100,feitos/subs.length*100):0));
   const valorLiquidoProduzido=valorLiquidoTotal*pctValor/100;
-  return{p,ok:true,calc,subs,feitos,totalItens:subs.length,statusPedido,etapa:etapaAncora,inicioSugeridoIso,estourou:!!(aloc&&aloc.estourouJanela),progItens,valorLiquidoTotal,pctValor,valorLiquidoProduzido};
+  return{p,ok:true,calc,subs,feitos,totalItens:subs.length,statusPedido,etapasAtrasadas,etapa:etapaAncora,inicioSugeridoIso,estourou:!!(aloc&&aloc.estourouJanela),progItens,valorLiquidoTotal,pctValor,valorLiquidoProduzido};
 }
 // Lista filtrada do menu PRODUÇÃO — mesmo padrão de busca/status/intervalo de datas de
 // Projetos/Compras (ver _projListaFiltrada). ignorarPadraoOcultarConcluido=true é usado por
@@ -40006,7 +40015,7 @@ function prodImprimirChecklist(pedidoId){
     <div class="k"><span>Andamento</span><b>${pctGeral}%</b> <small>(${info.feitos.toFixed(1).replace(/\.0$/,'').replace('.',',')} de ${info.totalItens} subtarefas)</small></div>
     <div class="k"><span>Prazo da produção</span><b>${subProd?fmtD(subProd.etapa.iso):'—'}</b></div>
     <div class="k"><span>Prazo final do pedido</span><b>${prazoFinal}</b></div>
-    <div class="k"><span>Situação</span><b>${concluidoTotal?'Pedido pronto':info.statusPedido==='atrasado'?'Atrasado':info.statusPedido==='andamento'?'Em andamento':'Não iniciado'}</b></div>
+    <div class="k"><span>Situação</span><b>${concluidoTotal?'Pedido pronto':info.statusPedido==='atrasado'?_prodAtrasoTxt(info):info.statusPedido==='andamento'?'Em andamento':'Não iniciado'}</b></div>
   </div>
   <div class="bar"><div style="width:${Math.min(100,pctGeral)}%"></div></div>
   ${distrib}
@@ -40651,7 +40660,8 @@ function renderProdLista(){
           <div style="font-size:.66rem;color:var(--ink4);margin-top:2px;white-space:nowrap">${x.naoFaturavel?'Não é venda — não soma na produção':fmtR(valorLiquidoProduzido)+' de '+fmtR(valorLiquidoTotal)}</div>
         </td>
         <td style="${td};white-space:nowrap">
-          <span style="color:#334155;font-weight:600;font-size:.78rem">${_dot(corDias)}${atrasado?'Atrasado':diasUteis+' '+(diasUteis===1?'dia útil':'dias úteis')}</span>
+          <span style="color:#334155;font-weight:600;font-size:.78rem;white-space:normal" title="${atrasado?'Etapa com prazo vencido sem baixa: '+(x.etapasAtrasadas||[]).map(e=>e.label+' (prazo '+fmtD(e.iso)+')').join(', '):''}">${_dot(corDias)}${atrasado?_prodAtrasoTxt(x):diasUteis+' '+(diasUteis===1?'dia útil':'dias úteis')}</span>
+          ${atrasado&&(x.etapasAtrasadas||[]).length?`<div style="font-size:.68rem;color:#b91c1c;margin-top:3px;padding-left:14px">${(x.etapasAtrasadas||[]).map(e=>'prazo '+fmtD(e.iso)).join(' · ')}</div>`:''}
           ${atrasado?'':`<div style="font-size:.68rem;color:#94a3b8;margin-top:3px;padding-left:14px">${horasUteis.toFixed(1).replace(/\.0$/,'').replace('.',',')}h úteis · ${_projStatusLabel(statusPedido).replace(/^\S+\s/,'')}</div>`}
         </td>
         <td style="${td};text-align:right;width:1%"><button onclick="event.stopPropagation();prodIniciarOuAbrirChecklist('${p.id}')" style="${_acaoBtnSt(statusPedido==='concluido'?'ver':feitos>0?'continuar':'iniciar')};border-radius:8px;padding:7px 14px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap">${acaoLbl}</button>${p.arq_os_url?`<a href="${String(p.arq_os_url).replace(/"/g,'&quot;')}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir / baixar a Ordem de Serviço (PDF) do pedido" style="${_acaoBtnSt('ver')};display:inline-block;text-decoration:none;border-radius:8px;padding:7px 12px;font-size:.74rem;font-weight:700;cursor:pointer;white-space:nowrap;margin-left:6px">📄 Pedido (PDF)</a>`:`<span title="Este pedido não tem a Ordem de Serviço em PDF anexada" style="display:inline-block;margin-left:6px;font-size:.7rem;color:#94a3b8;white-space:nowrap">sem PDF</span>`}</td>
@@ -40703,7 +40713,7 @@ function prodExportarListaExcel(){
       p.os||'',_pedCliTipo(p),p.job||'',p.tipo||'',p.conselhoData?fmtD(p.conselhoData):'',p.emissaoEm?fmtD(p.emissaoEm):'',
       fmtD(etapa.iso),p.prazo?fmtD(p.prazo):'',feitos.toFixed(1).replace(/\.0$/,'')+'/'+totalItens,
       _fmtValorPdf(valorLiquidoProduzido),_fmtValorPdf(valorLiquidoTotal),Math.round(pctValor)+'%',
-      statusPedido==='atrasado'?'Atrasado':diasUteis+' dias',
+      statusPedido==='atrasado'?_prodAtrasoTxt(x):diasUteis+' dias',
       statusPedido==='atrasado'?'':horasUteis.toFixed(1).replace(/\.0$/,'')+'h',
       statusTxtMap[statusPedido]||statusPedido
     ];
@@ -41804,6 +41814,7 @@ function renderProdKanban(){
             <div style="font-size:.68rem;color:var(--ink4)">Prazo: <strong>${fmtD(etapa.iso)}</strong></div>
             ${inicioSugeridoIso?`<div style="font-size:.68rem;color:${estourou?'#b45309':'var(--ink4)'}">Início sugerido: <strong>${fmtD(inicioSugeridoIso)}</strong>${estourou?' ⚠️':''}</div>`:''}
             <div style="font-size:.68rem;font-weight:700;margin-top:2px;color:${cor}">${feitos.toFixed(1).replace(/\.0$/,'')}/${totalItens} subtarefas</div>
+            ${col.key==='atrasado'&&(x.etapasAtrasadas||[]).length?`<div style="font-size:.66rem;font-weight:700;color:#b91c1c;margin-top:2px">⏰ ${(x.etapasAtrasadas||[]).map(e=>e.label).join(' + ')}</div>`:''}
           </div>`;
         }).join(''):'<div style="text-align:center;padding:16px;color:var(--ink4);font-size:.72rem">—</div>'}
       </div>
@@ -53322,6 +53333,64 @@ function _hpFiltrarCard(tipo){
 // (getVendaRowsMerged), pra achar qualquer pedido já vendido, mesmo o que só existe na
 // planilha (esse último clicado mostra aviso, não timeline — nunca teve evento registrado
 // no sistema). Sem busca digitada, mostra os 20 mais recentes; com busca, até 100 resultados.
+// (2026-11-24, a pedido do usuário) Prazo final ORIGINAL × ALTERADO na lista do Histórico —
+// só aparece quando o prazo final foi de fato alterado. Dias = corridos entre as duas datas.
+function _hpPrazoInfo(p){
+  if(!p)return null;
+  const orig=_hpFinalizacaoOriginalIso(p),atual=_hpIsoData(p.prazo);
+  if(!orig||!atual||orig===atual)return null;
+  const dias=Math.round((new Date(atual+'T00:00:00')-new Date(orig+'T00:00:00'))/86400000);
+  return{orig,atual,dias};
+}
+let _hpUltimasLinhas=[];
+function _hpLinhasExport(){
+  const pMap={};(pedidos||[]).forEach(x=>{if(x&&x.id)pMap[x.id]=x;});
+  return(_hpUltimasLinhas||[]).map(r=>{
+    const p=r._pid?pMap[r._pid]:null,pi=_hpPrazoInfo(p);
+    return{os:String(r.p||''),mes:r.mes||'',nome:_pedNome({cliente:r.cl,nomeFantasia:r.fant,job:r.job}),cat:r.cat||'',
+      orig:pi?fmtD(pi.orig):'',atual:pi?fmtD(pi.atual):'',dias:pi?pi.dias:'',br:Number(r.br)||0,lq:Number(r.lq)||0};
+  });
+}
+function _hpTituloExport(){
+  const base=_hpBase==='finalizacao'?'finalização original':'venda';
+  const filtro={pagamento:'Pagamento Adiado',finalizacao:'Finalização Adiada',sem:'Sem Adiamento'}[_hpCardFiltro]||'Todos';
+  return`${_hpMes?MESES_PT[_hpMes]:'Todos os meses'} ${_anoEf(_anoRef)} (data de ${base}) · ${filtro}`;
+}
+function hpExportarExcel(){
+  if(!window.XLSX){toast('Biblioteca do Excel ainda carregando — tente em alguns segundos','terr');return;}
+  const L=_hpLinhasExport();if(!L.length){toast('Nada pra exportar nesse filtro','terr');return;}
+  const aoa=[['Histórico de Pedidos — '+_hpTituloExport()],[],['OS','Mês','Pedido','Categoria','Data final original','Data final alterada','Dias a mais','Valor bruto','Valor líquido']]
+    .concat(L.map(x=>[x.os,x.mes,x.nome,x.cat,x.orig,x.atual,x.dias,x.br,x.lq]));
+  aoa.push(['','','TOTAL','','','','',L.reduce((a,x)=>a+x.br,0),L.reduce((a,x)=>a+x.lq,0)]);
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:8},{wch:11},{wch:55},{wch:16},{wch:14},{wch:14},{wch:10},{wch:14},{wch:14}];
+  for(let i=3;i<aoa.length;i++)['H','I'].forEach(c=>{const k=c+(i+1);if(ws[k]&&typeof ws[k].v==='number')ws[k].z='"R$" #,##0.00';});
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Histórico');
+  const d=new Date(),pd=n=>String(n).padStart(2,'0');
+  XLSX.writeFile(wb,`Historico_Pedidos_${d.getFullYear()}${pd(d.getMonth()+1)}${pd(d.getDate())}.xlsx`);toast('Excel gerado 📊','tok');
+}
+async function hpExportarPDF(){
+  if(!window.jspdf||!window.jspdf.jsPDF){toast('O gerador de PDF ainda está carregando — tente em alguns segundos','terr');return;}
+  const L=_hpLinhasExport();if(!L.length){toast('Nada pra exportar nesse filtro','terr');return;}
+  const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'mm',format:'a4',orientation:'landscape'});
+  if(typeof doc.autoTable!=='function'){toast('Biblioteca de tabelas do PDF não carregada — recarregue a página','terr');return;}
+  const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight(),M=12,NAVY=[26,43,94];
+  let logo=null;try{logo=typeof _orc4Logo==='function'?await _orc4Logo():null;}catch(e){}
+  const tx=v=>String(v==null?'':v).replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu,'').trim();
+  const cab=()=>{if(logo){try{doc.addImage(logo,'PNG',M,7,34,12,'lg','FAST');}catch(e){}}doc.setFont('helvetica','bold');doc.setFontSize(14);doc.setTextColor(...NAVY);doc.text('Histórico de Pedidos',W-M,13,{align:'right'});doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(100,116,139);doc.text(tx(_hpTituloExport()+' · gerado em '+new Date().toLocaleString('pt-BR')),W-M,18,{align:'right'});};
+  cab();
+  const tb=L.reduce((a,x)=>a+x.br,0),tl=L.reduce((a,x)=>a+x.lq,0);
+  doc.autoTable({startY:25,margin:{left:M,right:M,top:25},
+    head:[['OS','Mês','Pedido','Categoria','Final original','Final alterada','Dias a mais','Bruto','Líquido']],
+    body:L.map(x=>[x.os,x.mes,tx(x.nome),x.cat,x.orig,x.atual,x.dias===''?'':(x.dias>0?'+':'')+x.dias,fmtR(x.br),fmtR(x.lq)]),
+    foot:[['','',`TOTAL (${L.length} ${_plural(L.length,'pedido','pedidos')})`,'','','','',fmtR(tb),fmtR(tl)]],
+    showFoot:'lastPage',theme:'grid',styles:{fontSize:7.5,cellPadding:1.8,overflow:'linebreak'},headStyles:{fillColor:NAVY,textColor:255},footStyles:{fillColor:[241,245,249],textColor:[15,23,42],fontStyle:'bold'},
+    alternateRowStyles:{fillColor:[248,250,252]},columnStyles:{0:{cellWidth:12},1:{cellWidth:20},2:{cellWidth:90},6:{halign:'center',cellWidth:16},7:{halign:'right'},8:{halign:'right'}},
+    didDrawPage:d=>{if(d.pageNumber>1)cab();}});
+  const n=doc.internal.getNumberOfPages();for(let i=1;i<=n;i++){doc.setPage(i);doc.setFontSize(7.5);doc.setTextColor(100,116,139);doc.text('GRANDA Comunicação Visual · GCORE',M,H-6);doc.text(i+'/'+n,W-M,H-6,{align:'right'});}
+  const d=new Date(),pd=n2=>String(n2).padStart(2,'0');
+  doc.save(`Historico_Pedidos_${d.getFullYear()}${pd(d.getMonth()+1)}${pd(d.getDate())}.pdf`);toast('PDF gerado 📄','tok');
+}
 function renderHistoricoPedidos(){
   const lblEl=document.getElementById('hp-mes-lbl');
   if(lblEl)lblEl.textContent=_hpMes?MESES_PT[_hpMes]:'Todos os meses';
@@ -53380,6 +53449,7 @@ function renderHistoricoPedidos(){
   else if(_hpCardFiltro==='finalizacao')rows=rows.filter(r=>idsFinalizacao.includes(r._pid));
   else if(_hpCardFiltro==='sem')rows=rows.filter(r=>idsSem.includes(r._pid));
   if(busca)rows=rows.filter(r=>String(r.p||'').toUpperCase().includes(busca)||(r.cl||'').toUpperCase().includes(busca)||(r.job||'').toUpperCase().includes(busca));
+  _hpUltimasLinhas=rows;
   const body=document.getElementById('hp-lista');
   if(!body)return;
   if(!rows.length){
@@ -53391,10 +53461,12 @@ function renderHistoricoPedidos(){
   body.innerHTML=(busca?'':_hpCardFiltro?`<div style="font-size:.72rem;color:var(--ink4);margin-bottom:8px">Mostrando ${limitados.length} ${_plural(limitados.length,'pedido','pedidos')} com esse indicador${_hpMes?' em '+MESES_PT[_hpMes]:''}${_hpBase==='finalizacao'?' (pela finalização original)':''}.</div>`:`<div style="font-size:.72rem;color:var(--ink4);margin-bottom:8px">Mostrando os ${limitados.length} pedidos mais recentes${_hpMes?' de '+MESES_PT[_hpMes]:''}${_hpBase==='finalizacao'?' (pela finalização original)':''} — busque por OS, cliente ou JOB pra achar outro.</div>`)
     +limitados.map(r=>`
     <div onclick="abrirHistoricoPedido('${r._pid||''}','${String(r.p).replace(/'/g,"\\'")}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:#fff;border:1.5px solid var(--border-lt);border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer" onmouseover="this.style.borderColor='var(--brand)'" onmouseout="this.style.borderColor='var(--border-lt)'">
-      <div style="min-width:0">
+      <div style="min-width:0;flex:1">
         <div style="font-weight:700;color:var(--ink);font-size:.86rem">${pedidoDisplay(r.p)} <span style="font-weight:400;color:var(--ink4)">· ${r.mes||'—'}</span></div>
         <div style="color:var(--ink3);font-size:.8rem;white-space:normal;overflow-wrap:anywhere" title="${(r.cl||'').replace(/"/g,'&quot;')}">${_pedNome({cliente:r.cl,nomeFantasia:r.fant,job:r.job})}</div>
       </div>
+      ${(()=>{const pi=_hpPrazoInfo(r._pid?pMap[r._pid]:null);if(!pi)return'';const c=pi.dias>0?'#b45309':'#15803d';return`<div style="flex-shrink:0;text-align:right;white-space:nowrap;padding:0 6px" title="Data final original → data final alterada"><div style="font-size:.6rem;font-weight:700;color:var(--ink4);text-transform:uppercase">Entrega final</div><div style="font-size:.76rem;color:#334155"><span style="text-decoration:line-through;color:#94a3b8">${fmtD(pi.orig)}</span> → <b>${fmtD(pi.atual)}</b></div><div style="font-size:.7rem;font-weight:800;color:${c}">${pi.dias>0?'+':''}${pi.dias} ${Math.abs(pi.dias)===1?'dia':'dias'}</div></div>`;})()}
+      <div style="flex-shrink:0;text-align:right;white-space:nowrap;padding:0 6px;min-width:130px"><div style="font-size:.76rem;color:#0f172a"><span style="font-size:.6rem;font-weight:700;color:var(--ink4)">BRUTO</span> <b>${fmtR(Number(r.br)||0)}</b></div><div style="font-size:.76rem;color:#0f172a"><span style="font-size:.6rem;font-weight:700;color:var(--ink4)">LÍQUIDO</span> <b>${fmtR(Number(r.lq)||0)}</b></div></div>
       <div style="font-size:.72rem;color:var(--ink4);white-space:nowrap;flex-shrink:0">${r.cat||'—'} →</div>
     </div>`).join('')
     +(rows.length>limitados.length?`<div style="text-align:center;padding:10px;color:var(--ink4);font-size:.75rem">Mostrando ${limitados.length} de ${rows.length} — refine a busca pra ver mais.</div>`:'');
@@ -74716,6 +74788,14 @@ function _orc2HtmlProjeto(){
   <div class="orcx-hint" style="margin-top:12px">Esses dados valem pro orçamento todo: aparecem no PDF e a cidade/UF calcula a distância dos operacionais sozinha.</div></div>${_orc8HtmlCapa()}`;
 }
 function orc2SetAba(a){_orc2PuxarOperacionais();orc2.aba=a;['projeto','produtos','operacionais','resumo'].forEach(x=>{const el=document.getElementById('orc2-aba-'+x);if(el)el.style.display=x===a?'':'none';});document.querySelectorAll('#sec-cat-ORCAMENTOS > .dash-tabs .dash-tab').forEach(b=>b.classList.toggle('active',(b.getAttribute('onclick')||'').indexOf("'"+a+"'")>=0));if(a==='resumo')_orc2RenderResumo();_orc2GuardarRascunho();}
+// (2026-11-24, Clabonde) o inverso: orçamento aberto como "Só serviço (instalação/frete)" pode passar a ter produtos.
+// Vira "Produto e instalação"; instalação, frete e elevação continuam como estavam escolhidos. O valor do pedido digitado à
+// mão continua valendo até entrar o primeiro produto — daí passa a ser a soma dos produtos (regra de 2026-11-19).
+function orc2IncluirProdutos(){const d=orc2.doc;if(!d||d.tipo!=='operacionais')return;_orc2PuxarOperacionais();
+  d.operacionais=d.operacionais||{};let vp=0;try{vp=_orcxMoney('orcx-valor-pedido');}catch(e){}
+  if(vp>0){d.operacionais.vpAteProduto=true;d.operacionais.vpAuto=false;}else{d.operacionais.vpAuto=true;}
+  d.tipo='completo';orc2.aba='produtos';orc2Render();_orc2GuardarRascunho();
+  toast('Produtos incluídos — o orçamento agora é Produto e instalação','tinf');}
 function orc2IncluirOperacionais(){orc2.doc.tipo='completo';orc2.aba='operacionais';_orc2PuxarOperacionais();orc2Render();toast('Operacionais incluídos — o valor do pedido vem dos produtos','tinf');}
 function _orc2AtualizarTotais(){
   if(!orc2.doc)return;_orc2PuxarOperacionais();
@@ -74923,7 +75003,9 @@ function _orc2WatchLista(){
 }
 async function orc2Salvar(){
   const d=orc2.doc;if(!d)return;_orc2PuxarOperacionais();
-  {const _v=_munValidar(_orcxVal('orcx-cidade'),_orcxVal('orcx-uf'));if(_v.ok===false){toast(_v.msg,'terr');const _st=document.getElementById('orcx-dist-status');if(_st)_st.innerHTML=_munErroHtml(_v.msg);return;}}
+  // (2026-11-24, Clabonde) cidade/UF errada NÃO impede mais de salvar — todo orçamento mexido salva sozinho. O aviso
+  // fica no Projeto e no status da barra; quem barra cidade errada é a criação do pedido (e o cálculo de distância/frete).
+  {const _v=_munValidar(_orcxVal('orcx-cidade'),_orcxVal('orcx-uf'));if(_v.ok===false){const _st=document.getElementById('orcx-dist-status');if(_st)_st.innerHTML=_munErroHtml(_v.msg);}}
   const t=orc2Totais();
   if(!(d.produtos.length||(d.operacionais.resultado&&d.operacionais.resultado.itens.length))){toast('Adicione um produto ou calcule os operacionais antes de salvar','terr');return;}
   if(!window._fbOrcSalvar){toast('Não foi possível salvar agora (conexão)','terr');return;}
@@ -75738,7 +75820,7 @@ async function _crmCkConfirmar(){
   const e=crmEmpresas.find(x=>x.id===p.id);if(!e){_crmCkCancelar();return;}
   const erro=document.getElementById('crm-ck-erro');
   const caderno=!!document.getElementById('crm-ck-cad')?.checked;
-  const itens=[];let falta='';
+  const itens=[];let falta='';const grandes=[];
   if(!caderno)
   document.querySelectorAll('#crm-ck-lista .crm-ck-row').forEach((row,i)=>{
     row.style.borderColor='#fbcfe8';
@@ -75753,14 +75835,15 @@ async function _crmCkConfirmar(){
     else if(key==='letra'&&!modelo)msg='escolha o tipo de letra caixa';
     else if(!(qtd>=1))msg='informe a quantidade';
     else if(!(larg>0)||!(alt>0)||prof==null||prof<0)msg='preencha largura, altura e profundidade (em metros)';
-    else if(larg>50||alt>50||prof>10)msg='as medidas são em METROS (ex.: 1,20 × 0,60 × 0,08) — parece que foi digitado em cm';
     else if(d&&d.obsObrig&&!obs)msg='descreva o que é no campo Detalhe';
     if(msg){if(!falta){falta=`Produto ${i+1}: ${msg}.`;}row.style.borderColor='#dc2626';return;}
+    if(larg>50||alt>50||prof>10)grandes.push(`Produto ${i+1}: ${String(larg).replace('.',',')} × ${String(alt).replace('.',',')} × ${String(prof).replace('.',',')} m`);
     const item={key,qtd,larg:_crmCkM2Cm(larg),alt:_crmCkM2Cm(alt),prof:_crmCkM2Cm(prof),obs};if(modelo)item.modelo=modelo;
     itens.push(item);
   });
   if(falta){if(erro)erro.textContent=falta;return;}
   if(!caderno&&!itens.length){if(erro)erro.textContent='Adicione pelo menos 1 produto ou marque Produtos padrão caderno.';return;}
+  if(grandes.length&&!confirm('Confira as medidas — estão em METROS:\n\n'+grandes.join('\n')+'\n\nÉ isso mesmo? (OK = sim, são metros · Cancelar = corrigir)'))return;
   const quem=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',agora=new Date().toISOString();
   const antes=_crmCkResumoTxt(e.orcChecklist);
   e.orcChecklist=caderno?{modo:'caderno',obs:(document.getElementById('crm-ck-cad-obs')?.value||'').trim(),itens:[],em:agora,por:quem}:{itens,em:agora,por:quem};
@@ -76393,6 +76476,11 @@ function _orcavAbrir(e,destKey){
       <div id="orcav-com-lbl" style="font-size:.76rem;font-weight:800;color:#334155;margin-bottom:6px">Comentário</div>
       <textarea id="orcav-com" class="no-upper" rows="2" placeholder="Uma linha explicando o que aconteceu" style="width:100%;box-sizing:border-box;border:1.5px solid #e5e7eb;border-radius:8px;padding:8px 10px;font-size:.82rem;font-family:inherit;resize:vertical"></textarea>
     </div>
+    <div style="margin-top:12px">
+      <div style="font-size:.76rem;font-weight:800;color:#334155;margin-bottom:6px">📎 Evidências do que precisou arrumar (opcional)</div>
+      <div id="orcav-evid" tabindex="0" onclick="if(event.target===this||event.target.classList.contains('orcav-evid-dica'))this.focus()" style="border:2px dashed #cbd5e1;border-radius:10px;padding:10px;min-height:64px;background:#f8fafc;outline:none;display:flex;flex-wrap:wrap;gap:8px;align-items:center"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap"><label class="dash-btn-conf" style="background:#475569;padding:5px 12px;font-size:.74rem;cursor:pointer;margin:0">🖼️ Escolher imagem<input type="file" accept="image/*" multiple style="display:none" onchange="_orcavEvidArquivos(this.files);this.value=''"></label><span style="font-size:.7rem;color:#64748b">ou tire o print e aperte <b>Ctrl+V</b> com esta janela aberta</span></div>
+    </div>
     <div id="orcav-nota" style="margin-top:12px;font-size:.82rem;font-weight:800;color:#101B3D;min-height:1.2em"></div>
     <div id="orcav-erro" style="font-size:.78rem;color:#dc2626;margin-top:6px;min-height:1em"></div>
     <div style="display:flex;gap:8px;margin-top:8px">
@@ -76401,7 +76489,56 @@ function _orcavAbrir(e,destKey){
     </div>
   </div>`;
   document.body.appendChild(modal);
+  _orcavPend.evid=[];_orcavEvidRender();
 }
+// ── (2026-11-24, Clabonde) EVIDÊNCIAS na avaliação do orçamento: prints colados (Ctrl+V) ou escolhidos ──
+const ORCAV_EVID_MAX=10,ORCAV_EVID_MB=8;
+function _orcavEvidArquivos(lista){
+  const p=_orcavPend;if(!p)return;p.evid=p.evid||[];
+  const d=new Date(),z=n=>String(n).padStart(2,'0');let n=0;
+  [...(lista||[])].forEach((f,k)=>{
+    if(!/^image\//.test(f.type||'')){toast('"'+(f.name||'arquivo')+'" não é imagem','terr');return;}
+    if(f.size>ORCAV_EVID_MB*1024*1024){toast('"'+(f.name||'imagem')+'" passa de '+ORCAV_EVID_MB+' MB','terr');return;}
+    if(p.evid.length>=ORCAV_EVID_MAX){toast('Máximo de '+ORCAV_EVID_MAX+' evidências','twar');return;}
+    const nome=f.name&&!/^image\.(png|jpe?g)$/i.test(f.name)?f.name:`evidencia_${z(d.getDate())}-${z(d.getMonth()+1)}_${z(d.getHours())}h${z(d.getMinutes())}m${z(d.getSeconds())}s${lista.length>1?'_'+(k+1):''}.${((f.type.split('/')[1])||'png').replace('jpeg','jpg')}`;
+    p.evid.push({file:f,nome,prev:URL.createObjectURL(f)});n++;});
+  _orcavEvidRender();if(n)toast(n>1?n+' evidências adicionadas':'Evidência adicionada','tok');
+}
+function _orcavEvidTirar(i){const p=_orcavPend;if(!p||!p.evid)return;const x=p.evid.splice(i,1)[0];try{URL.revokeObjectURL(x.prev);}catch(e){}_orcavEvidRender();}
+function _orcavEvidRender(){
+  const box=document.getElementById('orcav-evid'),p=_orcavPend;if(!box||!p)return;const l=p.evid||[];
+  box.innerHTML=(l.length?l.map((x,i)=>`<div style="position:relative;width:76px;height:56px;border-radius:8px;overflow:hidden;border:1px solid #cbd5e1;background:#fff"><img src="${x.prev}" alt="" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in" onclick="_orcavEvidVer('${x.prev}','${_orcavEsc(x.nome).replace(/'/g,'')}')"><button type="button" onclick="_orcavEvidTirar(${i})" title="Tirar" style="position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(15,23,42,.75);color:#fff;font-size:.62rem;line-height:18px;padding:0;cursor:pointer">✕</button></div>`).join(''):'')
+    +`<span class="orcav-evid-dica" style="font-size:.74rem;color:#64748b">${l.length?'Cole mais com Ctrl+V':'📋 Cole aqui os prints (Ctrl+V) do que você precisou corrigir'}</span>`;
+}
+// visualizador: abre a imagem grande na tela; baixar é escolha de quem está vendo
+function _orcavEvidVer(url,nome){
+  const old=document.getElementById('orcav-evid-ver');if(old)old.remove();
+  const v=document.createElement('div');v.id='orcav-evid-ver';
+  v.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.88);z-index:10080;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:10px';
+  v.innerHTML=`<div style="display:flex;gap:8px;align-self:flex-end"><a href="${url}" download="${nome||'evidencia.png'}" target="_blank" rel="noopener" class="dash-btn-conf" style="background:#475569;text-decoration:none;padding:7px 14px;font-size:.78rem">⬇️ Baixar</a><button type="button" class="dash-btn-conf" style="background:#e91e63;padding:7px 14px;font-size:.78rem" onclick="document.getElementById('orcav-evid-ver').remove()">✕ Fechar</button></div><img src="${url}" alt="" style="max-width:100%;max-height:calc(100vh - 90px);border-radius:10px;background:#fff">`;
+  v.addEventListener('click',ev=>{if(ev.target===v)v.remove();});document.body.appendChild(v);
+}
+window._orcavEvidVer=_orcavEvidVer;
+document.addEventListener('paste',function(ev){
+  try{const m=document.getElementById('orcav-modal');if(!m||!_orcavPend)return;
+    const cd=ev.clipboardData;if(!cd)return;const imgs=[];
+    for(const it of (cd.items||[])){if(it.kind==='file'&&/^image\//.test(it.type)){const f=it.getAsFile();if(f)imgs.push(f);}}
+    if(!imgs.length)return;ev.preventDefault();_orcavEvidArquivos(imgs);}catch(e){console.warn('colar evidência',e);}
+});
+async function _orcavEvidSubir(){
+  const p=_orcavPend,l=(p&&p.evid)||[];if(!l.length)return[];
+  if(!cfg.cld_cloud||!cfg.cld_preset)throw new Error('o envio de imagens (Cloudinary) não está configurado');
+  const out=[];
+  for(const x of l){
+    const fd=new FormData();fd.append('file',x.file,x.nome);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_orc_avaliacao');
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/image/upload`,{method:'POST',body:fd});const d=await r.json();
+    if(!d||!d.secure_url)throw new Error((d&&d.error&&d.error.message)||'falha no envio');
+    try{if(typeof _cldRegistrarUpload==='function')_cldRegistrarUpload(x.file.size);}catch(e){}
+    out.push({url:d.secure_url,nome:x.nome});
+  }
+  return out;
+}
+function _orcavEvidHtml(l){if(!Array.isArray(l)||!l.length)return'';return`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:5px">${l.map(x=>`<img src="${_orcavEsc(x.url)}" alt="" title="${_orcavEsc(x.nome||'evidência')} — clique pra ver" onclick="event.stopPropagation();_orcavEvidVer('${_orcavEsc(x.url)}','${_orcavEsc(x.nome||'').replace(/'/g,'')}')" style="width:64px;height:48px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1;cursor:zoom-in">`).join('')}</div>`;}
 function _orcavEscolher(k){
   const p=_orcavPend;if(!p)return;
   p.res=k;
@@ -76448,9 +76585,14 @@ async function _orcavConfirmar(){
       erro.textContent='Antes de aprovar, falta o valor bruto da proposta no card (aba Proposta).';return;
     }
   }catch(err){}
+  let evid=[];
+  if((p.evid||[]).length){const bt=document.getElementById('orcav-ok'),tx=bt?bt.textContent:'';
+    if(bt){bt.disabled=true;bt.textContent='⏳ Enviando evidências…';}
+    try{evid=await _orcavEvidSubir();}catch(err){console.error('evidências',err);erro.textContent='Não consegui enviar as evidências ('+(err.message||err)+'). Tente de novo — nada foi salvo.';if(bt){bt.disabled=false;bt.textContent=tx;}return;}
+    if(bt){bt.disabled=false;bt.textContent=tx;}}
   const agora=new Date().toISOString(),por=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
   const conta=_orcavConta(e,p.res),nota=_orcavNota(e,p.res,p.ciclo.atrasado);
-  const reg={id:'av_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),em:agora,por,orcamentista:quem,resultado:p.res,erros,comentario:com,
+  const reg={id:'av_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),em:agora,por,orcamentista:quem,resultado:p.res,erros,comentario:com,evidencias:evid,
     conta,nota,correcao:!!p.correcao,atrasado:!!p.ciclo.atrasado,msUteis:p.ciclo.msUteis,
     iniEm:p.ciclo.ini!=null?new Date(p.ciclo.ini).toISOString():null,fimEm:p.ciclo.fim!=null?new Date(p.ciclo.fim).toISOString():null,prazoDu:ORCAV_PRAZO_DU};
   const r=ORCAV_RES[p.res];
@@ -76458,7 +76600,7 @@ async function _orcavConfirmar(){
   e.avalOrc.push(reg);
   if(!e.timeline)e.timeline=[];
   const txtNota=nota==null?'não conta':'nota '+nota+'%';
-  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:`🎯 Avaliação do orçamento${quem?' ('+quem+')':''}: ${r.ic} ${r.t} · ${txtNota}${reg.atrasado&&conta&&p.res!=='vermelho'?' · fora do prazo':''}${erros.length?' · erro: '+erros.map(k=>(ORCAV_ERROS.find(x=>x[0]===k)||[k,k])[1]).join(', '):''}${com?' — '+com:''}`,autor:por,em:agora,sistema:true});
+  e.timeline.push({id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),texto:`🎯 Avaliação do orçamento${quem?' ('+quem+')':''}: ${r.ic} ${r.t} · ${txtNota}${reg.atrasado&&conta&&p.res!=='vermelho'?' · fora do prazo':''}${erros.length?' · erro: '+erros.map(k=>(ORCAV_ERROS.find(x=>x[0]===k)||[k,k])[1]).join(', '):''}${com?' — '+com:''}${evid.length?' · 📎 '+evid.length+' '+(evid.length===1?'evidência':'evidências'):''}`,autor:por,em:agora,sistema:true});
   const m=document.getElementById('orcav-modal');if(m)m.remove();
   _orcavPend=null;
   window._orcavOk=true;
@@ -76492,6 +76634,7 @@ function _orcavRegHtml(a){
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.78rem"><b style="color:${r.cor}">${r.ic} ${r.t}</b><span style="font-weight:800;color:#101B3D;white-space:nowrap">${nota}</span>${a.atrasado&&a.conta&&a.resultado!=='vermelho'?'<span style="font-size:.66rem;font-weight:800;background:#fee2e2;color:#991b1b;border-radius:999px;padding:1px 8px;white-space:nowrap">⏰ fora do prazo</span>':''}</div>
     ${errs.length?`<div style="font-size:.72rem;color:#334155;margin-top:3px">Erro: ${_orcavEsc(errs.join(', '))}</div>`:''}
     ${a.comentario?`<div style="font-size:.74rem;color:#1e293b;margin-top:3px">“${_orcavEsc(a.comentario)}”</div>`:''}
+    ${_orcavEvidHtml(a.evidencias)}
     <div style="font-size:.66rem;color:#94a3b8;margin-top:3px">${_orcavEsc(a.orcamentista||'—')} · avaliado por ${_orcavEsc(a.por||'—')} em ${_fmtDataHora(a.em)}</div>
   </div>`;
 }
@@ -76601,7 +76744,7 @@ function _orcavPainelHtml(orcNome){
     <tbody>${r.doPer.length?r.doPer.map(x=>{const a=x.a,rr=ORCAV_RES[a.resultado]||ORCAV_RES.nao_conta;
       const errs=(a.erros||[]).map(k=>(ORCAV_ERROS.find(z=>z[0]===k)||[k,k])[1]).join(', ');
       const prazo=a.msUteis==null?'—':((a.atrasado&&a.conta&&a.resultado!=='vermelho')?`<span style="color:#dc2626;font-weight:700;white-space:nowrap">⏰ ${_fmtDuracaoUtil(a.msUteis)}</span>`:`<span style="white-space:nowrap">${_fmtDuracaoUtil(a.msUteis)}</span>`);
-      return`<tr style="cursor:pointer" onclick="crmAbrirCard('${x.e.id}')"><td style="white-space:nowrap">${_fmtDataHora(a.em)}</td><td style="font-weight:600">${_orcavEsc(x.e.nome||'—')}</td><td style="white-space:nowrap;color:${rr.cor};font-weight:700">${rr.ic} ${rr.t}</td><td style="font-weight:800;white-space:nowrap">${a.nota==null?'<span style="color:#94a3b8;font-weight:600">não conta</span>':a.nota+'%'}</td><td>${prazo}</td><td>${_orcavEsc(errs||'—')}</td><td style="max-width:260px">${_orcavEsc(a.comentario||'—')}</td><td style="white-space:nowrap">${_orcavEsc(a.por||'—')}</td></tr>`;}).join(''):'<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:14px">Nenhum orçamento avaliado neste período.</td></tr>'}</tbody></table></div>
+      return`<tr style="cursor:pointer" onclick="crmAbrirCard('${x.e.id}')"><td style="white-space:nowrap">${_fmtDataHora(a.em)}</td><td style="font-weight:600">${_orcavEsc(x.e.nome||'—')}</td><td style="white-space:nowrap;color:${rr.cor};font-weight:700">${rr.ic} ${rr.t}</td><td style="font-weight:800;white-space:nowrap">${a.nota==null?'<span style="color:#94a3b8;font-weight:600">não conta</span>':a.nota+'%'}</td><td>${prazo}</td><td>${_orcavEsc(errs||'—')}</td><td style="max-width:260px">${_orcavEsc(a.comentario||'—')}${_orcavEvidHtml(a.evidencias)}</td><td style="white-space:nowrap">${_orcavEsc(a.por||'—')}</td></tr>`;}).join(''):'<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:14px">Nenhum orçamento avaliado neste período.</td></tr>'}</tbody></table></div>
     <div style="font-size:.7rem;color:#94a3b8;margin-top:8px">🟢 vale 100%, 🟡 vale 50% e 🔴 vale 0%. Prazo: ${ORCAV_PRAZO_DU} dias úteis da entrada em ORÇAMENTO até a revisão. ${ORCAV_PRAZO_DU} dias úteis e algumas horas ainda está no prazo; só perde ${ORCAV_PEN_ATRASO} pontos quando completa o ${ORCAV_PRAZO_DU+1}º dia útil. Orçamento que levou 🔴 e volta para revisão certo não conta de novo; se vier fora de novo, conta mais um 0. Assertividade = média das notas do mês; ${ORCAV_META}% ou mais libera a comissão.</div></div>`;
   const meio=(errHtml||mesesHtml)?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:14px;margin-bottom:14px">${mesesHtml}${errHtml}</div>`:'';
   let gp='';try{gp=_orcGanhoPerdidoHtml(orcNome,y,m,per);}catch(err){console.error('ganhos/perdidos',err);}
@@ -77447,7 +77590,7 @@ async function _ucCriar(){
   const variacao=(v('uc-var')||'PADRÃO').toUpperCase().replace(/\s+/g,' ');
   const L=_prodNumCm(v('uc-l')),A=_prodNumCm(v('uc-a')),Pr=_prodNumCm(v('uc-p'));
   if(L==null||A==null||Pr==null){toast('Preencha largura, altura e profundidade (em metros, maiores que zero)','terr');return;}
-  if(L>5000||A>5000){toast('As medidas são em METROS (ex.: 1,20) — parece que foi digitado em cm','terr');return;}
+  if((L>5000||A>5000)&&!confirm('Confira as medidas — estão em METROS: '+String(L/100).replace('.',',')+' × '+String(A/100).replace('.',',')+' m.\n\nÉ isso mesmo? (OK = sim, são metros · Cancelar = corrigir)'))return;
   const nome=_prodNomeAuto(cat,variacao);
   const fk=cad+'|'+cat;
   if(getProdutos().some(x=>x&&_prodFamKey(x)===fk)){toast('Já existe "'+cat+'" no caderno '+cad+' — abra esse produto e use Duplicar variação','terr');return;}
@@ -81909,6 +82052,11 @@ function _uxHoje(){try{return _hojeIso();}catch(e){const d=new Date();return d.g
   #sec-cat-MEUDIA .md-at{display:flex;flex-wrap:wrap;gap:8px}
   #sec-cat-MEUDIA .md-at button{border:1.5px solid #e2e8f0;background:#fff;border-radius:10px;padding:8px 12px;font-size:.78rem;font-weight:700;cursor:pointer;font-family:inherit;color:#334155}
   #sec-cat-MEUDIA .md-at button:hover{border-color:#1a2b5e}
+  #sec-cat-MEUDIA .md-ch .t b,#sec-cat-MEUDIA .md-ch .t span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #sec-cat-MEUDIA .md-ch .t span{display:block}
+  #sec-cat-MEUDIA .md-ch-st{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0;max-width:45%}
+  #sec-cat-MEUDIA .md-ch-vazio{padding:10px 0;color:#94a3b8;font-size:.82rem;font-weight:700}
+  @media(max-width:700px){#sec-cat-MEUDIA .md-ch{flex-wrap:wrap}#sec-cat-MEUDIA .md-ch-st{align-items:flex-start;max-width:100%;flex-direction:row;flex-wrap:wrap}}
   `;
   document.head.appendChild(st);
 })();
@@ -82287,6 +82435,7 @@ function _uxMdRender(){
   const atalhos=[...document.querySelectorAll('#sb-nav .sb-btn')].filter(b=>b.id&&b.id!=='sb-cat-MEUDIA'&&b.style.display!=='none').map(b=>`<button type="button" onclick="document.getElementById('${b.id}').click()">${_uxEsc((b.querySelector('.sb-btn-label')||b).textContent.trim())}</button>`).join('');
   c.innerHTML=`
   <div class="md-hero"><div class="md-hero-l"><div class="md-hero-dt">${_uxEsc(dt)}</div><div class="md-hero-ola">${saud}, ${_uxEsc((()=>{const n=(eu||'').split(' ')[0]||'';return n.charAt(0).toUpperCase()+n.slice(1).toLowerCase();})())}! <span class="md-hero-emo">👋</span></div>${_uxFraseDia({atr:atr.length,hj:hj.length,fila})}<button type="button" class="md-hero-busca" onclick="_uxBuscaAbrir()">🔍 Buscar qualquer coisa <kbd>Ctrl K</kbd></button></div>${_uxVersiculoDia()}</div>
+  ${(()=>{try{return typeof window._chMeuDiaHtml==='function'?window._chMeuDiaHtml():'';}catch(e){console.error('meu dia chamados',e);return'';}})()}
   <div class="md-cards">
     ${card('#b91c1c','#fee2e2','⏰ Tarefas atrasadas',atr.length)}
     ${card('#1d4ed8','#dbeafe','📅 Pra hoje',hj.length)}
@@ -82802,7 +82951,7 @@ const UX_EXP_ALVOS=[
   /* dash-tab-graficos saiu (2026-10-28): a tela já tem Excel/PDF próprios ao lado do filtro de mês */['crm-sec-indicadores','CRM — Indicadores'],['prosp-sec-indicadores','Prospecção — Indicadores'],
   ['fin-sec-indicadores','Financeiro — Indicadores'],/* dre-indicadores saiu (2026-10-28): exporta pelo PDF ▾/Excel ▾ do topo do DRE */['pl-sec-indicadores','Planejamento — Indicadores'],
   ['proj-sec-indicadores','Projetos — Indicadores'],/* prod-sec-indicadores saiu (2026-10-28): a tela já tem Excel/PDF próprios */['rh-sec-pontualidade','RH — Pontualidade e assiduidade'],
-  ['hp-cards','Histórico de pedidos — Indicadores'],['dir-painel','Painel da diretoria'],['orc8-painel','Orçamentos — Painel']
+  ['dir-painel','Painel da diretoria'],['orc8-painel','Orçamentos — Painel']
 ];
 function _uxExpEnsure(){
   UX_EXP_ALVOS.forEach(([id,tit])=>{
@@ -83769,6 +83918,14 @@ a.chx-arq:hover{border-color:#1d4ed8;color:#1d4ed8}
 .chx-arq button{background:none;border:none;cursor:pointer;color:#94a3b8;font-size:.72rem;padding:0 0 0 2px;width:auto;height:auto}
 .chx-anx{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .chx-anx img{width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0;display:block}
+.chx-vid{width:280px;max-width:100%;max-height:200px;border-radius:8px;border:1px solid #e2e8f0;background:#0f172a;display:block}
+.chx-arq-linha{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.chx-colar{display:inline-flex;align-items:center;gap:4px;border:1.5px dashed #94a3b8;border-radius:8px;padding:7px 12px;font-size:.76rem;font-weight:700;color:#334155;cursor:pointer;background:#f8fafc;outline:none;white-space:nowrap}
+.chx-colar:hover{border-color:#1d4ed8;color:#1d4ed8}
+.chx-colar:focus{border-color:#16a34a;color:#15803d;background:#f0fdf4;box-shadow:0 0 0 3px rgba(22,163,74,.15)}
+.chx-link{background:none;border:none;padding:0;margin-left:8px;color:#1d4ed8;font-weight:700;font-size:.74rem;cursor:pointer;font-family:inherit;width:auto;height:auto}
+.chx-link:hover{text-decoration:underline}
+.chx-prazo-outro{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px 0;margin-top:8px}
 .chx-aval{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:9px 12px;font-size:.8rem;margin-bottom:10px}
 .chx-grp{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:.76rem;color:#334155;margin:4px 0 10px}
 .chx-grp-i{width:auto;height:auto;display:inline-flex;align-items:center;gap:6px;border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:4px 8px;font-size:.74rem;font-weight:700;color:#0f172a;cursor:pointer;font-family:inherit}
@@ -83807,7 +83964,7 @@ const CH_TIPOS=['Prazo / atraso','Qualidade / retrabalho','Informação errada o
 const CH_STATUS={ABERTO:'Aguardando o setor assumir',ANDAMENTO:'Em andamento',RESOLVIDO:'Resolvido — aguardando confirmação',ENCERRADO:'Encerrado'};
 const CH_AVAL={TOTAL:{l:'Atendida',cor:'#15803d',bg:'#dcfce7'},PARCIAL:{l:'Atendida em parte',cor:'#b45309',bg:'#fef3c7'}};
 const CH_INICIO='2026_10';
-const CH_MAX_ARQ=5,CH_MAX_MB=10;
+const CH_MAX_ARQ=5,CH_MAX_MB=10,CH_MAX_MB_VIDEO=100; // (2026-11-24) vídeo até 100 MB (limite do Cloudinary por vídeo)
 let _chItens={};          // id -> chamado (todos os meses)
 let _chPorDoc={};         // nome do doc -> {id:chamado}
 let _chWatching={};       // nome do doc -> true
@@ -83836,12 +83993,19 @@ const destLbl=c=>c&&c.destinoPessoa?(_tcNome(c.destinoPessoa.nome)+' ('+setorLbl
 function _tcNome(n){return String(n||'').toLowerCase().replace(/(^|\s)(\S)/g,(m,a,b)=>a+b.toUpperCase());}
 function _chVeTudo(){try{const u=_getUserCat();return u.isAdm||_nivelDe(u.email)==='DIRETORIA';}catch(e){return false;}}
 function _chIsAdm(){try{return!!_getUserCat().isAdm;}catch(e){return false;}}
-function _chMeusSetores(){try{return _minhasCats().filter(c=>c&&c!=='ADMINISTRADOR');}catch(e){return[];}}
+// (2026-11-24, Clabonde) Admin fixo não tem cadastro em usuarioCats/usuarioCatsExtras, então o setor dele
+// nos Chamados ficava vazio e nada caía em "Recebidos/Abertos pelo meu setor". O Clabonde é gestor do Comercial:
+// nos Chamados ele conta também como COMERCIAL. Não mexe em _minhasCats (permissões do resto do sistema).
+const _CH_SETOR_FIXO={'guilherme.clabonde@granda.ind.br':['COMERCIAL']};
+function _chMeusSetores(){try{const fx=_CH_SETOR_FIXO[_chMeuEmail()]||[];return[...new Set(_minhasCats().concat(fx))].filter(c=>c&&c!=='ADMINISTRADOR');}catch(e){return[];}}
 function _chSouDestino(c){if(!_chPodeAcessar())return false;if(c&&c.destinoPessoa)return String(c.destinoPessoa.email||'').toLowerCase()===_chMeuEmail();return _chPodeAbrir()&&_chMeusSetores().includes(c.destino);}
 function _chSouOrigem(c){if(!_chPodeAbrir())return false;const em=_getUserCat().email;return _chMeusSetores().includes(c.origem)||(c.criadoPorEmail&&c.criadoPorEmail===em);}
 // Diretoria e admin podem agir pelos dois lados (ex.: destravar quando o supervisor está fora).
 function _chAgeDestino(c){return _chSouDestino(c)||_chVeTudo();}
 function _chAgeOrigem(c){return _chSouOrigem(c)||_chVeTudo();}
+// (2026-11-24, Clabonde) "Confirmar e avaliar" e "Não resolveu — reabrir" só pra quem ABRIU — nunca pra quem recebeu o
+// chamado (nem se for admin/diretoria ou do mesmo setor de quem abriu).
+function _chPodeConfirmar(c){return _chAgeOrigem(c)&&!_chSouDestino(c);}
 // A partir da 2ª prorrogação, só Gestor ou acima (do setor que abriu) / Diretoria / admin aprova — evita empurrar prazo sem fim.
 function _chPodeAprovarPrazo(c){if(!_chAgeOrigem(c))return false;if((c.prorrogacoes||0)<1)return true;return _chVeTudo()||_chNivelRank()>=3;}
 function _chVisivel(c){if(!c||c.excluido)return false;return _chVeTudo()||_chSouDestino(c)||_chSouOrigem(c);}
@@ -83865,11 +84029,26 @@ function _chMinhaAcao(c){
   if(!c||c.excluido||c.status==='ENCERRADO')return'';
   const dest=_chSouDestino(c),orig=_chSouOrigem(c);
   if(orig&&c.pedidoPrazo)return _chPodeAprovarPrazo(c)?'Responder pedido de mais prazo':'Pedido de prazo — Gestor ou Diretoria decide';
-  if(orig&&c.status==='RESOLVIDO')return'Confirmar a solução';
+  if(orig&&!dest&&c.status==='RESOLVIDO')return'Confirmar a solução';
   if(dest&&c.status==='ABERTO')return'Assumir o chamado';
   if(dest&&c.status==='ANDAMENTO'&&!c.pedidoPrazo){const s=_chSituacao(c);if(s.k==='atr'||s.k==='hoje'||s.k==='amanha')return s.k==='atr'?'Resolver — está atrasado':'Resolver — '+s.txt.toLowerCase();}
   return'';
 }
+
+// ── Meu dia (2026-11-24): chamados que estão com a pessoa (mandados direto pra ela) ou com o setor dela
+//    (setor só pra Supervisor ou acima — mesma regra de "Recebidos pelo meu setor"). Só os que não foram encerrados.
+function _chMeuDiaLista(){return Object.values(_chItens).filter(c=>c&&!c.excluido&&c.status!=='ENCERRADO'&&_chSouDestino(c)).sort((x,y)=>{const ax=_chMinhaAcao(x)?0:1,ay=_chMinhaAcao(y)?0:1;return(ax-ay)||String(x.prazo||'').localeCompare(String(y.prazo||''))||((x.num||0)-(y.num||0))||String(x.sufixo||'').localeCompare(String(y.sufixo||''));});}
+function _chMeuDiaInner(){
+  const l=_chMeuDiaLista(),MAX=10;
+  const tit=`<div class="dash-sec-title">📣 Meus chamados${l.length?' ('+l.length+')':''}</div>`;
+  if(!l.length)return tit+`<div class="md-ch-vazio">${Object.keys(_chPorDoc).length?'Você não tem nenhum chamado hoje. ✅':'Carregando chamados…'}</div>`;
+  const rows=l.slice(0,MAX).map(c=>{const s=_chSituacao(c),acao=_chMinhaAcao(c),pra=c.destinoPessoa?'para você':'para '+setorLbl(c.destino);
+    return`<div class="md-tf md-ch" onclick="chAbrir('${esc(c.id)}')"><span class="md-chip" style="background:#f1f5f9;color:#334155">${numTxt(c)}</span><div class="t"><b title="${esc(c.titulo)}">${esc(c.titulo)}</b><span>De ${esc(setorLbl(c.origem))} ${esc(pra)}${c.os?' · OS '+esc(c.os):''}</span></div><div class="md-ch-st">${_chPill(s.txt,s.cor,s.bg)}${acao?`<span class="chx-acao-tag">👉 ${esc(acao)}</span>`:''}</div></div>`;}).join('');
+  return tit+rows+`<button type="button" class="orcx-link" style="margin-top:6px" onclick="_chMdAbrirLista()">${l.length>MAX?'Ver todos os '+l.length+' chamados':'Abrir Chamados'} →</button>`;
+}
+window._chMeuDiaHtml=function(){if(!_chPodeAcessar())return'';try{_chIniciarWatch();}catch(e){}return`<div class="dash-card" id="md-chamados" style="margin:0 0 14px">${_chMeuDiaInner()}</div>`;};
+window._chMdAbrirLista=function(){setSection('cat:FERRAMENTAS');setTimeout(()=>{try{ferramentaTool('chamados',document.getElementById('ferr-tool-chamados'));}catch(e){console.error(e);}},150);};
+function _chMeuDiaAtualizar(){const el=document.getElementById('md-chamados');if(el&&el.offsetParent!==null)el.innerHTML=_chMeuDiaInner();}
 
 // ── Banco ──
 function _chDocNome(mes){return'chamados_'+mes;}
@@ -83886,6 +84065,7 @@ setInterval(_chIniciarWatch,4000);
 function _chAoMudar(){
   try{const t=_chTemPraMim();if(t&&!_chTinhaPraMim&&!_chPodeAbrir()&&typeof buildSidebarCats==='function')buildSidebarCats();_chTinhaPraMim=t;}catch(e){}
   try{_chAtualizarBotaoFerr();}catch(e){}
+  try{_chMeuDiaAtualizar();}catch(e){}
   try{const el=document.getElementById('ferramenta-chamados');if(el&&el.style.display!=='none'&&el.offsetParent!==null)_chRender();}catch(e){}
   try{const m=document.getElementById('mo-chamado');if(m&&m.classList.contains('open')&&m.dataset.id)_chRenderDetalhe(m.dataset.id);}catch(e){}
   try{if(typeof _atualizarBadgeAvisos==='function')_atualizarBadgeAvisos();}catch(e){}
@@ -83907,32 +84087,36 @@ function _chHist(c,tipo,txt,anexos){c.hist=Array.isArray(c.hist)?c.hist:[];const
 window.chArqEscolher=function(campo,input){
   const atuais=_chArqs[campo]||[];const novos=[...(input.files||[])];input.value='';
   for(const f of novos){
-    const ok=/^image\//.test(f.type)||f.type==='application/pdf'||/\.pdf$/i.test(f.name);
-    if(!ok){toast(`"${f.name}" não é foto nem PDF`,'terr');continue;}
-    if(f.size>CH_MAX_MB*1024*1024){toast(`"${f.name}" passa de ${CH_MAX_MB} MB`,'terr');continue;}
+    const vid=_chEhVideo(f);
+    const ok=/^image\//.test(f.type)||vid||f.type==='application/pdf'||/\.pdf$/i.test(f.name);
+    if(!ok){toast(`"${f.name}" não é foto, vídeo nem PDF`,'terr');continue;}
+    const lim=vid?CH_MAX_MB_VIDEO:CH_MAX_MB;
+    if(f.size>lim*1024*1024){toast(`"${f.name}" passa de ${lim} MB`,'terr');continue;}
     if(atuais.length>=CH_MAX_ARQ){toast(`Máximo de ${CH_MAX_ARQ} arquivos`,'twar');break;}
     atuais.push(f);
   }
   _chArqs[campo]=atuais;_chArqLista(campo);
 };
+function _chEhVideo(f){return/^video\//.test(f&&f.type||'')||/\.(mp4|mov|m4v|webm|avi|mkv|3gp|wmv)$/i.test(f&&f.name||'');}
 window.chArqTirar=function(campo,i){(_chArqs[campo]||[]).splice(i,1);_chArqLista(campo);};
-function _chArqLista(campo){const el=document.getElementById(campo+'-lista');if(!el)return;el.innerHTML=(_chArqs[campo]||[]).map((f,i)=>`<span class="chx-arq">${/^image\//.test(f.type)?'🖼️':'📄'} ${esc(f.name)} <button type="button" onclick="chArqTirar('${campo}',${i})" title="Tirar">✕</button></span>`).join('');}
-function _chArqCampo(campo,label){_chArqs[campo]=[];return`<div class="fg"><label>${label}</label><label class="chx-arq-bt">📎 Anexar foto ou PDF<input type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="chArqEscolher('${campo}',this)"></label><span class="chx-sub" style="margin-left:8px">ou cole um print com <b>Ctrl+V</b> · até ${CH_MAX_ARQ} arquivos de ${CH_MAX_MB} MB</span><div id="${campo}-lista" class="chx-arqs"></div></div>`;}
+function _chArqLista(campo){const el=document.getElementById(campo+'-lista');if(!el)return;el.innerHTML=(_chArqs[campo]||[]).map((f,i)=>`<span class="chx-arq">${/^image\//.test(f.type)?'🖼️':_chEhVideo(f)?'🎬':'📄'} ${esc(f.name)} <button type="button" onclick="chArqTirar('${campo}',${i})" title="Tirar">✕</button></span>`).join('');}
+// (2026-11-24, Clabonde) aceita vídeo + área visível pra colar print com Ctrl+V (o colar em si é o tratador global "Ctrl+V cola um print")
+function _chArqCampo(campo,label){_chArqs[campo]=[];return`<div class="fg"><label>${label}</label><div class="chx-arq-linha"><label class="chx-arq-bt">📎 Anexar foto, vídeo ou PDF<input type="file" accept="image/*,video/*,application/pdf" multiple style="display:none" onchange="chArqEscolher('${campo}',this)"></label><div class="chx-colar" tabindex="0" role="button" onclick="this.focus()" title="Clique aqui e aperte Ctrl+V">📋 Colar print: clique aqui e aperte <b>Ctrl+V</b></div></div><div class="chx-sub" style="margin-top:6px">Até ${CH_MAX_ARQ} arquivos · foto ou PDF até ${CH_MAX_MB} MB · vídeo até ${CH_MAX_MB_VIDEO} MB</div><div id="${campo}-lista" class="chx-arqs"></div></div>`;}
 async function _chSubirArqs(campo){
   const fs=_chArqs[campo]||[];if(!fs.length)return[];
   if(!(cfg.cld_cloud&&cfg.cld_preset))throw new Error('o envio de arquivos não está configurado (Cloudinary)');
   const out=[];
   for(const f of fs){
-    const img=/^image\//.test(f.type);
+    const img=/^image\//.test(f.type),vid=!img&&_chEhVideo(f);
     const fd=new FormData();fd.append('file',f);fd.append('upload_preset',cfg.cld_preset);fd.append('folder','gcore_chamados');
-    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/${img?'image':'raw'}/upload`,{method:'POST',body:fd});
-    const d=await r.json();if(!d.secure_url)throw new Error(`não consegui enviar "${f.name}"`);
+    const r=await fetch(`https://api.cloudinary.com/v1_1/${cfg.cld_cloud}/${img?'image':vid?'video':'raw'}/upload`,{method:'POST',body:fd});
+    const d=await r.json();if(!d.secure_url)throw new Error(`não consegui enviar "${f.name}"`+(d.error&&d.error.message?' ('+d.error.message+')':''));
     try{if(typeof _cldRegistrarUpload==='function')_cldRegistrarUpload(f.size);}catch(e){}
-    out.push({nome:f.name,url:d.secure_url,img,tam:f.size});
+    const a={nome:f.name,url:d.secure_url,img,tam:f.size};if(vid)a.video=true;out.push(a);
   }
   return out;
 }
-function _chAnexosHtml(l){if(!l||!l.length)return'';return`<div class="chx-anx">${l.map(a=>a.img?`<a href="${esc(a.url)}" target="_blank" title="${esc(a.nome)}"><img src="${esc(a.url)}" alt="${esc(a.nome)}"></a>`:`<a class="chx-arq" href="${esc(a.url)}" target="_blank">📄 ${esc(a.nome)}</a>`).join('')}</div>`;}
+function _chAnexosHtml(l){if(!l||!l.length)return'';return`<div class="chx-anx">${l.map(a=>a.video?`<video class="chx-vid" src="${esc(a.url)}" controls preload="metadata" title="${esc(a.nome)}"></video>`:a.img?`<a href="${esc(a.url)}" target="_blank" title="${esc(a.nome)}"><img src="${esc(a.url)}" alt="${esc(a.nome)}"></a>`:`<a class="chx-arq" href="${esc(a.url)}" target="_blank">📄 ${esc(a.nome)}</a>`).join('')}</div>`;}
 
 // ── Menu Ferramentas ──
 function _chAtualizarBotaoFerr(){
@@ -84027,7 +84211,7 @@ function _chRender(soLista){
   if(soLista){const t=document.getElementById('chx-lista');if(t){t.innerHTML=tabela;return;}}
   el.innerHTML=`<div class="chx-topo">
       <div class="dash-tabs chx-tabs">${tab('recebidos','📥 Recebidos pelo meu setor',nRec,aRec)}${tab('enviados','📤 Abertos pelo meu setor',nEnv,aEnv)}${tab('atrasados','🔴 Atrasados',nAtr,nAtr)}${veTudo?tab('todos','🏢 Todos os setores',todos.filter(c=>c.status!=='ENCERRADO').length):''}${tab('encerrados','✅ Encerrados',0)}</div>
-      ${_chPodeAbrir()?'<button type="button" class="dash-btn-conf chx-novo" onclick="chNovo()">📣 Abrir chamado</button>':''}
+      <div style="display:flex;align-items:center;gap:0">${_gerotBotaoHtml()}${_chPodeAbrir()?'<button type="button" class="dash-btn-conf chx-novo" onclick="chNovo()">📣 Abrir chamado</button>':''}</div>
     </div>
     <div class="chx-barra"><input class="fc chx-busca" placeholder="🔎 Buscar por número, assunto, setor ou OS" value="${esc(_chBusca)}" oninput="chBuscar(this.value)">${atrAba?`<button type="button" class="plx-tg" onclick="chImprimirAtrasados()">🖨️ Imprimir para a reunião</button><span class="chx-mut" style="font-size:.72rem">Do mais atrasado para o menos atrasado.</span>`:`<span class="chx-mut" style="font-size:.72rem">${enc?'Os encerrados mais recentes primeiro.':'Ordem: o que precisa de você primeiro, depois o prazo mais próximo.'}</span>`}</div>
     <div id="chx-lista">${tabela}</div>`;
@@ -84062,12 +84246,46 @@ window.chNovo=function(){
       <div class="fg"><label>Tipo <span class="r">*</span></label><select id="chn-tipo" class="fc">${CH_TIPOS.map(t=>`<option>${esc(t)}</option>`).join('')}</select></div>
       <div class="fg"><label>OS do pedido (se tiver)</label><input id="chn-os" class="fc chx-tn" maxlength="30" placeholder="Ex.: 326"></div>
     </div>
-    <div class="fg"><label>Prioridade <span class="r">*</span></label><div class="chx-prio" id="chn-prio" data-v="NORMAL">${prioBt}</div><div id="chn-prazo-prev" class="chx-sub" style="margin-top:6px"></div></div>
+    <div class="fg"><label>Prioridade <span class="r">*</span></label><div class="chx-prio" id="chn-prio" data-v="NORMAL">${prioBt}</div><div id="chn-prazo-prev" class="chx-sub" style="margin-top:6px"></div>
+      <div id="chn-prazo-outro" class="chx-prazo-outro" style="display:none"><div class="chx-grid2">
+        <div class="fg"><label>Em quantos dias úteis?</label><input id="chn-prazo-dias" type="number" min="0" max="365" step="1" class="fc" placeholder="Ex.: 3" oninput="chPrazoOutro('dias')"></div>
+        <div class="fg"><label>Ou data final para conclusão</label><input id="chn-prazo-data" type="date" class="fc" min="${hojeIso()}" oninput="chPrazoOutro('data')"></div>
+      </div></div></div>
     <div class="fg"><label>O que precisa ser resolvido <span class="r">*</span></label><textarea id="chn-desc" class="fc chx-tn" rows="5" maxlength="2000" placeholder="Descreva o problema e o que o outro setor precisa fazer."></textarea></div>
     ${_chArqCampo('chn-arq','Fotos ou documentos (se tiver)')}
     <div class="chx-sub" style="margin:-6px 0 12px">Os supervisores dos setores escolhidos recebem um e-mail avisando do chamado.</div>
     <button type="button" class="chx-btn-main" onclick="chSalvarNovo(this)">📣 Abrir chamado</button>`,600);
-  chAtualizarDestinos();chEscolherPrio('NORMAL');
+  _chnPrazo=null;chAtualizarDestinos();chEscolherPrio('NORMAL');
+};
+// (2026-11-24, Clabonde) prazo do chamado: além do prazo da prioridade, quem abre pode digitar em quantos dias
+// úteis espera a solução OU escolher a data final. Vazio = vale o prazo da prioridade.
+let _chnPrazo=null;
+function _chnPrazoPrev(){
+  const pv=document.getElementById('chn-prazo-prev');if(!pv)return;
+  const prio=(document.getElementById('chn-prio')||{dataset:{}}).dataset.v||'NORMAL';
+  const aberto=(document.getElementById('chn-prazo-outro')||{style:{}}).style.display!=='none';
+  pv.innerHTML=_chnPrazo?`Prazo para resolver: <b>${fmtD(_chnPrazo)}</b> <span class="chx-mut">(definido por você)</span><button type="button" class="chx-link" onclick="chPrazoOutroToggle(false)">↩ Usar o prazo da prioridade</button>`
+    :`Prazo para resolver: <b>${fmtD(_chPrazoDe(prio))}</b>${aberto?`<button type="button" class="chx-link" onclick="chPrazoOutroToggle(false)">↩ Usar o prazo da prioridade</button>`:`<button type="button" class="chx-link" onclick="chPrazoOutroToggle(true)">⏱️ Definir outro prazo</button>`}`;
+}
+window.chPrazoOutroToggle=function(on){
+  const w=document.getElementById('chn-prazo-outro');if(!w)return;w.style.display=on?'':'none';
+  if(!on){_chnPrazo=null;const a=document.getElementById('chn-prazo-dias'),b=document.getElementById('chn-prazo-data');if(a)a.value='';if(b)b.value='';}
+  else setTimeout(()=>{try{document.getElementById('chn-prazo-dias').focus();}catch(e){}},30);
+  _chnPrazoPrev();
+};
+window.chPrazoOutro=function(campo){
+  const a=document.getElementById('chn-prazo-dias'),b=document.getElementById('chn-prazo-data');if(!a||!b)return;const h=hojeIso();
+  if(campo==='dias'){
+    const n=parseInt(a.value,10);
+    if(a.value===''||isNaN(n)||n<0){_chnPrazo=null;b.value='';}
+    else{const d=_addDiasUteis(h,Math.min(n,365));_chnPrazo=_isoLocal(d);b.value=_chnPrazo;}
+  }else{
+    const v=b.value;
+    if(!v||!/^\d{4}-\d{2}-\d{2}$/.test(v)){_chnPrazo=null;a.value='';}
+    else if(v<h){_chnPrazo=null;a.value='';toast('A data final não pode ser antes de hoje','twar');}
+    else{_chnPrazo=v;a.value=String(_lpDuEntre(h,v));}
+  }
+  _chnPrazoPrev();
 };
 // (2026-11-18, Clabonde) chamado direto pra uma pessoa: Supervisor+ manda pros operadores da PRÓPRIA equipe (setor)
 // e pra qualquer Supervisor, Gestor ou Diretoria; nunca pra operador de outra equipe. Diretoria/admin: qualquer pessoa.
@@ -84077,18 +84295,27 @@ function _chSetorDe(email){const e=String(email||'').toLowerCase();let nv='OPERA
   if(nv==='DIRETORIA'||(cat==='ADMINISTRADOR'&&!(Array.isArray(ex)&&ex.length)))return'DIRETORIA';return cat==='ADMINISTRADOR'?ex[0]:cat;}
 function _chPessoasPossiveis(){
   const eu=_chMeuEmail(),meus=_chMeusSetores(),tudo=_chVeTudo(),desl=cfg.vendDesligados||{};const out=[];
-  Object.entries(cfg.usuarioNomes||{}).forEach(([em,nome])=>{const e=String(em).toLowerCase();if(!e||e===eu||desl[em])return;
+  // (2026-11-24, Clabonde: "temos que ter os adm e diretores nessa lista") — administradores (categoria ADMINISTRADOR ou
+  // admin fixo do sistema, que nem está no cadastro de usuários) entram sempre, como "Administrador"; Diretoria já entrava
+  // pelo nível. Admin fixo: só o e-mail da empresa (a conta pessoal alternativa é a mesma pessoa).
+  const nomes=Object.assign({},cfg.usuarioNomes||{});
+  try{(typeof _ADMINS!=='undefined'?_ADMINS:[]).forEach(a=>{const e=String(a).toLowerCase();if(!/@granda\.ind\.br$/.test(e))return;if(!Object.keys(nomes).some(k=>String(k).toLowerCase()===e))nomes[e]=e==='guilherme.clabonde@granda.ind.br'?'GUILHERME CLABONDE':e.split('@')[0].toUpperCase();});}catch(x){}
+  Object.entries(nomes).forEach(([em,nome])=>{const e=String(em).toLowerCase();if(!e||e===eu||desl[em])return;
     let r=1;try{r=_nivelRank(_nivelDe(e));}catch(x){}const cats=[(cfg.usuarioCats||{})[e]].concat((cfg.usuarioCatsExtras||{})[e]||[]).filter(Boolean);
+    try{if((typeof _ADMINS!=='undefined'&&_ADMINS.includes(e))||cats.includes('ADMINISTRADOR'))r=Math.max(r,99);}catch(x){}
+    // diretores: a mesma regra do Painel da Diretoria (lista marcada no ⚙️ do painel; sem lista, PAULO… e …CARBONARE)
+    try{const dc=(typeof _dirCfg!=='undefined'&&_dirCfg&&Array.isArray(_dirCfg.emails))?_dirCfg.emails.map(x=>String(x).toLowerCase()):null;
+      const ehDir=dc?dc.indexOf(e)>=0:(/CARBONARE/i.test(String(nome||''))||/^PAULO\b/i.test(String(nome||'')));if(ehDir&&r<4)r=4;}catch(x){}
     const minhaEquipe=cats.some(c=>meus.includes(c));
     if(r>=2)out.push({email:e,nome,setor:_chSetorDe(e),equipe:minhaEquipe&&r<2,rank:r});});
   return out.sort((a,b)=>(b.equipe-a.equipe)||(a.rank-b.rank)||String(a.nome).localeCompare(String(b.nome),'pt-BR'));}
 function _chParaQuemHtml(){
   const L=_chPessoasPossiveis();if(!L.length)return'';
-  const nvL=r=>r>=4?'Diretoria':r===3?'Gestor':r===2?'Supervisor':'Operador';
+  const nvL=r=>r>=99?'Administrador':r>=4?'Diretoria':r===3?'Gestor':r===2?'Supervisor':'Operador';
   const eq=L.filter(x=>x.equipe),out=L.filter(x=>!x.equipe);
-  const opt=x=>`<option value="${esc(x.email)}">${esc(_tcNome(x.nome))} — ${esc(nvL(x.rank))} · ${esc(setorLbl(x.setor))}</option>`;
+  const opt=x=>`<option value="${esc(x.email)}">${esc(_tcNome(x.nome))} — ${esc(nvL(x.rank))}${x.setor&&x.setor!=='DIRETORIA'?' · '+esc(setorLbl(x.setor)):''}</option>`;
   return`<div class="fg"><label>Para quem? <span class="r">*</span></label><div class="chx-prio" id="chn-modo" data-v="setor"><button type="button" class="plx-tg on" data-m="setor" onclick="chModoPara('setor')">🏢 Um setor</button><button type="button" class="plx-tg" data-m="pessoa" onclick="chModoPara('pessoa')">👤 Uma pessoa</button></div></div>
-    <div class="fg" id="chn-w-pessoa" style="display:none"><label>Pessoa que vai resolver <span class="r">*</span></label><select id="chn-pessoa" class="fc"><option value="">Escolha…</option>${eq.length?`<optgroup label="Minha equipe">${eq.map(opt).join('')}</optgroup>`:''}${out.length?`<optgroup label="Supervisores, gestores e diretoria">${out.map(opt).join('')}</optgroup>`:''}</select>
+    <div class="fg" id="chn-w-pessoa" style="display:none"><label>Pessoa que vai resolver <span class="r">*</span></label><select id="chn-pessoa" class="fc"><option value="">Escolha…</option>${eq.length?`<optgroup label="Minha equipe">${eq.map(opt).join('')}</optgroup>`:''}${out.length?`<optgroup label="Supervisores, gestores, diretoria e administradores">${out.map(opt).join('')}</optgroup>`:''}</select>
     <div class="chx-sub" style="margin-top:6px">Só Supervisor, Gestor ou Diretoria. Quem você escolher recebe o chamado e o e-mail.</div></div>`;}
 window.chModoPara=function(m){const w=document.getElementById('chn-modo');if(!w)return;w.dataset.v=m;w.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
   const a=document.getElementById('chn-w-setores'),b=document.getElementById('chn-w-pessoa');if(a)a.style.display=m==='setor'?'':'none';if(b)b.style.display=m==='pessoa'?'':'none';};
@@ -84106,7 +84333,7 @@ window.chInfoDestinos=function(){
 window.chEscolherPrio=function(k){
   const w=document.getElementById('chn-prio');if(!w)return;w.dataset.v=k;
   w.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.prio===k));
-  const pv=document.getElementById('chn-prazo-prev');if(pv)pv.innerHTML=`Prazo para resolver: <b>${fmtD(_chPrazoDe(k))}</b>`;
+  _chnPrazoPrev();
 };
 window.chSalvarNovo=async function(btn){
   const v=id=>(document.getElementById(id)||{}).value||'';
@@ -84118,22 +84345,26 @@ window.chSalvarNovo=async function(btn){
   if(!destinos.length){toast('Escolha pelo menos um setor que vai resolver','terr');return;}
   if(!titulo){toast('Escreva o assunto','terr');return;}
   if(!desc){toast('Descreva o que precisa ser resolvido','terr');return;}
+  const _outroAberto=(document.getElementById('chn-prazo-outro')||{style:{display:'none'}}).style.display!=='none';
+  if(_outroAberto&&!_chnPrazo){toast('Digite em quantos dias úteis ou escolha a data final — ou clique em "Usar o prazo da prioridade"','terr');return;}
+  if(_chnPrazo&&_chnPrazo<hojeIso()){toast('A data final não pode ser antes de hoje','terr');return;}
   if(!origem||(!_chVeTudo()&&!_chMeusSetores().includes(origem))){toast('Seu usuário não tem setor cadastrado. Fale com o administrador.','terr');return;}
   // Chamado repetido: mesma OS já tem chamado em aberto para algum desses setores
   if(os){
     const dup=Object.values(_chItens).filter(c=>!c.excluido&&c.status!=='ENCERRADO'&&String(c.os||'').trim().toUpperCase()===os.toUpperCase()&&destinos.includes(c.destino));
     if(dup.length&&!confirm(`Já existe chamado em aberto para a OS ${os}:\n\n${dup.map(c=>`${numTxt(c)} · ${setorLbl(c.destino)} · ${c.titulo}`).join('\n')}\n\nAbrir outro mesmo assim?`))return;
   }
-  if(btn){btn.disabled=true;btn.textContent='Abrindo...';}
+  if(btn){btn.disabled=true;btn.textContent=(_chArqs['chn-arq']||[]).length?'Enviando anexos...':'Abrindo...';}
   try{
-    const anexos=await _chSubirArqs('chn-arq');
+    const anexos=await _chSubirArqs('chn-arq');if(btn)btn.textContent='Abrindo...';
     const mes=(()=>{const d=new Date();return d.getFullYear()+'_'+String(d.getMonth()+1).padStart(2,'0');})();
-    const prazo=_chPrazoDe(prio);const LET='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const prazoMeu=!!_chnPrazo;const prazo=_chnPrazo||_chPrazoDe(prio);const LET='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const lista=destinos.map((destino,i)=>{
       const c={mes,origem,destino,titulo,tipo,os,descricao:desc,anexos,prioridade:prio,prazo,prazoOriginal:prazo,status:'ABERTO',
         sufixo:destinos.length>1?LET[i]:'',grupoSetores:destinos,destinoPessoa:_pessoa?{email:_pessoa.email,nome:_pessoa.nome}:null,
         criadoPor:meuNome(),criadoPorEmail:_getUserCat().email,criadoEm:agora(),responsavel:'',pedidoPrazo:null,prorrogacoes:0,prazoHist:[],hist:[]};
-      _chHist(c,'abertura',`Chamado aberto por ${setorLbl(origem)} para ${_pessoa?_tcNome(_pessoa.nome)+' ('+setorLbl(destino)+')':setorLbl(destino)}${destinos.length>1?' (chamado conjunto com '+destinos.filter(x=>x!==destino).map(setorLbl).join(', ')+')':''} · prioridade ${CH_PRIO[prio].l} · prazo ${fmtD(prazo)}`);
+      if(prazoMeu)c.prazoDefinido=true;
+      _chHist(c,'abertura',`Chamado aberto por ${setorLbl(origem)} para ${_pessoa?_tcNome(_pessoa.nome)+' ('+setorLbl(destino)+')':setorLbl(destino)}${destinos.length>1?' (chamado conjunto com '+destinos.filter(x=>x!==destino).map(setorLbl).join(', ')+')':''} · prioridade ${CH_PRIO[prio].l} · prazo ${fmtD(prazo)}${prazoMeu?' (definido por quem abriu)':''}`);
       return c;
     });
     const r=await window._fbChCriar(_chDocNome(mes),lista);
@@ -84156,6 +84387,8 @@ function _chEmailsDoSetor(setor){
     try{if(_nivelRank(_nivelDe(e))<2)return;}catch(x){return;}
     out.add(e);
   });
+  // (2026-11-24, Clabonde) admin fixo que conta como setor nos Chamados (_CH_SETOR_FIXO) também recebe o e-mail do setor
+  try{Object.entries(_CH_SETOR_FIXO||{}).forEach(([em,sets])=>{if((sets||[]).includes(setor))out.add(String(em).toLowerCase());});}catch(e){}
   return[...out];
 }
 function _chEmailHtml(c){
@@ -84184,6 +84417,124 @@ async function _chEmailAbertura(c){
   }catch(e){reg=`Não consegui enviar o e-mail do chamado (${(e&&(e.text||e.message))||e})`;toast(reg,'twar');}
   try{await _chAlterar(c.id,x=>{_chHist(x,'email',reg);},c.mes);}catch(e){console.warn('registro e-mail chamado',e);}
 }
+
+// ── PLANO DE AÇÃO GeRot → CHAMADOS (2026-11-24, Clabonde: "lance abrindo chamado para cada pessoa de cada setor responsável
+// por cada demanda, com estes detalhes da planilha na descrição, o setor que abriu colocar RH") ──
+// As 20 ações abertas (status diferente de CLOSED) da aba GEROT da planilha "GeRot gestão". Cada uma vira 1 chamado:
+// origem RH, para a pessoa responsável, prazo = PRAZO FINAL da planilha (vencido → Urgente com o prazo da prioridade),
+// pelo mesmo caminho de gravação e e-mail do "📣 Abrir chamado". Cada chamado leva planoAcao.chave, então nada é aberto 2x.
+const _GEROT_ACOES=[{"k": "GEROT-7", "item": "7", "t": "Checklists nos setores, KANBAN e etiquetagem por cor e ímã", "resp": "FERNANDO KURLIS MONTEIRO", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "03/11/2025_ Retorno com a implementação de check list nos setores (Luiz e André)\n28/09/2026_ Modelo de checklists\n28/09/2026 _ Verificar possibilidade de implantanção de KANBAN ( ferramenta de qualidade para melhoria do processo).\n19/10/2026_ Etiquetagem por cor e imã - etiquetas por peça.  (solda e pintura áreas mais críticas de controle) melhor forma de controle etiquetas - Letra caixa (Gaiola para os materiais não caírem)\nReuniões extras das áreas envolvidas para verificar melhor sistemática de controle. Considerar fluxo de processo, padronização.\n23/11/2026_ permanece conforme o processo atual - 23/11/2026 reunião semanal complano de ação"}, {"k": "GEROT-15", "item": "15", "t": "Treinamento e homologação de instaladores", "resp": "ROBERSON GUILHERME CASTILHO", "emp": "GRANDA MATRIZ", "prazo": "2027-02-05", "st": "IN PROGRESS", "desc": "24/11/2025_Treinamento e homologação de instaladores\n23/11/2026_ Realizar treinamento junto aos fornecedores externo (01/2027)"}, {"k": "GEROT-55", "item": "55", "t": "Avaliação de desempenho contínua dos colaboradores", "resp": "IZABEL NASCIMENTO", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "23/03/2026_Avaliação de desempenho (colaboradores) contínuo"}, {"k": "GEROT-59", "item": "59", "t": "Padronizar o registro fotográfico das entregas (diário de obras)", "resp": "ROBERSON GUILHERME CASTILHO", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "20/04/2026_Padronizar registro fotográfico das entregas (antes, durante e depois)\n23/11/2026_Utilizar na ferramenta de diário de obras - Gcore"}, {"k": "GEROT-60", "item": "60", "t": "Integração e treinamento de novos colaboradores (On The Job)", "resp": "IZABEL NASCIMENTO", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "20/04/2026_Melhorar integração e treinamento de novos colaboradores\n28/09/2026_ Estruturar Treinamento On The Job - (Já executado na produção - formalização)"}, {"k": "GEROT-64", "item": "64", "t": "Treinamentos periódicos, auditorias e Semana da Qualidade 2027", "resp": "LUIZ FERNANDO SOARES JUNIOR", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "11/05/2026_Realizar treinamentos periódicos e auditorias trabalhando assim a melhoria contínua\n28/09/2026_Considear dentro do calendário corporativo - Semana da Qualidade \n19/10/2026_ À definir semana de Qualidade - 2027 (02 dias)."}, {"k": "GEROT-65", "item": "65", "t": "Padronizar cadernos técnicos e listas de materiais no GCore", "resp": "BRUNO BALDYKOWSKI", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "11/05/2026_Padronizar cadernos técnicos e listas de materiais\n23/11/2026 Todo time utilizando o Gcore - padronização de informações - lista de materiais por produto.\n23/11/2026_ Pendente cadernos técnicos - complemento de informações no Gcore."}, {"k": "GEROT-67", "item": "67", "t": "Levantamento e entrega de ferramentas — cadastro no GCore", "resp": "JULIANO CESAR RIBEIRO DE PAULA", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "11/05/2026_Levantamento ferramentas\n28/09/2026_Treinamento - Entrega de Ferramentas\n23/11/2026_ Cadastro no Gcore - entrega de ferramentas - entrega, troca e dvolução - Juliano sentar com Guilherme Clabonde e fornecer as informações necessários para o desenho de necessidade"}, {"k": "GEROT-69", "item": "69", "t": "Cadastro dos produtos no Mubisys", "resp": "GUILHERME VINICIUS CLABONDE", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "11/05/2026_Cadastros dos produtos no Mubisys\n28/09/2026_ Revisar alterações dos cadastros Mubisys - Projetos/ Financeiro/ Comercial\n19/11/2026_ Análise de cadastramento ainda permanece sendo realizada\n23/11/2026_ Guillherme realizando o cadastro em paralelo com o Ederson que ainda permanece cadastrando no Mubisys. Previsão de funcionamento 12/2026 - orçamentação e pedido."}, {"k": "GEROT-70", "item": "70", "t": "Talha — fabricação interna, compra do motor e instalação", "resp": "ANDRÉ RODRIGO RIBEIRO", "emp": "GRANDA MATRIZ", "prazo": "2026-10-30", "st": "DELAYED", "desc": "11/05/2026_Talha  - Fabricação interna e Instalação - 30/10/2026\n28/09/2026_ Projeto realizado - \n28/09/2026_ Análise produção e Projetos\n19/11/2026_ Pendente de fabricação\n23/11/2026_ Recebido projeto - aguardando instalação.\n23/11/2026_ Aquisição do motor da Talha"}, {"k": "GEROT-76", "item": "76", "t": "Devolução de ferramentas no checklist de desligamento", "resp": "JULIANO CESAR RIBEIRO DE PAULA", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "03/08/2026_Por em check list de desligamento sobre devolução de ferramentas e acompanhar o funcionário até o almoxarifado para devolução\n28/09/2026_ Juliano e Izabel - denifição de retirada e conferência de devolução."}, {"k": "GEROT-78", "item": "78", "t": "Melhorias na máquina de plasma (talha, gaveta, bandeja e ímã)", "resp": "ANDRÉ RODRIGO RIBEIRO", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "28/09/2026_ Melhoria para a máquina de Plasma - Talha e gaveta para cair as peças e bandeja de água.\n23/11/2026_ aquisição de imã para máquina de plasma"}, {"k": "GEROT-80", "item": "80", "t": "Faixa de caminho seguro na fábrica", "resp": "ANDRÉ RODRIGO RIBEIRO", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "28/09/2026_ Colocar faixa para caminho seguro."}, {"k": "GEROT-81", "item": "81", "t": "Atualizar a matriz de EPIs no BUSCA EPI", "resp": "IZABEL NASCIMENTO", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "28/09/2026_ Atualização da Matriz de EPI's no sistema BUSCA EPI"}, {"k": "GEROT-82", "item": "82", "t": "Padronização da parte elétrica (engenheiro elétrico terceirizado)", "resp": "ROBERSON GUILHERME CASTILHO", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "Padronização de elétrica em geral - Engenheiro elétrico terceiro"}, {"k": "GEROT-84", "item": "84", "t": "Elaborar o caderno técnico (evitar copia e cola de projeto antigo)", "resp": "BRUNO BALDYKOWSKI", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "Elaborar caderno técnico  - para evitar (copia/cola) errado, causando impacto do projeto antigo\n23/11/2026_ Trabalho contínuo"}, {"k": "GEROT-85", "item": "85", "t": "Tipo de embalagem no GCore (volumes e embalagens por peça)", "resp": "GUILHERME VINICIUS CLABONDE", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "Incluir tipo de emabalagem no sistema g core, e em quais volumes são por peça e quais embalagens para este tipo de peça\n23/11/2026_ Sistema de embalagem já consta no sistema - estimativa de preço - PCP esta embalagem quanto tempo demora, e o quanto a embalagem influência no preço do produto."}, {"k": "GEROT-86", "item": "86", "t": "Pesquisar balança com identificação de carga", "resp": "ROBERSON GUILHERME CASTILHO", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "Pesquisar sobre - balança com identificação de carga após implantação das etiquetas - quais itens e quantidade."}, {"k": "GEROT-87", "item": "87", "t": "Sistema de chamados entre áreas com SLA — uso pelos gestores", "resp": "GUILHERME VINICIUS CLABONDE", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "Elaborar sistema de chamados - entre áreas com SLA (cada área passar suas necessidades para o Clabonde elaborar dentro do Gcore).\n23/11/2026 já está no sistema, gestores precisam utilizar"}, {"k": "GEROT-REATOR", "item": "", "t": "Padronizar a instalação do reator (NR10)", "resp": "BRUNO BALDYKOWSKI", "emp": "GRANDA MATRIZ", "prazo": "2026-12-07", "st": "IN PROGRESS", "desc": "28/09/2026_Verificar/ modificar maneira de instalação do reator (NR10)\nPadronização de Instalação do reator \nModelo de reator\nComercial/Projetos/Compras/Qualidade/ Planejamento e Produção"}];
+const _GEROT_ST={'IN PROGRESS':'Em andamento','DELAYED':'Atrasado','NOT STARTED':'Não iniciado','ON HOLD':'Em espera'};
+function _gerotNorm(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/[^A-Z ]/g,' ').split(/\s+/).filter(t=>t.length>=3&&!['DOS','DAS','DES'].includes(t));}
+function _gerotParecido(a,b){if(a===b)return true;if(Math.min(a.length,b.length)<5)return false;
+  const m=a.length,n=b.length;let p=Array.from({length:n+1},(_,j)=>j);for(let i=1;i<=m;i++){const q=[i];for(let j=1;j<=n;j++)q[j]=Math.min(p[j]+1,q[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=q;}
+  return p[n]<=Math.max(1,Math.floor(Math.max(m,n)*0.2));}
+function _gerotCandidatos(){
+  const L=_chPessoasPossiveis().slice();const eu=_chMeuEmail();
+  if(eu&&!L.some(x=>x.email===eu)){let nm='';try{nm=(cfg.usuarioNomes||{})[eu]||'';}catch(e){}if(!nm&&eu==='guilherme.clabonde@granda.ind.br')nm='GUILHERME CLABONDE';L.push({email:eu,nome:nm||meuNome(),setor:_chSetorDe(eu),rank:99,eu:true});}
+  return L;}
+// Casa o nome da planilha com o usuário do GCore: 1º nome igual + sobrenomes em comum (aceita pequena diferença de grafia).
+function _gerotCasar(resp,L){
+  const r=_gerotNorm(resp);if(!r.length)return{p:null,ok:false};
+  const sc=L.map(x=>{const t=_gerotNorm(x.nome);if(!t.length||!_gerotParecido(t[0],r[0]))return{x,s:0};
+    let s=2;r.slice(1).forEach(a=>{if(t.slice(1).some(b=>_gerotParecido(a,b)))s++;});return{x,s};}).filter(o=>o.s>0).sort((a,b)=>b.s-a.s);
+  if(!sc.length)return{p:null,ok:false};
+  const empate=sc.length>1&&sc[1].s===sc[0].s;
+  return{p:sc[0].x,ok:sc[0].s>=3&&!empate};}
+function _gerotJaAbertos(){const m={};Object.values(_chItens||{}).forEach(c=>{const k=c&&c.planoAcao&&c.planoAcao.chave;if(k&&!c.excluido)m[k]=c;});return m;}
+function _gerotPendentes(){const ja=_gerotJaAbertos();return _GEROT_ACOES.filter(a=>!ja[a.k]).length;}
+function _gerotBotaoHtml(){
+  try{if(!_chVeTudo())return'';const n=_gerotPendentes();if(!n)return'';
+    return`<button type="button" class="plx-tg" style="margin-right:8px" onclick="chGerotAbrir()" title="Abre um chamado do RH para cada responsável pelas ações abertas da planilha GeRot">📋 Plano de ação GeRot · ${n} para lançar</button>`;}catch(e){return'';}}
+function _gerotPrazo(a){const hoje=hojeIso();if(a.prazo&&a.prazo>=hoje)return{prazo:a.prazo,prio:'NORMAL',definido:true,vencido:false};return{prazo:_chPrazoDe('URGENTE'),prio:'URGENTE',definido:false,vencido:true};}
+function _gerotDescricao(a,pz){
+  const st=_GEROT_ST[a.st]||a.st;
+  return['Plano de ação da empresa — GeRot (Gerenciamento de Rotina · Gestão)',
+    `Item da planilha: ${a.item||'sem número'}${a.emp?' · Empresa: '+a.emp:''}`,
+    `Responsável na planilha: ${a.resp}`,
+    `Prazo final na planilha: ${a.prazo?fmtD(a.prazo):'—'} · Status na planilha: ${st}`,
+    pz.vencido?`⚠ O prazo da planilha já venceu — chamado aberto como Urgente, com prazo de ${duTxt(CH_PRIO.URGENTE.d)}.`:'',
+    '','Histórico da ação (como está na planilha):',a.desc].filter((l,i)=>l!==''||i>4).join('\n');}
+window.chGerotAbrir=function(){
+  if(!_chVeTudo()){toast('Só administrador ou diretoria lança o plano de ação.','terr');return;}
+  const mesAtual=_chDocNome((()=>{const d=new Date();return d.getFullYear()+'_'+String(d.getMonth()+1).padStart(2,'0');})());
+  if(!_chPorDoc[mesAtual]&&!_chWatching[mesAtual]){_chIniciarWatch();}
+  const L=_gerotCandidatos();const ja=_gerotJaAbertos();
+  const nvL=x=>x.eu?'você':x.rank>=99?'Administrador':x.rank>=4?'Diretoria':x.rank===3?'Gestor':x.rank===2?'Supervisor':'';
+  const opts=sel=>`<option value="">— escolha —</option>`+L.slice().sort((a,b)=>String(a.nome).localeCompare(String(b.nome),'pt-BR')).map(x=>`<option value="${esc(x.email)}"${sel&&sel.email===x.email?' selected':''}>${esc(_tcNome(x.nome))} — ${esc(nvL(x))}${x.setor&&x.setor!=='DIRETORIA'?' · '+esc(setorLbl(x.setor)):''}</option>`).join('');
+  let nConf=0;
+  const linhas=_GEROT_ACOES.map((a,i)=>{
+    const feito=ja[a.k];const pz=_gerotPrazo(a);
+    if(feito)return`<tr style="opacity:.6"><td></td><td><b>${esc(a.item||'—')}</b></td><td>${esc(a.t)}</td><td colspan="3">✅ Já aberto — ${esc(numTxt(feito))} para ${esc(_tcNome((feito.destinoPessoa||{}).nome||setorLbl(feito.destino)))}</td></tr>`;
+    const m=_gerotCasar(a.resp,L);if(!m.ok)nConf++;
+    return`<tr data-i="${i}"><td><input type="checkbox" class="gerot-ck" checked></td><td><b>${esc(a.item||'—')}</b></td><td>${esc(a.t)}<div class="chx-sub">Planilha: ${esc(a.resp)}</div></td>
+      <td><select class="fc gerot-p" style="min-width:230px;${m.ok?'':'border-color:#f59e0b;background:#fffbeb'}">${opts(m.p)}</select>${m.ok?'':`<div class="chx-sub" style="color:#b45309">⚠ ${m.p?'Confira se é esta pessoa':'Não achei no GCore — escolha'}</div>`}</td>
+      <td style="white-space:nowrap">${fmtD(pz.prazo)}${pz.vencido?`<div class="chx-sub" style="color:#b91c1c">planilha: ${fmtD(a.prazo)} (vencido)</div>`:''}</td>
+      <td>${_chPill(CH_PRIO[pz.prio].l,CH_PRIO[pz.prio].cor,CH_PRIO[pz.prio].bg)}</td></tr>`;}).join('');
+  const th='text-align:left;padding:6px;font-size:.72rem;color:#64748b;border-bottom:1px solid #e2e8f0';
+  _chModal('mo-gerot','📋 Plano de ação GeRot → chamados',`
+    <div class="chx-sub" style="margin:-4px 0 10px">Um chamado para cada ação aberta da planilha, <b>aberto pelo setor RH</b>, para a pessoa responsável, com o histórico da ação na descrição. Cada pessoa recebe o e-mail do chamado. Ações que já viraram chamado não são abertas de novo.${nConf?` <b style="color:#b45309">Confira as ${nConf} linha(s) em amarelo antes de abrir.</b>`:''}</div>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.8rem"><thead><tr><th style="${th}"></th><th style="${th}">Item</th><th style="${th}">Assunto</th><th style="${th}">Para quem</th><th style="${th}">Prazo</th><th style="${th}">Prioridade</th></tr></thead><tbody>${linhas}</tbody></table></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button type="button" class="plx-tg" onclick="fecharJanela('mo-gerot')">Cancelar</button><button type="button" class="dash-btn-conf" id="gerot-ok" onclick="chGerotConfirmar(this)">📣 Abrir os chamados marcados</button></div>`,1060);
+};
+window.chGerotConfirmar=async function(btn){
+  const m=document.getElementById('mo-gerot');if(!m)return;
+  const L=_gerotCandidatos();const ja=_gerotJaAbertos();
+  const sel=[...m.querySelectorAll('tr[data-i]')].filter(tr=>tr.querySelector('.gerot-ck').checked).map(tr=>{const a=_GEROT_ACOES[+tr.dataset.i];const em=tr.querySelector('.gerot-p').value;return{a,p:L.find(x=>x.email===em)||null};}).filter(o=>!ja[o.a.k]);
+  if(!sel.length){toast('Nenhuma ação marcada para abrir.','terr');return;}
+  const sem=sel.filter(o=>!o.p);if(sem.length){toast(`Escolha a pessoa do item ${sem.map(o=>o.a.item||'sem número').join(', ')}`,'terr');return;}
+  if(!confirm(`Abrir ${sel.length} chamado(s) do RH e enviar o e-mail para cada responsável?\n\n${sel.map(o=>`• Item ${o.a.item||'s/nº'} → ${_tcNome(o.p.nome)}`).join('\n')}`))return;
+  if(btn){btn.disabled=true;}
+  const mes=(()=>{const d=new Date();return d.getFullYear()+'_'+String(d.getMonth()+1).padStart(2,'0');})();
+  const abertos=[],erros=[];
+  for(let i=0;i<sel.length;i++){
+    const {a,p}=sel[i];if(btn)btn.textContent=`Abrindo ${i+1} de ${sel.length}...`;
+    if(_gerotJaAbertos()[a.k])continue;
+    const pz=_gerotPrazo(a);let destino=p.setor||'DIRETORIA';if(p.eu){const ms=_chMeusSetores();if(ms.length)destino=ms[0];}
+    const c={mes,origem:'RH',destino,titulo:`GeRot ${a.item?'item '+a.item:'(sem nº)'} — ${a.t}`.slice(0,120),tipo:'Outro',os:'',descricao:_gerotDescricao(a,pz),anexos:[],prioridade:pz.prio,prazo:pz.prazo,prazoOriginal:pz.prazo,status:'ABERTO',
+      sufixo:'',grupoSetores:[destino],destinoPessoa:{email:p.email,nome:p.nome},
+      criadoPor:meuNome(),criadoPorEmail:_getUserCat().email,criadoEm:agora(),responsavel:'',pedidoPrazo:null,prorrogacoes:0,prazoHist:[],hist:[],
+      planoAcao:{fonte:'GeRot',chave:a.k,item:a.item||'',respPlanilha:a.resp,prazoPlanilha:a.prazo||'',statusPlanilha:a.st}};
+    if(pz.definido)c.prazoDefinido=true;
+    _chHist(c,'abertura',`Chamado aberto por ${setorLbl('RH')} para ${_tcNome(p.nome)} (${setorLbl(destino)}) · prioridade ${CH_PRIO[pz.prio].l} · prazo ${fmtD(pz.prazo)}${pz.definido?' (prazo final da planilha)':''} · lançado do plano de ação GeRot`);
+    try{const r=await window._fbChCriar(_chDocNome(mes),[c]);c.id=r.ids[0];c.num=r.num;abertos.push(c);}
+    catch(e){console.error(e);erros.push(`item ${a.item||'s/nº'}: ${e.message||e}`);}
+  }
+  _chWatching[_chDocNome(mes)]||_chIniciarWatch();
+  closeM('mo-gerot');
+  toast(`${abertos.length} chamado(s) do plano de ação aberto(s)${erros.length?' — '+erros.length+' com erro':''} ✅`,erros.length?'twar':'tok');
+  if(erros.length)alert('Não consegui abrir:\n\n'+erros.join('\n'));
+  _chAba='todos';_chRender();
+  // e-mails um de cada vez, com intervalo, para o serviço de e-mail não recusar por excesso
+  for(const c of abertos){try{await _chEmailAbertura(c);}catch(e){console.warn(e);}await new Promise(r=>setTimeout(r,1200));}
+};
+window._gerotDebug={acoes:_GEROT_ACOES,casar:(r)=>_gerotCasar(r,_gerotCandidatos()),pendentes:_gerotPendentes};
+
+// ── E-mail "seu chamado foi resolvido" (2026-11-24, Clabonde: "chegar notificação por email para a pessoa quando o chamado
+// dela for resolvido e aparecer no sino do sistema também") — vai para quem abriu o chamado (criadoPorEmail). Usado pelos
+// Chamados entre setores e pelos Chamados internos de Projetos.
+window._chEmailResolvido=async function(o){
+  const para=String(o.para||'').toLowerCase().trim();
+  if(!para||!/@/.test(para))return'Quem abriu o chamado não tem e-mail cadastrado — e-mail de resolvido não enviado';
+  if(para===String((_getUserCat()||{}).email||'').toLowerCase())return'';
+  if(!window.emailjs)return'O serviço de e-mail não carregou — e-mail de resolvido não enviado';
+  const E=_emailGrandaEsc;
+  const anx=(o.anexos||[]).map(a=>_emailGrandaLink('📎 '+E(a.nome),a.url)).join('<br>');
+  const html=_emailGranda({
+    aviso:{cor:'#15803d',claro:'#f0fdf4',borda:'#bbf7d0',ico:'🛠️'},
+    rotulo:o.rotulo||'Chamado entre setores',
+    titulo:E('Seu chamado foi resolvido · '+o.num),
+    subtitulo:E(o.titulo+' — resolvido por '+o.quem),
+    info:[['Resolvido por',E(o.quem)],['Em',E(fmtDH(o.em))],['Prazo',E(o.noPrazo?'cumprido':'resolvido com '+o.atraso+' de atraso'),!o.noPrazo]],
+    corpo:_emailGrandaSecao('O que foi feito',[['Solução',E(o.solucao||'(sem texto — veja os anexos)').replace(/\n/g,'<br>')],['Comprovação',anx]])
+      +_emailGrandaTexto(`<br>Entre no GCORE → <b>${E(o.ondeVer||'Ferramentas → Chamados entre setores')}</b> para conferir. Se ficou certo, confirme e avalie; se não resolveu, reabra o chamado por lá.`)
+  });
+  try{
+    emailjs.init(cfg.k||'wtJbXi3uGODPaFIqc');
+    await emailjs.send(cfg.s||'service_t99xeta',cfg.t||'template_lzow9ef',{html_content:html,to_email:para,cc:'',to_name:o.paraNome||'',os_numero:String(o.os||''),subject:_assuntoEmail(`[Chamado resolvido] ${o.num} · ${o.titulo}`),name:'GCORE - Sistema Granda',reply_to:o.replyTo||'grandacv@gmail.com'});
+    return`E-mail de resolvido enviado para ${para}`;
+  }catch(e){return`Não consegui enviar o e-mail de resolvido (${(e&&(e.text||e.message))||e})`;}
+};
 
 // ── Detalhe ──
 window.chAbrir=function(id){
@@ -84215,7 +84566,7 @@ function _chRenderDetalhe(id){
     if(c.pedidoPrazo&&ageO){
       if(_chPodeAprovarPrazo(c))bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','aprovar_prazo')">✅ Aprovar novo prazo</button>`,`<button class="chx-b no" onclick="chAcao('${id}','recusar_prazo')">⛔ Recusar novo prazo</button>`);
     }
-    if(c.status==='RESOLVIDO'&&ageO){bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','confirmar')">🏁 Confirmar e avaliar</button>`,`<button class="chx-b no" onclick="chAcao('${id}','reabrir')">🔁 Não resolveu — reabrir</button>`);}
+    if(c.status==='RESOLVIDO'&&_chPodeConfirmar(c)){bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','confirmar')">🏁 Confirmar e avaliar</button>`,`<button class="chx-b no" onclick="chAcao('${id}','reabrir')">🔁 Não resolveu — reabrir</button>`);}
     if(c.status==='ABERTO'&&ageD)bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','assumir')">✋ Assumir o chamado</button>`);
     if((c.status==='ABERTO'||c.status==='ANDAMENTO')&&ageD){
       bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','resolver')">🛠️ Marcar como resolvido</button>`);
@@ -84267,6 +84618,7 @@ const ACOES={
 };
 window.chAcao=function(id,acao){
   const c=_chItens[id],a=ACOES[acao];if(!c||!a)return;
+  if((acao==='confirmar'||acao==='reabrir')&&!_chPodeConfirmar(c)){toast('Só quem abriu o chamado confirma a solução ou reabre','terr');return;}
   let html='';
   if(acao==='pedir_prazo'){const min=_isoLocal(_addDiasUteis(c.prazo<hojeIso()?hojeIso():c.prazo,1));html+=`<div class="fg"><label>Novo prazo <span class="r">*</span></label><input type="date" id="cha-data" class="fc" min="${min}" value="${min}"><div class="chx-sub" style="margin-top:5px">Prazo atual: ${fmtD(c.prazo)}${c.prorrogacoes?` · já prorrogado ${c.prorrogacoes}x (a próxima aprovação é só de Gestor ou Diretoria)`:''}. Quem abriu o chamado (${esc(setorLbl(c.origem))}) precisa aprovar.</div></div>`;}
   if(acao==='assumir')html+=`<div style="font-size:.82rem;color:#334155;margin-bottom:14px">Você passa a ser o responsável por este chamado em ${esc(setorLbl(c.destino))}. Prazo: <b>${fmtD(c.prazo)}</b>.</div>`;
@@ -84292,6 +84644,7 @@ window.chConfirmarAcao=async function(id,acao,btn){
   const eu=meuNome();
   try{
     const anexos=a.arq?await _chSubirArqs('cha-arq'):[];
+    let _cRes=null;
     const _res=await _chAlterar(id,c=>{
       const fechado=c.status==='ENCERRADO';
       c.prazoHist=Array.isArray(c.prazoHist)?c.prazoHist:[];
@@ -84316,11 +84669,11 @@ window.chConfirmarAcao=async function(id,acao,btn){
         case'resolver':if(fechado||c.status==='RESOLVIDO')return false;if(!_chAgeDestino(c))throw new Error('Só o setor que recebeu resolve');
           c.status='RESOLVIDO';c.solucao=txt;c.solucaoAnexos=anexos;c.resolvidoEm=agora();c.resolvidoPor=eu;c.resolvidoNoPrazo=hojeIso()<=c.prazo;c.diasAtrasoResolucao=_chDiasAtraso(c);if(!c.responsavel)c.responsavel=eu;
           if(c.pedidoPrazo){const up=ultPedido();if(up){up.decisao='SEM_DECISAO';}c.pedidoPrazo=null;}
-          _chHist(c,'resolvido',`Marcado como resolvido${c.resolvidoNoPrazo?' (no prazo)':' com '+duTxt(c.diasAtrasoResolucao)+' de atraso'}${txt?'\n'+txt:''}`,anexos);break;
-        case'confirmar':if(c.status!=='RESOLVIDO')return false;if(!_chAgeOrigem(c))throw new Error('Só quem abriu confirma');
+          _chHist(c,'resolvido',`Marcado como resolvido${c.resolvidoNoPrazo?' (no prazo)':' com '+duTxt(c.diasAtrasoResolucao)+' de atraso'}${txt?'\n'+txt:''}`,anexos);_cRes=JSON.parse(JSON.stringify(c));break;
+        case'confirmar':if(c.status!=='RESOLVIDO')return false;if(!_chPodeConfirmar(c))throw new Error('Só quem abriu confirma');
           c.status='ENCERRADO';c.encerradoTipo='CONFIRMADO';c.encerradoEm=agora();c.encerradoPor=eu;c.avaliacao={nota:aval,obs:txt,por:eu,em:agora()};
           _chHist(c,'confirmado',`Solução confirmada — ${CH_AVAL[aval].l.toLowerCase()} — chamado encerrado${txt?'\n'+txt:''}`);break;
-        case'reabrir':{if(c.status!=='RESOLVIDO')return false;if(!_chAgeOrigem(c))throw new Error('Só quem abriu reabre');
+        case'reabrir':{if(c.status!=='RESOLVIDO')return false;if(!_chPodeConfirmar(c))throw new Error('Só quem abriu reabre');
           const novo=_chPrazoDe(c.prioridade);c.prazoHist.push({tipo:'REABERTURA',de:c.prazo,para:novo,motivo:txt,por:eu,em:agora()});
           c.status='ANDAMENTO';c.reaberturas=(c.reaberturas||0)+1;c.prazo=novo;c.reabertoEm=agora();
           _chHist(c,'reaberto',`Reaberto (não atendeu) — novo prazo ${fmtD(c.prazo)}\n${txt}`);break;}
@@ -84332,6 +84685,8 @@ window.chConfirmarAcao=async function(id,acao,btn){
       }
     });
     closeM('mo-chamado-acao');
+    if(_res&&acao==='resolver'&&_cRes){const c=_cRes;(async()=>{const reg=await window._chEmailResolvido({para:c.criadoPorEmail,paraNome:c.criadoPor,num:numTxt(c),titulo:c.titulo,quem:c.resolvidoPor||meuNome(),em:c.resolvidoEm,noPrazo:c.resolvidoNoPrazo,atraso:duTxt(c.diasAtrasoResolucao||0),solucao:c.solucao,anexos:c.solucaoAnexos,os:c.os,replyTo:_getUserCat().email});
+      if(reg){if(/^Não|não /.test(reg))toast(reg,'twar');try{await _chAlterar(c.id,x=>{_chHist(x,'email',reg);},c.mes);}catch(e){console.warn('registro e-mail resolvido',e);}}})();}
     if(!_res){toast('Nada foi alterado — o chamado já tinha sido atualizado por outra pessoa. Veja a situação atual.','twar');return;}
     if(acao==='excluir')closeM('mo-chamado');
     toast({assumir:'Chamado assumido ✅',comentar:'Comentário registrado ✅',pedir_prazo:'Pedido de prazo enviado ✅',aprovar_prazo:'Novo prazo aprovado ✅',recusar_prazo:'Pedido de prazo recusado',resolver:'Marcado como resolvido ✅',confirmar:'Chamado encerrado ✅',reabrir:'Chamado reaberto',sem_necessidade:'Chamado encerrado',excluir:'Chamado excluído'}[acao],'tok');
@@ -84354,7 +84709,7 @@ function _chAvisos(){
   const h=hojeIso();
   Object.values(_chItens).forEach(c=>{
     if(!c||c.excluido||c.status==='ENCERRADO')return;
-    const dest=_chSouDestino(c),orig=_chSouOrigem(c);
+    const dest=_chSouDestino(c),orig=_chSouOrigem(c)||(!!c.criadoPorEmail&&String(c.criadoPorEmail).toLowerCase()===_chMeuEmail());
     const base={automatico:true,tipoAuto:'chamado',chId:c.id,destinatarioTipo:'chamado'};
     const n=numTxt(c);
     if(dest){
@@ -87427,7 +87782,11 @@ _pfSalvarEtapas=function(){
   // ── dados ──
   function cadLista(){const o=GM.cadOk&&Object.keys(GM.cad).some(k=>k!=='_ops')?GM.cad:Object.fromEntries(GM_SEED.map(x=>[x.id,x]));
     return Object.keys(o).filter(k=>k!=='_ops').map(k=>o[k]).filter(x=>x&&!x.inativo).sort((a,b)=>(a.item||0)-(b.item||0));}
-  const cadItem=id=>cadLista().find(x=>x.id===id)||null;
+  // (2026-11-24, Clabonde) itens desativados: fora da busca do orçamento, da IA e das exportações (cadLista), mas o
+  // orçamento que já usa o item continua achando ele (cadItem procura em todos) e o admin vê pra reativar no caderno.
+  function cadTodos(){const o=GM.cadOk&&Object.keys(GM.cad).some(k=>k!=='_ops')?GM.cad:Object.fromEntries(GM_SEED.map(x=>[x.id,x]));
+    return Object.keys(o).filter(k=>k!=='_ops').map(k=>o[k]).filter(x=>x&&x.id).sort((a,b)=>(a.item||0)-(b.item||0));}
+  const cadItem=id=>cadTodos().find(x=>x.id===id)||null;
   const ops=()=>Object.assign({},GM_OPS_PADRAO,(GM.cad&&GM.cad._ops)||{});
   const medida=x=>{const f=v=>v?String(R2(v)).replace('.',','):'';const l=f(x.larg),a=f(x.alt),p=f(x.prof);return l&&a?`${l} × ${a}${p?' × '+p:''} m`:'';};
   function watch(){
@@ -87613,10 +87972,20 @@ _pfSalvarEtapas=function(){
   }
   function orcTabela(l){
     if(!l.length)return`<div style="padding:30px;text-align:center;color:#94a3b8;font-size:.84rem">Nenhum orçamento ${GM.orcBusca||GM.orcSt?'com esse filtro':'ainda'}. Use <b>＋ Novo orçamento</b> ou abra pelo card do CRM Comercial.</div>`;
-    return`<table class="dash-table"><thead><tr><th>Nº</th><th>Cliente</th><th>Card do CRM</th><th style="text-align:right">Total</th><th>Status</th><th>Atualizado</th></tr></thead><tbody>${l.map(d=>{const t=totais(d);
+    return`<table class="dash-table"><thead><tr><th>Nº</th><th>Cliente</th><th>Card do CRM</th><th style="text-align:right">Total</th><th>Status</th><th>Atualizado</th><th style="width:1%"></th></tr></thead><tbody>${l.map(d=>{const t=totais(d);
       return`<tr class="gm-cl" onclick="gmOrcAbrir('${d.id}')"><td style="white-space:nowrap;font-weight:800;color:#243e80">${E(d.numero||'—')}</td><td><b>${E(d.cliente||'—')}</b><div style="font-size:.68rem;color:#64748b">${E([d.cidade,d.uf].filter(Boolean).join(' / '))}</div></td>
-      <td style="font-size:.74rem">${d.crmId?E(cardNome(d.crmId)||'card não encontrado'):'<span style="color:#94a3b8">—</span>'}</td><td style="text-align:right;white-space:nowrap;font-weight:800">${R(t.total)}</td><td>${chipOrc(d)}</td><td style="font-size:.72rem;color:#64748b;white-space:nowrap">${dBR(d.atualizadoEm)}<div>${E(d.atualizadoPor||'')}</div></td></tr>`;}).join('')}</tbody></table>`;
+      <td style="font-size:.74rem">${d.crmId?E(cardNome(d.crmId)||'card não encontrado'):'<span style="color:#94a3b8">—</span>'}</td><td style="text-align:right;white-space:nowrap;font-weight:800">${R(t.total)}</td><td onclick="event.stopPropagation()">${stOrc(d)==='ped'?chipOrc(d):(()=>{const s=ST_ORC[stOrc(d)]||ST_ORC.rasc;return`<select class="gm-st-sel" title="Mudar o status" onchange="gmListaStatus('${d.id}',this.value)" style="background:${s[1]};color:${s[2]}">${['rasc','env','aprov','perdido'].map(k=>`<option value="${k}" ${stOrc(d)===k?'selected':''}>${ST_ORC[k][0]}</option>`).join('')}</select>`;})()}</td><td style="font-size:.72rem;color:#64748b;white-space:nowrap">${dBR(d.atualizadoEm)}<div>${E(d.atualizadoPor||'')}</div></td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap">${d.numero?`<button type="button" class="gm-b" title="Baixar a proposta em PDF" onclick="gmListaPdf('${d.id}')" style="padding:5px 10px;font-size:.72rem">📄 PDF</button>`:''}</td></tr>`;}).join('')}</tbody></table>`;
   }
+  // (2026-11-24, Clabonde) na lista: PDF da proposta e mudar o status sem abrir o orçamento
+  window.gmListaPdf=async function(id){const o=GM.orcs[id];if(!o)return;const ant=GM.doc;GM.doc=limpo(o);try{await gmOrcPdf();}finally{GM.doc=ant;}};
+  window.gmListaStatus=async function(id,v){
+    const o=GM.orcs[id];if(!o||o.pedidoId||!ST_ORC[v])return;
+    if(GM.doc&&GM.doc.id===id){gmSet('status',v);return;}
+    const x=limpo(o);x.status=v;
+    try{const sv=await gravar(COL_ORC,x);toast((o.numero||'Orçamento')+': '+ST_ORC[v][0],'tok');if(sv.crmId){try{await enviarCrm(sv);}catch(e){console.warn('gm crm status',e);}}}catch(e){console.warn('gm status',e);toast('Não consegui mudar o status agora — tente de novo','terr');}
+    try{_gmRenderLista();}catch(e){}};
+  try{const st=document.createElement('style');st.textContent='.gm-st-sel{border:none;border-radius:999px;padding:3px 8px;font-size:.68rem;font-weight:800;cursor:pointer;font-family:inherit;outline:none}.gm-st-sel option{background:#fff;color:#1e293b}';document.head.appendChild(st);}catch(e){}
   window._gmRenderLista=()=>{const el=document.getElementById('gm-orc-lista');if(!el)return;const q=String(GM.orcBusca||'').toLowerCase();
     let l=Object.values(GM.orcs).sort((a,b)=>String(b.atualizadoEm||'').localeCompare(String(a.atualizadoEm||'')));if(GM.orcSt)l=l.filter(d=>stOrc(d)===GM.orcSt);
     if(q)l=l.filter(d=>[d.numero,d.cliente,d.cidade,cardNome(d.crmId)].join(' ').toLowerCase().includes(q));el.innerHTML=orcTabela(l);};
@@ -87643,13 +88012,17 @@ _pfSalvarEtapas=function(){
     clearTimeout(autoTimer);
     if(autoProm){try{await autoProm;}catch(e){}}
     const d=GM.doc;if(!d||d._direto||d.pedidoId||!d._sujo){if(agoraCrm)await crmFlush();return;}
-    let falta='';
-    if(!String(d.cliente||'').trim())falta='Informe o cliente para o orçamento ser salvo';
-    else if((d.itens||[]).some(i=>!i.lpu&&!String(i.nome||'').trim()))falta='Item avulso sem descrição';
-    else if(d.entrega&&d.entrega<hoje()&&d.entrega!==((GM.orcs[d.id]||{}).entrega))falta='A data de entrega não pode ser retroativa';
-    else if(d.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(d.email).trim()))falta='E-mail do contato inválido';
+    // (2026-11-24, Clabonde: "orçamentos Omoda também salvar automaticamente") — o que falta NÃO impede mais de salvar:
+    // salva e mostra o aviso ao lado. Só não salva: orçamento ainda vazio (sem cliente e sem item) e cópia sem alteração
+    // (pra não duplicar). Quem continua barrando o que falta é o "Transformar em pedido".
+    let falta='',aviso='';
+    if(!String(d.cliente||'').trim()&&!(d.itens||[]).length)falta='Informe o cliente ou adicione um item para o orçamento ser salvo';
     else if(!d.numero&&d._dupDe&&assinOrc(d)===d._dupDe.assin)falta='Cópia sem alterações — altere algo para salvar';
     if(falta){autoSt('⚠️ Não salvo: '+falta,'#dc2626');return;}
+    if(!String(d.cliente||'').trim())aviso='falta o cliente';
+    else if((d.itens||[]).some(i=>!i.lpu&&!String(i.nome||'').trim()))aviso='item avulso sem descrição';
+    else if(d.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(d.email).trim()))aviso='e-mail do contato inválido';
+    else if(d.entrega&&d.entrega<hoje()&&d.entrega!==((GM.orcs[d.id]||{}).entrega))aviso='data de entrega retroativa';
     const ver=d._ver;
     autoProm=(async()=>{
       autoSt('💾 Salvando…','#64748b');
@@ -87662,7 +88035,7 @@ _pfSalvarEtapas=function(){
         if(GM.doc===d){d.atualizadoEm=salvo.atualizadoEm;d.atualizadoPor=salvo.atualizadoPor;d.totalCache=salvo.totalCache;delete d._novo;if(d._ver===ver)delete d._sujo;}
         if(d.crmId){crmPend=d.id;clearTimeout(crmTimer);crmTimer=setTimeout(()=>crmFlush(),20000);}
         if(novo&&GM.doc===d)renderMantendoFoco();
-        const h=new Date();autoSt(d._sujo?'✏️ Alterações não salvas…':'✓ Salvo automaticamente às '+String(h.getHours()).padStart(2,'0')+':'+String(h.getMinutes()).padStart(2,'0'),d._sujo?'#b45309':'#15803d');
+        const h=new Date();autoSt(d._sujo?'✏️ Alterações não salvas…':'✓ Salvo automaticamente às '+String(h.getHours()).padStart(2,'0')+':'+String(h.getMinutes()).padStart(2,'0')+(aviso?' · ⚠️ '+aviso:''),d._sujo?'#b45309':(aviso?'#b45309':'#15803d'));
       }catch(e){if(novo&&!GM.orcs[d.id])d.numero='';console.warn('gm auto-salvar',e);autoSt('⚠️ Não consegui salvar agora — tento de novo na próxima alteração','#dc2626');}
     })();
     try{await autoProm;}finally{autoProm=null;}
@@ -87770,7 +88143,7 @@ _pfSalvarEtapas=function(){
         ${d._direto?`<button type="button" class="gm-b r" onclick="gmPedConverterAbrir()">Continuar para o financeiro →</button>`:bloq?`<button type="button" class="dash-btn-conf" style="background:#dc2626;padding:7px 12px;font-size:.76rem" onclick="gmOrcPdf()">📄 PDF</button><button type="button" class="gm-b p" onclick="gmPedAbrir('${d.pedidoId}')">Abrir pedido ${E((GM.peds[d.pedidoId]||{}).numero||'')}</button><button type="button" class="gm-b" onclick="gmOrcDuplicar()" title="Criar um orçamento novo a partir deste">⧉ Duplicar</button>`:`
         <select class="fc" style="width:auto" onchange="gmSet('status',this.value)">${['rasc','env','aprov','perdido'].map(k=>`<option value="${k}" ${d.status===k?'selected':''}>${ST_ORC[k][0]}</option>`).join('')}</select>
         <span id="gm-auto-st" style="font-size:.72rem;font-weight:700;color:${d._sujo?'#b45309':'#15803d'};white-space:nowrap">${d._sujo?'✏️ Alterações não salvas…':d.numero?'✓ Salvo automaticamente':''}</span>
-        <button type="button" class="gm-b p" onclick="gmOrcSalvar()">💾 Salvar</button>
+        ${d._direto?`<button type="button" class="gm-b p" onclick="gmOrcSalvar()">💾 Salvar</button>`:''}
         ${d.numero?`<button type="button" class="dash-btn-conf" style="background:#dc2626;padding:7px 12px;font-size:.76rem" onclick="gmOrcPdf()">📄 PDF</button><button type="button" class="gm-b r" onclick="gmPedConverterAbrir()">✅ Transformar em pedido</button><button type="button" class="gm-b" onclick="gmOrcDuplicar()" title="Criar um orçamento novo a partir deste">⧉ Duplicar</button>`:''}
         ${d.numero&&adm()?`<button type="button" class="gm-b" onclick="gmOrcExcluir()" title="Excluir orçamento">🗑</button>`:''}`}
       </div>
@@ -88125,7 +88498,9 @@ ${lista}`;
       doc.setFont('helvetica','bold');doc.setFontSize(alto?8:6.5);doc.setTextColor(...PRETO);
       doc.text(lbl,xLbl,y+h/2+1,{align:'right'});doc.text('R$',xR-colR-colRS+1,y+h/2+1);doc.text(F2(val),xR-1.5,y+h/2+1,{align:'right'});y+=h;};
     linhaTot('SUBTOTAL PRODUTOS',t.itens,false,false);
-    linhaTot('DESPESAS (FRETE, MOBILIZAÇÃO, ELEVAÇÃO)',t.ops,false,false);
+    // (2026-11-24, Clabonde) o rótulo cita só o que este orçamento tem — sem elevação no orçamento, "ELEVAÇÃO" não aparece
+    {const dp=[t.frete>0?'FRETE':'',t.mob>0?'MOBILIZAÇÃO':'',t.diar>0?'DIÁRIAS':'',t.elev>0?'ELEVAÇÃO':''].filter(Boolean);
+     linhaTot(dp.length?'DESPESAS ('+dp.join(', ')+')':'DESPESAS',t.ops,false,false);}
     linhaTot('TOTAL COM DESCONTO',t.total,true,true);
     // ── bloco de baixo: garantias, pagamento, prazo, observações ──
     const obs=String(d.obs||'').split(/\n+/).map(s=>s.trim()).filter(Boolean);
@@ -88214,7 +88589,10 @@ ${lista}`;
   window.gmPedConverterAbrir=async function(){if(GM.doc&&GM.doc._sujo&&!GM.doc._direto&&!GM.doc.pedidoId)await autoSalvar(true);
     const d=GM.doc;if(!d)return;
     if(d._direto){if(!String(d.cliente||'').trim()){toast('Informe o cliente','terr');return;}if((d.itens||[]).some(i=>!i.lpu&&!String(i.nome||'').trim())){toast('Item avulso sem descrição','terr');return;}}
-    else{if(!d.numero)return;if(d._sujo){toast('Salve o orçamento antes de transformar em pedido','terr');return;}}
+    else{if(!d.numero)return;if(d._sujo){toast('O orçamento ainda está salvando — tente de novo em alguns segundos','terr');return;}
+      if(!String(d.cliente||'').trim()){toast('Informe o cliente antes de transformar em pedido','terr');return;}
+      if((d.itens||[]).some(i=>!i.lpu&&!String(i.nome||'').trim())){toast('Item avulso sem descrição — descreva antes de transformar em pedido','terr');return;}
+      if(d.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(d.email).trim())){toast('E-mail do contato inválido — corrija antes de transformar em pedido','terr');return;}}
     if(!(d.itens||[]).length){toast('O orçamento não tem itens','terr');return;}
     const t=totais(d);
     const pc=pagCalc(d);
@@ -88433,6 +88811,8 @@ ${lista}`;
   #sec-cat-GRANDA_MOB tr.gml-cat small{font-size:.68rem;color:#c7d2fe;margin-left:10px;font-weight:600}
   #sec-cat-GRANDA_MOB tr.gml-v td{padding:9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle;background:#fff}
   #sec-cat-GRANDA_MOB tr.gml-v.z td{background:#fbfcfe}
+  #sec-cat-GRANDA_MOB tr.gml-v.inat td.md,#sec-cat-GRANDA_MOB tr.gml-v.inat td.cd,#sec-cat-GRANDA_MOB tr.gml-v.inat td.pr,#sec-cat-GRANDA_MOB tr.gml-v.inat td.tm em:not(.gml-inat){opacity:.4}
+  #sec-cat-GRANDA_MOB em.gml-inat{display:inline-block;margin-left:6px;font-style:normal;font-size:.62rem;font-weight:800;background:#fee2e2;color:#b91c1c;border-radius:999px;padding:2px 8px;text-decoration:none}
   #sec-cat-GRANDA_MOB tr.gml-v.ult td{border-bottom:1px solid #e5e7eb}
   #sec-cat-GRANDA_MOB tr.gml-v:hover td.tm,#sec-cat-GRANDA_MOB tr.gml-v:hover td.md,#sec-cat-GRANDA_MOB tr.gml-v:hover td.cd,#sec-cat-GRANDA_MOB tr.gml-v:hover td.pr,#sec-cat-GRANDA_MOB tr.gml-v:hover td.ed{background:#eef2ff}
   #sec-cat-GRANDA_MOB td.ft{padding:10px!important;border-right:1px solid #f1f5f9}
@@ -88455,10 +88835,10 @@ ${lista}`;
   @media(max-width:520px){#sec-cat-GRANDA_MOB .gmc-fam{grid-template-columns:1fr}#sec-cat-GRANDA_MOB .gmc-img{border-right:none;border-bottom:1px solid #f1f5f9}}
   `;document.head.appendChild(st);}catch(e){}
   function htmlCad(){
-    const todos=cadLista(),o=ops();
+    const todos=cadLista(),o=ops(),vis=adm()?cadTodos():todos,nInat=vis.length-todos.length;
     const nrm=v=>String(v||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
     const q=nrm(GM.cadQ);
-    const lb=todos.filter(x=>!q||nrm([x.codigo,x.nome,x.descricao].join(' ')).includes(q));let l=lb;
+    const lb=vis.filter(x=>!q||nrm([x.codigo,x.nome,x.descricao].join(' ')).includes(q));let l=lb;
     const nCat={};lb.forEach(x=>{const c=catDe(x);nCat[c]=(nCat[c]||0)+1;});
     if(GM.cadCat)l=l.filter(x=>catDe(x)===GM.cadCat);
     const precos=todos.map(x=>N(x.preco)).filter(v=>v>0);
@@ -88472,14 +88852,14 @@ ${lista}`;
       fams.forEach(g=>g[1].sort((a,b)=>(ordT[tamSig(a)]||0)-(ordT[tamSig(b)]||0)||(a.item-b.item)));
       return`<tr class="gml-cat"><td colspan="${adm()?7:6}"><span>${n}</span><small>${fams.length} ${pl(fams.length,'produto','produtos')} · ${its.length} ${pl(its.length,'variação','variações')}</small></td></tr>`+
         fams.map(([nome,vs])=>{zebra++;const fx=vs.find(v=>GM_FOTOS[v.codigo])||vs[0];const f=GM_FOTOS[fx.codigo];const desc=vs.map(v=>v.descricao).find(Boolean)||'';const z=zebra%2?'':' z';
-          return vs.map((v,vi)=>`<tr class="gml-v${z}${vi===vs.length-1?' ult':''}" onmouseenter="_gmCadFoto('${J(nome)}','${v.id}')">
+          return vs.map((v,vi)=>`<tr class="gml-v${z}${vi===vs.length-1?' ult':''}${v.inativo?' inat':''}" onmouseenter="_gmCadFoto('${J(nome)}','${v.id}')">
             ${vi===0?`<td class="ft" rowspan="${vs.length}">${f?`<img data-fam="${E(nome)}" src="${f}" alt="${E(nome)}" onclick="_gcVerArquivo&&_gcVerArquivo(this.src,'${J(nome)}.jpg')" title="Ampliar">`:'<div class="sf">sem foto</div>'}</td>
             <td class="pd" rowspan="${vs.length}"><b>${E(nome)}</b><span>${E(desc)}</span></td>`:''}
-            <td class="tm"><em class="t-${tamSig(v)}">${E(tamTxt(v,vs,vi))}</em></td>
+            <td class="tm"><em class="t-${tamSig(v)}">${E(tamTxt(v,vs,vi))}</em>${v.inativo?'<em class="gml-inat" title="Não aparece pra escolher no orçamento">Desativado</em>':''}</td>
             <td class="md">${E(medida(v)||'—')}</td>
             <td class="cd">${E(v.codigo)}</td>
             <td class="pr">${R(v.preco)}</td>
-            ${adm()?`<td class="ed"><button type="button" onclick="gmCadEditar('${v.id}')" title="Editar preço e descrição">✎</button></td>`:''}</tr>`).join('');}).join('');}).join('');
+            ${adm()?`<td class="ed"><button type="button" onclick="gmCadEditar('${v.id}')" title="Editar preço e descrição, ou desativar o item">✎</button></td>`:''}</tr>`).join('');}).join('');}).join('');
     const lista=`<div class="gml-wrap"><table class="gml"><colgroup><col style="width:104px"><col><col style="width:150px"><col style="width:170px"><col style="width:82px"><col style="width:140px">${adm()?'<col style="width:40px">':''}</colgroup>
       <thead><tr><th></th><th>Produto</th><th>Tamanho</th><th>Medidas (L × A × P)</th><th>Código</th><th style="text-align:right">Preço instalado</th>${adm()?'<th></th>':''}</tr></thead><tbody>${linhas}</tbody></table></div>`;
     return`<div class="gmc-hero"><div class="gmc-box"><div class="gmc-tit">Caderno de mobiliário OMODA &amp; JAECOO</div>
@@ -88492,6 +88872,7 @@ ${lista}`;
         <button type="button" class="gm-b" onclick="gmCadExportar('xlsx')" title="Baixar o caderno inteiro em planilha">📊 Exportar Excel</button>
         <button type="button" class="dash-btn-conf" style="background:#dc2626;padding:7px 12px;font-size:.76rem" onclick="gmCadExportar('pdf')" title="Baixar o caderno inteiro em PDF, com fotos">📄 Exportar PDF</button>
 </div>
+      ${nInat>0?`<div style="font-size:.72rem;color:#64748b;margin:0 0 8px">🚫 ${nInat} ${pl(nInat,'item desativado aparece','itens desativados aparecem')} apagado${nInat>1?'s':''} — só você vê; não ${nInat>1?'aparecem':'aparece'} pra escolher no orçamento. Clique no ✎ pra reativar.</div>`:''}
       <div class="gmc-chips"><button type="button" class="gmc-chip ${!GM.cadCat?'on':''}" onclick="_gm.cadCat='';_gmRender()">Todos<span>${lb.length}</span></button>
         ${cats.filter(c=>nCat[c[0]]).map(([k,n])=>`<button type="button" class="gmc-chip ${GM.cadCat===k?'on':''}" onclick="_gm.cadCat=_gm.cadCat==='${k}'?'':'${k}';_gmRender()">${n}<span>${nCat[k]}</span></button>`).join('')}</div>
       ${l.length?lista:'<div class="dash-card" style="text-align:center;color:#94a3b8;padding:30px">Nada no caderno com essa busca.</div>'}`;
@@ -88637,7 +89018,12 @@ ${lista}`;
     ov.innerHTML=`<div class="bx" style="max-width:520px"><h3>${E(x.codigo)} · ${E(x.nome)}</h3>
       <label class="gm-l" style="margin-top:10px">Descrição<textarea id="gm-ced-d" class="fc no-upper" rows="3" style="text-transform:none">${E(x.descricao||'')}</textarea></label>
       <label class="gm-l" style="margin-top:8px">Preço do produto instalado (R$)<input id="gm-ced-p" class="fc" inputmode="decimal" value="${M(x.preco)}"></label>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button type="button" class="gm-b" onclick="document.getElementById('gm-ced').remove()">Cancelar</button><button type="button" class="gm-b p" onclick="_gmCedOk('${id}')">Salvar</button></div></div>`;document.body.appendChild(ov);};
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap"><button type="button" class="gm-b" style="margin-right:auto;${x.inativo?'color:#15803d;border-color:#86efac':'color:#b91c1c;border-color:#fca5a5'}" onclick="_gmCedAtivo('${id}',${x.inativo?'true':'false'})">${x.inativo?'✅ Reativar item':'🚫 Desativar item'}</button><button type="button" class="gm-b" onclick="document.getElementById('gm-ced').remove()">Cancelar</button><button type="button" class="gm-b p" onclick="_gmCedOk('${id}')">Salvar</button></div>
+      ${x.inativo?'<div style="font-size:.72rem;color:#b45309;margin-top:8px">Este item está desativado: não aparece pra escolher no orçamento, na leitura com IA nem nas exportações do caderno.</div>':''}</div>`;document.body.appendChild(ov);};
+  window._gmCedAtivo=async function(id,ativar){if(!adm())return;const x=Object.assign({},cadItem(id));if(!x.id)return;
+    if(!ativar&&!confirm('Desativar '+x.codigo+' · '+x.nome+'?\n\nEle deixa de aparecer pra escolher no orçamento, na leitura com IA e nas exportações do caderno. Os orçamentos que já têm este item continuam iguais. Dá pra reativar depois pelo ✎.'))return;
+    if(ativar)delete x.inativo;else x.inativo=true;x.atualizadoEm=agora();x.atualizadoPor=quem();x.hist=(x.hist||[]).concat([{em:agora(),por:quem(),txt:ativar?'Item reativado':'Item desativado'}]);
+    try{await window._fbOrcSalvar(DOC_CAD,id,x);GM.cad[id]=x;document.getElementById('gm-ced')?.remove();toast(ativar?x.codigo+' reativado ✔':x.codigo+' desativado — não aparece mais pra escolher no orçamento','tok');render();}catch(e){toast('Erro: '+(e.message||e),'terr');}};
   window._gmCedOk=async function(id){const x=Object.assign({},cadItem(id));const p=N((document.getElementById('gm-ced-p')||{}).value);if(!(p>0)){toast('Preço inválido','terr');return;}
     const ant=x.preco;x.descricao=(document.getElementById('gm-ced-d')||{}).value||'';x.preco=p;x.atualizadoEm=agora();x.atualizadoPor=quem();x.hist=(x.hist||[]).concat(ant!==p?[{em:agora(),por:quem(),txt:'Preço '+R(ant)+' → '+R(p)}]:[]);
     try{await window._fbOrcSalvar(DOC_CAD,id,x);GM.cad[id]=x;document.getElementById('gm-ced')?.remove();toast('Item salvo','tok');render();}catch(e){toast('Erro: '+(e.message||e),'terr');}};
@@ -89044,7 +89430,7 @@ function E2(s){return _orcxEsc(s);}
     const e=crmEmpresas.find(x=>x.id===p.id);if(!e){_crmCkCancelar();return;}
     const erro=document.getElementById('crm-ck-erro');
     const caderno=!!document.getElementById('crm-ck-cad')?.checked&&document.getElementById('crm-ck-cad-box')?.style.display!=='none';
-    const itens=[];let falta='';
+    const itens=[];let falta='';const grandes=[];
     if(!caderno)document.querySelectorAll('#crm-ck-lista .crm-ck-row').forEach((row,i)=>{
       row.style.borderColor='#fbcfe8';
       const key=row.querySelector('.crm-ck-prod')?.value||'';
@@ -89057,9 +89443,9 @@ function E2(s){return _orcxEsc(s);}
       else if(temModelos&&!mv)msg=key==='caderno'?'escolha o produto do caderno':'escolha o modelo';
       else if(!(qtd>=1)){msg='informe quantas unidades o cliente quer';const q=row.querySelector('.crm-ck-qtd');if(q)q.style.borderColor='#dc2626';}
       else if(!(larg>0)||!(alt>0)||prof==null||prof<0)msg='preencha largura, altura e profundidade (em metros)';
-      else if(larg>50||alt>50||prof>10)msg='as medidas são em METROS (ex.: 1,20 × 0,60 × 0,08) — parece que foi digitado em cm';
       else if(d&&d.obsObrig&&!obs)msg='descreva o que é no campo Detalhe';
       if(msg){if(!falta)falta=`Produto ${i+1}: ${msg}.`;row.style.borderColor='#dc2626';return;}
+      if(larg>50||alt>50||prof>10)grandes.push(`Produto ${i+1}: ${String(larg).replace('.',',')} × ${String(alt).replace('.',',')} × ${String(prof).replace('.',',')} m`);
       const item={key,qtd,larg:_crmCkM2Cm(larg),alt:_crmCkM2Cm(alt),prof:_crmCkM2Cm(prof),obs};
       if(mv.startsWith('m:'))item.modelo=mv.slice(2);else if(mv.startsWith('e:'))item.eng=mv.slice(2);else if(mv.startsWith('r:'))item.rcId=mv.slice(2);
       else if(mv.startsWith('p:')){item.prodId=mv.slice(2);const pp=prodsCaderno().find(x=>String(x.id)===item.prodId);if(pp)item.prodNome=nomeProd(pp);}
@@ -89067,6 +89453,7 @@ function E2(s){return _orcxEsc(s);}
     });
     if(falta){if(erro)erro.textContent=falta;return;}
     if(!caderno&&!itens.length){if(erro)erro.textContent='Adicione pelo menos 1 produto.';return;}
+    if(grandes.length&&!confirm('Confira as medidas — estão em METROS:\n\n'+grandes.join('\n')+'\n\nÉ isso mesmo? (OK = sim, são metros · Cancelar = corrigir)'))return;
     const quem=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—',agora=new Date().toISOString();
     const antes=_crmCkResumoTxt(e.orcChecklist);
     e.orcChecklist=caderno?{modo:'caderno',obs:(document.getElementById('crm-ck-cad-obs')?.value||'').trim(),itens:[],em:agora,por:quem}:{itens,em:agora,por:quem};
@@ -89960,6 +90347,60 @@ function _crmCardSetSubOrc(sub){
 
 </script>
 <script>
+// ══ CONTATOS DO GRANDA MOB NO CRM (2026-11-24, Clabonde: "cadastrar os clientes do Granda Mob também nos contatos
+// do CRM, pegar a pessoa e já relacionar com a empresa que tá no nome do orçamento") ══════════════════════════════
+// Cada orçamento do Granda Mob com Contato preenchido vira um contato na lista de Contatos (CRM e Prospecção), com a
+// EMPRESA = Cliente do orçamento, telefone e e-mail do contato. É ao vivo (lê os orçamentos do Granda Mob): orçamento
+// novo ou alterado aparece sozinho, sem ninguém cadastrar nada. Mesma pessoa em vários orçamentos = um contato só
+// (fica o dado do orçamento mais recente). Clique abre o orçamento no Granda Mob. Aparece também na sugestão ao
+// digitar o nome de um decisor no card.
+(function(){
+  'use strict';
+  let _pediu=false,_reRender=false;
+  function garantirDados(){
+    const G=window._gm;if(!G)return null;
+    if(!G.watch&&typeof window._gmWatch==='function'&&!_pediu){_pediu=true;try{window._gmWatch();}catch(e){}
+      if(!_reRender){_reRender=true;[1500,4000].forEach(ms=>setTimeout(()=>{try{if(document.getElementById('crm-contatos-lista-body')&&typeof renderCrmContatosLista==='function')renderCrmContatosLista();}catch(e){}
+        try{if(document.getElementById('prosp-contatos-lista-body')&&typeof renderProspContatosLista==='function')renderProspContatosLista();}catch(e){}},ms));}}
+    return G;
+  }
+  window._gmTodosContatos=function(){
+    const G=garantirDados();if(!G||!G.orcs)return[];
+    const lst=Object.values(G.orcs).filter(o=>o&&o.id&&!o.excluido&&String(o.contato||'').trim())
+      .sort((a,b)=>String(b.atualizadoEm||b.criadoEm||'').localeCompare(String(a.atualizadoEm||a.criadoEm||'')));
+    const vistos=new Set(),out=[];
+    lst.forEach(o=>{
+      const tel=String(o.telefone||'').trim();
+      const c={nome:String(o.contato).trim().toUpperCase(),cargo:'',empresa:String(o.cliente||'').trim(),telefones:tel?[{tipo:'',numero:tel}]:[],email:String(o.email||'').trim().toLowerCase(),linkedin:'',aniversario:'',
+        empresaId:o.id,empresaNome:String(o.cliente||'').trim()||'—',_gmId:o.id,_gmNum:o.numero||o.codigo||''};
+      let k;try{k=_crmContatoChave(c);}catch(e){k=c.nome+'|'+c.email+'|'+tel;}
+      if(vistos.has(k))return;vistos.add(k);out.push(c);
+    });
+    return out;
+  };
+  // lista unificada (Contatos do CRM e da Prospecção): entra a origem Granda Mob
+  if(typeof _contatosUnificados==='function'){const _u=_contatosUnificados;_contatosUnificados=function(){
+    const base=_u.apply(this,arguments);let gm=[];try{gm=window._gmTodosContatos().map(c=>Object.assign({},c,{_origem:'Granda Mob'}));}catch(e){}
+    if(!gm.length)return base;const vistos=new Set(base.map(c=>{try{return _crmContatoChave(c);}catch(e){return'';}}));
+    return base.concat(gm.filter(c=>{let k;try{k=_crmContatoChave(c);}catch(e){k='';}return!vistos.has(k);}));};}
+  // linha do contato de origem Granda Mob: etiqueta própria e clique abre o orçamento
+  function ajustarLista(wrapId){
+    const w=document.getElementById(wrapId);if(!w)return;
+    const gm=window._gmTodosContatos();if(!gm.length)return;
+    const porId={};gm.forEach(c=>{porId[c.empresaId]=c;});
+    w.querySelectorAll(':scope > div[onclick]').forEach(row=>{
+      const oc=row.getAttribute('onclick')||'';const m=/(?:crmAbrirCard|prospAbrirCard)\('([^']+)'\)/.exec(oc);if(!m||!porId[m[1]])return;
+      if((crmEmpresas||[]).some(e=>e.id===m[1]))return;try{if((prospEmpresas||[]).some(e=>e.id===m[1]))return;}catch(e){}
+      row.setAttribute('onclick',`gmOrcAbrirDoCard('${m[1]}')`);row.title='Contato do orçamento do Granda Mob — clique pra abrir o orçamento';
+      const tag=[...row.querySelectorAll('span')].find(s=>/^(CRM|Prospecção)$/.test(s.textContent.trim()));
+      if(tag){tag.textContent='Granda Mob';tag.style.background='#fce7f3';tag.style.color='#9d174d';}
+    });
+  }
+  if(typeof renderCrmContatosLista==='function'){const _r=renderCrmContatosLista;renderCrmContatosLista=function(){const r=_r.apply(this,arguments);try{ajustarLista('crm-contatos-lista-body');}catch(e){}return r;};}
+  if(typeof renderProspContatosLista==='function'){const _r=renderProspContatosLista;renderProspContatosLista=function(){const r=_r.apply(this,arguments);try{ajustarLista('prosp-contatos-lista-body');}catch(e){}return r;};}
+})();
+</script>
+<script>
 // ══ ORÇAMENTOS — IA: PLANILHA DO CLIENTE + PROJETO (2026-11-11, pedido do Clabonde: "consegue treinar pra ler
 // planilha do BK também? eu mando a planilha do BK que é o que o cliente pediu e mando os pdfs também, tem coisa
 // que não tem medida na planilha daí você acha no projeto e faz a compatibilidade entre os dois documentos")
@@ -90266,7 +90707,7 @@ function situacao(c){
 function minhaAcao(c){
   if(!c||c.excluido||c.status==='ENCERRADO')return'';
   if(souOrig(c)&&c.pedidoPrazo)return'Responder pedido de mais prazo';
-  if(souOrig(c)&&c.status==='RESOLVIDO')return'Confirmar a solução';
+  if(souOrig(c)&&!souDest(c)&&c.status==='RESOLVIDO')return'Confirmar a solução';
   if(souDest(c)&&c.status==='ABERTO')return'Começar o chamado';
   if(souDest(c)&&c.status==='ANDAMENTO'&&!c.pedidoPrazo){const s=situacao(c);if(s.k==='atr')return'Resolver — está atrasado';if(s.k==='hoje'||s.k==='amanha')return'Resolver — '+s.txt.toLowerCase();}
   return'';
@@ -90566,7 +91007,7 @@ function renderDetalhe(id){
   const bts=[];
   if(aberto){
     if(c.pedidoPrazo&&O)bts.push(`<button class="chx-b ok" onclick="cipAcao('${id}','aprovar_prazo')">✅ Aprovar novo prazo</button>`,`<button class="chx-b no" onclick="cipAcao('${id}','recusar_prazo')">⛔ Recusar novo prazo</button>`);
-    if(c.status==='RESOLVIDO'&&O)bts.push(`<button class="chx-b ok" onclick="cipAcao('${id}','confirmar')">🏁 Confirmar e avaliar</button>`,`<button class="chx-b no" onclick="cipAcao('${id}','reabrir')">🔁 Não resolveu — reabrir</button>`);
+    if(c.status==='RESOLVIDO'&&O&&!souDest(c))bts.push(`<button class="chx-b ok" onclick="cipAcao('${id}','confirmar')">🏁 Confirmar e avaliar</button>`,`<button class="chx-b no" onclick="cipAcao('${id}','reabrir')">🔁 Não resolveu — reabrir</button>`);
     if(c.status==='ABERTO'&&D)bts.push(`<button class="chx-b ok" onclick="cipAcao('${id}','comecar')">▶️ Começar</button>`);
     if((c.status==='ABERTO'||c.status==='ANDAMENTO')&&D){
       bts.push(`<button class="chx-b ok" onclick="cipAcao('${id}','resolver')">🛠️ Marcar como resolvido</button>`);
@@ -90617,6 +91058,7 @@ const ACOES={
 };
 window.cipAcao=function(id,acao){
   const c=_itens[id],a=ACOES[acao];if(!c||!a)return;
+  if((acao==='confirmar'||acao==='reabrir')&&!(ageOrig(c)&&!souDest(c))){toast('Só quem abriu o chamado confirma a solução ou reabre','terr');return;}
   let html='';
   if(acao==='pedir_prazo'){const min=_isoLocal(_addDiasUteis(c.prazo<hoje()?hoje():c.prazo,1));html+=`<div class="fg"><label>Novo prazo <span class="r">*</span></label><input type="date" id="cipa-data" class="fc" min="${min}" value="${min}"><div class="chx-sub" style="margin-top:5px">Prazo atual: ${fmtD(c.prazo)}. ${esc(c.criadoPor)} aprova ou recusa; até lá vale o prazo atual.</div></div>`;}
   if(acao==='comecar')html+=`<div style="font-size:.82rem;color:#334155;margin-bottom:14px">Marca que você começou a resolver este chamado. Prazo: <b>${fmtD(c.prazo)}</b>.</div>`;
@@ -90641,6 +91083,7 @@ window.cipConfirmarAcao=async function(id,acao,btn){
   const eu=meuNome();
   try{
     const anexos=a.arq?await subirArqs('cipa-arq'):[];
+    let _cRes=null;
     const res=await alterar(id,c=>{
       const fechado=c.status==='ENCERRADO';c.prazoHist=Array.isArray(c.prazoHist)?c.prazoHist:[];
       const ultPed=()=>{for(let i=c.prazoHist.length-1;i>=0;i--)if(c.prazoHist[i].tipo==='PEDIDO'&&c.prazoHist[i].decisao==='PENDENTE')return c.prazoHist[i];return null;};
@@ -90663,11 +91106,11 @@ window.cipConfirmarAcao=async function(id,acao,btn){
         case'resolver':if(fechado||c.status==='RESOLVIDO')return false;if(!ageDest(c))throw new Error('Só o projetista do chamado resolve');
           c.status='RESOLVIDO';c.solucao=txt;c.solucaoAnexos=anexos;c.resolvidoEm=agora();c.resolvidoPor=eu;c.resolvidoNoPrazo=hoje()<=c.prazo;c.diasAtrasoResolucao=diasAtraso(c);
           if(c.pedidoPrazo){const up=ultPed();if(up)up.decisao='SEM_DECISAO';c.pedidoPrazo=null;}
-          hist(c,'resolvido',`Marcado como resolvido${c.resolvidoNoPrazo?' (no prazo)':' com '+duTxt(c.diasAtrasoResolucao)+' de atraso'}${txt?'\n'+txt:''}`,anexos);break;
-        case'confirmar':if(c.status!=='RESOLVIDO')return false;if(!ageOrig(c))throw new Error('Só quem abriu confirma');
+          hist(c,'resolvido',`Marcado como resolvido${c.resolvidoNoPrazo?' (no prazo)':' com '+duTxt(c.diasAtrasoResolucao)+' de atraso'}${txt?'\n'+txt:''}`,anexos);_cRes=JSON.parse(JSON.stringify(c));break;
+        case'confirmar':if(c.status!=='RESOLVIDO')return false;if(!ageOrig(c)||souDest(c))throw new Error('Só quem abriu confirma');
           c.status='ENCERRADO';c.encerradoTipo='CONFIRMADO';c.encerradoEm=agora();c.encerradoPor=eu;c.avaliacao={nota:aval,obs:txt,por:eu,em:agora()};
           hist(c,'confirmado',`Solução confirmada — ${AVAL[aval].l.toLowerCase()} — chamado encerrado${txt?'\n'+txt:''}`);break;
-        case'reabrir':{if(c.status!=='RESOLVIDO')return false;if(!ageOrig(c))throw new Error('Só quem abriu reabre');
+        case'reabrir':{if(c.status!=='RESOLVIDO')return false;if(!ageOrig(c)||souDest(c))throw new Error('Só quem abriu reabre');
           const novo=prazoDe(c.prioridade);c.prazoHist.push({tipo:'REABERTURA',de:c.prazo,para:novo,motivo:txt,por:eu,em:agora()});
           c.status='ANDAMENTO';c.reaberturas=(c.reaberturas||0)+1;c.prazo=novo;c.reabertoEm=agora();
           hist(c,'reaberto',`Reaberto (não atendeu) — novo prazo ${fmtD(c.prazo)}\n${txt}`);break;}
@@ -90679,6 +91122,8 @@ window.cipConfirmarAcao=async function(id,acao,btn){
       }
     });
     closeM('mo-cip-acao');
+    if(res&&acao==='resolver'&&_cRes&&window._chEmailResolvido){const c=_cRes;(async()=>{const reg=await window._chEmailResolvido({rotulo:'Chamado interno de Projetos',ondeVer:'Projetos → Chamados internos',para:c.criadoPorEmail,paraNome:c.criadoPor,num:numTxt(c),titulo:c.titulo,quem:c.resolvidoPor||meuNome(),em:c.resolvidoEm,noPrazo:c.resolvidoNoPrazo,atraso:duTxt(c.diasAtrasoResolucao||0),solucao:c.solucao,anexos:c.solucaoAnexos,os:c.os,replyTo:c.destEmail});
+      if(reg){if(/^Não|não /.test(reg))toast(reg,'twar');try{await alterar(c.id,x=>{hist(x,'email',reg);});}catch(e){console.warn('registro e-mail resolvido',e);}}})();}
     if(!res){toast('Nada foi alterado — o chamado já tinha sido atualizado por outra pessoa. Veja a situação atual.','twar');return;}
     if(acao==='excluir')closeM('mo-cip');
     toast({comecar:'Chamado começado ✅',comentar:'Comentário registrado ✅',pedir_prazo:'Pedido de prazo enviado ✅',aprovar_prazo:'Novo prazo aprovado ✅',recusar_prazo:'Pedido de prazo recusado',resolver:'Marcado como resolvido ✅',confirmar:'Chamado encerrado ✅',reabrir:'Chamado reaberto',sem_necessidade:'Chamado encerrado',excluir:'Chamado excluído'}[acao],'tok');
@@ -93504,8 +93949,60 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
   // Nada de módulo solto fora de fileira.
   const PASSO_REGRA=0.12;
   function distribui(a,b,passo){const len=b-a;if(len<=0)return[];let n=Math.round(len/passo)-1;if(n<1)n=1;const r=[];for(let j=1;j<=n;j++)r.push(a+len*j/(n+1));return r;}
+  // (2026-11-24, Clabonde) LETRA DE PERNA FINA (ex.: letras de 30 cm com perna de 10 cm): a grade de 12 cm deixa
+  // 1 módulo por perna e a letra não acende. Perna com menos de 24 cm (2 × 12 cm) → LED pelo PERÍMETRO: módulos
+  // acompanhando a parede por dentro (contorno externo e miolos), 1 a cada 12 cm (parâmetro "Módulo de LED + fio"),
+  // a ~3 cm da parede — o mesmo padrão do contorno ÷ 0,12 m. Perna larga continua na grade de 12 cm.
+  // Largura média da perna = 2 × área ÷ contorno.
+  const PERNA_FINA=0.24;
+  function pernaMedia(aneis){let ext=0,fur=0,per=0;aneis.forEach((r,i)=>{const a=Math.abs(areaAnel(r));if(i===0)ext=a;else fur+=a;per+=perAnel(r);});return per>0?2*(ext-fur)/per:0;}
+  // (2026-11-24 v2, Clabonde: "não é esse desenho feio") LED PELO PERÍMETRO = uma corrente de módulos acompanhando a
+  // parede POR DENTRO, a ~2,5 cm dela (¼ da perna em perna mais fina), em cada contorno (externo e miolos), 1 módulo a
+  // cada 12 cm, GIRADO na direção da parede (acompanha curva e diagonal). Só fica módulo INTEIRO dentro da letra, sem
+  // encostar em parede nem em outro módulo; em canto apertado o módulo corre um pouco pra frente/trás até caber.
+  function ledCabe(cx,cy,ang,aneis){
+    const c=Math.cos(ang),s2=Math.sin(ang),hl=MOD.c/2+0.004,hw=MOD.l/2+0.004;
+    for(const fx of[-1,-0.5,0,0.5,1])for(const fy of[-1,0,1]){const a=fx*hl,b=fy*hw;if(!dentro(cx+a*c-b*s2,cy+a*s2+b*c,aneis))return false;}
+    for(const r of aneis)for(const p of r){const dx=p.x-cx,dy=p.y-cy,u=dx*c+dy*s2,v=-dx*s2+dy*c;if(Math.abs(u)<hl&&Math.abs(v)<hw)return false;}
+    return true;
+  }
+  function segDist(a,b,c,d){ // menor distância entre os segmentos ab e cd
+    const cl=(v)=>Math.max(0,Math.min(1,v));
+    const pd=(p,q,r)=>{const vx=r.x-q.x,vy=r.y-q.y,L=vx*vx+vy*vy;const t=L>0?cl(((p.x-q.x)*vx+(p.y-q.y)*vy)/L):0;return Math.hypot(p.x-(q.x+t*vx),p.y-(q.y+t*vy));};
+    const cr=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+    if(cr(a,b,c)*cr(a,b,d)<0&&cr(c,d,a)*cr(c,d,b)<0)return 0;
+    return Math.min(pd(a,c,d),pd(b,c,d),pd(c,a,b),pd(d,a,b));
+  }
+  function ledEixo(l){const h=MOD.c/2,c=Math.cos(l.ang),s2=Math.sin(l.ang);return[{x:l.x-h*c,y:l.y-h*s2},{x:l.x+h*c,y:l.y+h*s2}];}
+  function ledLivre(l,leds){const e=ledEixo(l),min=MOD.l+0.008;return!leds.some(o=>Math.hypot(o.x-l.x,o.y-l.y)<MOD.c+min&&segDist(e[0],e[1],...ledEixo(o))<min);}
+  function layoutPerimetro(aneis,passo,perna){
+    const leds=[],off=Math.max(MOD.l/2+0.012,Math.min(0.025,perna/4));
+    aneis.forEach(r=>{
+      const n0=r.length;if(n0<3)return;const segs=[];let tot=0;
+      for(let i=0;i<n0;i++){const a=r[i],b=r[(i+1)%n0],L=Math.hypot(b.x-a.x,b.y-a.y);if(L>1e-9){segs.push({a,b,L,ini:tot});tot+=L;}}
+      if(tot<MOD.c)return;
+      const at=d=>{d=((d%tot)+tot)%tot;let lo=0,hi=segs.length-1;while(lo<hi){const m=(lo+hi+1)>>1;if(segs[m].ini<=d)lo=m;else hi=m-1;}const sg=segs[lo],t=Math.min(1,(d-sg.ini)/sg.L);return{x:sg.a.x+(sg.b.x-sg.a.x)*t,y:sg.a.y+(sg.b.y-sg.a.y)*t};};
+      const n=Math.max(1,Math.ceil(tot/passo-1e-9)),sp=tot/n,w=Math.min(0.04,sp/3);
+      for(let j=0;j<n;j++){
+        let pos=null;
+        for(const dd of[0,0.01,-0.01,0.02,-0.02,0.03,-0.03,0.045,-0.045]){
+          const d=(j+0.5)*sp+dd,p=at(d),p1=at(d-w),p2=at(d+w);let tx=p2.x-p1.x,ty=p2.y-p1.y;const tl=Math.hypot(tx,ty);if(tl<1e-9)continue;tx/=tl;ty/=tl;
+          let nx=-ty,ny=tx;if(!dentro(p.x+nx*off,p.y+ny*off,aneis)){nx=-nx;ny=-ny;}
+          const ang=Math.atan2(ty,tx);
+          for(const k of[1,0.85,1.2,0.7,1.4]){const l={x:p.x+nx*off*k,y:p.y+ny*off*k,ang};if(ledCabe(l.x,l.y,ang,aneis)&&ledLivre(l,leds)){pos=l;break;}}
+          if(pos)break;
+        }
+        if(pos)leds.push(pos);
+      }
+    });
+    return leds;
+  }
   function layoutPeca(aneis,passo){
     passo=PASSO_REGRA;
+    {const perna=pernaMedia(aneis);if(perna>0&&perna<PERNA_FINA){
+      const pP=(typeof _orcP==='function'&&_orcP().moduloM)||PASSO_REGRA,leds=layoutPerimetro(aneis,pP,perna),bb=bbAneis(aneis),g=0.02,lim=pP*1.05;
+      let sl=0;for(let y=bb.minY+g/2;y<bb.maxY;y+=g)for(let x=bb.minX+g/2;x<bb.maxX;x+=g)if(dentro(x,y,aneis)&&!leds.some(l=>Math.hypot(l.x-x,l.y-y)<lim))sl+=g*g;
+      return{leds,semLuz:sl,perimetro:true};}}
     const bb=bbAneis(aneis),leds=[],H=bb.maxY-bb.minY;
     const longe=(x,y,d)=>!leds.some(l=>Math.hypot(l.x-x,l.y-y)<d);
     const fileira=(y,dmin)=>{
@@ -93778,7 +94275,9 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
   // tira = caixa + aba do fundo + espessura da chapa da frente (4 mm) + largura do filete. BORDA INFINITA: a frente
   // fica por cima da lateral sem borda metálica aparente (fixação por dentro) — tira = caixa + 2 abas.
   const ESP_FRENTE=0.004,FILETE_PAD=0.015;
-  function alturaTira(i,caixa){const pc=S.pc[i]||{};return pc.acab==='filetado'&&S.modelo==='acril'?caixa+APV_ABA+ESP_FRENTE+(N(pc.filete)>0?N(pc.filete):FILETE_PAD):caixa+2*APV_ABA;}
+  // (2026-11-24, Clabonde) o filete agora é uma chapa galvanizada 20 própria (1,20×3,00 m, no formato das letras, com
+  // aproveitamento) — a tira da lateral volta a ser caixa + 2 abas, igual à borda infinita.
+  function alturaTira(i,caixa){return caixa+2*APV_ABA;}
   function partsTiras(pecasIdx,M,caixa){
     const parts=[];
     pecasIdx.forEach(i=>{const q=M.porPeca[i],h=alturaTira(i,caixa);[q.perExt].concat(q.perFurosLista||[]).forEach((comp,j)=>{if(comp>0)parts.push({w:comp,h,area:comp*h,ref:{peca:i,tira:true,miolo:j>0}});});});
@@ -94104,14 +94603,14 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     });
     r.per=r.perExt+r.perFuros;
     if(S.modelo==='acril'){
-      const ck=k.toFixed(6)+'|'+passo+'|v3|'+g.pecas.map((p,i)=>(ehAplic(i)||ehIgn(i)||ehTest(i)?1:0)+(S.pc[i]&&S.pc[i].tipoAp==='vazado'?'v':'')+(S.pc[i]&&opaca(S.pc[i])?'o':'')).join('');
+      const ck=k.toFixed(6)+'|'+passo+'|v5|'+g.pecas.map((p,i)=>(ehAplic(i)||ehIgn(i)||ehTest(i)?1:0)+(S.pc[i]&&S.pc[i].tipoAp==='vazado'?'v':'')+(S.pc[i]&&opaca(S.pc[i])?'o':'')).join('');
       if(_ledCache.k!==ck||_ledCache.g!==g){
         const leds=[],pp=[];
         g.pecas.forEach((p,i)=>{if(ehAplic(i)||ehIgn(i)||ehTest(i)){pp[i]={n:0,semLuz:0};return;}
           // frente opaca (ACM) com vazados: a luz só sai pelos vazados — LED atrás de cada vazado (regra dos 12 cm)
           const vz=opaca(S.pc[i])?vazadosDe(i):[];
-          if(vz.length){let n=0,sl=0;vz.forEach(j=>{const L=layoutPeca(aneisEsc(g.pecas[j],k),passo);L.leds.forEach(l=>leds.push({x:l.x,y:l.y,rot:l.rot,peca:i}));n+=L.leds.length;sl+=L.semLuz;});pp[i]={n,semLuz:sl};return;}
-          const L=layoutPeca(aneisEsc(p,k),passo);L.leds.forEach(l=>leds.push({x:l.x,y:l.y,rot:l.rot,peca:i}));pp[i]={n:L.leds.length,semLuz:L.semLuz};});
+          if(vz.length){let n=0,sl=0;vz.forEach(j=>{const L=layoutPeca(aneisEsc(g.pecas[j],k),passo);L.leds.forEach(l=>leds.push({x:l.x,y:l.y,rot:l.rot,ang:l.ang,peca:i}));n+=L.leds.length;sl+=L.semLuz;});pp[i]={n,semLuz:sl};return;}
+          const L=layoutPeca(aneisEsc(p,k),passo);L.leds.forEach(l=>leds.push({x:l.x,y:l.y,rot:l.rot,ang:l.ang,peca:i}));pp[i]={n:L.leds.length,semLuz:L.semLuz};});
         _ledCache={k:ck,g,v:{leds,pp}};
       }
       r.leds=_ledCache.v.leds;_ledCache.v.pp.forEach((x,i)=>{r.porPeca[i].leds=x.n;r.porPeca[i].semLuz=x.semLuz;r.semLuz+=x.semLuz;});
@@ -94199,7 +94698,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     return`<div style="background:#eef2ff;border:1.5px solid #a5b4fc;border-radius:12px;padding:10px 12px;margin:8px 0">
       <div style="font-weight:700;color:#1e1b4b;font-size:.82rem">🔎 Achei ${pend.length} ${PL(pend.length,'desenho','desenhos')} por cima da ${E(maes)}. Como ${pend.length>1?'eles são feitos':'ele é feito'}?</div>
       <div class="fx" style="margin:3px 0 8px;color:#4338ca">Vale pra todos agora; depois dá pra mudar um por um clicando no desenho.</div>
-      <div style="display:flex;flex-direction:column;gap:6px">${b('adesivo','🏷️','Adesivo de recorte','recortado e colado na frente da peça')}${sobreTs?b('impresso','🖨️','Adesivo impresso','impressão digital aplicada na frente'):''}${b('vazado','💡','Vazado com acrílico ou policarbonato','a frente é recortada; a chapa + adesivo colados por trás')}${sobreTs?b('pvc','🔤','Letra em PVC expandido','recortada em PVC de 10, 20 ou 30 mm, colada na frente'):''}${b('relevo','📦','Letra caixa em relevo','caixa própria montada sobre a frente (acrílico, galvanizada…)')}</div></div>`;
+      <div style="display:flex;flex-direction:column;gap:6px">${b('adesivo','🏷️','Adesivo de recorte','recortado e colado na frente da peça')}${sobreTs?b('impresso','🖨️','Adesivo impresso','impressão digital aplicada na frente'):''}${b('vazado','💡','Vazado com acrílico ou policarbonato','a frente é recortada; a chapa + adesivo colados por trás')}${sobreTs?b('pvc','🔤','Letra em PVC expandido','recortada em PVC de 10, 20 ou 30 mm, colada na frente'):''}${b('relevo','📦','Letra caixa em relevo','caixa própria montada sobre a frente (acrílico, galvanizada…)')}<button type="button" class="orc2-btn sec" style="flex:1;padding:7px 5px;font-size:.74rem;line-height:1.25;text-align:left" onclick="l3dIgnorarAplic(true)"><b>🚫 Não existe — erro de leitura do arquivo</b><br><small>tira ${pend.length>1?'esses desenhos':'esse desenho'} da arte (dá pra trazer de volta pelo chip da peça)</small></button></div></div>`;
   }
   const matNome=c=>{const m=(typeof orc3!=='undefined'&&orc3.base||{})[String(c)];return m?String(m.n).trim():'';};
   const ehAcm=n=>/\bACM\b|ALUMINIO COMPOSTO|ALUMÍNIO COMPOSTO/i.test(String(n||''));
@@ -94219,7 +94718,10 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
       if(pc.acrilCod)out.push({papel:'frente',cod:String(pc.acrilCod),nome:matNome(pc.acrilCod)||'Chapa da frente',ch:apvDims(pc.acrilCod,[2,1])});
       {const fc=fundoDe(g.pc)||'1826';out.push({papel:'fundo',cod:fc,nome:matNome(fc)||'PVC Expandido 10mm',ch:apvDims(fc,[1.22,2.44])});}
     }else if(h<=1.20)out.push({papel:'frente',cod:'1790',nome:matNome('1790')||'Chapa Galv. 20',ch:apvDims('1790',[1.2,3])}); // acima de 1,20 m a face é ACM da fórmula antiga
-    const lc=pc.latCod||'1792';if(!semLat&&!eh3D(matNome(lc)))out.push({papel:'lateral',cod:String(lc),nome:matNome(lc)||'Chapa Galv. 26',ch:apvDims(lc,[1.2,2])});
+    // (2026-11-24, Clabonde) filetado: o filete é recortado em chapa galvanizada 20 (1,20×3,00 m) no formato das letras
+    if(acril&&pc.acab==='filetado'&&!opaca(pc))out.push({papel:'filete',cod:'1790',nome:matNome('1790')||'Chapa Galv. 20 (filete)',ch:apvDims('1790',[1.2,3])});
+    // (2026-11-24, Clabonde) sem a profundidade da caixa digitada não dá pra saber a altura da tira: a lateral não entra no aproveitamento
+    const lc=pc.latCod||'1792';if(!semLat&&!eh3D(matNome(lc))&&N(S.caixa)>0)out.push({papel:'lateral',cod:String(lc),nome:matNome(lc)||'Chapa Galv. 26',ch:apvDims(lc,[1.2,2])});
     return out.concat(chapasVazado(g)).concat(chapasPvc(g));
   }
   // TESTEIRA — revestimento: retângulo vai DOBRADO (frente + laterais numa peça só: + profundidade e + 3 cm de cada
@@ -94590,8 +95092,8 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
       const pl=new THREE.InstancedMesh(new THREE.BoxGeometry(MOD.c,MOD.l,MOD.h*2),new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.6}),n);
       const pt=new THREE.InstancedMesh(new THREE.BoxGeometry(0.008,0.008,0.003),new THREE.MeshBasicMaterial({color:corLed((S.pc[0]||{}).ledCod)}),n*3);
       M.leds.forEach((l,i)=>{
-        const lz=temPai(l.peca)?baseZ(l.peca):0;o.position.set(l.x-cx,l.y-cy,lz+MOD.h/2+0.001);o.rotation.set(0,0,l.rot?Math.PI/2:0);o.updateMatrix();pl.setMatrixAt(i,o.matrix);
-        [-0.024,0,0.024].forEach((d,j)=>{o.position.set(l.x-cx+(l.rot?0:d),l.y-cy+(l.rot?d:0),lz+MOD.h+0.0025);o.rotation.set(0,0,0);o.updateMatrix();pt.setMatrixAt(i*3+j,o.matrix);});
+        const lz=temPai(l.peca)?baseZ(l.peca):0,an=l.ang!=null?l.ang:(l.rot?Math.PI/2:0),ca=Math.cos(an),sa=Math.sin(an);o.position.set(l.x-cx,l.y-cy,lz+MOD.h/2+0.001);o.rotation.set(0,0,an);o.updateMatrix();pl.setMatrixAt(i,o.matrix);
+        [-0.024,0,0.024].forEach((d,j)=>{o.position.set(l.x-cx+d*ca,l.y-cy+d*sa,lz+MOD.h+0.0025);o.rotation.set(0,0,an);o.updateMatrix();pt.setMatrixAt(i*3+j,o.matrix);});
       });
       for(let i=0;i<n;i++)pl.setColorAt(i,new THREE.Color(0x2b3440));
       pl.frustumCulled=false;pt.frustumCulled=false;pl.userData={parte:'led',inst:true};pt.userData={parte:'led'};g.add(pl);g.add(pt);meshes.push(pl);r.pl=pl;
@@ -94813,7 +95315,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         ${cAb==='filetado'?'<div class="fx l3d-pend" style="margin-top:4px">Filetado não dá com lateral em ACM — escolha uma das opções acima.</div>':''}${cantH}
         ${!cAb?'<div class="fx l3d-pend" style="margin-top:4px">Falta escolher o acabamento da frente.</div>':v(cAb)?vHint('acabamentos'):''}`
         :(`<div class="fx" style="margin-top:8px;font-weight:700">Acabamento da frente</div><div style="display:flex;gap:6px;margin-top:4px">${ab('filetado')}🔲 Filetado<br><small>borda metálica segura a chapa</small></button>${ab('infinita')}✨ Borda infinita<br><small>sem borda metálica aparente</small></button></div>
-        ${cAb==='filetado'?`<div class="fx" style="margin-top:6px;display:flex;align-items:center;gap:6px">Largura do filete <input class="fc" style="width:70px;margin:0" type="number" step="0.5" min="0.5" value="${Q((N(cFi&&cFi!=='VARIOS'?cFi:'')||FILETE_PAD)*100,1).replace(',','.')}" onclick="event.stopPropagation()" onchange="l3dSel('filete',Math.max(0.005,(parseFloat(this.value)||1.5)/100))"> cm <small style="color:#64748b">— a tira da lateral sobe o filete + 4 mm da chapa</small></div>`:''}
+        ${cAb==='filetado'?`<div class="fx" style="margin-top:6px;display:flex;align-items:center;gap:6px">Largura do filete <input class="fc" style="width:70px;margin:0" type="number" step="0.5" min="0.5" value="${Q((N(cFi&&cFi!=='VARIOS'?cFi:'')||FILETE_PAD)*100,1).replace(',','.')}" onclick="event.stopPropagation()" onchange="l3dSel('filete',Math.max(0.005,(parseFloat(this.value)||1.5)/100))"> cm <small style="color:#64748b">— recortado em chapa galvanizada 20 (1,20×3,00 m), no formato das letras</small></div>`:''}
         ${!cAb?'<div class="fx l3d-pend" style="margin-top:4px">Falta escolher o acabamento da frente.</div>':v(cAb)?vHint('acabamentos'):''}`)):'';
       const frente=(acril?`<div class="fx">Chapa da frente — acrílico/policarbonato (por onde a luz sai) ou ACM (com vazados)</div>${v(cA)?vHint('chapas'):''}${_orcMpBuscaHtml('3d-acril',{tipo:'frente',on:c=>l3dSel('acrilCod',c),limpar:()=>l3dSel('acrilCod','')},v(cA)?'':cA,'🔍 Chapa: nome ou código…')}${!cA?'<div class="fx l3d-pend" style="margin-top:4px">Falta escolher a chapa da frente.</div>':''}`
           :`<div class="fx">${M.hMax>1.20?'ACM':'Chapa galvanizada 20'} pintada com a tinta da lateral.</div>`)
@@ -94890,7 +95392,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         const bt=(t,ic,tx,sub)=>`<button type="button" class="orc2-btn ${tA===t?'pri':'sec'}" style="flex:1;padding:6px 4px;font-size:.72rem;line-height:1.2" onclick="event.stopPropagation();l3dTipoAp('${t}')">${ic} ${tx}<br><small>${sub}</small></button>`;
         const sobreTs=selArr.every(i=>ehTest(raizDe(i)));
         const tipos=`<div style="display:flex;gap:6px;margin:6px 0;flex-wrap:wrap">${bt('adesivo','🏷️','Adesivo de recorte','colado na frente')}${sobreTs?bt('impresso','🖨️','Adesivo impresso','impressão digital'):''}${bt('vazado','💡','Vazado','acrílico ou policarbonato + adesivo por dentro')}${sobreTs?bt('pvc','🔤','Letra em PVC','10, 20 ou 30 mm'):''}<button type="button" class="orc2-btn sec" style="flex:1;padding:6px 4px;font-size:.72rem;line-height:1.2" onclick="event.stopPropagation();l3dRelevo(true)">📦 Relevo<br><small>letra caixa por cima</small></button></div>`;
-        const adesH=`<div class="fx" style="margin-top:8px">Adesivo${tA==='vazado'?' (aplicado no acrílico/policarbonato)':''}</div>${v(cD)?vHint('adesivos'):''}${_orcMpBuscaHtml('3d-ades',{tipo:'adesivo',on:c=>l3dSel('adesCod',c),limpar:()=>l3dSel('adesCod','')},v(cD)?'':cD,'🔍 Adesivo: nome ou código…')}${!cD?'<div class="fx l3d-pend" style="margin-top:4px">Falta escolher o adesivo.</div>':''}`;
+        const adesH=`<div class="fx" style="margin-top:8px">Adesivo${tA==='vazado'?' (aplicado no acrílico/policarbonato) — opcional':''}</div>${v(cD)?vHint('adesivos'):''}${_orcMpBuscaHtml('3d-ades',{tipo:'adesivo',on:c=>l3dSel('adesCod',c),limpar:()=>l3dSel('adesCod','')},v(cD)?'':cD,tA==='vazado'?'🔍 Adesivo: nome ou código (vazio = sem adesivo)…':'🔍 Adesivo: nome ou código…')}${!cD&&tA!=='vazado'?'<div class="fx l3d-pend" style="margin-top:4px">Falta escolher o adesivo.</div>':''}`;
         const vazH=tA==='vazado'?`<div class="fx" style="margin-top:8px">Acrílico ou policarbonato por dentro (o desenho + ${Q(VAZ_SOBRA*100,0)} cm de sobra em volta pra colar)</div>${_orcMpBuscaHtml('3d-vaz',{tipo:'acril',on:c=>l3dSel('vazCod',c),limpar:()=>l3dSel('vazCod','')},v(cV)?'':cV,'🔍 Acrílico ou policarbonato: nome ou código…')}${!cV||v(cV)?'<div class="fx l3d-pend" style="margin-top:4px">Falta escolher o acrílico ou policarbonato.</div>':''}
           <div class="fx" style="margin-top:6px;color:#475569">A frente da ${E(maes)} é recortada no desenho. ${opaca(S.pc[raizDe(selArr[0])])?'Como a frente é opaca, o LED vai só atrás dos vazados.':'Escolha a chapa da frente da '+E(maes)+' (ex.: ACM) — com frente opaca o LED vai só atrás dos vazados.'}</div>`:'';
         const txt=tA==='pvc'?`Letra recortada em PVC expandido, colada na frente da <b>${E(maes)}</b>.`:tA==='impresso'?`Adesivo impresso aplicado na frente da <b>${E(maes)}</b>.`:tA==='vazado'?`Recortado na frente da <b>${E(maes)}</b>, com acrílico/policarbonato e adesivo colados por dentro (acende).`:tA==='adesivo'?`Adesivo recortado aplicado por cima da frente da <b>${E(maes)}</b> — ${Q(m2,2)} m² (retângulo de cada aplicação).`:`Desenhado por cima da <b>${E(maes)}</b>. Como ele é feito?`;
@@ -94900,7 +95402,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         const pvcH=tA==='pvc'?`<div class="fx" style="margin-top:8px">Espessura do PVC</div><div style="display:flex;gap:6px;margin-top:4px">${esB(0.01)}${esB(0.02)}${esB(0.03)}</div>
           <div class="fx" style="margin-top:8px">Chapa de PVC (encaixe pelo formato das letras)</div>${_orcMpBuscaHtml('3d-pvc',{tipo:'',on:c=>l3dSel('pvcCod',c),limpar:()=>l3dSel('pvcCod','')},v(cP)?'':cP,'🔍 PVC expandido…')}${!cP||v(cP)?'<div class="fx l3d-pend" style="margin-top:4px">Falta escolher a chapa de PVC.</div>':''}
           <div class="fx" style="margin-top:10px;font-weight:700">Cor</div>${comum('pvcPinta')===true?tinta:`<div class="fx">PVC branco, sem pintura.</div>`}<div class="fx" style="margin-top:4px">${comum('pvcPinta')===true?`<button type="button" class="orcx-link" onclick="event.stopPropagation();l3dPvcPintar(false)">deixar sem pintura (PVC branco)</button>`:`<button type="button" class="orcx-link" onclick="event.stopPropagation();l3dPvcPintar(true)">pintar as letras</button>`}</div>`:'';
-        corpo=`<div class="l3d-sec">${E(selTxt)}</div>`+card('frente','🏷️','Desenho sobre a peça',`<div class="fx">${txt} Não é caixa: não leva lateral, fundo, LED próprio nem estrutura.</div>${tipos}${tA&&!v(tA)?(tA==='impresso'?impH:tA==='pvc'?pvcH:adesH+vazH):'<div class="fx l3d-pend">Escolha o tipo acima.</div>'}`);
+        corpo=`<div class="l3d-sec">${E(selTxt)}</div>`+card('frente','🏷️','Desenho sobre a peça',`<div class="fx">${txt} Não é caixa: não leva lateral, fundo, LED próprio nem estrutura.</div>${tipos}<button type="button" class="orcx-link" style="margin:0 0 6px" onclick="event.stopPropagation();l3dIgnorarAplic(false)">🚫 Esse desenho não existe (erro de leitura do arquivo) — tirar da arte</button>${tA&&!v(tA)?(tA==='impresso'?impH:tA==='pvc'?pvcH:adesH+vazH):'<div class="fx l3d-pend">Escolha o tipo acima.</div>'}`);
       }else if(selArr.some(ehAplic)){
         corpo=`<div class="l3d-sec">${E(selTxt)}</div><div class="orc2-vazio" style="padding:14px;font-size:.78rem">A seleção mistura aplicações (adesivo por cima de outra peça) com caixas. Selecione só as aplicações ou só as caixas.</div>`;
       }else
@@ -94916,7 +95418,12 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         return`<div class="l3d-grp"><h4>🏢 Item ${g.n} · Testeira · ${E(listaPecas(g.pecas))}</h4><input class="fc no-upper" placeholder="Nome do item (ex.: Testeira fachada)" value="${E(g.nome)}" oninput="l3dNome('${E(g.k)}',this.value)">
           <div class="fx">${Q(g.larg,2)} × ${Q(g.alt,2)} m${pc.tsMat?' · '+E(nomeCurtoMat(matNome(pc.tsMat))):''}${tp?' · '+tp:''}</div>
           ${fT.length?`<div class="fx l3d-pend l3d-falta" onclick="l3dResolver(${g.n})" title="Clique pra ir até o que falta">Falta: ${fT.join(', ')}. <u>mostrar ›</u></div>`:'<div class="fx l3d-ok">✔ Pronto</div>'}<button type="button" class="orcx-link" style="margin-top:6px" onclick="l3dAba('mats')">🧾 ver materiais, quantidades e preços →</button></div>`;}
-      const falta=[];if(acril&&!pc.acrilCod)falta.push('chapa da frente');if(!S.pc[g.pecas[0]].latOk||g.pecas.some(i=>!S.pc[i].latOk))falta.push('confirmar o material da lateral');const acmL=latEhAcm(pc,g.hMax);if(acmL&&pc.semPintura==null)falta.push('cor do ACM (própria ou pintada)');else if(!pc.tinta&&!(acmL&&pc.semPintura))falta.push('tinta');if((acril||halo)&&!pc.ledCod)falta.push('LED');
+      const falta=[];if(!(N(S.caixa)>0))falta.push('profundidade da caixa');if(acril&&!pc.acrilCod)falta.push('chapa da frente');if(!S.pc[g.pecas[0]].latOk||g.pecas.some(i=>!S.pc[i].latOk))falta.push('confirmar o material da lateral');const acmL=latEhAcm(pc,g.hMax);if(acmL&&pc.semPintura==null)falta.push('cor do ACM (própria ou pintada)');else if(!pc.tinta&&!(acmL&&pc.semPintura))falta.push('tinta');if((acril||halo)&&!pc.ledCod)falta.push('LED');
+      {const ap=(g.aplics||[]).map(i=>S.pc[i]);
+        if(ap.some(p=>!p.tipoAp))falta.push('tipo do desenho por cima');
+        if(ap.some(p=>p.tipoAp==='adesivo'&&!p.adesCod))falta.push('adesivo do desenho por cima');
+        if(ap.some(p=>p.tipoAp==='vazado'&&!p.vazCod))falta.push('acrílico do vazado');
+        if(ap.some(p=>(p.tipoAp==='impresso'&&!p.impCod)||(p.tipoAp==='pvc'&&(!p.pvcCod||(p.pvcPinta&&!(p.tinta&&p.tinta.nome))))))falta.push('material do desenho por cima');}
       if(falta.length)faltasG.push({n:g.n,f:falta});
       return`<div class="l3d-grp"><h4><i style="width:12px;height:12px;border-radius:3px;background:${hex(corFrente(pc))};border:1px solid #0002"></i>Item ${g.n} · ${E(listaPecas(g.pecas))}</h4>
         <input class="fc no-upper" placeholder="Nome do item (ex.: Letras DAF, Tarja)" value="${E(g.nome)}" oninput="l3dNome('${E(g.k)}',this.value)">
@@ -94944,7 +95451,11 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     ${S.geo.textos?`<div class="orcx-hint" style="margin:0;color:#b45309">⚠️ O arquivo tem ${S.geo.textos} ${PL(S.geo.textos,'texto que não está','textos que não estão')} em curvas e ${S.geo.textos===1?'ficou':'ficaram'} de fora. No Corel: Ctrl+Q antes de exportar.</div>`:''}
     ${fora?`<div class="orcx-hint" style="margin:0;color:#b45309">⚠️ O módulo de LED é indicado pra caixas de 8 a 15 cm de profundidade (a caixa tem ${Q(caixa*100,0)} cm).</div>`:''}
     ${htmlPerguntaFundo()}${htmlPerguntaAplic()}${htmlConferencia()}${cab}${htmlAvisos()}${corpo}${fixSanfona()}
-    <div class="l3d-sec">Vai pro orçamento como ${G.length} ${PL(G.length,'item','itens')}</div>${gr}${prog}`;
+    ${(()=>{const nL=G.filter(g=>!g.testeira).length,nT=G.length-nL;if(nL<2)return`<div class="l3d-sec">Vai pro orçamento como ${G.length} ${PL(G.length,'item','itens')}</div>`;
+      const j=S.juntar!==false,nI=(j?1:nL)+nT;
+      return`<div class="l3d-sec">Vai pro orçamento como ${nI} ${PL(nI,'item','itens')}</div>
+      <div style="display:flex;gap:6px;margin:0 0 8px"><button type="button" class="orc2-btn ${j?'pri':'sec'}" style="flex:1;padding:7px 6px;font-size:.74rem;line-height:1.25" onclick="l3dJuntar(true)">🧩 Um produto só<br><small>todas as partes num item do orçamento</small></button><button type="button" class="orc2-btn ${j?'sec':'pri'}" style="flex:1;padding:7px 6px;font-size:.74rem;line-height:1.25" onclick="l3dJuntar(false)">📦 Separar por material<br><small>cada combinação vira um item</small></button></div>
+      ${j?`<input class="fc no-upper" style="margin:0 0 8px" placeholder="Nome do produto no orçamento (ex.: Letreiro Localiza Seminovos)" value="${E(S.nomeUnico||'')}" oninput="l3dNomeUnico(this.value)"><div class="fx" style="margin:-4px 0 8px;color:#64748b">As partes abaixo continuam calculadas cada uma com o seu material — no orçamento entra um item só, com a soma e todos os materiais.</div>`:''}`;})()}${gr}${prog}`;
   }
   // materiais do item, pelo mesmo cálculo que vai pro orçamento (chapas, LED, reatores, fios…), com a quantidade
   // (2026-11-17) aba "Materiais e preços": por item, as matérias-primas do MESMO cálculo que vai pro orçamento, com
@@ -94962,7 +95473,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         const pr=(i.cost||0)>0||un>0?`${m?BRL(m.v):BRL(un)}${m?`<button type="button" class="ed" title="Revisar o preço desta matéria-prima (cód. ${E(f.cod)})" onclick="l3dPreco('${E(f.cod)}')">✏️</button>`:''}${rev}`:'<span style="color:#94a3b8">—</span>';
         return`<tr><td><span class="nm">${i.icon||'•'} ${E(i.name)}</span>${m?`<span class="cd">cód. ${E(f.cod)}</span>`:''}</td><td class="n">${E(i.qty)}</td><td class="n">${pr}</td><td class="n"><b>${(i.cost||0)>0?BRL(i.cost):'—'}</b></td></tr>`;}).join('');
       const ap=aprovGrupo(g);
-      const apH=ap.length?`<div class="l3d-mats"><div class="t">📐 Aproveitamento das chapas (clique pra ver o desenho)</div>${ap.map(c=>`<div class="l3d-mat" onclick="event.stopPropagation();l3dApv('${E(c.cod)}')" style="cursor:pointer"><span>${{frente:'Frente',fundo:'Fundo',lateral:'Lateral',vazado:'Vazados',pvc:'Letras em PVC',revest:'Revestimento',revestLat:'Laterais'}[c.papel]||E(c.papel)} · ${E(nomeCurtoMat(c.nome))}</span><b>${c.res.compart?Q(c.res.qtd,2)+' ch. (compartilhada)':Q(c.res.qtd,1).replace(',0','')+' ch.'} · ${Math.round(c.res.uso*100)}% ›</b></div>`).join('')}</div>`:'';
+      const apH=ap.length?`<div class="l3d-mats"><div class="t">📐 Aproveitamento das chapas (clique pra ver o desenho)</div>${ap.map(c=>`<div class="l3d-mat" onclick="event.stopPropagation();l3dApv('${E(c.cod)}')" style="cursor:pointer"><span>${{frente:'Frente',filete:'Filete',fundo:'Fundo',lateral:'Lateral',vazado:'Vazados',pvc:'Letras em PVC',revest:'Revestimento',revestLat:'Laterais'}[c.papel]||E(c.papel)} · ${E(nomeCurtoMat(c.nome))}</span><b>${c.res.compart?Q(c.res.qtd,2)+' ch. (compartilhada)':Q(c.res.qtd,1).replace(',0','')+' ch.'} · ${Math.round(c.res.uso*100)}% ›</b></div>`).join('')}</div>`:'';
       return`<div class="l3d-grp">${cab}<table class="l3d-mt"><thead><tr><th>Material</th><th class="n">Qtd</th><th class="n">Preço un.</th><th class="n">Total</th></tr></thead><tbody>${lin}</tbody><tfoot><tr><td colspan="3">Custo dos materiais${g.testeira?'':' (sem a margem)'}</td><td class="n"><b>${BRL(r.totalMat||0)}</b></td></tr></tfoot></table>${apH}</div>`;}).join('');
     return`<div class="fx" style="color:#64748b;margin:2px 0 8px">Preços da planilha de matérias-primas${dias!=null?` (atualizada há ${dias} ${PL(dias,'dia','dias')})`:''}. Achou preço velho? Clique no ✏️ e revise — vale pra todos os orçamentos e fica registrado quem mudou.</div>
       ${blocos}<div class="l3d-mt-tot"><span>Custo total dos materiais da arte</span><b>${BRL(tot)}</b></div>`;}
@@ -94970,7 +95481,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
   function htmlMatsGrupo(g){
     let html='';
     const ap=aprovGrupo(g);
-    if(ap.length)html+=`<div class="l3d-mats"><div class="t">📐 Aproveitamento das chapas</div>${ap.map(c=>`<div class="l3d-mat" onclick="event.stopPropagation();l3dApv('${E(c.cod)}')" style="cursor:pointer" title="Ver o desenho"><span>${{frente:'Frente',fundo:'Fundo',lateral:'Lateral',vazado:'Vazados',pvc:'Letras em PVC',revest:'Revestimento',revestLat:'Laterais'}[c.papel]||E(c.papel)} · ${E(nomeCurtoMat(c.nome))}</span><b>${c.res.compart?Q(c.res.qtd,2)+' ch. (compartilhada)':Q(c.res.qtd,1).replace(',0','')+' ch.'} · ${Math.round(c.res.uso*100)}% ›</b></div>`).join('')}</div>`;
+    if(ap.length)html+=`<div class="l3d-mats"><div class="t">📐 Aproveitamento das chapas</div>${ap.map(c=>`<div class="l3d-mat" onclick="event.stopPropagation();l3dApv('${E(c.cod)}')" style="cursor:pointer" title="Ver o desenho"><span>${{frente:'Frente',filete:'Filete',fundo:'Fundo',lateral:'Lateral',vazado:'Vazados',pvc:'Letras em PVC',revest:'Revestimento',revestLat:'Laterais'}[c.papel]||E(c.papel)} · ${E(nomeCurtoMat(c.nome))}</span><b>${c.res.compart?Q(c.res.qtd,2)+' ch. (compartilhada)':Q(c.res.qtd,1).replace(',0','')+' ch.'} · ${Math.round(c.res.uso*100)}% ›</b></div>`).join('')}</div>`;
     try{
       if(typeof orc2CalcLetra!=='function'||typeof _orc2Precos!=='function')return html;
       const r=orc2CalcLetra(itemDoGrupo(g,null,S.med),_orc2Precos(),orc2.adesivoPrecos);
@@ -95179,7 +95690,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     const bb=document.getElementById('l3d-apv-btns');if(bb)bb.innerHTML=(S.pc.some(p=>p.estrutura)?`<button type="button" id="l3d-b-est" class="${S.verEst?'on':''}" onclick="l3dVerEst()">🏗️ Ver estrutura</button>`:'')+htmlApvBtns();
     if(!S.pc.some(p=>p.estrutura)&&S.verEst){S.verEst=false;visibilidade();}
     const ov=document.getElementById('l3d-apv');if(ov){if(S.apv){ov.style.display='block';ov.innerHTML=htmlApv(S.apv);}else ov.style.display='none';}
-    const n=grupos().length,b=document.getElementById('l3d-aplicar');if(b)b.textContent=n>1?'✔ Adicionar '+n+' itens ao orçamento':'✔ Usar no orçamento';
+    const n=grupos().length,b=document.getElementById('l3d-aplicar');if(b){const gg=grupos(),nL=gg.filter(g=>!g.testeira).length,nI=(S.juntar!==false&&nL>1)?1+(gg.length-nL):gg.length;b.textContent=nI>1?'✔ Adicionar '+nI+' itens ao orçamento':'✔ Usar no orçamento';}
   }
 
   function abrirModal(){
@@ -95275,6 +95786,11 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
       else{pc.papel='';}});
     S.sel=new Set(alvo.filter(i=>!ehIgn(i)));S.med=medir();_apvCache.clear();renderPainel();construirLetras();
     if(t==='ignorar')toast(alvo.map(nomePeca).join(', ')+' fora da arte (clique no chip pra trazer de volta)','tinf');};
+  // (2026-11-24, Clabonde) leitura errada do arquivo (ex.: miolo da letra O lido como desenho por cima): o orçamentista
+  // tira o desenho da arte — mesmo "Não faz parte" das peças; não pede material e não entra no cálculo. Volta pelo chip.
+  window.l3dIgnorarAplic=function(pendentes){
+    const alvo=pendentes?S.pc.map((p,i)=>i).filter(i=>ehAplic(i)&&!S.pc[i].tipoAp):[...S.sel].filter(i=>temPai(i));
+    if(!alvo.length)return;alvo.forEach(i=>l3dPapel('ignorar',i));};
   window.l3dTs=function(k,v){S.sel.forEach(i=>{if(!ehTest(i))return;const pc=S.pc[i];pc[k]=v;
       if(k==='tsTipo'){pc.estrutura=v==='simples'||v==='caixa';
         if(v==='simples'&&!pc.estPerfil)pc.estPerfil=acharMp(/METALON.*\b20\s*X\s*20\b/i,RE_ALUM)||acharMp(/METALON.*\b20\s*X\s*30\b/i,RE_ALUM)||acharMp(/METALON/i,RE_ALUM)||'';
@@ -95310,6 +95826,8 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
   window.l3dCantCor=function(){if(!S.sel.size)return;window._orcMpCtx['3d-cant-tinta']={tipo:'tinta',on:t=>{S.sel.forEach(i=>{S.pc[i].cantTinta=JSON.parse(JSON.stringify(t));});renderPainel();construirLetras();}};corAbrir('3d-cant-tinta');};
   window.l3dCor=function(){if(!S.sel.size){toast('Selecione uma peça primeiro','terr');return;}window._orcMpCtx['3d-tinta']={tipo:'tinta',on:t=>{S.sel.forEach(i=>{S.pc[i].tinta=JSON.parse(JSON.stringify(t));});renderPainel();construirLetras();}};corAbrir('3d-tinta');};
   // (2026-11-18) o nome fica gravado nas peças do item: trocar material não apaga mais o nome
+  window.l3dJuntar=function(on){S.juntar=!!on;renderPainel();};
+  window.l3dNomeUnico=function(v){S.nomeUnico=String(v||'');};
   window.l3dNome=function(k,v){S.nomes[k]=v;S.nomePc=S.nomePc||{};const g=grupos().find(x=>x.k===k);if(g)g.pecas.forEach(i=>{S.nomePc[i]=v;});};
   window.l3dEst=function(on){
     if(!S.sel.size){toast('Selecione uma peça primeiro','terr');return;}
@@ -95436,7 +95954,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
   function arteIdDe(p){const e=estDe(p);return e?e.arteId:null;}
   function setEst(p,est){if(p.extras&&p.extras.arte3d)p.extras.arte3d.est=JSON.parse(JSON.stringify(est));else if(p.arte)p.arte.est=JSON.parse(JSON.stringify(est));}
   function marcarUrl(id,url){const f=e=>{if(e&&e.arteId===id&&!e.url)e.url=url;};((orc2.doc&&orc2.doc.produtos)||[]).forEach(p=>f(estDe(p)));if(orc2.letra&&orc2.letra.arte)f(orc2.letra.arte.est);try{_orc2GuardarRascunho();}catch(e){}}
-  function estadoArte(){return JSON.parse(JSON.stringify({v:1,arteId:S.arteId||'',nome:S.geo?S.geo.nome:'',url:_arteUrls[S.arteId]||'',alvo:S.alvo||'letra',modelo:S.modelo,modeloOk:!!S.modeloOk,larg:S.larg,caixa:S.caixa,altInst:S.altInst||'',fix:S.fix||null,fundoOk:!!S.fundoOk,fundoCod:S.fundoCod||'',nomes:S.nomes||{},nomePc:S.nomePc||{},pc:S.pc||[]}));}
+  function estadoArte(){return JSON.parse(JSON.stringify({v:1,arteId:S.arteId||'',nome:S.geo?S.geo.nome:'',url:_arteUrls[S.arteId]||'',alvo:S.alvo||'letra',modelo:S.modelo,modeloOk:!!S.modeloOk,larg:S.larg,caixa:S.caixa,altInst:S.altInst||'',fix:S.fix||null,fundoOk:!!S.fundoOk,fundoCod:S.fundoCod||'',nomes:S.nomes||{},nomePc:S.nomePc||{},pc:S.pc||[],juntar:S.juntar!==false,nomeUnico:S.nomeUnico||''}));}
   window._l3dEstDe=estDe;
   async function geoDoEst(est){
     let geo=_geoCache[est.arteId];if(geo){await libs();return geo;}
@@ -95449,7 +95967,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     const L=orc2.letra||(orc2.letra=_orc2LetraVazia());
     if(Array.isArray(est.pc)&&est.pc.length===geo.pecas.length){S.pc=JSON.parse(JSON.stringify(est.pc));S.sel=new Set();S.parte='';S.cardAb=null;S.aba='montar';}else iniciarPecas(L);
     S.alvo=est.alvo||'letra';S.modelo=est.modelo;S.modeloOk=!!est.modeloOk;S.larg=String(est.larg||r2(geo.W));S.caixa=est.caixa==null?'':String(est.caixa);S.altInst=est.altInst||'';
-    S.fix=est.fix?JSON.parse(JSON.stringify(est.fix)):null;S.fundoOk=!!est.fundoOk;S.fundoCod=est.fundoCod||'';S.nomes=Object.assign({},est.nomes||{});S.nomePc=Object.assign({},est.nomePc||{});S.med=null;}
+    S.fix=est.fix?JSON.parse(JSON.stringify(est.fix)):null;S.fundoOk=!!est.fundoOk;S.fundoCod=est.fundoCod||'';S.nomes=Object.assign({},est.nomes||{});S.nomePc=Object.assign({},est.nomePc||{});S.juntar=est.juntar!==false;S.nomeUnico=est.nomeUnico||'';S.med=null;}
   // abre o 3D de um item do orçamento (botão 🧊 na lista)
   window.l3dAbrirItem=async function(id){
     const p=((orc2.doc&&orc2.doc.produtos)||[]).find(x=>x.id===id),est=estDe(p);
@@ -95487,7 +96005,8 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     if(semFt.length){S.sel=new Set(semFt);S.parte='';destacar();renderPainel(true);toast('Escolha a fita dupla face que cola o ACM na estrutura ('+semFt.map(nomePeca).join(', ')+')','terr');return;}
     const semCt=S.modelo==='acril'?S.pc.map((p,i)=>!ehAplic(i)&&!ehIgn(i)&&!ehTest(i)&&!opaca(p)&&p.acab==='cantoneira'&&(!p.cantCod||!p.cantPinta||!tintaCant(p))?i:-1).filter(i=>i>=0):[];
     if(semCt.length){S.sel=new Set(semCt);S.parte='frente';destacar();renderPainel(true);toast('Cantoneira ('+semCt.map(nomePeca).join(', ')+'): escolha a cantoneira de alumínio e a pintura dela','terr');return;}
-    const semAd=S.pc.map((p,i)=>ehAplic(i)&&(p.tipoAp==='adesivo'||p.tipoAp==='vazado')&&!p.adesCod?i:-1).filter(i=>i>=0);
+    // (2026-11-24, Clabonde) adesivo só é obrigatório no "Adesivo de recorte"; no vazado é opcional (tem vazado sem adesivo)
+    const semAd=S.pc.map((p,i)=>ehAplic(i)&&p.tipoAp==='adesivo'&&!p.adesCod?i:-1).filter(i=>i>=0);
     const semMat=S.pc.map((p,i)=>ehAplic(i)&&((p.tipoAp==='impresso'&&!p.impCod)||(p.tipoAp==='pvc'&&(!p.pvcCod||(p.pvcPinta&&!(p.tinta&&p.tinta.nome)))))?i:-1).filter(i=>i>=0);
     if(semMat.length){S.sel=new Set(semMat);S.parte='frente';destacar();renderPainel(true);toast('Falta o material ('+semMat.map(nomePeca).join(', ')+'): impressão, chapa de PVC ou tinta','terr');return;}
     if(semAd.length){S.sel=new Set(semAd);S.parte='frente';destacar();renderPainel(true);toast('Escolha o adesivo das aplicações ('+semAd.map(nomePeca).join(', ')+')','terr');return;}
@@ -95515,16 +96034,39 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
       const pc=g.pc,falta=[];if(S.modelo==='acril'&&!pc.acrilCod)falta.push('chapa da frente');const acmL=latEhAcm(pc,g.hMax);if(acmL&&pc.semPintura==null)falta.push('cor do ACM (própria ou pintada)');else if(!pc.tinta&&!(acmL&&pc.semPintura))falta.push('tinta');if((S.modelo==='acril'||S.modelo==='halo')&&!pc.ledCod)falta.push('LED');
       if(falta.length){S.sel=new Set(g.pecas);S.parte='';destacar();renderPainel();toast('Item '+g.n+' ('+g.pecas.map(nomePeca).join(', ')+'): falta '+falta.join(', '),'terr');return;}
     }
-    const antes=(orc2.doc&&orc2.doc.produtos||[]).length;let ok=0;
+    const antes=(orc2.doc&&orc2.doc.produtos||[]).length;let ok=0;const juntar=S.juntar!==false&&G.length>1,addIds=[];
     for(const g of G){
       orc2.letra=itemDoGrupo(g,L,M);if(!orc2.letra.nome)orc2.letra.nome='Item '+g.n+' da arte';
-      const n0=orc2.doc.produtos.length;orc2AdicionarLetra();
-      if(orc2.doc.produtos.length>n0)ok++;else{toast('Parei no item '+g.n+': confira os dados dele','terr');break;}
+      // (2026-11-24, Clabonde) quando um item não entra, mostra O MOTIVO (antes só "confira os dados dele")
+      let ultErro='';const _t=toast;toast=function(m,c){if(c==='terr')ultErro=String(m||'');return _t.apply(this,arguments);};
+      const n0=orc2.doc.produtos.length;try{orc2AdicionarLetra();}finally{toast=_t;}
+      if(orc2.doc.produtos.length>n0){ok++;addIds.push(orc2.doc.produtos[orc2.doc.produtos.length-1].id);}
+      else{S.sel=new Set(g.pecas);S.parte='';try{destacar();renderPainel();}catch(e){}
+        toast('Não entrou o item '+g.n+' ('+listaPecas(g.pecas)+'): '+(ultErro||'confira os dados dele'),'terr');break;}
     }
-    if(ok===G.length){fecharModal();toast((ok+nTs)+' itens adicionados ao orçamento ✔','tok');}
-    else if(ok>0)toast(ok+' de '+G.length+' itens foram adicionados','terr');
+    if(juntar&&ok!==G.length&&addIds.length){orc2.doc.produtos=orc2.doc.produtos.filter(p=>addIds.indexOf(p.id)<0);try{_orc2ReRenderProdutos();_orc2AtualizarTotais();}catch(e){}}
+    if(ok===G.length&&juntar){try{juntarNoOrcamento(addIds,G);}catch(e){console.error('juntar itens da arte',e);}fecharModal();toast('Arte adicionada como 1 produto'+(nTs?' (+ '+nTs+' '+(nTs===1?'testeira':'testeiras')+')':'')+' ✔','tok');}
+    else if(ok===G.length){fecharModal();toast((ok+nTs)+' itens adicionados ao orçamento ✔','tok');}
+    else if(ok>0&&!juntar)toast(ok+' de '+G.length+' itens foram adicionados','terr');
   };
 
+  // ── (2026-11-24, Clabonde) UM PRODUTO SÓ: as partes da arte (ex.: letras brancas + folha laranja) entram como 1 item.
+  // O item principal (maior área) guarda as outras partes em p.juntos — cada parte continua com o próprio cálculo;
+  // custo = soma, materiais = todos (o detalhe diz de qual parte é).
+  function juntarNoOrcamento(ids,G){
+    const d=orc2.doc;const its=ids.map(id=>d.produtos.find(p=>p.id===id)).filter(Boolean);if(its.length<2)return;
+    let k=0;G.forEach((g,i)=>{if(g.area>G[k].area)k=i;});const pr=its[k]||its[0],outros=its.filter(x=>x!==pr);
+    const nm=String(S.nomeUnico||'').trim();
+    pr.juntos=outros.map(o=>{const c=JSON.parse(JSON.stringify(o));delete c.juntos;delete c.fotoUrl;return c;});
+    pr.parteNome=pr.nomeCurto||'';if(nm)pr.nomeCurto=nm;
+    const r=window._orcJuntosCalc(pr);if(r){pr.materiais=r.materiais;pr.custo=r.custo;}
+    const a=pr.arte;if(a){outros.forEach(o=>{const b=o.arte||{};a.pecas=(a.pecas||0)+(b.pecas||0);a.area=Math.round(((a.area||0)+(b.area||0))*1000)/1000;
+      if(a.peso&&b.peso){a.peso.kg=Math.round((a.peso.kg+b.peso.kg)*10)/10;a.peso.max=Math.max(a.peso.max||0,b.peso.max||0);a.peso.porPeca=(a.peso.porPeca||[]).concat(b.peso.porPeca||[]);}
+      if(a.fix&&b.fix&&b.fix.pontos)a.fix.pontos=(a.fix.pontos||0)+b.fix.pontos;});}
+    pr.nome=(pr.nomeCurto?pr.nomeCurto+' — ':'')+(pr.descricao||'');
+    d.produtos=d.produtos.filter(p=>outros.indexOf(p)<0);
+    ['_orc2ReRenderProdutos','_orc2SincronizarValorPedido','orcxCalcular','_orc2AtualizarTotais','_orc2GuardarRascunho','_orc2AtualizarContadorAba'].forEach(f=>{try{if(typeof window[f]==='function')window[f]();}catch(e){}});
+  }
   // ── (2026-11-18, pedido do Clabonde) IMPORTAR ARTE EM TODO PRODUTO FORA DE CADERNO ──
   // Cada categoria (Letra caixa, Fachada e testeira, Placa, Cavalete, Totem, Neon LED, Outros) tem o próprio botão.
   // O produto escolhido decide a pré-seleção: testeira já entra com ACM 3 mm (cor do formulário) e metalon pela
@@ -95899,11 +96441,11 @@ function _orcLetraExtras(r,p,P){
       const ehAcmN=x=>/\bACM\b|ALUM[IÍ]NIO COMPOSTO/i.test(String(x||''));
       // (2026-11-17) fundo em ACM (escolhido na arte ou trocado no 🔁): fica na cor própria, sem tinta branca por dentro
       const fundoAcm=p.modelo==='acril'&&((p.fundoCod&&ehAcmN((_orc8Mat(p.fundoCod)||{}).n))||items.some(it=>it.trocado&&/\(fundo\)|^PVC Expandido/i.test(String(it.chaveTroca||''))&&ehAcmN(it.name)));
-      const ext=latA+(faceP?ar:0),intA=latA+(fundoAcm?0:ar),arr=v=>Math.round(v*100)/100;
+      const abF=A.acab&&A.acab.tipo==='filetado'?(A.acab.filete||0):0,ext=latA+(faceP?ar:0)+per*abF,intA=latA+(fundoAcm?0:ar),arr=v=>Math.round(v*100)/100;
       let ltE=0,ltI=0,achou=false;
       items=items.map(it=>{
         if(/^Tinta — |^Tinta ⚠️/.test(it.name)){achou=true;const q0=_orcTrNum(it.qty),un=q0>0?it.cost/q0:0;ltE=arr(ext*Lm2);
-          return Object.assign({},it,{detail:'pela área pintada da arte: laterais '+q2(per,2)+' m × '+q2(cx,2)+' m = '+q2(latA,2)+' m²'+(faceP?' + face '+q2(ar,2)+' m² = '+q2(ext,2)+' m²':'')+' × '+q2(Lm2,2)+' L/m² → '+q2(ltE,2)+' L'+(String(it.detail||'').match(/ · .*$/)||[''])[0],qty:q2(ltE,2)+' L',cost:ltE*un});}
+          return Object.assign({},it,{detail:'pela área pintada da arte: laterais '+q2(per,2)+' m × '+q2(cx,2)+' m = '+q2(latA,2)+' m²'+(faceP?' + face '+q2(ar,2)+' m²':'')+(abF?' + filete '+q2(per,2)+' m × '+q2(abF*100,1)+' cm = '+q2(per*abF,2)+' m²':'')+((faceP||abF)?' = '+q2(ext,2)+' m²':'')+' × '+q2(Lm2,2)+' L/m² → '+q2(ltE,2)+' L'+(String(it.detail||'').match(/ · .*$/)||[''])[0],qty:q2(ltE,2)+' L',cost:ltE*un});}
         if(/^Tinta PU Branco Fosco \(interna\)/.test(it.name)){const q0=_orcTrNum(it.qty),un=q0>0?it.cost/q0:0;ltI=arr(intA*Lm2);
           return Object.assign({},it,{detail:'por dentro: laterais '+q2(latA,2)+' m²'+(fundoAcm?' (o fundo é ACM na cor própria, não pinta)':' + '+(p.modelo==='acril'?'fundo':'verso da face')+' '+q2(ar,2)+' m² = '+q2(intA,2)+' m²')+' × '+q2(Lm2,2)+' L/m² → '+q2(ltI,2)+' L',qty:q2(ltI,2)+' L',cost:ltI*un});}
         return it;});
@@ -95963,7 +96505,12 @@ function _orcLetraExtras(r,p,P){
       items.push({icon:'💡',name:(m?String(m.n).trim():v.nome||'Policarbonato')+' — vazados (por dentro)',detail:v.n+' '+(v.n===1?'vazado':'vazados')+' + 2 cm de sobra em volta pra colar → encaixe pelo desenho: área '+q2(v.frac,2)+' ch. → '+q2(v.q,v.q%0.5?2:1)+' ch.'+(m?'':' ⚠️ material fora da planilha'),qty:q2(v.q,v.q%0.5?2:1)+' ch.',cost:v.q*(m?(m.v||0):0)});mexeu=true;});
     // acabamento da frente (filetado ou borda infinita) — informativo; o filete já está na tira da lateral
     const ab=p.arte&&p.arte.acab;
-    if(ab&&ab.tipo&&ab.tipo!=='cantoneira'){items.push({icon:'🔲',name:ab.tipo==='filetado'?'Frente filetada — borda metálica de '+q2(ab.filete*100,1)+' cm segurando a chapa':'Frente com borda infinita — sem borda metálica aparente',detail:ab.tipo==='filetado'?'a tira da lateral sobe o filete + 4 mm da chapa da frente (já contado na chapa da lateral)':'a chapa da frente fica por cima da lateral, fixada por dentro',qty:'—',cost:0});mexeu=true;}
+    if(ab&&ab.tipo==='infinita'){items.push({icon:'🔲',name:'Frente com borda infinita — sem borda metálica aparente',detail:'a chapa da frente fica por cima da lateral, fixada por dentro',qty:'—',cost:0});mexeu=true;}
+    // (2026-11-24, Clabonde) FILETADO: filete de chapa galvanizada 20 (1,20×3,00 m), recortado no formato das letras,
+    // pelo aproveitamento do desenho. Sem o desenho (medidas mudaram), pela área das letras ÷ área da chapa.
+    if(ab&&ab.tipo==='filetado'){const fa=_orcAprovVale(p)&&p.aprov.filete,m=_orc8Mat('1790'),d=(typeof _orcEmDims==='function'&&_orcEmDims('1790'))||[1.2,3],aCh=d[0]*d[1],un=m&&m.v>0?m.v:((P&&P.galv20)||0);
+      const ar=(A&&A.area)||(_orc2Num(p.largura)*_orc2Num(p.altura)),qf=fa&&fa.q>0?fa.q:_orc2CeilMeia(ar/aCh);
+      items.push({icon:'🔲',name:'Chapa Galv. 20 0,95mm '+q2(d[0],2)+'×'+q2(d[1],2)+'m (filete da frente)',detail:'filete de '+q2(ab.filete*100,1)+' cm segurando a chapa da frente, recortado no formato das letras'+(fa&&fa.q>0?(fa.compart?' → chapa compartilhada com outro item da mesma arte (total '+q2(fa.qTot,1)+' ch.) → parte deste item '+q2(fa.q,2)+' ch.':' → pelo aproveitamento do desenho: '+q2(fa.q,1)+' ch. (uso '+fa.uso+'% da chapa)'):' → '+q2(ar,3)+' m² ÷ '+q2(aCh,2)+' m² → '+q2(qf,1)+' ch.')+' · cód. 1790',qty:q2(qf,(qf*2)%1?2:1)+' ch.',cost:qf*un});mexeu=true;}
     // (2026-11-17) lateral em ACM: frente com CANTONEIRA DE ALUMÍNIO na borda (contorno no plano de barras) + tinta dela
     const CT=arteOk&&A.cant;
     if(CT&&CT.cod){const m=_orc8Mat(CT.cod),pr=m?(m.v||0):0,nm=m?String(m.n).trim():(CT.nome||'Cantoneira de alumínio');
@@ -96964,7 +97511,6 @@ const ORC_CONDS_PAG=['50% ENTRADA + 1 PARCELA 30 DIAS','50% ENTRADA + 2 PARCELAS
   function status(cls,txt){const s=document.getElementById('orc2-barra-st');if(s){s.className='st '+cls;s.textContent=txt;}}
   function motivo(d){
     if(!(d.produtos.length||(d.operacionais&&d.operacionais.resultado&&(d.operacionais.resultado.itens||[]).length)))return'Rascunho — salva sozinho quando tiver produto ou operacional';
-    try{const v=_munValidar(_orcxVal('orcx-cidade'),_orcxVal('orcx-uf'));if(v.ok===false)return'Não salvo — confira cidade/UF no Projeto';}catch(e){}
     if(!window._fbOrcSalvar)return'Sem conexão — tentando de novo';return'';}
   async function autoSalvar(){
     tm=null;const d=orc2&&orc2.doc;if(!d||orc2.view!=='editor')return;
@@ -96976,7 +97522,8 @@ const ORC_CONDS_PAG=['50% ENTRADA + 1 PARCELA 30 DIAS','50% ENTRADA + 2 PARCELAS
     try{await orc2Salvar();}catch(e){console.warn('salvamento automático',e);}
     salvando=false;ultimo=Date.now();
     const ok=d.id&&orc2.salvos[d.id]&&sem(orc2.salvos[d.id])===sem(d);
-    if(ok){const h=new Date();status('ok','☁️ Salvo às '+String(h.getHours()).padStart(2,'0')+':'+String(h.getMinutes()).padStart(2,'0'));}
+    if(ok){const h=new Date();let cid=false;try{cid=_munValidar(_orcxVal('orcx-cidade'),_orcxVal('orcx-uf')).ok===false;}catch(e){}
+      status(cid?'novo':'ok','☁️ Salvo às '+String(h.getHours()).padStart(2,'0')+':'+String(h.getMinutes()).padStart(2,'0')+(cid?' · ⚠️ confira cidade/UF no Projeto':''));}
     else if(!deNovo)status('novo','Não salvo — tentando de novo');
     if(deNovo||!ok){deNovo=false;agendar(ok?ATRASO:8000);}
   }
@@ -97022,6 +97569,146 @@ const ORC_CONDS_PAG=['50% ENTRADA + 1 PARCELA 30 DIAS','50% ENTRADA + 2 PARCELAS
     #sec-cat-ORCAMENTOS .orc-mais-lst button{background:#fff!important;color:#1e293b!important;border:none!important;text-align:left;padding:9px 12px!important;border-radius:8px!important;font-size:.8rem!important;width:100%}
     #sec-cat-ORCAMENTOS .orc-mais-lst button:hover{background:#f1f5f9!important}`;
   document.head.appendChild(st);
+})();
+</script>
+<script>
+// ══ REVISÃO AUTOMÁTICA DO ORÇAMENTO (2026-11-24, Clabonde: "se dependermos do usuário clicar dizendo que é uma
+// nova revisão muitos vão esquecer") ══════════════════════════════════════════════════════════════════════════
+// • PROPOSTA ENTREGUE = gerar a Proposta PDF ou o card ir pra ORÇAMENTO APROVADO (o que vier primeiro). Nesse
+//   momento guarda o "retrato" do que o cliente recebeu (d.entregue).
+// • Depois de entregue, a 1ª alteração que muda o que o cliente recebe (item entra/sai, quantidade, valor de item,
+//   operacionais, desconto, forma/condição de pagamento) abre SOZINHA a Rev. N+1, com o retrato guardado no
+//   histórico de revisões. Nome/observação não abrem revisão.
+// • Uma revisão por rodada: enquanto não for entregue de novo, as mudanças ficam na mesma revisão.
+// • O motivo se escreve sozinho (o que mudou × versão entregue); dá pra complementar num campo opcional.
+// • Se a alteração for desfeita (volta igual ao entregue), a revisão aberta sozinha é desfeita também.
+// • Orçamentos antigos: se já foram enviados (PDF) ou o card já passou por ORÇAMENTO APROVADO / voltou pra
+//   REVISÃO, a versão salva conta como a entregue.
+(function(){
+  'use strict';
+  const _RP=_orc2RevPendente;
+  const R2=v=>Math.round((Number(v)||0)*100)/100;
+  const nomeP=p=>{try{return p.nomeCurto||_orc2ProdTitulo(p)||'Item';}catch(e){return p.nomeCurto||'Item';}};
+  const opItens=d=>((d&&d.operacionais&&d.operacionais.resultado&&d.operacionais.resultado.itens)||[]);
+  const pag=d=>{try{const pp=_orc6Prop(d);return{forma:String(pp.formaPag||''),cond:String(pp.pagamento||'')};}catch(e){return{forma:'',cond:''};}};
+  function retrato(d){
+    let total=0;try{total=R2(orc2Totais(d).total);}catch(e){}
+    const produtos=(d.produtos||[]).map(p=>{let v=0,q=1;try{v=R2(_orc2PrecoItem(p));}catch(e){}try{q=_orc2Qtd1(p);}catch(e){}return{id:p.id||'',nome:nomeP(p),qtd:q,valor:v};});
+    const ops=opItens(d).map(i=>({nome:String(i.nome||''),valor:R2(i.valor)}));
+    const ds=d.desconto||{};const desc={tipo:ds.tipo||'pct',v:String(ds.v==null?'':ds.v)};
+    return{total,produtos,ops,desc,pag:pag(d)};
+  }
+  const chave=r=>JSON.stringify([r.total,r.produtos.map(p=>[p.qtd,p.valor]),r.ops.map(o=>o.valor),r.desc.v?[r.desc.tipo,r.desc.v]:0,r.pag.forma,r.pag.cond]);
+  const BRL=v=>(typeof _orcxBRL==='function'?_orcxBRL(v):'R$ '+v);
+  function diffTxt(a,b){
+    const out=[];const key=p=>p.id||p.nome;
+    const ma=new Map(a.produtos.map(p=>[key(p),p])),mb=new Map(b.produtos.map(p=>[key(p),p]));
+    b.produtos.forEach(p=>{const o=ma.get(key(p));if(!o)out.push('entrou '+p.nome+' ('+BRL(p.valor)+')');
+      else{if(o.qtd!==p.qtd)out.push(p.nome+': qtd '+o.qtd+' → '+p.qtd);if(Math.abs(o.valor-p.valor)>0.004)out.push(p.nome+' '+BRL(o.valor)+' → '+BRL(p.valor));}});
+    a.produtos.forEach(p=>{if(!mb.has(key(p)))out.push('saiu '+p.nome);});
+    const oa=new Map(a.ops.map(o=>[o.nome,o.valor])),ob=new Map(b.ops.map(o=>[o.nome,o.valor]));
+    b.ops.forEach(o=>{const v=oa.get(o.nome);if(v==null)out.push('entrou '+o.nome+' ('+BRL(o.valor)+')');else if(Math.abs(v-o.valor)>0.004)out.push(o.nome+' '+BRL(v)+' → '+BRL(o.valor));});
+    a.ops.forEach(o=>{if(!ob.has(o.nome))out.push('saiu '+o.nome);});
+    const dt=x=>x.v?(x.tipo==='valor'?BRL(Number(String(x.v).replace(',','.'))||0):x.v+'%'):'sem desconto';
+    if(JSON.stringify(a.desc)!==JSON.stringify(b.desc)&&(a.desc.v||b.desc.v))out.push('desconto '+dt(a.desc)+' → '+dt(b.desc));
+    if(a.pag.forma!==b.pag.forma)out.push('forma de pagamento '+(a.pag.forma||'—')+' → '+(b.pag.forma||'—'));
+    if(a.pag.cond!==b.pag.cond)out.push('condição de pagamento '+(a.pag.cond||'—')+' → '+(b.pag.cond||'—'));
+    if(Math.abs(a.total-b.total)>0.004)out.push('total '+BRL(a.total)+' → '+BRL(b.total));
+    return out.join(' · ')||'alteração no orçamento';
+  }
+  const quem=()=>(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  function marcarEntregue(d,como){
+    if(!d)return;const r=retrato(d);
+    d.entregue={em:new Date().toISOString(),por:quem(),rev:d.rev||0,como,chave:chave(r),r};
+    d.revAuto=false;
+  }
+  function cardJaAprovado(d){
+    try{if(!d.crm||!d.crm.id)return false;const e=_orc5Card(d.crm.id);if(!e)return false;
+      const iA=_orcavIdx('orcamento_aprovado'),i=_orcavIdx(e.etapa);return iA>=0&&i>=iA;}catch(e){return false;}
+  }
+  // antes de salvar: abre / atualiza / desfaz a revisão automática
+  function revAuto(d){
+    if(!d||!d.id)return;
+    const s=orc2.salvos&&orc2.salvos[d.id];const RP=_RP;
+    if(!d.entregue&&s){
+      let jaFoi=!!s.enviadoEm||cardJaAprovado(s);try{if(!jaFoi&&RP(d))jaFoi=true;}catch(e){}
+      if(jaFoi){const r=retrato(s);d.entregue={em:s.enviadoEm||s.atualizadoEm||s.dataSalvo||'',por:s.atualizadoPor||s.por||'—',rev:s.rev||0,como:s.enviadoEm?'pdf':'card',chave:chave(r),r};}
+    }
+    const E=d.entregue;if(!E||!E.r)return;
+    const atual=retrato(d),mudou=chave(atual)!==E.chave,rev=d.rev||0;
+    if(rev===(E.rev||0)){
+      if(!mudou)return;
+      const motivo=diffTxt(E.r,atual);
+      d.revisoes=(d.revisoes||[]).concat([{n:E.rev||0,em:E.em||'',por:E.por||'—',total:E.r.total,produtos:E.r.produtos.map(p=>({nome:p.nome,qtd:p.qtd,valor:p.valor})),motivoProxima:motivo,auto:true}]);
+      d.rev=(E.rev||0)+1;d.revMotivo=motivo;d.revEm=new Date().toISOString();d.revAuto=true;d.revObs=d.revObs||'';
+      try{toast('📝 Revisão '+d.rev+' aberta automaticamente — o orçamento mudou depois da proposta entregue','tinf');}catch(e){}
+      try{if(typeof orc2Render==='function'&&orc2.view==='editor')setTimeout(()=>{try{_orcRevAutoBarra();}catch(e){}},50);}catch(e){}
+      return;
+    }
+    if(d.revAuto&&rev===(E.rev||0)+1){
+      const ult=(d.revisoes||[])[d.revisoes.length-1];
+      if(!mudou){ // voltou igual ao entregue: desfaz a revisão que abriu sozinha
+        if(ult&&ult.auto&&ult.n===(E.rev||0))d.revisoes=d.revisoes.slice(0,-1);
+        d.rev=E.rev||0;delete d.revMotivo;delete d.revEm;d.revAuto=false;
+        try{toast('Alteração desfeita — voltou a ser a versão entregue (sem revisão nova)','tinf');}catch(e){}return;}
+      const motivo=diffTxt(E.r,atual);d.revMotivo=motivo;if(ult&&ult.auto)ult.motivoProxima=motivo+(d.revObs?' — '+d.revObs:'');
+    }
+  }
+  window._orcRevAuto=revAuto;
+  {const _s=orc2Salvar;orc2Salvar=async function(){try{revAuto(orc2.doc);}catch(e){console.warn('revisão automática',e);}return _s.apply(this,arguments);};}
+  // proposta entregue: PDF gerado
+  {const _p=_orc8AposPdf;_orc8AposPdf=async function(d){const r=await _p.apply(this,arguments);try{if(d&&d.id){marcarEntregue(d,'pdf');if(orc2.doc===d)_orc2GuardarRascunho();}}catch(e){console.warn('entregue pdf',e);}return r;};}
+  // proposta entregue: card movido pra ORÇAMENTO APROVADO (ou além) pelo botão do orçamento
+  {const _m=orc5MoverCard;orc5MoverCard=async function(){const r=await _m.apply(this,arguments);try{const d=orc2.doc;if(d&&cardJaAprovado(d)){marcarEntregue(d,'card');_orc2GuardarRascunho();}}catch(e){console.warn('entregue card',e);}return r;};}
+  // complemento opcional do motivo
+  window.orcRevObs=function(v){const d=orc2.doc;if(!d)return;d.revObs=String(v||'');const ult=(d.revisoes||[])[d.revisoes.length-1];if(d.revAuto&&ult&&ult.auto)ult.motivoProxima=(d.revMotivo||'')+(d.revObs?' — '+d.revObs:'');_orc2GuardarRascunho();};
+  {const _h=_orc2HtmlRevisoes;_orc2HtmlRevisoes=function(){
+    const h=_h.apply(this,arguments);const d=orc2.doc;if(!d||!d.revAuto)return h;
+    const E=_orcxEsc;
+    return h.replace(/(<div class="orcx-hint" style="margin:0 0 6px"><b>Rev\. \d+<\/b> \(atual\) — )/,'$1<span style="color:#0369a1;font-weight:700">📝 aberta automaticamente</span> · ')
+      +`<div class="fg" style="margin:6px 0 0"><label style="font-size:.72rem">Complemento do motivo (opcional)</label><input class="fc no-upper" style="text-transform:none" value="${E(d.revObs||'')}" placeholder="ex.: cliente pediu desconto, mudou a medida" oninput="orcRevObs(this.value)"></div>`;};}
+  // aviso discreto na barra do orçamento
+  window._orcRevAutoBarra=function(){const st=document.getElementById('orc2-barra-st'),d=orc2.doc;if(!st||!d)return;
+    let b=document.getElementById('orc-rev-auto-tag');if(!d.revAuto){if(b)b.remove();return;}
+    if(!b){b=document.createElement('span');b.id='orc-rev-auto-tag';b.style.cssText='display:inline-block;margin-left:6px;background:#e0f2fe;color:#0369a1;border-radius:999px;padding:2px 9px;font-size:.7rem;font-weight:800;white-space:nowrap';st.parentNode.insertBefore(b,st.nextSibling);}
+    b.textContent='📝 Rev. '+d.rev+' aberta automaticamente';b.title='Mudou depois da proposta entregue: '+(d.revMotivo||'');};
+  setInterval(()=>{try{if(orc2&&orc2.view==='editor')_orcRevAutoBarra();}catch(e){}},1500);
+  // o lembrete antigo "abra uma nova revisão" (botão laranja) não é mais necessário: a revisão abre sozinha
+  _orc2RevPendente=function(){return false;};
+})();
+</script>
+<script>
+// (2026-11-24) legenda pequena do botão escolhido (rosa) no 3D ficava rosa sobre rosa — agora branca, legível
+(function(){try{const st=document.createElement('style');st.textContent='#l3d-modal .orc2-btn.pri small{color:rgba(255,255,255,.9)!important}';document.head.appendChild(st);}catch(e){}})();
+// ══ ITEM "UM PRODUTO SÓ" DA ARTE 3D (2026-11-24, Clabonde) — p.juntos = as outras partes da arte ══════════════
+// Cada parte mantém o próprio cálculo (material, LED, chapas…); o item do orçamento soma tudo. O detalhe de cada
+// material diz de qual parte ele é. Editar um item assim é pelo 🧊 3D (o formulário da letra só tem uma parte).
+(function(){
+  'use strict';
+  const R2=v=>Math.round((Number(v)||0)*100)/100;
+  const rot=(nome,txt)=>'['+(nome||'parte')+'] '+(txt||'');
+  window._orcJuntosCalc=function(pr){
+    if(!pr||!Array.isArray(pr.juntos)||!pr.juntos.length)return null;
+    if(pr.custoParte==null){pr.custoParte=pr.custo||0;pr.materiaisParte=JSON.parse(JSON.stringify(pr.materiais||[]));}
+    const mats=[];
+    (pr.materiaisParte||[]).forEach(m=>mats.push(Object.assign({},m,{detalhe:rot(pr.parteNome||'principal',m.detalhe)})));
+    let custo=Number(pr.custoParte)||0;
+    pr.juntos.forEach(j=>{(j.materiais||[]).forEach(m=>mats.push(Object.assign({},m,{detalhe:rot(j.nomeCurto,m.detalhe)})));custo+=Number(j.custo)||0;});
+    return{materiais:mats,custo:R2(custo)};
+  };
+  if(typeof _orc2Recalcular==='function'){const _r=_orc2Recalcular;_orc2Recalcular=function(p){
+    if(!p||!Array.isArray(p.juntos)||!p.juntos.length)return _r.apply(this,arguments);
+    const base=Object.assign({},p);delete base.juntos;
+    const r0=_r.call(this,base);if(!r0)return null;
+    const items=r0.items.map(i=>Object.assign({},i,{detail:rot(p.parteNome||'principal',i.detail)}));let tot=r0.totalMat||0;
+    for(const j of p.juntos){const rj=_r.call(this,j);if(!rj)return null;rj.items.forEach(i=>items.push(Object.assign({},i,{detail:rot(j.nomeCurto,i.detail)})));tot+=rj.totalMat||0;}
+    return Object.assign({},r0,{items,totalMat:tot});};}
+  if(typeof orc2EditarProduto==='function'){const _e=orc2EditarProduto;orc2EditarProduto=function(id){
+    const p=((orc2.doc&&orc2.doc.produtos)||[]).find(x=>x.id===id);
+    if(p&&Array.isArray(p.juntos)&&p.juntos.length){
+      if(typeof window.l3dAbrirItem==='function'&&typeof window._l3dEstDe==='function'&&window._l3dEstDe(p)){toast('Este produto junta '+(p.juntos.length+1)+' partes da arte — abrindo no 3D pra editar','tinf');return window.l3dAbrirItem(id);}
+      toast('Este produto junta várias partes da arte: importe a arte de novo pra editar','terr');return;}
+    return _e.apply(this,arguments);};}
 })();
 </script>
 <script>
@@ -98318,7 +99005,7 @@ ${V.l.map(x=>x.n+') '+x.txt).join('\n')}
     let aprov=true;try{aprov=_getUserCat().isAdm||_orc2AprovOk(d);}catch(e){}
     const st=document.getElementById('orc2-barra-st');
     s.innerHTML=`<div class="oxl-card">
-      ${tp?`<div class="oxl-l"><span>Produtos</span><b>${brl(t.precoProd)}</b></div>`:''}
+      ${tp?`<div class="oxl-l"><span>Produtos</span><b>${brl(t.precoProd)}</b></div>`:`<button type="button" class="oxl-lk" onclick="orc2IncluirProdutos()">＋ Incluir produtos</button>`}
       ${temOp?`<div class="oxl-l"><span>Operacionais</span><b>${brl(d.tipo==='operacionais'?t.op:t.opConta)}</b></div>${(()=>{try{const L=_orcOpLinhas(d,t,false).filter(x=>x.v>0&&(d.tipo==='operacionais'||d.operacionais[x.c]==='SIM'));return L.length?`<div class="oxl-ops">${L.map(x=>`<div><span>${_orcxEsc(x.l)}</span><b>${brl(x.v)}</b></div>`).join('')}</div>`:(tp?'<div class="oxl-ops vazio">Instalação e frete ainda não calculados</div>':'');}catch(e){return'';}})()}${tp?`<button type="button" class="oxl-bt op" onclick="oxlAbrir('operacionais')">🚚 Editar instalação, frete e elevação</button>`:''}`:`<button type="button" class="oxl-lk" onclick="orc2IncluirOperacionais()">＋ Incluir instalação e frete</button>`}
       <div class="oxl-l"><span>Desconto</span><b>${t.desconto>0?'− '+brl(t.desconto):'—'}</b></div><button type="button" class="oxl-lk" onclick="oxlAbrir('resumo')">${t.desconto>0?'Mudar desconto e condições':'Dar desconto · condições'}</button>
       <div class="oxl-tot"><span>Total do cliente</span><b>${brl(t.total)}</b></div>
@@ -98456,28 +99143,33 @@ ${V.l.map(x=>x.n+') '+x.txt).join('\n')}
     const r=f.apply(this,arguments);
     volta();try{requestAnimationFrame(volta);}catch(e){}setTimeout(volta,0);setTimeout(volta,80);setTimeout(volta,250);
     return r;};});
-  let cache=null,cacheN=-1;
+  let cache=null,cacheN=-1,refs={};
   function marcas(){
     const base=(typeof orc3!=='undefined'&&orc3.base)||{};const n=Object.keys(base).length;
     if(cache&&cacheN===n)return cache;
-    const out={};
-    try{Object.entries(_orc2AcmCores()).forEach(([cor,cc])=>{const ms=new Set();
+    const out={};refs={};
+    try{Object.entries(_orc2AcmCores()).forEach(([cor,cc])=>{const ms=new Set(),rs=new Set();
       [cc.c122,cc.c150].forEach(cod=>{const m=cod&&base[cod];if(!m)return;const nm=String(m.n||'').toUpperCase().replace(/\s+/g,' ');
         const rest=(nm.split(/\b0?3 ?MM\b/)[1]||'').trim();let mk='';
+        // (2026-11-24, Clabonde: "temos o ACM PRO 129 mas na lista não achei") — a referência de cor vai junto no nome
+        {let rf=(rest.match(/\bREF\.?\s*(?:DE COR\s*)?([A-Z]{0,4}\s?\d[A-Z0-9]*)/)||[])[1]||'';
+         if(!rf){const a=rest.split(' - ')[0].trim();if(/^[A-Z]{0,4}\d+[A-Z]?$/.test(a))rf=a;}
+         if(rf)rs.add(rf.trim());}
         const i=rest.lastIndexOf(' - ');if(i>=0)mk=rest.slice(i+3).trim();else if(rest.charAt(0)==='-')mk=rest.slice(1).trim();
         if(!mk){const k=rest.match(/DAY ?BRASIL|ALUCOMAXX|ALUMBRASIL|ACTOS|BOLD|PROJETO ?ALUMINIO|ALUCOBOND/);if(k)mk=k[0];}
         mk=mk.replace(/^DAYBRASIL$/,'DAY BRASIL').replace(/^PROJETOALUMINIO$/,'PROJETO ALUMÍNIO');if(mk)ms.add(mk);});
-      if(ms.size)out[cor]=[...ms].join(' / ');});}catch(e){}
+      if(ms.size)out[cor]=[...ms].join(' / ');if(rs.size)refs[cor]=[...rs].join(' / ');});}catch(e){}
     cache=out;cacheN=n;return out;
   }
   window._acmMarca=c=>marcas()[c]||'';
+  window._acmRef=c=>{marcas();return refs[c]||'';};
   function rotular(){
     let cores;try{cores=new Set(Object.keys(_orc2AcmCores()));}catch(e){return;}if(cores.size<3)return;
-    const mk=marcas();if(!Object.keys(mk).length)return;
+    const mk=marcas();if(!Object.keys(mk).length&&!Object.keys(refs).length)return;
     document.querySelectorAll('select:not([data-acm-mk])').forEach(sel=>{
       const ops=[...sel.options];if(ops.length<3||ops.filter(o=>cores.has(o.value)).length<Math.min(3,ops.length-1))return;
       sel.setAttribute('data-acm-mk','1');
-      ops.forEach(o=>{const m=mk[o.value];if(m&&o.text.indexOf(' — '+m)<0)o.text=o.text+' — '+m;});
+      ops.forEach(o=>{const m=mk[o.value],r=refs[o.value];const ex=[r?'ref. '+r:'',m||''].filter(Boolean).join(' · ');if(ex&&o.text.indexOf(' — '+ex)<0)o.text=o.text+' — '+ex;});
     });
   }
   let t=null;const ag=()=>{if(t)return;t=setTimeout(()=>{t=null;try{rotular();}catch(e){}},250);};
@@ -99723,12 +100415,16 @@ function _orcOpLinhas(d,t,comIcone){
   // (2026-11-23, Clabonde: "permitir o usuário colocar o valor manual quando é uma cotação somente dos operacionais e não
   // tem produto") — no "Só serviço" o valor do pedido fica liberado pra digitar; com valor, ele vira a base da instalação e
   // da ART (igual a um pedido com produto); vazio, continua valendo instalação e frete informados à mão.
+  // orçamento que era "Só serviço" e ganhou produtos (orc2IncluirProdutos): segura o valor digitado enquanto não tem produto
+  function segura(d){const o=d&&d.operacionais;if(!o||!o.vpAteProduto)return false;
+    if(d.tipo!=='operacionais'&&_orc2ValorVendaProdutos(d)>0){delete o.vpAteProduto;return false;}return d.tipo!=='operacionais';}
   function travar(){
     const el=document.getElementById('orcx-valor-pedido');if(!el)return;
     const vh=document.getElementById('orcx-vp-hint');
-    if(orc2&&orc2.doc&&orc2.doc.tipo==='operacionais'){
+    if(orc2&&orc2.doc&&(orc2.doc.tipo==='operacionais'||segura(orc2.doc))){
       el.readOnly=false;el.removeAttribute('tabindex');el.style.background='';el.style.color='';el.style.cursor='';
       el.title='Sem produto: digite o valor do pedido, se tiver';
+      if(vh&&orc2.doc.tipo!=='operacionais'){vh.innerHTML='✏️ Valor informado à mão — vira a soma dos produtos quando entrar o primeiro produto';return;}
       if(vh)vh.innerHTML=_orcxMoney('orcx-valor-pedido')>0?'✏️ Valor informado à mão — base da instalação e da ART':'✏️ Sem produto: digite o valor do pedido ou deixe vazio e informe abaixo a instalação e o frete';
       return;}
     el.readOnly=true;el.tabIndex=-1;el.style.background='#f1f5f9';el.style.color='#334155';el.style.cursor='not-allowed';
@@ -99738,11 +100434,11 @@ function _orcOpLinhas(d,t,comIcone){
   const _s=_orc2SincronizarValorPedido;
   _orc2SincronizarValorPedido=function(){
     const d=orc2&&orc2.doc;
-    if(d&&d.operacionais&&d.tipo!=='operacionais')d.operacionais.vpAuto=true;
+    if(d&&d.operacionais&&d.tipo!=='operacionais')d.operacionais.vpAuto=!segura(d);
     const r=_s.apply(this,arguments);try{travar();}catch(e){}return r;};
   if(typeof orcxAoMudar==='function'){const _o=orcxAoMudar;orcxAoMudar=function(){
     const d=orc2&&orc2.doc;
-    if(d&&d.operacionais&&d.tipo!=='operacionais'){d.operacionais.vpAuto=true;try{_orc2SincronizarValorPedido();}catch(e){}}
+    if(d&&d.operacionais&&d.tipo!=='operacionais'){d.operacionais.vpAuto=!segura(d);try{_orc2SincronizarValorPedido();}catch(e){}}
     return _o.apply(this,arguments);};}
   if(typeof orcxAtualizarVisibilidade==='function'){const _v=orcxAtualizarVisibilidade;orcxAtualizarVisibilidade=function(){const r=_v.apply(this,arguments);try{travar();}catch(e){}return r;};}
   // ao montar o editor (operacionais fica na janela da tela única) já sincroniza
