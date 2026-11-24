@@ -34,7 +34,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-24.22';</script>
+<script>const APP_BUILD_VERSION='2026-11-24.27';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -10133,7 +10133,7 @@ function _cqgFiltrar(T){
   return T.filter(l=>{
     const[yy,mm]=l.em.split('-').map(Number);
     if(yy!==y||(m&&mm!==m))return false;
-    if(q&&!N([l.os,l.p.cliente,l.p.nomeFantasia,l.p.job,l.resp,l.origem.os,l.setorLbl,l.marca].join(' ')).includes(q))return false;
+    if(q&&!_buscaCasa([l.os,l.p.cliente,l.p.nomeFantasia,l.p.job,l.resp,l.origem&&l.origem.os,l.setorLbl,l.marca],q))return false;
     return true;
   }).sort((a,b)=>String(b.em).localeCompare(String(a.em))||String(b.os).localeCompare(String(a.os),'pt-BR',{numeric:true}));
 }
@@ -15329,6 +15329,19 @@ function _emComVendedor(lista,p){
 // (2026-10-27) O EmailJS escapa o assunto ({{subject}}): "/" chegava como "&#x2F;", "&" como "&amp;"
 // (ex.: "SOROCABA VERGUEIRO&#x2F;SP"). Todo assunto de aviso passa por aqui antes de enviar.
 function _assuntoEmail(t){return String(t||'').replace(/\//g,'-').replace(/&/g,' e ').replace(/[<>"]/g,'').replace(/'/g,'’').replace(/\s{2,}/g,' ').trim();}
+// ── BUSCA TOLERANTE (2026-11-24, Clabonde: "pesquiso av sao paulo e não acha esse pedido... essa pesquisa tá ruim") ──
+// Ignora acento, maiúscula/minúscula e pontuação ("AV. SÃO PAULO" = "av sao paulo"), e cada palavra digitada pode estar em
+// qualquer campo e em qualquer ordem ("sorocaba burger" acha "BURGER KING FS SOROCABA"). Usada nas buscas das listas de pedidos.
+// (2026-11-24, Clabonde: "data lá em pedidos Granda Mob bugando quando digito") — o campo de data do navegador avisa
+// "mudou" a cada dígito do ano (2 → 0002, 20 → 0020...) e a tela salvava e redesenhava no meio da digitação, travando o ano
+// em 0002. Agora só aceita data completa com ano entre 2000 e 2100 (ou o campo vazio, pra apagar).
+function _gmDtOk(v){if(v==null||v==='')return true;const m=/^(\d{4})-\d{2}-\d{2}$/.exec(String(v));return!!m&&+m[1]>=2000&&+m[1]<=2100;}
+function _buscaNorm(v){return String(v==null?'':v).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();}
+function _buscaCasa(campos,busca){
+  const q=_buscaNorm(busca);if(!q)return true;
+  const t=' '+_buscaNorm((Array.isArray(campos)?campos:[campos]).filter(x=>x!=null&&x!=='').join(' '))+' ';
+  return q.split(' ').every(w=>t.indexOf(w)>=0);
+}
 // (2026-10-27) Grava SÓ os campos de status do e-mail, numa transação sobre o documento atual do
 // servidor — nunca regrava o pedido inteiro. Se o pedido ainda não chegou no servidor (emissão
 // acabou de acontecer), tenta de novo algumas vezes e, no fim, cai no salvamento normal.
@@ -37239,7 +37252,7 @@ function renderSetorTarefas(setorKey){
   const filStatus=document.getElementById('st-'+pref+'-fil')?.value||'';
   const hojeIso=_hojeIso();
   let linhas=_lpTarefasSetor(setorKey,hojeIso);
-  if(busca)linhas=linhas.filter(l=>String(l.p.os||'').toUpperCase().includes(busca)||(l.p.cliente||'').toUpperCase().includes(busca)||(l.p.job||'').toUpperCase().includes(busca));
+  if(busca)linhas=linhas.filter(l=>_buscaCasa([l.p.os,l.p.cliente,l.p.nomeFantasia,l.p.job],busca));
   if(filStatus==='pendentes')linhas=linhas.filter(l=>l.status==='pendente');
   else if(filStatus==='atrasadas')linhas=linhas.filter(l=>l.status==='atrasado');
   else if(filStatus==='concluidas')linhas=linhas.filter(l=>l.status==='ok');
@@ -38119,7 +38132,7 @@ function _projListaFiltrada(ignorarPadraoOcultarConcluido){
   const temFiltroData=!!(filDataCampo&&(filDataDe||filDataAte));
   let infos=_lpPedidosElegiveis().map(p=>_projInfo(p,hojeIso)).filter(x=>x.ok);
   try{infos=_projxAplicarFiltros(infos,hojeIso);}catch(err){console.error('_projxAplicarFiltros',err);}
-  if(busca)infos=infos.filter(({p})=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.nomeFantasia||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca)||(()=>{try{return _projx2TextoBusca(p).includes(busca);}catch(e){return false;}})());
+  if(busca)infos=infos.filter(({p})=>_buscaCasa([p.os,p.cliente,p.nomeFantasia,p.job,(()=>{try{return _projx2TextoBusca(p);}catch(e){return'';}})()],busca));
   if(temFiltroData){
     if(filDataCampo==='emissao')infos=infos.filter(x=>_lpDataNoIntervalo(x.calc.emissaoIso,filDataDe,filDataAte));
     else if(filDataCampo==='final')infos=infos.filter(x=>_lpDataNoIntervalo(x.calc.prazoIso,filDataDe,filDataAte));
@@ -38642,7 +38655,7 @@ function _comprasListaFiltrada(ignorarPadraoOcultarConcluido){
   const filDataAte=document.getElementById('compras-fil-data-ate')?.value||'';
   const temFiltroData=!!(filDataCampo&&(filDataDe||filDataAte));
   let linhas=_comprasLinhasInfo(hojeIso);
-  if(busca)linhas=linhas.filter(({p})=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.nomeFantasia||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
+  if(busca)linhas=linhas.filter(({p})=>_buscaCasa([p.os,p.cliente,p.nomeFantasia,p.job],busca));
   if(filEtapa)linhas=linhas.filter(x=>x.etapa.key===filEtapa);
   if(temFiltroData){
     if(filDataCampo==='emissao')linhas=linhas.filter(x=>_lpDataNoIntervalo(x.calc.emissaoIso,filDataDe,filDataAte));
@@ -39761,7 +39774,7 @@ function _prodListaFiltrada(ignorarPadraoOcultarConcluido){
   const filDataAte=document.getElementById('prod-fil-data-ate')?.value||'';
   const temFiltroData=!!(filDataCampo&&(filDataDe||filDataAte));
   let infos=_lpPedidosElegiveis().map(p=>_prodInfo(p,hojeIso)).filter(x=>x.ok);
-  if(busca)infos=infos.filter(({p})=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.nomeFantasia||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
+  if(busca)infos=infos.filter(({p})=>_buscaCasa([p.os,p.cliente,p.nomeFantasia,p.job],busca));
   if(temFiltroData){
     if(filDataCampo==='emissao')infos=infos.filter(x=>_lpDataNoIntervalo(x.calc.emissaoIso,filDataDe,filDataAte));
     else if(filDataCampo==='final')infos=infos.filter(x=>_lpDataNoIntervalo(x.calc.prazoIso,filDataDe,filDataAte));
@@ -42090,7 +42103,7 @@ function _lpListaFiltrada(){
   // como pendência — é inconsistência de cadastro que precisa de correção manual no prazo,
   // então some da lista inteira em vez de aparecer como aviso (2026-07-30, a pedido do usuário).
   infos=infos.filter(x=>!x.curto);
-  if(busca)infos=infos.filter(({p})=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.nomeFantasia||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
+  if(busca)infos=infos.filter(({p})=>_buscaCasa([p.os,p.cliente,p.nomeFantasia,p.job],busca));
   if(filEtapa)infos=infos.filter(x=>x.ok&&x.etapaAtual&&x.etapaAtual.key===filEtapa);
   if(_lpMes)infos=infos.filter(x=>x.ok&&x.calc.prazoIso&&parseInt(x.calc.prazoIso.slice(5,7),10)===_lpMes&&_anoDeIso(x.calc.prazoIso)===_anoRef);
   if(temFiltroData){
@@ -51066,7 +51079,7 @@ function _plObrasLinhasFiltradas(ignorarStatus){
   // usuário — reaproveita _fgMesPrazo, mesma conta já usada em Indicadores de Planejamento).
   if(_plMes)lista=lista.filter(p=>_fgMesPrazo(p)===_plMes&&_anoDeIso(_normPrazoIso(p.prazo))===_anoRef);
   if(busca){
-    lista=lista.filter(p=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.nomeFantasia||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
+    lista=lista.filter(p=>_buscaCasa([p.os,p.cliente,p.nomeFantasia,p.job],busca));
   }
   const hojeISO=_hojeIso();
   // atrasado = ainda não concluída E o Prazo de Finalização já passou (comparação de string
@@ -52432,7 +52445,7 @@ function renderPendenciasFinalizacao(){
   }
 
   let lista=_pfPedidosElegiveis();
-  if(busca)lista=lista.filter(p=>String(p.os||'').toUpperCase().includes(busca)||(p.cliente||'').toUpperCase().includes(busca)||(p.nomeFantasia||'').toUpperCase().includes(busca)||(p.job||'').toUpperCase().includes(busca));
+  if(busca)lista=lista.filter(p=>_buscaCasa([p.os,p.cliente,p.nomeFantasia,p.job],busca));
   const hojeISO=_hojeIso();
   let rows=lista.map(p=>{
     const pf=p.pendenciaFin||{};
@@ -53391,6 +53404,26 @@ async function hpExportarPDF(){
   const d=new Date(),pd=n2=>String(n2).padStart(2,'0');
   doc.save(`Historico_Pedidos_${d.getFullYear()}${pd(d.getMonth()+1)}${pd(d.getDate())}.pdf`);toast('PDF gerado 📄','tok');
 }
+// (2026-11-24, Clabonde: "inserir no histórico de pedidos as garantias e retrabalho também, todos os pedidos e vendas")
+// Antes a lista era só a Lista de Vendas (getVendaRowsMerged). Agora entram também os pedidos que não são venda —
+// Garantia/Retrabalho, Interno, Amostra, Brinde, Chumbador — no mesmo formato de linha (pedidoToVendaRow).
+// Importados da planilha ficam de fora aqui porque a Lista de Vendas já cuida deles (evita duplicar).
+function _hpLinhasTodas(){
+  const base=getVendaRowsMerged();
+  const ja=new Set(base.map(r=>r._pid).filter(Boolean));
+  const extra=[];
+  (pedidos||[]).forEach(p=>{
+    try{
+      if(!p||!p.id||ja.has(p.id)||p.importadoPlanilha||p.copiaOsRepetida||p.excluido)return;
+      if(typeof isComercialPedido==='function'&&isComercialPedido(p))return;
+      if(p.os&&typeof isVendaCancelada==='function'&&isVendaCancelada(p.os))return;
+      const r=pedidoToVendaRow(p);if(!r)return;
+      r._pid=r._pid||p.id;r._naoVenda=true;r.cat=p.tipo||r.cat||'Não é venda';
+      extra.push(r);
+    }catch(e){}
+  });
+  return base.concat(extra);
+}
 function renderHistoricoPedidos(){
   const lblEl=document.getElementById('hp-mes-lbl');
   if(lblEl)lblEl.textContent=_hpMes?MESES_PT[_hpMes]:'Todos os meses';
@@ -53404,7 +53437,7 @@ function renderHistoricoPedidos(){
   let idsPagamento=[],idsFinalizacao=[],idsSem=[];
   if(cardsEl){
     const vistos=new Set();
-    getVendaRowsMerged().filter(r=>r._pid&&_hpNoPeriodo(r,pMap)).forEach(r=>{
+    _hpLinhasTodas().filter(r=>r._pid&&_hpNoPeriodo(r,pMap)).forEach(r=>{
       const p=pMap[r._pid];
       if(!p||vistos.has(r._pid))return;
       vistos.add(r._pid);
@@ -53443,12 +53476,12 @@ function renderHistoricoPedidos(){
     </div>`).join('');
   }
   const busca=(document.getElementById('hp-fil-busca')?.value||'').toUpperCase().trim();
-  let rows=getVendaRowsMerged().slice().sort((a,b)=>(b.m-a.m)||String(b.p).localeCompare(String(a.p)));
+  let rows=_hpLinhasTodas().slice().sort((a,b)=>(b.m-a.m)||String(b.p).localeCompare(String(a.p)));
   rows=rows.filter(r=>_hpNoPeriodo(r,pMap));
   if(_hpCardFiltro==='pagamento')rows=rows.filter(r=>idsPagamento.includes(r._pid));
   else if(_hpCardFiltro==='finalizacao')rows=rows.filter(r=>idsFinalizacao.includes(r._pid));
   else if(_hpCardFiltro==='sem')rows=rows.filter(r=>idsSem.includes(r._pid));
-  if(busca)rows=rows.filter(r=>String(r.p||'').toUpperCase().includes(busca)||(r.cl||'').toUpperCase().includes(busca)||(r.job||'').toUpperCase().includes(busca));
+  if(busca)rows=rows.filter(r=>_buscaCasa([r.p,r.cl,r.job,(()=>{try{const pp=(typeof pedidos!=='undefined'?pedidos:[]).find(x=>String(x.os)===String(r.p));return pp?pp.nomeFantasia:'';}catch(e){return'';}})()],busca));
   _hpUltimasLinhas=rows;
   const body=document.getElementById('hp-lista');
   if(!body)return;
@@ -53467,7 +53500,7 @@ function renderHistoricoPedidos(){
       </div>
       ${(()=>{const pi=_hpPrazoInfo(r._pid?pMap[r._pid]:null);if(!pi)return'';const c=pi.dias>0?'#b45309':'#15803d';return`<div style="flex-shrink:0;text-align:right;white-space:nowrap;padding:0 6px" title="Data final original → data final alterada"><div style="font-size:.6rem;font-weight:700;color:var(--ink4);text-transform:uppercase">Entrega final</div><div style="font-size:.76rem;color:#334155"><span style="text-decoration:line-through;color:#94a3b8">${fmtD(pi.orig)}</span> → <b>${fmtD(pi.atual)}</b></div><div style="font-size:.7rem;font-weight:800;color:${c}">${pi.dias>0?'+':''}${pi.dias} ${Math.abs(pi.dias)===1?'dia':'dias'}</div></div>`;})()}
       <div style="flex-shrink:0;text-align:right;white-space:nowrap;padding:0 6px;min-width:130px"><div style="font-size:.76rem;color:#0f172a"><span style="font-size:.6rem;font-weight:700;color:var(--ink4)">BRUTO</span> <b>${fmtR(Number(r.br)||0)}</b></div><div style="font-size:.76rem;color:#0f172a"><span style="font-size:.6rem;font-weight:700;color:var(--ink4)">LÍQUIDO</span> <b>${fmtR(Number(r.lq)||0)}</b></div></div>
-      <div style="font-size:.72rem;color:var(--ink4);white-space:nowrap;flex-shrink:0">${r.cat||'—'} →</div>
+      <div style="font-size:.72rem;color:${r._naoVenda?'#b45309':'var(--ink4)'};font-weight:${r._naoVenda?'700':'400'};white-space:nowrap;flex-shrink:0">${r.cat||'—'} →</div>
     </div>`).join('')
     +(rows.length>limitados.length?`<div style="text-align:center;padding:10px;color:var(--ink4);font-size:.75rem">Mostrando ${limitados.length} de ${rows.length} — refine a busca pra ver mais.</div>`:'');
 }
@@ -82231,7 +82264,7 @@ function _uxBuscaAbrir(){
 }
 function _uxBuscaFechar(){const b=document.getElementById('ux-busca-bg');if(b)b.remove();}
 function _uxBuscaColetar(q){
-  const Q=_uxNorm(q).trim();if(Q.length<2)return[];const tem=s=>_uxNorm(s).indexOf(Q)>=0;const out=[];const add=(g,arr)=>arr.slice(0,8).forEach(x=>out.push(Object.assign({g},x)));
+  const Q=_uxNorm(q).trim();if(Q.length<2)return[];const tem=s=>_buscaCasa([s],q);const out=[];const add=(g,arr)=>arr.slice(0,8).forEach(x=>out.push(Object.assign({g},x)));
   // menus
   try{add('Menus',[...document.querySelectorAll('#sb-nav .sb-btn')].filter(b=>b.offsetParent!==null||b.id).map(b=>({t:(b.querySelector('.sb-btn-label')||b).textContent.trim(),s:'Abrir menu',fn:()=>b.click()})).filter(x=>x.t&&tem(x.t)));}catch(e){}
   // pedidos
@@ -83961,7 +83994,7 @@ a.chx-arq:hover{border-color:#1d4ed8;color:#1d4ed8}
 (function(){
 const CH_PRIO={URGENTE:{l:'Urgente',d:2,cor:'#b91c1c',bg:'#fee2e2'},NORMAL:{l:'Normal',d:5,cor:'#1d4ed8',bg:'#dbeafe'},NAO_URGENTE:{l:'Não urgente',d:10,cor:'#475569',bg:'#f1f5f9'}};
 const CH_TIPOS=['Prazo / atraso','Qualidade / retrabalho','Informação errada ou faltando','Material / compras','Comunicação','Outro'];
-const CH_STATUS={ABERTO:'Aguardando o setor assumir',ANDAMENTO:'Em andamento',RESOLVIDO:'Resolvido — aguardando confirmação',ENCERRADO:'Encerrado'};
+const CH_STATUS={ABERTO:'Aberto — com o responsável',ANDAMENTO:'Em andamento',RESOLVIDO:'Resolvido — aguardando confirmação',ENCERRADO:'Encerrado'};
 const CH_AVAL={TOTAL:{l:'Atendida',cor:'#15803d',bg:'#dcfce7'},PARCIAL:{l:'Atendida em parte',cor:'#b45309',bg:'#fef3c7'}};
 const CH_INICIO='2026_10';
 const CH_MAX_ARQ=5,CH_MAX_MB=10,CH_MAX_MB_VIDEO=100; // (2026-11-24) vídeo até 100 MB (limite do Cloudinary por vídeo)
@@ -83990,6 +84023,19 @@ function _chPodeAbrir(){try{if(!_ul())return false;return _chNivelRank()>=2;}cat
 function _chPodeAcessar(){try{return!!_ul();}catch(e){return false;}}
 function _chMeuEmail(){try{return String(_getUserCat().email||'').toLowerCase();}catch(e){return'';}}
 const destLbl=c=>c&&c.destinoPessoa?(_tcNome(c.destinoPessoa.nome)+' ('+setorLbl(c.destino)+')'):setorLbl(c&&c.destino);
+// (2026-11-24, Clabonde: "tirar essa regra de assumir o chamado, se foi direcionado pra tal setor já colocar o supervisor
+// da área como responsável ou ainda ser possível colocar a pessoa") — chamado para um setor já nasce com o Supervisor do
+// setor como responsável (sem Supervisor: o nível mais baixo acima dele, Gestor…). Chamado para pessoa: a própria pessoa.
+function _chSupervisoresDo(setor){
+  let L=[];try{const fixo=Object.keys(_CH_SETOR_FIXO||{}).map(x=>x.toLowerCase());
+    L=_chEmailsDoSetor(setor).filter(e=>!fixo.includes(e)).map(e=>{let r=2;try{r=_nivelRank(_nivelDe(e));}catch(x){}return{email:e,nome:(cfg.usuarioNomes||{})[e]||e.split('@')[0].toUpperCase(),rank:r};});}catch(e){}
+  if(!L.length)return[];const min=Math.min(...L.map(x=>x.rank));return L.filter(x=>x.rank===min).sort((a,b)=>String(a.nome).localeCompare(String(b.nome),'pt-BR'));}
+function _chRespTxt(c){
+  if(!c)return'';if(c.responsavel)return c.responsavel;if(c.destinoPessoa&&c.destinoPessoa.nome)return _tcNome(c.destinoPessoa.nome);
+  const sv=_chSupervisoresDo(c.destino);return sv.length?sv.map(x=>_tcNome(x.nome)).join(' / '):'Supervisor de '+setorLbl(c.destino);}
+function _chConjTxt(c){
+  if(!c)return'';if(Array.isArray(c.grupoPessoas)&&c.grupoPessoas.length>1){const eu=c.destinoPessoa&&c.destinoPessoa.nome;return c.grupoPessoas.filter(n=>n!==eu).map(_tcNome).join(', ');}
+  return c.grupoSetores&&c.grupoSetores.length>1?c.grupoSetores.filter(x=>x!==c.destino).map(setorLbl).join(', '):'';}
 function _tcNome(n){return String(n||'').toLowerCase().replace(/(^|\s)(\S)/g,(m,a,b)=>a+b.toUpperCase());}
 function _chVeTudo(){try{const u=_getUserCat();return u.isAdm||_nivelDe(u.email)==='DIRETORIA';}catch(e){return false;}}
 function _chIsAdm(){try{return!!_getUserCat().isAdm;}catch(e){return false;}}
@@ -84030,7 +84076,7 @@ function _chMinhaAcao(c){
   const dest=_chSouDestino(c),orig=_chSouOrigem(c);
   if(orig&&c.pedidoPrazo)return _chPodeAprovarPrazo(c)?'Responder pedido de mais prazo':'Pedido de prazo — Gestor ou Diretoria decide';
   if(orig&&!dest&&c.status==='RESOLVIDO')return'Confirmar a solução';
-  if(dest&&c.status==='ABERTO')return'Assumir o chamado';
+  if(dest&&c.status==='ABERTO'&&!c.pedidoPrazo){const s=_chSituacao(c);return s.k==='atr'?'Resolver — está atrasado':'Chamado novo — resolver até '+fmtD(c.prazo);}
   if(dest&&c.status==='ANDAMENTO'&&!c.pedidoPrazo){const s=_chSituacao(c);if(s.k==='atr'||s.k==='hoje'||s.k==='amanha')return s.k==='atr'?'Resolver — está atrasado':'Resolver — '+s.txt.toLowerCase();}
   return'';
 }
@@ -84193,12 +84239,12 @@ function _chRender(soLista){
       sitCol=_chPill(s.txt,s.cor,s.bg);ultCol=av?_chPill(av.l,av.cor,av.bg):(c.encerradoTipo==='SEM_NECESSIDADE'?'<span class="chx-sub">Não precisou mais</span>':'');
     }else{
       prazoCol=`${fmtD(c.prazo)}${extra}`;
-      sitCol=`${_chPill(s.txt,s.cor,s.bg)}<div class="chx-sub">${esc(c.status==='ABERTO'?'Ninguém assumiu ainda':c.status==='ANDAMENTO'?('Com '+(c.responsavel||'o setor')):'')}</div>`;
+      sitCol=`${_chPill(s.txt,s.cor,s.bg)}<div class="chx-sub">${esc((c.status==='ABERTO'||c.status==='ANDAMENTO')?('Com '+_chRespTxt(c)):'')}</div>`;
       ultCol=acao?`<span class="chx-acao-tag">👉 ${esc(acao)}</span>`:'';
     }
     return`<tr class="chx-tr${acao&&!enc?' chx-acao':''}${s.k==='atr'?' chx-atr':''}" style="box-shadow:inset 3px 0 0 ${borda}" onclick="chAbrir('${c.id}')">
       <td class="chx-num">${numTxt(c)}</td>
-      <td><div class="chx-1l"><b>${esc(setorLbl(c.origem))}</b> <span class="chx-mut">→</span> <b>${esc(destLbl(c))}</b></div>${c.grupoSetores&&c.grupoSetores.length>1?`<div class="chx-sub chx-1l">conjunto com ${c.grupoSetores.filter(x=>x!==c.destino).map(setorLbl).join(', ')}</div>`:''}</td>
+      <td><div class="chx-1l"><b>${esc(setorLbl(c.origem))}</b> <span class="chx-mut">→</span> <b>${esc(destLbl(c))}</b></div>${_chConjTxt(c)?`<div class="chx-sub chx-1l">conjunto com ${esc(_chConjTxt(c))}</div>`:''}</td>
       <td><div class="chx-1l" title="${esc(c.titulo)}">${esc(c.titulo)}</div><div class="chx-sub chx-1l">${esc(c.tipo||'')}${c.os?' · OS '+esc(c.os):''} · aberto por ${esc(c.criadoPor||'—')}</div></td>
       <td>${_chPill(p.l,p.cor,p.bg)}</td>
       <td class="chx-nw">${prazoCol}</td>
@@ -84313,10 +84359,15 @@ function _chParaQuemHtml(){
   const L=_chPessoasPossiveis();if(!L.length)return'';
   const nvL=r=>r>=99?'Administrador':r>=4?'Diretoria':r===3?'Gestor':r===2?'Supervisor':'Operador';
   const eq=L.filter(x=>x.equipe),out=L.filter(x=>!x.equipe);
-  const opt=x=>`<option value="${esc(x.email)}">${esc(_tcNome(x.nome))} — ${esc(nvL(x.rank))}${x.setor&&x.setor!=='DIRETORIA'?' · '+esc(setorLbl(x.setor)):''}</option>`;
-  return`<div class="fg"><label>Para quem? <span class="r">*</span></label><div class="chx-prio" id="chn-modo" data-v="setor"><button type="button" class="plx-tg on" data-m="setor" onclick="chModoPara('setor')">🏢 Um setor</button><button type="button" class="plx-tg" data-m="pessoa" onclick="chModoPara('pessoa')">👤 Uma pessoa</button></div></div>
-    <div class="fg" id="chn-w-pessoa" style="display:none"><label>Pessoa que vai resolver <span class="r">*</span></label><select id="chn-pessoa" class="fc"><option value="">Escolha…</option>${eq.length?`<optgroup label="Minha equipe">${eq.map(opt).join('')}</optgroup>`:''}${out.length?`<optgroup label="Supervisores, gestores, diretoria e administradores">${out.map(opt).join('')}</optgroup>`:''}</select>
-    <div class="chx-sub" style="margin-top:6px">Só Supervisor, Gestor ou Diretoria. Quem você escolher recebe o chamado e o e-mail.</div></div>`;}
+  const opt=x=>`<label class="chn-pp" data-q="${esc(_buscaNorm(x.nome+' '+setorLbl(x.setor)+' '+nvL(x.rank)))}" style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:.8rem"><input type="checkbox" value="${esc(x.email)}" onchange="chPessoasInfo()"> <span><b>${esc(_tcNome(x.nome))}</b> <span class="chx-sub">— ${esc(nvL(x.rank))}${x.setor&&x.setor!=='DIRETORIA'?' · '+esc(setorLbl(x.setor)):''}</span></span></label>`;
+  return`<div class="fg"><label>Para quem? <span class="r">*</span></label><div class="chx-prio" id="chn-modo" data-v="setor"><button type="button" class="plx-tg on" data-m="setor" onclick="chModoPara('setor')">🏢 Um setor</button><button type="button" class="plx-tg" data-m="pessoa" onclick="chModoPara('pessoa')">👤 Pessoas</button></div></div>
+    <div class="fg" id="chn-w-pessoa" style="display:none"><label>Quem vai resolver <span class="r">*</span> <span class="chx-sub">— pode marcar mais de uma pessoa</span></label>
+    <input class="fc no-upper" placeholder="🔎 Buscar pessoa ou setor" oninput="chPessoasFiltrar(this.value)" style="margin-bottom:6px">
+    <div id="chn-pessoas" style="max-height:220px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;padding:4px">${eq.length?`<div class="chx-sub" style="padding:4px 8px;font-weight:700">Minha equipe</div>${eq.map(opt).join('')}`:''}${out.length?`<div class="chx-sub" style="padding:4px 8px;font-weight:700">Supervisores, gestores, diretoria e administradores</div>${out.map(opt).join('')}`:''}</div>
+    <div class="chx-sub" id="chn-pessoas-info" style="margin-top:6px">Só Supervisor, Gestor ou Diretoria. Cada pessoa marcada recebe o próprio chamado (ligado aos outros) e o e-mail.</div></div>`;}
+window.chPessoasFiltrar=function(q){const n=_buscaNorm(q);document.querySelectorAll('#chn-pessoas .chn-pp').forEach(l=>{l.style.display=!n||n.split(' ').every(w=>l.dataset.q.includes(w))?'flex':'none';});};
+window.chPessoasInfo=function(){const n=document.querySelectorAll('#chn-pessoas input:checked').length;const el=document.getElementById('chn-pessoas-info');if(!el)return;
+  el.textContent=n>1?`Vai abrir ${n} chamados ligados (um para cada pessoa), cada um com o próprio prazo e responsável.`:'Só Supervisor, Gestor ou Diretoria. Cada pessoa marcada recebe o próprio chamado (ligado aos outros) e o e-mail.';};
 window.chModoPara=function(m){const w=document.getElementById('chn-modo');if(!w)return;w.dataset.v=m;w.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.m===m));
   const a=document.getElementById('chn-w-setores'),b=document.getElementById('chn-w-pessoa');if(a)a.style.display=m==='setor'?'':'none';if(b)b.style.display=m==='pessoa'?'':'none';};
 window.chAtualizarDestinos=function(){
@@ -84338,9 +84389,9 @@ window.chEscolherPrio=function(k){
 window.chSalvarNovo=async function(btn){
   const v=id=>(document.getElementById(id)||{}).value||'';
   const origem=v('chn-origem'),titulo=v('chn-titulo').trim(),tipo=v('chn-tipo'),os=v('chn-os').trim(),desc=v('chn-desc').trim();
-  const _modo=(document.getElementById('chn-modo')||{dataset:{}}).dataset.v||'setor';let _pessoa=null;
-  if(_modo==='pessoa'){const em=v('chn-pessoa');_pessoa=_chPessoasPossiveis().find(x=>x.email===em)||null;if(!_pessoa){toast('Escolha a pessoa que vai resolver','terr');return;}}
-  const destinos=_pessoa?[_pessoa.setor]:[...document.querySelectorAll('#chn-destinos button.on')].map(b=>b.dataset.s).filter(s=>s&&s!==origem);
+  const _modo=(document.getElementById('chn-modo')||{dataset:{}}).dataset.v||'setor';let _pessoas=[];
+  if(_modo==='pessoa'){const _L=_chPessoasPossiveis();_pessoas=[...document.querySelectorAll('#chn-pessoas input:checked')].map(i=>_L.find(x=>x.email===i.value)).filter(Boolean);if(!_pessoas.length){toast('Marque quem vai resolver','terr');return;}}
+  const destinos=_pessoas.length?_pessoas.map(x=>x.setor||'DIRETORIA'):[...document.querySelectorAll('#chn-destinos button.on')].map(b=>b.dataset.s).filter(s=>s&&s!==origem);
   const prio=(document.getElementById('chn-prio')||{dataset:{}}).dataset.v||'NORMAL';
   if(!destinos.length){toast('Escolha pelo menos um setor que vai resolver','terr');return;}
   if(!titulo){toast('Escreva o assunto','terr');return;}
@@ -84360,11 +84411,18 @@ window.chSalvarNovo=async function(btn){
     const mes=(()=>{const d=new Date();return d.getFullYear()+'_'+String(d.getMonth()+1).padStart(2,'0');})();
     const prazoMeu=!!_chnPrazo;const prazo=_chnPrazo||_chPrazoDe(prio);const LET='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const lista=destinos.map((destino,i)=>{
+      const _pessoa=_pessoas[i]||null;
+      // responsável já definido na abertura: a pessoa escolhida, ou o Supervisor do setor (não existe mais "assumir")
+      const _sv=_pessoa?[]:_chSupervisoresDo(destino);
+      const _resp=_pessoa?_tcNome(_pessoa.nome):(_sv.length?_sv.map(x=>_tcNome(x.nome)).join(' / '):'');
       const c={mes,origem,destino,titulo,tipo,os,descricao:desc,anexos,prioridade:prio,prazo,prazoOriginal:prazo,status:'ABERTO',
         sufixo:destinos.length>1?LET[i]:'',grupoSetores:destinos,destinoPessoa:_pessoa?{email:_pessoa.email,nome:_pessoa.nome}:null,
-        criadoPor:meuNome(),criadoPorEmail:_getUserCat().email,criadoEm:agora(),responsavel:'',pedidoPrazo:null,prorrogacoes:0,prazoHist:[],hist:[]};
+        criadoPor:meuNome(),criadoPorEmail:_getUserCat().email,criadoEm:agora(),responsavel:_resp,pedidoPrazo:null,prorrogacoes:0,prazoHist:[],hist:[]};
+      if(_pessoas.length>1)c.grupoPessoas=_pessoas.map(x=>x.nome);
+      if(_sv.length)c.responsavelEmails=_sv.map(x=>x.email);
       if(prazoMeu)c.prazoDefinido=true;
-      _chHist(c,'abertura',`Chamado aberto por ${setorLbl(origem)} para ${_pessoa?_tcNome(_pessoa.nome)+' ('+setorLbl(destino)+')':setorLbl(destino)}${destinos.length>1?' (chamado conjunto com '+destinos.filter(x=>x!==destino).map(setorLbl).join(', ')+')':''} · prioridade ${CH_PRIO[prio].l} · prazo ${fmtD(prazo)}${prazoMeu?' (definido por quem abriu)':''}`);
+      const _conj=_pessoas.length>1?_pessoas.filter(x=>x!==_pessoa).map(x=>_tcNome(x.nome)).join(', '):destinos.filter(x=>x!==destino).map(setorLbl).join(', ');
+      _chHist(c,'abertura',`Chamado aberto por ${setorLbl(origem)} para ${_pessoa?_tcNome(_pessoa.nome)+' ('+setorLbl(destino)+')':setorLbl(destino)}${destinos.length>1?' (chamado conjunto com '+_conj+')':''} · responsável: ${_resp||'Supervisor do setor'} · prioridade ${CH_PRIO[prio].l} · prazo ${fmtD(prazo)}${prazoMeu?' (definido por quem abriu)':''}`);
       return c;
     });
     const r=await window._fbChCriar(_chDocNome(mes),lista);
@@ -84400,9 +84458,9 @@ function _chEmailHtml(c){
     titulo:E('Novo chamado para '+destLbl(c)+' · '+numTxt(c)),
     subtitulo:E(c.titulo+' — aberto por '+setorLbl(c.origem)),
     info:[['Prioridade',E(p.l),c.prioridade==='URGENTE'],['Prazo',E(fmtD(c.prazo)),true],['Aberto por',E(c.criadoPor)]],
-    corpo:_emailGrandaSecao('Chamado',[['Setor que abriu',E(setorLbl(c.origem))],['Setor que vai resolver',E(setorLbl(c.destino))],['Tipo',E(c.tipo)],['OS do pedido',E(c.os)],['Chamado conjunto com',c.grupoSetores&&c.grupoSetores.length>1?E(c.grupoSetores.filter(x=>x!==c.destino).map(setorLbl).join(', ')):''],['Aberto em',E(fmtDH(c.criadoEm))]])
+    corpo:_emailGrandaSecao('Chamado',[['Setor que abriu',E(setorLbl(c.origem))],['Setor que vai resolver',E(setorLbl(c.destino))],['Tipo',E(c.tipo)],['OS do pedido',E(c.os)],['Responsável',E(_chRespTxt(c))],['Chamado conjunto com',E(_chConjTxt(c))],['Aberto em',E(fmtDH(c.criadoEm))]])
       +_emailGrandaSecao('O que precisa ser resolvido',[['Descrição',E(c.descricao).replace(/\n/g,'<br>')],['Anexos',anx]])
-      +_emailGrandaTexto(`<br>Entre no GCORE → <b>Ferramentas → Chamados entre setores</b> para assumir o chamado. Se não der para cumprir o prazo, peça mais prazo por lá.`)
+      +_emailGrandaTexto(`<br>Entre no GCORE → <b>Ferramentas → Chamados entre setores</b> para ver o chamado e marcar como resolvido. Se não der para cumprir o prazo, peça mais prazo por lá.`)
   });
 }
 async function _chEmailAbertura(c){
@@ -84493,7 +84551,7 @@ window.chGerotConfirmar=async function(btn){
     const pz=_gerotPrazo(a);let destino=p.setor||'DIRETORIA';if(p.eu){const ms=_chMeusSetores();if(ms.length)destino=ms[0];}
     const c={mes,origem:'RH',destino,titulo:`GeRot ${a.item?'item '+a.item:'(sem nº)'} — ${a.t}`.slice(0,120),tipo:'Outro',os:'',descricao:_gerotDescricao(a,pz),anexos:[],prioridade:pz.prio,prazo:pz.prazo,prazoOriginal:pz.prazo,status:'ABERTO',
       sufixo:'',grupoSetores:[destino],destinoPessoa:{email:p.email,nome:p.nome},
-      criadoPor:meuNome(),criadoPorEmail:_getUserCat().email,criadoEm:agora(),responsavel:'',pedidoPrazo:null,prorrogacoes:0,prazoHist:[],hist:[],
+      criadoPor:meuNome(),criadoPorEmail:_getUserCat().email,criadoEm:agora(),responsavel:_tcNome(p.nome),pedidoPrazo:null,prorrogacoes:0,prazoHist:[],hist:[],
       planoAcao:{fonte:'GeRot',chave:a.k,item:a.item||'',respPlanilha:a.resp,prazoPlanilha:a.prazo||'',statusPlanilha:a.st}};
     if(pz.definido)c.prazoDefinido=true;
     _chHist(c,'abertura',`Chamado aberto por ${setorLbl('RH')} para ${_tcNome(p.nome)} (${setorLbl(destino)}) · prioridade ${CH_PRIO[pz.prio].l} · prazo ${fmtD(pz.prazo)}${pz.definido?' (prazo final da planilha)':''} · lançado do plano de ação GeRot`);
@@ -84567,7 +84625,6 @@ function _chRenderDetalhe(id){
       if(_chPodeAprovarPrazo(c))bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','aprovar_prazo')">✅ Aprovar novo prazo</button>`,`<button class="chx-b no" onclick="chAcao('${id}','recusar_prazo')">⛔ Recusar novo prazo</button>`);
     }
     if(c.status==='RESOLVIDO'&&_chPodeConfirmar(c)){bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','confirmar')">🏁 Confirmar e avaliar</button>`,`<button class="chx-b no" onclick="chAcao('${id}','reabrir')">🔁 Não resolveu — reabrir</button>`);}
-    if(c.status==='ABERTO'&&ageD)bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','assumir')">✋ Assumir o chamado</button>`);
     if((c.status==='ABERTO'||c.status==='ANDAMENTO')&&ageD){
       bts.push(`<button class="chx-b ok" onclick="chAcao('${id}','resolver')">🛠️ Marcar como resolvido</button>`);
       if(!c.pedidoPrazo)bts.push(`<button class="chx-b" onclick="chAcao('${id}','pedir_prazo')">⏳ Pedir mais prazo</button>`);
@@ -84581,7 +84638,7 @@ function _chRenderDetalhe(id){
   const sol=(c.status==='RESOLVIDO'||c.status==='ENCERRADO')&&(c.solucao||(c.solucaoAnexos||[]).length)?`<div class="chx-sol"><b>🛠️ Comprovação da solução — ${esc(setorLbl(c.destino))}</b> <span class="chx-sub">${esc(c.resolvidoPor||'')} · ${fmtDH(c.resolvidoEm)}${c.resolvidoNoPrazo===false?` · <b style="color:#b91c1c">🔴 ${duTxt(c.diasAtrasoResolucao||0)} de atraso</b>`:' · no prazo'}</span>${c.solucao?`<div style="white-space:pre-wrap;margin-top:4px">${esc(c.solucao)}</div>`:''}${_chAnexosHtml(c.solucaoAnexos)}</div>`:'';
   const av=c.avaliacao&&CH_AVAL[c.avaliacao.nota]?`<div class="chx-aval">⭐ <b>Avaliação de ${esc(setorLbl(c.origem))}:</b> ${_chPill(CH_AVAL[c.avaliacao.nota].l,CH_AVAL[c.avaliacao.nota].cor,CH_AVAL[c.avaliacao.nota].bg)} <span class="chx-sub">${esc(c.avaliacao.por)} · ${fmtDH(c.avaliacao.em)}</span>${c.avaliacao.obs?`<div style="margin-top:3px;white-space:pre-wrap">${esc(c.avaliacao.obs)}</div>`:''}</div>`:'';
   const irmaos=c.grupoSetores&&c.grupoSetores.length>1?Object.values(_chItens).filter(x=>x.num===c.num&&x.id!==c.id&&!x.excluido):[];
-  const grupo=irmaos.length?`<div class="chx-grp"><b>Chamado conjunto:</b> ${irmaos.sort((a,b)=>String(a.sufixo).localeCompare(String(b.sufixo))).map(x=>{const sx=_chSituacao(x);return`<button type="button" class="chx-grp-i" onclick="chAbrir('${x.id}')">${numTxt(x)} · ${esc(setorLbl(x.destino))} ${_chPill(sx.txt,sx.cor,sx.bg)}</button>`;}).join('')}</div>`:'';
+  const grupo=irmaos.length?`<div class="chx-grp"><b>Chamado conjunto:</b> ${irmaos.sort((a,b)=>String(a.sufixo).localeCompare(String(b.sufixo))).map(x=>{const sx=_chSituacao(x);return`<button type="button" class="chx-grp-i" onclick="chAbrir('${x.id}')">${numTxt(x)} · ${esc(destLbl(x))} ${_chPill(sx.txt,sx.cor,sx.bg)}</button>`;}).join('')}</div>`:'';
   const hist=(c.hist||[]).slice().reverse().map(h=>`<div class="chx-h"><div class="chx-h-ic">${HIST_IC[h.tipo]||'•'}</div><div style="min-width:0"><div class="chx-sub"><b style="color:#0f172a">${esc(h.por)}</b> · ${fmtDH(h.em)}</div><div style="white-space:pre-wrap">${esc(h.txt)}</div>${_chAnexosHtml(h.anexos)}</div></div>`).join('');
   const prazoInfo=c.prazoOriginal&&c.prazoOriginal!==c.prazo?` <span class="chx-sub">(original ${fmtD(c.prazoOriginal)})</span>`:'';
   box.innerHTML=`
@@ -84591,7 +84648,7 @@ function _chRenderDetalhe(id){
       <div><span>Prioridade</span>${_chPill(p.l,p.cor,p.bg)}</div>
       <div><span>Prazo</span><b>${fmtD(c.prazo)}</b>${prazoInfo}</div>
       <div><span>Situação</span>${_chPill(s.txt,s.cor,s.bg)}</div>
-      <div><span>Responsável</span><b>${esc(c.responsavel||'Ninguém assumiu ainda')}</b></div>
+      <div><span>Responsável</span><b>${esc(_chRespTxt(c))}</b></div>
     </div>
     <div class="chx-sub" style="margin:8px 0 4px">${esc(c.tipo||'')}${c.os?' · OS '+esc(c.os):''} · aberto por ${esc(c.criadoPor)} em ${fmtDH(c.criadoEm)} · ${esc(CH_STATUS[c.status]||'')}</div>
     ${grupo}
@@ -88164,7 +88221,7 @@ _pfSalvarEtapas=function(){
         <div class="gm-g" style="grid-template-columns:2fr 1fr 1fr;margin-top:10px">
           <label>Card do CRM Comercial<select class="fc" ${dis} onchange="gmVincular(this.value)"><option value="">— sem vínculo —</option>${bloq?'':'<option value="__novo__">➕ CRIAR CARD NOVO NO CRM</option>'}${cards.map(e=>`<option value="${e.id}" ${e.id===d.crmId?'selected':''}>${E(e.nome)}${e.fechamento?' (fechado)':''}</option>`).join('')}</select></label>
           <label>Validade da proposta (dias)<input class="fc" type="number" min="1" ${dis} value="${E(d.validadeDias||5)}" oninput="gmSet('validadeDias',this.value)"></label>
-          <label>Entrega finalizada na loja<input class="fc" type="date" ${dis} min="${bloq?'':hoje()}" value="${E(d.entrega||'')}" onchange="gmEntrega(this)"></label>
+          <label>Entrega finalizada na loja<input class="fc" type="date" ${dis} min="${bloq?'':hoje()}" value="${E(d.entrega||'')}" onchange="if(_gmDtOk(this.value))gmEntrega(this)"></label>
         </div>
         ${!card&&!bloq?`<div style="margin-top:8px;font-size:.72rem;color:#64748b">Este ${d._direto?'pedido':'orçamento'} ainda não tem card no CRM Comercial. <a href="javascript:void(0)" onclick="gmCriarCardAbrir()" style="color:#243e80;font-weight:700">➕ Criar card com este cliente</a></div>`:''}
         ${card?`<div style="margin-top:8px;font-size:.72rem;color:#64748b">O valor deste ${d._direto?'pedido':'orçamento'} vai pro card <b>${E(card.nome)}</b> ${d._direto?'quando o pedido for criado':'quando você salva'}. <a href="javascript:void(0)" onclick="gmAbrirCard('${card.id}')" style="color:#243e80;font-weight:700">Abrir card ↗</a></div>`:''}
@@ -88607,13 +88664,13 @@ ${lista}`;
     ov.innerHTML=`<div class="bx"><div style="display:flex;align-items:center;gap:10px"><h3 style="flex:1">${GM.doc._direto?'✅ Novo pedido direto':'✅ Transformar '+E(GM.doc.numero)+' em pedido'}</h3><button type="button" class="gm-b" onclick="document.getElementById('gm-cv').remove()">✕</button></div>
       <div style="font-size:.76rem;color:#64748b;margin-top:2px">${E(GM.doc.cliente)} · total do cliente <b style="color:#0f172a">${R(CV.total)}</b></div>
       <div class="gm-sec">Entrega</div>
-      <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px"><label class="gm-l">Entrega combinada com o cliente *<input class="fc" type="date" value="${E(CV.entrega)}" onchange="_gmCv('entrega',this.value)"></label>
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px"><label class="gm-l">Entrega combinada com o cliente *<input class="fc" type="date" value="${E(CV.entrega)}" onchange="if(_gmDtOk(this.value))_gmCv('entrega',this.value)"></label>
         <label class="gm-l">Observações do pedido<input class="fc no-upper" value="${E(CV.obs)}" onchange="_gmCv('obs',this.value)" placeholder="opcional"></label></div>
       <div class="gm-sec">Financeiro — como o cliente vai pagar</div>
       <label style="display:flex;align-items:center;gap:8px;font-size:.8rem;font-weight:700;margin-bottom:8px;cursor:pointer"><input type="checkbox" ${CV.temEnt?'checked':''} onchange="_gmCv('temEnt',this.checked)"> Tem entrada</label>
       ${CV.temEnt?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;padding:10px;border:1px solid #e2e8f0;border-radius:10px">
         <label class="gm-l">Valor da entrada *<input class="fc" inputmode="decimal" value="${E(CV.ent.valor)}" onchange="_gmCvEnt('valor',this.value)" placeholder="0,00"></label>
-        <label class="gm-l">Vencimento *<input class="fc" type="date" value="${E(CV.ent.venc)}" onchange="_gmCvEnt('venc',this.value)"></label>
+        <label class="gm-l">Vencimento *<input class="fc" type="date" value="${E(CV.ent.venc)}" onchange="if(_gmDtOk(this.value))_gmCvEnt('venc',this.value)"></label>
         <label class="gm-l">Forma de pagamento${fsel(CV.ent.forma,"_gmCvEnt('forma',this.value)")}</label></div>`:''}
       <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end">
         <label class="gm-l">Número de parcelas<select class="fc" onchange="_gmCv('n',this.value)">${[0,1,2,3,4,5,6,7,8,9,10,11,12].map(n=>`<option value="${n}" ${CV.n===n?'selected':''}>${n===0?'Sem parcelas':n+' '+pl(n,'parcela','parcelas')}</option>`).join('')}</select></label>
@@ -88622,7 +88679,7 @@ ${lista}`;
       ${CV.parc.map((x,i)=>`<div style="display:grid;grid-template-columns:90px 1fr 1fr 1fr;gap:10px;align-items:end;margin-top:8px">
         <div style="font-size:.74rem;font-weight:800;color:#475569;padding-bottom:9px">Parcela ${i+1}/${CV.parc.length}</div>
         <label class="gm-l">Valor *<input class="fc" inputmode="decimal" value="${E(x.valor)}" onchange="_gmCvP(${i},'valor',this.value)" placeholder="0,00"></label>
-        <label class="gm-l">Vencimento *<input class="fc" type="date" value="${E(x.venc)}" onchange="_gmCvP(${i},'venc',this.value)"></label>
+        <label class="gm-l">Vencimento *<input class="fc" type="date" value="${E(x.venc)}" onchange="if(_gmDtOk(this.value))_gmCvP(${i},'venc',this.value)"></label>
         <label class="gm-l">Forma${fsel(x.forma,`_gmCvP(${i},'forma',this.value)`)}</label></div>`).join('')}
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px">
         <div style="background:#f8fafc;border-radius:10px;padding:9px 12px;font-size:.64rem;font-weight:800;color:#64748b;text-transform:uppercase">Total<b style="display:block;font-size:.95rem;color:#0f172a">${R(CV.total)}</b></div>
@@ -88674,13 +88731,13 @@ ${lista}`;
         <span style="font-size:.74rem;color:#64748b">${p.orcNumero?'orçamento '+E(p.orcNumero):'pedido direto (sem orçamento)'}</span>${p.crmId?`<button type="button" class="gm-b" onclick="gmAbrirCard('${p.crmId}')">Card do CRM ↗</button>`:''}<button type="button" class="gm-b" onclick="_gmPaFechar()">✕</button></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px">
         <div style="background:#f8fafc;border-radius:10px;padding:8px 12px;font-size:.64rem;font-weight:800;color:#64748b;text-transform:uppercase">Total<b style="display:block;font-size:.95rem;color:#0f172a">${R((p.totais||{}).total)}</b></div>
-        <div style="background:#f8fafc;border-radius:10px;padding:8px 12px;font-size:.64rem;font-weight:800;color:#64748b;text-transform:uppercase">Entrega combinada<input class="fc" type="date" value="${E(p.entregaPrevista||'')}" onchange="_gmPaSet('entregaPrevista',this.value)" style="margin-top:3px"></div>
+        <div style="background:#f8fafc;border-radius:10px;padding:8px 12px;font-size:.64rem;font-weight:800;color:#64748b;text-transform:uppercase">Entrega combinada<input class="fc" type="date" value="${E(p.entregaPrevista||'')}" onchange="if(_gmDtOk(this.value))_gmPaSet('entregaPrevista',this.value)" style="margin-top:3px"></div>
         <div style="background:#f8fafc;border-radius:10px;padding:8px 12px;font-size:.64rem;font-weight:800;color:#64748b;text-transform:uppercase">Andamento<b style="display:block;font-size:.95rem;color:#0f172a">${pct(p)}%</b></div>
         ${fin?`<div style="background:#f8fafc;border-radius:10px;padding:8px 12px;font-size:.64rem;font-weight:800;color:#64748b;text-transform:uppercase">Recebido<b style="display:block;font-size:.95rem;color:#047857">${R(recebido)}</b></div>`:''}</div>
       <div class="gm-sec">Próxima ação (o que precisa ser feito agora)</div>
       <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:end;padding:10px;border:1.5px solid ${pedSituacao(p).atras?'#fecaca':'#c7d2fe'};background:${pedSituacao(p).atras?'#fef2f2':'#f5f7ff'};border-radius:12px">
         <label class="gm-l">O que fazer<input class="fc no-upper" value="${E(pa.feita?'':pa.texto||'')}" placeholder="ex.: cobrar aprovação do projeto" onchange="_gmPaAcao('texto',this.value)"></label>
-        <label class="gm-l">Até quando<input class="fc" type="date" value="${E(pa.feita?'':pa.data||'')}" onchange="_gmPaAcao('data',this.value)"></label>
+        <label class="gm-l">Até quando<input class="fc" type="date" value="${E(pa.feita?'':pa.data||'')}" onchange="if(_gmDtOk(this.value))_gmPaAcao('data',this.value)"></label>
         <label class="gm-l">Responsável<input class="fc no-upper" value="${E(pa.feita?'':pa.resp||'')}" onchange="_gmPaAcao('resp',this.value)"></label>
         <button type="button" class="gm-b p" onclick="_gmPaAcaoFeita()" ${pa.texto&&!pa.feita?'':'disabled'}>✓ Feito</button></div>
       <div class="gm-sec">Etapas — podem andar juntas</div>
@@ -89016,7 +89073,8 @@ ${lista}`;
   window.gmCadEditar=function(id){if(!adm())return;const x=cadItem(id);if(!x)return;
     let ov=document.getElementById('gm-ced');if(ov)ov.remove();ov=document.createElement('div');ov.id='gm-ced';ov.className='gm-ov';
     ov.innerHTML=`<div class="bx" style="max-width:520px"><h3>${E(x.codigo)} · ${E(x.nome)}</h3>
-      <label class="gm-l" style="margin-top:10px">Descrição<textarea id="gm-ced-d" class="fc no-upper" rows="3" style="text-transform:none">${E(x.descricao||'')}</textarea></label>
+      <label class="gm-l" style="margin-top:10px">Nome do item<input id="gm-ced-n" class="fc" maxlength="120" value="${E(x.nome||'')}"></label>
+      <label class="gm-l" style="margin-top:8px">Descrição<textarea id="gm-ced-d" class="fc no-upper" rows="3" style="text-transform:none">${E(x.descricao||'')}</textarea></label>
       <label class="gm-l" style="margin-top:8px">Preço do produto instalado (R$)<input id="gm-ced-p" class="fc" inputmode="decimal" value="${M(x.preco)}"></label>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap"><button type="button" class="gm-b" style="margin-right:auto;${x.inativo?'color:#15803d;border-color:#86efac':'color:#b91c1c;border-color:#fca5a5'}" onclick="_gmCedAtivo('${id}',${x.inativo?'true':'false'})">${x.inativo?'✅ Reativar item':'🚫 Desativar item'}</button><button type="button" class="gm-b" onclick="document.getElementById('gm-ced').remove()">Cancelar</button><button type="button" class="gm-b p" onclick="_gmCedOk('${id}')">Salvar</button></div>
       ${x.inativo?'<div style="font-size:.72rem;color:#b45309;margin-top:8px">Este item está desativado: não aparece pra escolher no orçamento, na leitura com IA nem nas exportações do caderno.</div>':''}</div>`;document.body.appendChild(ov);};
@@ -89025,6 +89083,9 @@ ${lista}`;
     if(ativar)delete x.inativo;else x.inativo=true;x.atualizadoEm=agora();x.atualizadoPor=quem();x.hist=(x.hist||[]).concat([{em:agora(),por:quem(),txt:ativar?'Item reativado':'Item desativado'}]);
     try{await window._fbOrcSalvar(DOC_CAD,id,x);GM.cad[id]=x;document.getElementById('gm-ced')?.remove();toast(ativar?x.codigo+' reativado ✔':x.codigo+' desativado — não aparece mais pra escolher no orçamento','tok');render();}catch(e){toast('Erro: '+(e.message||e),'terr');}};
   window._gmCedOk=async function(id){const x=Object.assign({},cadItem(id));const p=N((document.getElementById('gm-ced-p')||{}).value);if(!(p>0)){toast('Preço inválido','terr');return;}
+    // (2026-11-24, Clabonde: "preciso poder mudar o nome do item no caderno também") — orçamentos já feitos guardam o nome da época.
+    const nomeNovo=String((document.getElementById('gm-ced-n')||{}).value||'').replace(/\s+/g,' ').trim().toUpperCase();if(!nomeNovo){toast('Escreva o nome do item','terr');return;}
+    const nomeAnt=x.nome;if(nomeNovo!==String(nomeAnt||'')){x.nome=nomeNovo;x.hist=(x.hist||[]).concat([{em:agora(),por:quem(),txt:'Nome "'+(nomeAnt||'')+'" → "'+nomeNovo+'"'}]);}
     const ant=x.preco;x.descricao=(document.getElementById('gm-ced-d')||{}).value||'';x.preco=p;x.atualizadoEm=agora();x.atualizadoPor=quem();x.hist=(x.hist||[]).concat(ant!==p?[{em:agora(),por:quem(),txt:'Preço '+R(ant)+' → '+R(p)}]:[]);
     try{await window._fbOrcSalvar(DOC_CAD,id,x);GM.cad[id]=x;document.getElementById('gm-ced')?.remove();toast('Item salvo','tok');render();}catch(e){toast('Erro: '+(e.message||e),'terr');}};
   window.gmOpsEditar=async function(){if(!adm())return;const o=ops();
