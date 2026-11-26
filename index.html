@@ -34,7 +34,7 @@
      arquivo de propósito — ver _checarNovaVersaoSistema() mais abaixo, que lê só os
      primeiros KB do HTML publicado (sem baixar o arquivo de 2MB+ inteiro) pra comparar com
      este valor e avisar quem estiver com o navegador aberto que tem versão nova. -->
-<script>const APP_BUILD_VERSION='2026-11-25.9';</script>
+<script>const APP_BUILD_VERSION='2026-11-26.18';</script>
 <script>
 // ── Arquivos no Cloudinary com o NOME ORIGINAL (2026-10-27, a pedido do usuário: "ao baixar não
 // distorcer nem mudar o nome do arquivo") ──
@@ -5774,7 +5774,43 @@ select.fc{cursor:pointer}
      _autofillPdfOs()/checklist por volta da linha 6839). Contas a Pagar deixou de usar PDF na
      importação (trocado por Excel, 2026-08-04, ver parseContasPagarXLSX()) mas esse script
      continua carregado por causa do autofill. -->
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" onload="if(window['pdfjsLib'])pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';"></script>
+<script>
+// (2026-11-25, Clabonde: pedido do Mubisys abrindo "tudo bugado" no visualizador) — o PDF do Mubisys usa
+// Helvetica NÃO embutida. O pdf.js, por padrão, pega a "Helvetica" instalada no computador/celular de quem
+// abre; se essa fonte do aparelho for diferente/defeituosa, as letras saem trocadas (ex.: "19/10/2026" virava
+// "ïçñïðñîðîê"). Agora todo PDF aberto pelo pdf.js usa as fontes padrão do próprio pdf.js (iguais em qualquer
+// aparelho) e os mapas de caracteres. Leituras que já pedem algo próprio (disableFontFace, Letra 3D) ficam como estavam.
+window._pdfjsPadrao=function(lib){
+  try{
+    lib=lib||window.pdfjsLib;if(!lib||lib.__gcFontesPadrao)return;
+    if(!lib.GlobalWorkerOptions.workerSrc)lib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const base='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/';
+    // o getDocument do pdf.js não pode ser trocado direto (propriedade travada) — por isso o sistema passa a
+    // usar um "envelope" que herda tudo da biblioteca original e só troca o getDocument.
+    const orig=lib.getDocument.bind(lib);
+    const env=Object.create(lib);
+    const getDoc=function(src){
+      try{
+        let o;
+        if(typeof src==='string'||(typeof URL!=='undefined'&&src instanceof URL))o={url:String(src)};
+        else if(src instanceof ArrayBuffer||ArrayBuffer.isView(src))o={data:src};
+        else if(src&&typeof src==='object')o=Object.assign({},src);
+        if(o&&!('disableFontFace' in o)){
+          if(!('useSystemFonts' in o))o.useSystemFonts=false;
+          if(!o.standardFontDataUrl)o.standardFontDataUrl=base+'standard_fonts/';
+          if(!o.cMapUrl){o.cMapUrl=base+'cmaps/';o.cMapPacked=true;}
+          return orig(o);
+        }
+      }catch(e){console.warn('pdf.js fontes padrão',e);}
+      return orig(src);
+    };
+    Object.defineProperty(env,'getDocument',{value:getDoc,enumerable:true});
+    Object.defineProperty(env,'__gcFontesPadrao',{value:true});
+    window.pdfjsLib=env;
+  }catch(e){console.warn('pdf.js fontes padrão',e);}
+};
+</script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" onload="if(window['pdfjsLib']){pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';if(window._pdfjsPadrao)_pdfjsPadrao(pdfjsLib);}"></script>
 <!-- SheetJS — usado só pra LER o Excel de Contas a Pagar na importação (2026-08-04), ver
      parseContasPagarXLSX(). -->
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -6288,7 +6324,7 @@ const _fbSaveCfgTx=(data)=>{
     // demais, esses campos vão SEMPRE com o valor atual do servidor — a regra do banco recusa qualquer mudança.
     try{if(typeof _prodPodeEditar==='function'&&!_prodPodeEditar()){['produtos','modelosInstalacao','modelosEmbalagem','produtosCodigos'].forEach(k=>{if(k in atual)safeData[k]=atual[k];else delete safeData[k];});}}catch(e){}
     // 2026-10-18: código de produto é definitivo — o registro do servidor sempre vence (nunca muda um código já dado)
-    try{const rc=atual.produtosCodigos||{};if(Object.keys(rc).length){const novo=Object.assign({},safeData.produtosCodigos||{},rc);safeData.produtosCodigos=novo;if(Array.isArray(safeData.produtos))safeData.produtos.forEach(p=>{if(p&&p.id&&novo[p.id]&&p.codigo!==novo[p.id])p.codigo=novo[p.id];});}}catch(e){}
+    try{const rc=atual.produtosCodigos||{};if(Object.keys(rc).length){const novo=Object.assign({},safeData.produtosCodigos||{},rc);try{const tr=Object.assign({},atual.prodCodTrocas||{},safeData.prodCodTrocas||{});if(Object.keys(tr).length)safeData.prodCodTrocas=tr;Object.entries(tr).forEach(([id,t])=>{if(t&&t.para&&novo[id]===t.de)novo[id]=t.para;});}catch(e){} /* 2026-11-26: troca de código AUTORIZADA pelo Clabonde (separação de produto) — só id+de→para listados em cfg.prodCodTrocas */safeData.produtosCodigos=novo;if(Array.isArray(safeData.produtos))safeData.produtos.forEach(p=>{if(p&&p.id&&novo[p.id]&&p.codigo!==novo[p.id])p.codigo=novo[p.id];});}}catch(e){}
     try{if(baseCfg&&snap.exists()&&Array.isArray(data.rhFuncionarios)&&Array.isArray(atual.rhFuncionarios)&&Array.isArray(baseCfg.rhFuncionarios))safeData.rhFuncionarios=_fbMergeArrId(baseCfg.rhFuncionarios,data.rhFuncionarios,atual.rhFuncionarios,window._rhIdsExcluidos);}catch(e){console.warn('merge rhFuncionarios',e);}
     tx.set(ref,safeData);
   }).catch(e=>{
@@ -64606,7 +64642,7 @@ function _crmOrdenarPorEtapa(lista,ordem){
     // recebido — ficava só em ordem alfabética mesmo dentro da etapa ORÇAMENTO, então
     // a mesma fila aparecia em ordens DIFERENTES no Kanban e na Lista. Não depende do
     // toggle Crescente/Decrescente (dir) — mais antigo primeiro sempre, igual ao Kanban.
-    if(ia<etapas.length&&(etapas[ia].key==='orcamento'||etapas[ia].key==='revisao_orcamento'))return _crmEtapaEntradaTs(a)-_crmEtapaEntradaTs(b); // fila por chegada também na REVISÃO (2026-10-06)
+    if(ia<etapas.length&&(etapas[ia].key==='orcamento'||etapas[ia].key==='revisao_orcamento'))return typeof _crmFilaCmp==='function'?_crmFilaCmp(a,b):_crmEtapaEntradaTs(a)-_crmEtapaEntradaTs(b); // fila por chegada também na REVISÃO (2026-10-06)
     return(a.nome||'').localeCompare(b.nome||'','pt-BR');
   });
 }
@@ -64677,6 +64713,7 @@ function crmLimparFiltrosAvancados(){
   const dCampo=document.getElementById('crm-fil-data-campo');if(dCampo)dCampo.value='criacao';
   const dIni=document.getElementById('crm-fil-data-ini');if(dIni)dIni.value='';
   const dFim=document.getElementById('crm-fil-data-fim');if(dFim)dFim.value='';
+  try{_crmxFil.cliente='';}catch(err){}
   _crmSyncSituacaoBotoes();
   _crmRenderFunilAtivo();
 }
@@ -64788,7 +64825,7 @@ function renderCrmKanban(){
     // ordem de chegada, deixando o primeiro a chegar por primeiro... para que a pessoa que
     // for fazer orçamentos siga uma fila") — mais antigo na etapa primeiro; demais colunas
     // seguem a ordem natural de sempre, sem mudança de comportamento.
-    if(et.key==='orcamento'||et.key==='revisao_orcamento')itens=itens.slice().sort((a,b)=>_crmEtapaEntradaTs(a)-_crmEtapaEntradaTs(b)); // REVISÃO também em fila (2026-10-06, pedido do usuário: "revisão de orçamento também precisa seguir uma fila por ordem de chegada pra eu aprovar")
+    if(et.key==='orcamento'||et.key==='revisao_orcamento')itens=itens.slice().sort((a,b)=>typeof _crmFilaCmp==='function'?_crmFilaCmp(a,b):_crmEtapaEntradaTs(a)-_crmEtapaEntradaTs(b)); // REVISÃO também em fila (2026-10-06, pedido do usuário: "revisão de orçamento também precisa seguir uma fila por ordem de chegada pra eu aprovar")
     // Soma dos valores líquidos da etapa (2026-09-16, a pedido do usuário: "encima ali do
     // ladinho de cada nome da etapa do funil a soma dos valores liquidos dos cards que tao
     // naquela etapa") — soma só os cards já com propostaValorLiquido lançado; card sem
@@ -64868,7 +64905,7 @@ function _crmCardHtml(e){
   // tal... para que a pessoa que for fazer orçamentos siga uma fila") — só na etapa
   // ORÇAMENTO, que é a que o pedido do usuário se referia (ver ordenação em
   // renderCrmKanban/_crmEtapaEntradaTs).
-  const filaBadge=(e.etapa==='orcamento'||e.etapa==='revisao_orcamento')?`<div style="font-size:.64rem;color:var(--ink4);margin-top:8px;padding-top:6px;border-top:1px dashed var(--border-lt)">🕒 ${e.etapa==='revisao_orcamento'?'Chegou na revisão em':'Lançado em'} ${_fmtDataHora(e.etapaEntradaEm||e.criadoEm).replace(', ',' às ')}</div>`:'';
+  const filaBadge=(e.etapa==='orcamento'||e.etapa==='revisao_orcamento')?`<div style="font-size:.64rem;color:var(--ink4);margin-top:8px;padding-top:6px;border-top:1px dashed var(--border-lt)">${typeof _crmOrcPrioSelo==='function'?_crmOrcPrioSelo(e):''}🕒 ${e.etapa==='revisao_orcamento'?'Chegou na revisão em':'Lançado em'} ${_fmtDataHora(e.etapaEntradaEm||e.criadoEm).replace(', ',' às ')}</div>`:'';
   // Selo de Ganho/Perdido no card (2026-09-16) — só aparece quando o card tem e.fechamento
   // (visível na prática só na visão Ganhos/Perdidos do painel de filtros, já que a visão
   // "Em aberto" nem devolve esses cards mais — ver _crmEmpresasFiltradas).
@@ -69870,10 +69907,22 @@ function _crmxAplicarExtras(lista,semChip){
     if(f.etapa&&_crmEtapaEfetiva(e)!==f.etapa)return false;
     if(f.valor&&_crmxValorFaixa(e.propostaValorLiquido)!==f.valor)return false;
     if(f.saude){let n='';try{n=_crmSaude(e).nivel;}catch(err){}if(n!==f.saude)return false;}
+    if(f.cliente&&!(e.decisores||[]).some(d=>_crmxCliChave(d)===f.cliente))return false;
     if(!semChip&&f.rapido&&!_crmxClasses(e)[f.rapido])return false;
     return true;
   });
 }
+// (2026-11-26, pedido do Clabonde) filtro por CLIENTE (contato/decisor): "quantos negócios em aberto da Maria do BK"
+function _crmxNorm(t){return String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toUpperCase();}
+function _crmxCliChave(d){const n=_crmxNorm(d&&d.nome);return n?n+'|'+_crmxNorm(d.empresa):'';}
+function _crmxClientes(){const m=new Map();(crmEmpresas||[]).forEach(e=>{const vistos=new Set();(e.decisores||[]).forEach(d=>{const k=_crmxCliChave(d);if(!k||vistos.has(k))return;vistos.add(k);
+  let o=m.get(k);if(!o){const emp=String(d.empresa||'').trim();o={k,txt:String(d.nome).trim().replace(/\s+/g,' ')+(emp?' — '+emp:''),n:0};m.set(k,o);}o.n++;});});
+  return[...m.values()].sort((a,b)=>a.txt.localeCompare(b.txt,'pt-BR'));}
+function crmxSetCliente(v){const t=_crmxNorm(v);if(!t){_crmxFil.cliente='';_crmRenderFunilAtivo();return;}
+  const L=_crmxClientes();let o=L.find(c=>_crmxNorm(c.txt)===t);
+  if(!o){const p=L.filter(c=>_crmxNorm(c.txt).includes(t));if(p.length===1)o=p[0];}
+  if(!o){if(typeof toast==='function')toast('Cliente não encontrado — escolha um nome da lista','terr');return;}
+  _crmxFil.cliente=o.k;_crmRenderFunilAtivo();}
 const _crmxFiltOrig=_crmEmpresasFiltradas;
 function _crmxFiltrar(busca,semChip){
   const q=(busca||'').trim().toUpperCase();
@@ -69885,7 +69934,7 @@ _crmEmpresasFiltradas=function(busca){try{return _crmxFiltrar(busca,false);}catc
 function crmxSet(k,v){_crmxFil[k]=v;_crmRenderFunilAtivo();}
 function crmxChip(k){_crmxFil.rapido=_crmxFil.rapido===k?'':k;_crmRenderFunilAtivo();}
 function crmxLimpar(){
-  _crmxFil.rapido='';_crmxFil.etapa='';_crmxFil.valor='';_crmxFil.saude='';
+  _crmxFil.rapido='';_crmxFil.etapa='';_crmxFil.valor='';_crmxFil.saude='';_crmxFil.cliente='';
   const b=document.getElementById('crm-kanban-busca');if(b)b.value='';
   const r=document.getElementById('crm-fil-responsavel');if(r)r.value='';
   _crmRenderFunilAtivo();
@@ -69947,11 +69996,12 @@ function _crmxRenderTopo(){
     row.innerHTML=`${veTodos?`<select onchange="crmxSetResp(this.value)" title="Responsável"><option value="">👥 Todos os responsáveis</option>${equipe.map(n=>`<option value="${_crmxEsc(n)}" ${respAtual===n?'selected':''}>${_crmxEsc(n)}${n===meu?' (eu)':''}</option>`).join('')}</select>`:''}
       <select onchange="crmxSet('etapa',this.value)" title="Etapa"><option value="">🗂️ Todas as etapas</option>${etapas.map(et=>`<option value="${et.key}" ${f.etapa===et.key?'selected':''}>${_crmxEsc(et.label)}</option>`).join('')}</select>
       <select onchange="crmxSet('valor',this.value)" title="Valor líquido">${_CRMX_VALOR.map(([k,l])=>`<option value="${k}" ${f.valor===k?'selected':''}>💰 ${l}</option>`).join('')}</select>
-      <select onchange="crmxSet('saude',this.value)" title="Saúde"><option value="">❤️ Qualquer saúde</option><option value="verde" ${f.saude==='verde'?'selected':''}>🟢 Saudável</option><option value="amarelo" ${f.saude==='amarelo'?'selected':''}>🟡 Atenção</option><option value="vermelho" ${f.saude==='vermelho'?'selected':''}>🔴 Desassistido</option></select>`;
+      <select onchange="crmxSet('saude',this.value)" title="Saúde"><option value="">❤️ Qualquer saúde</option><option value="verde" ${f.saude==='verde'?'selected':''}>🟢 Saudável</option><option value="amarelo" ${f.saude==='amarelo'?'selected':''}>🟡 Atenção</option><option value="vermelho" ${f.saude==='vermelho'?'selected':''}>🔴 Desassistido</option></select>
+      ${(()=>{const L=_crmxClientes(),sel=f.cliente&&L.find(c=>c.k===f.cliente);return`<span style="display:inline-flex;align-items:center;gap:4px"><input list="crmx-cli-dl" value="${sel?_crmxEsc(sel.txt):''}" placeholder="👤 Cliente (contato)" title="Filtrar pelos negócios de um cliente (contato)" onchange="crmxSetCliente(this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" style="min-width:230px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:.85rem${sel?';border-color:#0891b2;background:#ecfeff;font-weight:600':''}">${sel?`<button type="button" onclick="crmxSetCliente('')" title="Tirar o filtro de cliente" style="border:none;background:#e2e8f0;border-radius:6px;padding:6px 8px;cursor:pointer">✕</button>`:''}<datalist id="crmx-cli-dl">${L.map(c=>`<option value="${_crmxEsc(c.txt)}">${c.n} ${c.n===1?'negócio':'negócios'}</option>`).join('')}</datalist></span>`;})()}`;
   }
   const base=_crmxFiltrar(buscaTxt,true);
   const cont={};base.forEach(e=>{const c=_crmxClasses(e);Object.keys(c).forEach(k=>{cont[k]=(cont[k]||0)+1;});});
-  const extrasAtivos=[f.etapa&&'etapa',f.valor&&'valor',f.saude&&'saúde'].filter(Boolean);
+  const extrasAtivos=[f.etapa&&'etapa',f.valor&&'valor',f.saude&&'saúde',f.cliente&&'cliente'].filter(Boolean);
   const chipsVis=_CRMX_CHIPS.filter(([k])=>cont[k]||f.rapido===k);
   const temAlgo=chipsVis.length||extrasAtivos.length||f.rapido;
   const chips=temAlgo?`<div class="crmx-chips">${chipsVis.map(([k,ic,l])=>`<span class="crmx-chip ${f.rapido===k?'on':''}" onclick="crmxChip('${k}')" title="${l}">${ic} ${l} <b>${cont[k]||0}</b></span>`).join('')}${(extrasAtivos.length||f.rapido)?`<span class="crmx-chip" onclick="crmxLimpar()" style="border-style:dashed;color:#64748b" title="Limpar filtros">✕ Limpar${extrasAtivos.length?' ('+extrasAtivos.join(', ')+')':''}</span>`:''}</div>`:'';
@@ -70906,7 +70956,7 @@ async function auto1RelatorioPdf(){
   titulo('Fechamentos dos últimos 7 dias');
   tabela(['Negócio','Responsável','Resultado','Líquido'],fech.map(e=>[tx(e.nome),tx(e.responsavel||'—'),e.fechamento.status==='ganho'?'Ganho':'Perdido',fmtR(e.propostaValorLiquido||0)]),{3:{halign:'right'}});
   // 3) Fila de orçamento
-  const fila=E.filter(e=>e.etapa==='orcamento'&&!e.fechamento).sort((p,q)=>{try{return _crmEtapaEntradaTs(p)-_crmEtapaEntradaTs(q);}catch(x){return 0;}});
+  const fila=E.filter(e=>e.etapa==='orcamento'&&!e.fechamento).sort((p,q)=>{try{return typeof _crmFilaCmp==='function'?_crmFilaCmp(p,q):_crmEtapaEntradaTs(p)-_crmEtapaEntradaTs(q);}catch(x){return 0;}});
   titulo('Fila de orçamento ('+fila.length+')');
   tabela(['#','Negócio','Responsável','Na fila desde'],fila.map((e,i)=>[String(i+1),tx(e.nome),tx(e.responsavel||'—'),e.etapaEntradaEm?new Date(e.etapaEntradaEm).toLocaleDateString('pt-BR'):'—']),{0:{cellWidth:10,halign:'center'}});
   // 4) Propostas pedindo atenção (follow-up / validade)
@@ -71385,7 +71435,8 @@ function renderProdIndicadores(){
         <td style="${th};white-space:nowrap;${o.atrasado?'color:#b91c1c;font-weight:700':''}">${fmtD(x.etapa.iso)}</td>
         <td style="${th};white-space:nowrap">${x.calc.prazoIso?fmtD(x.calc.prazoIso):'—'}</td></tr>`;}).join('')}
       </tbody></table></div>`:`<div style="color:var(--ink4);font-size:.8rem;padding:6px 0">Nada a produzir programado neste período.</div>`}`;
-  wrap.innerHTML=tlHtml+tiles+_prodSetoresHtml(r,base,c)+'<div id="prod-ind-extra"></div>'+secProd+secA;
+  // (2026-11-26, Clabonde) "A produzir em <mês>" é o PRIMEIRO indicador, logo abaixo da escolha do mês
+  wrap.innerHTML=tlHtml+'<div id="prod-ind-aprod" style="margin-bottom:22px">'+secA+'</div>'+tiles+_prodSetoresHtml(r,base,c)+'<div id="prod-ind-extra"></div>'+secProd;
 }
 // ===================== CARGA POR SETOR (2026-11-23, a pedido do Clabonde) =====================
 // "lá em indicadores de produção eu quero todos os setores e a quantidade de produção de cada um, por
@@ -72066,14 +72117,18 @@ let orc2={view:'lista',doc:null,aba:'projeto',salvos:{},watchOn:false,cfg:{preco
 
 // ── utilidades ──
 function _orc2Cmv(){const v=parseFloat(orc2.cfg&&orc2.cfg.cmvPadrao);return(v>0&&v<=100)?v:33;}
-function _orc2CeilDec(v){return Math.ceil(v*10)/10;}
+function _orc2CeilDec(v){return _orcQ2(v);}
+// (2026-11-26, pedido do Clabonde) SEM arredondamento de material: usa exatamente o que o cálculo deu (0,30 de chapa = 0,30),
+// só arredonda no centésimo (0,083 → 0,08). Exceção: reator (segue as potências padrão) e unidades inteiras (módulo LED, parafuso, wago).
+function _orcQ2(v){v=+v||0;return v>0?Math.max(0.01,Math.round(v*100+1e-6)/100):0;}
+function _orcQs(v){v=+v||0;return _orc2Qtd(v,(Math.round(v*100)%100)?2:0);}
 // ACM da fachada (2026-10-05, a pedido do usuário): arredonda pra cima de meia em meia chapa — até 0,50 vira 0,50; de 0,50 a 1 vira 1 (2,30 → 2,50; 2,57 → 3).
 // Emenda (2026-10-05): quantos pedaços de chapa cw×ch cobrem L×A (a chapa pode girar). 1 = sem emenda.
 function _orcEmPedacos(L,A,cw,ch){const e=1e-9;L=+L||0;A=+A||0;if(!(L>0&&A>0&&cw>0&&ch>0))return 1;return Math.min(Math.ceil(L/cw-e)*Math.ceil(A/ch-e),Math.ceil(L/ch-e)*Math.ceil(A/cw-e));}
 function _orcEmTxt(pc){return pc<=1?'sem emenda':(pc-1)+(pc-1===1?' emenda':' emendas');}
 function _orcEmDims(cod){const m=(typeof orc3!=='undefined'&&orc3.base||{})[String(cod)];if(!m)return null;const r=String(m.n||'').match(/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)/);if(!r)return null;
   let a=parseFloat(r[1].replace(',','.')),b=parseFloat(r[2].replace(',','.'));if(a>=100)a/=1000;if(b>=100)b/=1000;return a>0&&b>0&&a<=12&&b<=12?[a,b]:null;}
-function _orc2CeilMeia(v){return Math.max(0.5,Math.ceil(v*2-1e-9)/2);}
+function _orc2CeilMeia(v){return _orcQ2(v);} // (2026-11-26) não arredonda mais de meia em meia
 function _orc2Qtd(v,d){return(Number(v)||0).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});}
 function _orc2PrecoFinal(custo,cmv){const c=(cmv>0&&cmv<=100)?cmv:_orc2Cmv();return custo/(c/100);}
 function _orc2Num(v){return parseFloat(String(v==null?'':v).replace(',','.'))||0;}
@@ -72127,7 +72182,7 @@ function orc2CalcLetra(p,P,adesivoPrecos){
   const _acrilNova=tipo==='acril'&&hLetra<=1.20; // frente acrílico + iluminação interna (2026-10-06) // halo (LED atrás) até 1,20 m — mesma base da galvanizada + tinta interna + LED + reator
   if(largura<=0||alturaVal<=0||(!isPVC&&((!_galvNova&&perimetro<=0)||caixaM<=0)))return{ok:false,items:[],totalMat:0};
   const area=largura*alturaVal,usaACM=hLetra>1.20,usaEstr=hLetra>2.00;
-  const arred=(v,d)=>_orcxArred(v,d),ceilDec=_orc2CeilMeia,fmtQtd=_orc2Qtd,fmtBRL=_orcxBRL,Pm=_orcP(); // 2026-10-06: chapas sempre de 0,5 em 0,5 (0,33 → 0,50; 0,88 → 1)
+  const arred=(v,d)=>_orcxArred(v,d),ceilDec=_orc2CeilMeia,fmtQtd=_orc2Qtd,fmtBRL=_orcxBRL,Pm=_orcP(); // 2026-11-26: chapas pelo valor exato (sem meia em meia)
   const items=[];let totalMat=0,areaChapasTotal=0;
   const push=(icon,name,detail,qty,cost)=>{items.push({icon,name,detail,qty,cost});totalMat+=cost;};
   // ── LETRA CAIXA GALVANIZADA SEM ILUMINAÇÃO (2026-10-06, fórmula do usuário) ──
@@ -72143,8 +72198,8 @@ function orc2CalcLetra(p,P,adesivoPrecos){
     const qP=(typeof _orcAprovQ==='function'&&_orcAprovQ(p,'fundo'))||ceilDec(area/aP);
     push('🟦','PVC Expandido 10mm '+fmtQtd(dP[0],2)+'×'+fmtQtd(dP[1],2)+'m (fundo)',fmtQtd(largura,2)+' × '+fmtQtd(alturaVal,2)+' = '+fmtQtd(area,3)+' m² ÷ '+fmtQtd(aP,3)+' m² → '+fmtQtd(qP,(qP*2)%1?2:1)+' ch.',fmtQtd(qP,(qP*2)%1?2:1)+' ch.',qP*P.pvc);
     const d26=(typeof _orcEmDims==='function'&&_orcEmDims(1792))||[1.2,2],c26=Math.max(d26[0],d26[1]),h26=Math.min(d26[0],d26[1]);
-    const q26=(typeof _orcAprovQ==='function'&&_orcAprovQ(p,'lateral'))||ceilDec((largura/c26)*caixaM/h26);
-    push('🔩','Chapa Galv. 26 0,50mm '+fmtQtd(h26,2)+'×'+fmtQtd(c26,2)+'m (laterais)',fmtQtd(largura,2)+'m ÷ '+fmtQtd(c26,2)+' × '+fmtQtd(caixaM,2)+'m ÷ '+fmtQtd(h26,2)+' → '+fmtQtd(q26,(q26*2)%1?2:1)+' ch.',fmtQtd(q26,(q26*2)%1?2:1)+' ch.',q26*P.galv26);
+    const q26=(typeof _orcAprovQ==='function'&&_orcAprovQ(p,'lateral'))||ceilDec(((perimetro>0?perimetro:largura)/c26)*caixaM/h26);
+    push('🔩','Chapa Galv. 26 0,50mm '+fmtQtd(h26,2)+'×'+fmtQtd(c26,2)+'m (laterais)',(perimetro>0?fmtQtd(perimetro,2)+'m de perímetro':fmtQtd(largura,2)+'m de largura (sem perímetro)')+' ÷ '+fmtQtd(c26,2)+' × '+fmtQtd(caixaM,2)+'m ÷ '+fmtQtd(h26,2)+' → '+fmtQtd(q26,(q26*2)%1?2:1)+' ch.',fmtQtd(q26,(q26*2)%1?2:1)+' ch.',q26*P.galv26);
     const AC=p.acrilCod,mA=AC?_orc8Mat(AC):null,dA=AC&&typeof _orcEmDims==='function'?_orcEmDims(AC):null,aA=dA?dA[0]*dA[1]:2;
     const qA=(typeof _orcAprovQ==='function'&&_orcAprovQ(p,'frente'))||ceilDec(area/aA);
     push('🔷',mA?'Frente — '+String(mA.n).trim():'Frente ⚠️ escolha o acrílico/policarbonato',fmtQtd(area,3)+' m² ÷ '+fmtQtd(aA,2)+' m²'+(dA?' ('+fmtQtd(dA[0],2)+'×'+fmtQtd(dA[1],2)+'m)':'')+' → '+fmtQtd(qA,(qA*2)%1?2:1)+' ch.',fmtQtd(qA,(qA*2)%1?2:1)+' ch.',mA&&mA.v>0?qA*mA.v:0);
@@ -72153,9 +72208,9 @@ function orc2CalcLetra(p,P,adesivoPrecos){
     push('🎨','Tinta PU Branco Fosco (interna)','mesma quantidade da tinta externa → '+fmtQtd(lt,2)+' L × '+fmtBRL(P.tinta)+'/L',fmtQtd(lt,2)+' L',lt*P.tinta);
     const ledCod=p.ledCod,mL=ledCod?_orc8Mat(ledCod):null,prL=mL&&mL.v>0?mL.v:P.led;
     // (2026-11-16) arte importada no 3D: módulos posicionados dentro de cada letra, comprados em correntes de 20
-    const q3=(typeof _orcLed3d==='function'?_orcLed3d(p):0),nBruto=q3||Math.ceil(perimetro/Pm.moduloM-1e-9),nLed=q3?Math.ceil(q3/20)*20:Math.ceil(nBruto/10)*10;
+    const q3=(typeof _orcLed3d==='function'?_orcLed3d(p):0),nBruto=q3||Math.ceil(perimetro/Pm.moduloM-1e-9),nLed=nBruto;
     const nomeL=mL?String(mL.n).trim():((ORC_LED_HALO.find(x=>x[0]===String(ledCod))||[0,''])[1]||'⚠️ escolha a temperatura do LED');
-    push('💡','Módulo LED — '+nomeL,q3?(q3+' '+_plural(q3,'módulo posicionado','módulos posicionados')+' dentro das letras (arte 3D, '+fmtQtd(_orc2Num(p.ledRef.passo)*100,0)+' cm entre módulos) → '+nLed+' módulos (correntes de 20)'):(fmtQtd(perimetro,2)+'m ÷ '+fmtQtd(Pm.moduloM,2)+'m = '+nBruto+' → '+nLed+' módulos (arredondado de 10 em 10)'),nLed+' un.',ledCod?nLed*prL:0);
+    push('💡','Módulo LED — '+nomeL,q3?(q3+' '+_plural(q3,'módulo posicionado','módulos posicionados')+' dentro das letras (arte 3D, '+fmtQtd(_orc2Num(p.ledRef.passo)*100,0)+' cm entre módulos)'):(fmtQtd(perimetro,2)+'m ÷ '+fmtQtd(Pm.moduloM,2)+'m = '+nBruto+' módulos'),nLed+' un.',ledCod?nLed*prL:0);
     const pot=arred(nLed*0.72*(1+Pm.reatorFolga/100),2),mr=_orc2MelhorReator(pot,P);
     push('⚡',mr.label+' IP67 12V',fmtQtd(pot,2)+'W ('+nLed+' × 0,72W + '+fmtQtd(Pm.reatorFolga,0)+'%) → '+mr.qty+' × '+mr.watts+'W = '+(mr.qty*mr.watts)+'W',mr.qty+' un.',mr.custo);
     // fiação e conectores do LED (2026-10-06): cabo flexível 1,5mm preto + vermelho por m de perímetro e Wago por reator
@@ -72163,7 +72218,7 @@ function orc2CalcLetra(p,P,adesivoPrecos){
      if(mF>0)push('🔌','Cabo flexível 1,5mm preto + vermelho (fiação do LED)',fmtQtd(perimetro,2)+'m × '+fmtQtd(Pm.fioPorM,2)+' = '+fmtQtd(mF,2)+'m de cada cor',fmtQtd(mF*2,2)+' m',mF*(pPr+pVm));
      if(qW>0)push('🔌','Conector Wago 221 (emenda 2 fios)',mr.qty+' '+_plural(mr.qty,'reator','reatores')+' × '+fmtQtd(Pm.wagoPorReator,0),qW+' un.',qW*pW);}
     // catalisador 2.1 Wash Primer 300ml (cód. 1676): litros de tinta (fora + branca de dentro) ÷ 0,30 por frasco
-    {const ltTot=lt*((_haloNova||_acrilNova)?2:1),qCat=Math.ceil(ltTot/Pm.catalisadorL-1e-9);if(qCat>0)push('🧪','Catalisador 2.1 Wash Primer 300ml',fmtQtd(ltTot,2)+' L de tinta ÷ '+fmtQtd(Pm.catalisadorL,2)+' → '+qCat+' '+_plural(qCat,'frasco','frascos')+'',qCat+' fr.',qCat*P.primer);}
+    {const ltTot=lt*((_haloNova||_acrilNova)?2:1),qCat=_orcQ2(ltTot/Pm.catalisadorL);if(qCat>0)push('🧪','Catalisador 2.1 Wash Primer 300ml',fmtQtd(ltTot,2)+' L de tinta ÷ '+fmtQtd(Pm.catalisadorL,2)+' → '+_orcQs(qCat)+' '+_plural(qCat,'frasco','frascos')+'',_orcQs(qCat)+' fr.',qCat*P.primer);}
     (p.adesivos||[]).forEach(ad=>{
       const l=_orc2Num(ad.largura),a=_orc2Num(ad.altura);if(!ad.codigo||!(l>0)||!(a>0))return;
       const m2=l*a,pr=((adesivoPrecos||{})[ad.codigo]||_orc3Preco(ad.codigo)||0),nome=(ORC2_ADESIVOS.find(x=>String(x[0])===String(ad.codigo))||[0,''])[1];
@@ -72177,8 +72232,8 @@ function orc2CalcLetra(p,P,adesivoPrecos){
     const a20=d20[0]*d20[1],c26=Math.max(d26[0],d26[1]),h26=Math.min(d26[0],d26[1]);
     const q20=(typeof _orcAprovQ==='function'&&_orcAprovQ(p,'frente'))||ceilDec(area/a20);
     push('🔩','Chapa Galv. 20 0,95mm '+fmtQtd(d20[0],2)+'×'+fmtQtd(d20[1],2)+'m (frente)',fmtQtd(largura,2)+' × '+fmtQtd(alturaVal,2)+' = '+fmtQtd(area,3)+' m² ÷ '+fmtQtd(a20,2)+' m² → '+fmtQtd(q20,(q20*2)%1?2:1)+' ch.',fmtQtd(q20,(q20*2)%1?2:1)+' ch.',q20*P.galv20);
-    const q26=(typeof _orcAprovQ==='function'&&_orcAprovQ(p,'lateral'))||ceilDec((largura/c26)*caixaM/h26);
-    push('🔩','Chapa Galv. 26 0,50mm '+fmtQtd(h26,2)+'×'+fmtQtd(c26,2)+'m (laterais)',fmtQtd(largura,2)+'m ÷ '+fmtQtd(c26,2)+' × '+fmtQtd(caixaM,2)+'m ÷ '+fmtQtd(h26,2)+' → '+fmtQtd(q26,(q26*2)%1?2:1)+' ch.',fmtQtd(q26,(q26*2)%1?2:1)+' ch.',q26*P.galv26);
+    const q26=(typeof _orcAprovQ==='function'&&_orcAprovQ(p,'lateral'))||ceilDec(((perimetro>0?perimetro:largura)/c26)*caixaM/h26);
+    push('🔩','Chapa Galv. 26 0,50mm '+fmtQtd(h26,2)+'×'+fmtQtd(c26,2)+'m (laterais)',(perimetro>0?fmtQtd(perimetro,2)+'m de perímetro':fmtQtd(largura,2)+'m de largura (sem perímetro)')+' ÷ '+fmtQtd(c26,2)+' × '+fmtQtd(caixaM,2)+'m ÷ '+fmtQtd(h26,2)+' → '+fmtQtd(q26,(q26*2)%1?2:1)+' ch.',fmtQtd(q26,(q26*2)%1?2:1)+' ch.',q26*P.galv26);
     const m2Ch=q20*a20+q26*c26*h26,lt=arred(m2Ch*Pm.tintaLm2,2),T=p.tinta,pL=_orcTintaPrecoL(T);
     push('🎨',T?'Tinta — '+T.nome:'Tinta ⚠️ escolha a tinta',fmtQtd(q20,(q20*2)%1?2:1)+' ch. × '+fmtQtd(a20,2)+' m² + '+fmtQtd(q26,(q26*2)%1?2:1)+' ch. × '+fmtQtd(c26*h26,2)+' m² = '+fmtQtd(m2Ch,2)+' m² × '+fmtQtd(Pm.tintaLm2,2)+' L/m² → '+fmtQtd(lt,2)+' L'+(T?' × '+fmtBRL(pL)+'/L':''),fmtQtd(lt,2)+' L',T?lt*pL:0);
     let semLed=false;
@@ -72187,9 +72242,9 @@ function orc2CalcLetra(p,P,adesivoPrecos){
       push('🎨','Tinta PU Branco Fosco (interna)','mesma quantidade da tinta externa → '+fmtQtd(lt,2)+' L × '+fmtBRL(P.tinta)+'/L',fmtQtd(lt,2)+' L',lt*P.tinta);
       // LED: perímetro ÷ 0,12 m (módulo + fio), arredondado pra cima de 10 em 10 (151 → 160)
       const ledCod=p.ledCod,mL=ledCod?_orc8Mat(ledCod):null,prL=mL&&mL.v>0?mL.v:P.led;semLed=!ledCod;
-      const nBruto=Math.ceil(perimetro/Pm.moduloM-1e-9),nLed=Math.ceil(nBruto/10)*10;
+      const nBruto=Math.ceil(perimetro/Pm.moduloM-1e-9),nLed=nBruto;
       const nomeL=mL?String(mL.n).trim():((ORC_LED_HALO.find(x=>x[0]===String(ledCod))||[0,''])[1]||'⚠️ escolha a temperatura do LED');
-      push('💡','Módulo LED — '+nomeL,fmtQtd(perimetro,2)+'m ÷ '+fmtQtd(Pm.moduloM,2)+'m = '+nBruto+' → '+nLed+' módulos (arredondado de 10 em 10)',nLed+' un.',ledCod?nLed*prL:0);
+      push('💡','Módulo LED — '+nomeL,fmtQtd(perimetro,2)+'m ÷ '+fmtQtd(Pm.moduloM,2)+'m = '+nBruto+' módulos',nLed+' un.',ledCod?nLed*prL:0);
       const pot=arred(nLed*0.72*(1+Pm.reatorFolga/100),2),mr=_orc2MelhorReator(pot,P);
       push('⚡',mr.label+' IP67 12V',fmtQtd(pot,2)+'W ('+nLed+' × 0,72W + '+fmtQtd(Pm.reatorFolga,0)+'%) → '+mr.qty+' × '+mr.watts+'W = '+(mr.qty*mr.watts)+'W',mr.qty+' un.',mr.custo);
     // fiação e conectores do LED (2026-10-06): cabo flexível 1,5mm preto + vermelho por m de perímetro e Wago por reator
@@ -72198,7 +72253,7 @@ function orc2CalcLetra(p,P,adesivoPrecos){
      if(qW>0)push('🔌','Conector Wago 221 (emenda 2 fios)',mr.qty+' '+_plural(mr.qty,'reator','reatores')+' × '+fmtQtd(Pm.wagoPorReator,0),qW+' un.',qW*pW);}
     }
     // catalisador 2.1 Wash Primer 300ml (cód. 1676): litros de tinta (fora + branca de dentro) ÷ 0,30 por frasco
-    {const ltTot=lt*((_haloNova||_acrilNova)?2:1),qCat=Math.ceil(ltTot/Pm.catalisadorL-1e-9);if(qCat>0)push('🧪','Catalisador 2.1 Wash Primer 300ml',fmtQtd(ltTot,2)+' L de tinta ÷ '+fmtQtd(Pm.catalisadorL,2)+' → '+qCat+' '+_plural(qCat,'frasco','frascos')+'',qCat+' fr.',qCat*P.primer);}
+    {const ltTot=lt*((_haloNova||_acrilNova)?2:1),qCat=_orcQ2(ltTot/Pm.catalisadorL);if(qCat>0)push('🧪','Catalisador 2.1 Wash Primer 300ml',fmtQtd(ltTot,2)+' L de tinta ÷ '+fmtQtd(Pm.catalisadorL,2)+' → '+_orcQs(qCat)+' '+_plural(qCat,'frasco','frascos')+'',_orcQs(qCat)+' fr.',qCat*P.primer);}
     (p.adesivos||[]).forEach(ad=>{
       const l=_orc2Num(ad.largura),a=_orc2Num(ad.altura);if(!ad.codigo||!(l>0)||!(a>0))return;
       const m2=l*a,pr=((adesivoPrecos||{})[ad.codigo]||_orc3Preco(ad.codigo)||0),nome=(ORC2_ADESIVOS.find(x=>String(x[0])===String(ad.codigo))||[0,''])[1];
@@ -72210,22 +72265,22 @@ function orc2CalcLetra(p,P,adesivoPrecos){
   if(isPVC){
     const isPVC20=tipo==='pvc20',pvcPreco=isPVC20?P.pvc20:P.pvc10,pvcNome=isPVC20?'PVC Expandido 20mm (1,22×2,44m)':'PVC Expandido 10mm (1,22×2,44m)';
     const areaChPVC=2.44*1.22,qPVC=ceilDec(area/areaChPVC);areaChapasTotal+=qPVC*areaChPVC;
-    push('🟦',pvcNome,fmtQtd(area,3)+' m² ÷ '+fmtQtd(areaChPVC,3)+' m² → '+fmtQtd(qPVC,1)+' ch.',fmtQtd(qPVC,1)+' ch.',qPVC*pvcPreco);
+    push('🟦',pvcNome,fmtQtd(area,3)+' m² ÷ '+fmtQtd(areaChPVC,3)+' m² → '+_orcQs(qPVC)+' ch.',_orcQs(qPVC)+' ch.',qPVC*pvcPreco);
     const lt=arred(areaChapasTotal*Pm.tintaLm2,2);push('🎨','Tinta PU (pintura externa)',fmtQtd(areaChapasTotal,2)+' m² × '+fmtQtd(Pm.tintaLm2,2)+' L/m² → '+fmtQtd(lt,2)+' L',fmtQtd(lt,2)+' L',lt*P.tinta);
-    const qPr=Math.ceil(lt/0.30);push('🧪','Wash Primer c/ Cat. (300ml)',fmtQtd(lt,2)+' L tinta ÷ 0,30 → '+qPr+' '+_plural(qPr,'frasco','frascos')+'',qPr+' fr.',qPr*P.primer);
+    const qPr=_orcQ2(lt/0.30);push('🧪','Wash Primer c/ Cat. (300ml)',fmtQtd(lt,2)+' L tinta ÷ 0,30 → '+_orcQs(qPr)+' '+_plural(qPr,'frasco','frascos')+'',_orcQs(qPr)+' fr.',qPr*P.primer);
     const ins=arred(totalMat*Pm.insumosPct/100,2);push('🔩','Insumos (fixação, parafusos etc.)',fmtQtd(Pm.insumosPct,0)+'% do custo dos materiais → '+fmtBRL(ins),'1 vb.',ins); // 2026-10-06: insumos 5% em todo produto
   }else{
     if(usaACM){
       const areaFace=largura*alturaVal,t122=areaFace/(5*1.22),t150=areaFace/(5*1.50),r122=ceilDec(t122),r150=ceilDec(t150),u122=t122/r122,u150=t150/r150;
       // emenda primeiro (2026-10-05): a chapa que cobre a face com menos pedaços ganha; empate → aproveitamento (regra antiga)
       const pc122=_orcEmPedacos(largura,alturaVal,5,1.22),pc150=_orcEmPedacos(largura,alturaVal,5,1.50);
-      if(pc122<pc150||(pc122===pc150&&u122>=u150)){areaChapasTotal+=r122*5*1.22;push('🔶','ACM Branco Fosco 5×1,22m',fmtQtd(areaFace,3)+' m² ÷ 6,1 → '+fmtQtd(r122,1)+' ch. (aprov. '+Math.round(u122*100)+'% · '+_orcEmTxt(pc122)+')',fmtQtd(r122,1)+' ch.',r122*P.acm122);}
-      else{areaChapasTotal+=r150*5*1.50;push('🔶','ACM Branco Fosco 5×1,50m',fmtQtd(areaFace,3)+' m² ÷ 7,5 → '+fmtQtd(r150,1)+' ch. (aprov. '+Math.round(u150*100)+'% · '+_orcEmTxt(pc150)+')',fmtQtd(r150,1)+' ch.',r150*P.acm150);}
+      if(pc122<pc150||(pc122===pc150&&r122*P.acm122<=r150*P.acm150)){areaChapasTotal+=r122*5*1.22;push('🔶','ACM Branco Fosco 5×1,22m',fmtQtd(areaFace,3)+' m² ÷ 6,1 → '+fmtQtd(r122,2)+' ch. ('+_orcEmTxt(pc122)+')',fmtQtd(r122,2)+' ch.',r122*P.acm122);}
+      else{areaChapasTotal+=r150*5*1.50;push('🔶','ACM Branco Fosco 5×1,50m',fmtQtd(areaFace,3)+' m² ÷ 7,5 → '+fmtQtd(r150,2)+' ch. ('+_orcEmTxt(pc150)+')',fmtQtd(r150,2)+' ch.',r150*P.acm150);}
       const lt122=(perimetro/5)*caixaM/1.22,lt150=(perimetro/5)*caixaM/1.50,lr122=ceilDec(lt122),lr150=ceilDec(lt150);
       const lu122=caixaM<=1.22?lt122/lr122:0,lu150=lt150/lr150;
-      if(lu122>=lu150){areaChapasTotal+=lr122*5*1.22;push('🔶','ACM Branco Fosco 5×1,22m (lateral)',fmtQtd(perimetro,2)+'m ÷ 5 × '+fmtQtd(caixaM,2)+'m ÷ 1,22 → '+fmtQtd(lr122,1)+' ch. (aprov. '+Math.round(lu122*100)+'%)',fmtQtd(lr122,1)+' ch.',lr122*P.acm122);}
-      else{areaChapasTotal+=lr150*5*1.50;push('🔶','ACM Branco Fosco 5×1,50m (lateral)',fmtQtd(perimetro,2)+'m ÷ 5 × '+fmtQtd(caixaM,2)+'m ÷ 1,50 → '+fmtQtd(lr150,1)+' ch. (aprov. '+Math.round(lu150*100)+'%)',fmtQtd(lr150,1)+' ch.',lr150*P.acm150);}
-      const qCant=Math.ceil(perimetro/6);push('📐','Cantoneira Al. 25×25 1,5mm (6m)','Fixação interna — '+fmtQtd(perimetro,2)+'m ÷ 6m → '+qCant+' '+_plural(qCant,'barra','barras')+'',qCant+' '+_plural(qCant,'barra','barras')+'',qCant*P.cant);
+      if(caixaM<=1.22&&lr122*P.acm122<=lr150*P.acm150){areaChapasTotal+=lr122*5*1.22;push('🔶','ACM Branco Fosco 5×1,22m (lateral)',fmtQtd(perimetro,2)+'m ÷ 5 × '+fmtQtd(caixaM,2)+'m ÷ 1,22 → '+fmtQtd(lr122,2)+' ch.',fmtQtd(lr122,2)+' ch.',lr122*P.acm122);}
+      else{areaChapasTotal+=lr150*5*1.50;push('🔶','ACM Branco Fosco 5×1,50m (lateral)',fmtQtd(perimetro,2)+'m ÷ 5 × '+fmtQtd(caixaM,2)+'m ÷ 1,50 → '+fmtQtd(lr150,2)+' ch.',fmtQtd(lr150,2)+' ch.',lr150*P.acm150);}
+      const qCant=_orcQ2(perimetro/6);push('📐','Cantoneira Al. 25×25 1,5mm (6m)','Fixação interna — '+fmtQtd(perimetro,2)+'m ÷ 6m → '+_orcQs(qCant)+' '+_plural(qCant,'barra','barras')+'',_orcQs(qCant)+' '+_plural(qCant,'barra','barras')+'',qCant*P.cant);
     }else{
       const aF=largura*alturaVal,q20=ceilDec(aF/(3*1.20));areaChapasTotal+=q20*3*1.20;
       push('🔩','Chapa Galv. 20 (face)',fmtQtd(aF,3)+' m² ÷ 3,6 → '+fmtQtd(q20,(q20*2)%1?2:1)+' ch.',fmtQtd(q20,(q20*2)%1?2:1)+' ch.',q20*P.galv20);
@@ -72235,15 +72290,15 @@ function orc2CalcLetra(p,P,adesivoPrecos){
     }
     const qParaf=Math.ceil(perimetro*20);push('🔧','Parafuso Brocante 4,2×13mm',qParaf+' un. (20/m perímetro)',qParaf+' un.',qParaf*P.paraf);
     const lt=arred(areaChapasTotal*Pm.tintaLm2,2);push('🎨','Tinta PU (pintura externa)',fmtQtd(areaChapasTotal,2)+' m² × '+fmtQtd(Pm.tintaLm2,2)+' L/m² → '+fmtQtd(lt,2)+' L',fmtQtd(lt,2)+' L',lt*P.tinta);
-    const qPr=Math.ceil(lt/0.30);push('🧪','Wash Primer c/ Cat. (300ml)',fmtQtd(lt,2)+' L tinta ÷ 0,30 → '+qPr+' '+_plural(qPr,'frasco','frascos')+'',qPr+' fr.',qPr*P.primer);
+    const qPr=_orcQ2(lt/0.30);push('🧪','Wash Primer c/ Cat. (300ml)',fmtQtd(lt,2)+' L tinta ÷ 0,30 → '+_orcQs(qPr)+' '+_plural(qPr,'frasco','frascos')+'',_orcQs(qPr)+' fr.',qPr*P.primer);
     const reatores=[{label:'Reator 35W',watts:35,preco:P.r35},{label:'Reator 60W',watts:60,preco:P.r60},{label:'Reator 100W',watts:100,preco:P.r100},{label:'Reator 150W',watts:150,preco:P.r150},{label:'Reator 200W',watts:200,preco:P.r200}];
     const melhorReator=pot=>_orc2MelhorReator(pot,P); // regra única de reator (menor número de unidades) — ver _orc2MelhorReator
     if(tipo==='halo'){
-      const qLed=Math.ceil(perimetro/0.12),_mL=p.ledCod?_orc8Mat(p.ledCod):null;push('💡',_mL?'Módulo LED — '+String(_mL.n).trim():'Módulo LED 6.500K 3P 12V 0,72W (Argia)',fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.',qLed+' un.',qLed*(_mL&&_mL.v>0?_mL.v:P.led));
+      const qLed=Math.ceil(perimetro/0.12-1e-9),_mL=p.ledCod?_orc8Mat(p.ledCod):null;push('💡',_mL?'Módulo LED — '+String(_mL.n).trim():'Módulo LED 6.500K 3P 12V 0,72W (Argia)',fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.',qLed+' un.',qLed*(_mL&&_mL.v>0?_mL.v:P.led));
       const pot=arred(qLed*0.72*1.20,1),mr=melhorReator(pot);push('⚡',mr.label+' IP67 12V',fmtQtd(pot,1)+'W (c/ 20% margem) ÷ '+mr.watts+'W → '+mr.qty+' un.',mr.qty+' un.',mr.custo);
     }
     if(tipo==='acril'){
-      const aCh=2.44*1.22,qPVC=ceilDec(area/aCh);push('🔷','PVC Expandido 10mm (1,22×2,44m)',fmtQtd(area,3)+' m² ÷ '+fmtQtd(aCh,3)+' m² → '+fmtQtd(qPVC,1)+' ch.',fmtQtd(qPVC,1)+' ch.',qPVC*P.pvc);
+      const aCh=2.44*1.22,qPVC=ceilDec(area/aCh);push('🔷','PVC Expandido 10mm (1,22×2,44m)',fmtQtd(area,3)+' m² ÷ '+fmtQtd(aCh,3)+' m² → '+_orcQs(qPVC)+' ch.',_orcQs(qPVC)+' ch.',qPVC*P.pvc);
       // 2026-10-05 (a pedido do usuário): escolher a chapa pensando em EMENDA, não só em área — letra de 3m
       // de largura cabe inteira na 3×2 (sem emenda) e na 2×1 precisa de 3 pedaços. Critério: menos pedaços
       // pra cobrir largura × altura (a chapa pode girar) → mais barato → melhor aproveitamento.
@@ -72256,13 +72311,13 @@ function orc2CalcLetra(p,P,adesivoPrecos){
       // antes a letra acima de 1,20 m ignorava a escolha e escolhia sozinha (ex.: punha policarbonato no lugar do acrílico).
       {const AC=p.acrilCod,mA=AC?_orc8Mat(AC):null,dA=AC&&typeof _orcEmDims==='function'?_orcEmDims(AC):null;
         if(mA){const aA=dA?dA[0]*dA[1]:2,qA=ceilDec(area/aA),pcA=dA?pedacos({cw:dA[0],ch:dA[1]}):null;mf={nome:'Frente — '+String(mA.n).trim(),areaChapa:aA,qty:qA,util:area/(qA*aA),custo:mA.v>0?qA*mA.v:0,pc:pcA==null?1:pcA};}}
-      push('🔵',mf.nome,fmtQtd(area,3)+' m² ÷ '+fmtQtd(mf.areaChapa,1)+' m² → '+fmtQtd(mf.qty,1)+' ch. (aprov. '+Math.round(mf.util*100)+'% · '+(mf.pc<=1?'sem emenda':(mf.pc-1)+(mf.pc-1===1?' emenda':' emendas'))+')',fmtQtd(mf.qty,1)+' ch.',mf.custo);
-      const _q3=(typeof _orcLed3d==='function'?_orcLed3d(p):0),qLed=_q3?Math.ceil(_q3/20)*20:Math.ceil(perimetro/0.12),_mL=p.ledCod?_orc8Mat(p.ledCod):null;push('💡',_mL?'Módulo LED — '+String(_mL.n).trim():'Módulo LED 6.500K 3P 12V 0,72W (Argia)',_q3?(_q3+' '+_plural(_q3,'módulo posicionado','módulos posicionados')+' dentro das letras (arte 3D) → '+qLed+' módulos (correntes de 20)'):(fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.'),qLed+' un.',qLed*(_mL&&_mL.v>0?_mL.v:P.led));
+      push('🔵',mf.nome,fmtQtd(area,3)+' m² ÷ '+fmtQtd(mf.areaChapa,1)+' m² → '+fmtQtd(mf.qty,1)+' ch. (aprov. '+Math.round(mf.util*100)+'% · '+(mf.pc<=1?'sem emenda':(mf.pc-1)+(mf.pc-1===1?' emenda':' emendas'))+')',_orcQs(mf.qty)+' ch.',mf.custo);
+      const _q3=(typeof _orcLed3d==='function'?_orcLed3d(p):0),qLed=_q3?_q3:Math.ceil(perimetro/0.12-1e-9),_mL=p.ledCod?_orc8Mat(p.ledCod):null;push('💡',_mL?'Módulo LED — '+String(_mL.n).trim():'Módulo LED 6.500K 3P 12V 0,72W (Argia)',_q3?(_q3+' '+_plural(_q3,'módulo posicionado','módulos posicionados')+' dentro das letras (arte 3D)'):(fmtQtd(perimetro,2)+'m ÷ 0,12m → '+qLed+' un.'),qLed+' un.',qLed*(_mL&&_mL.v>0?_mL.v:P.led));
       const pot=arred(qLed*0.72*1.20,1),mr=melhorReator(pot);push('⚡',mr.label+' IP67 12V',fmtQtd(pot,1)+'W (c/ 20% margem) ÷ '+mr.watts+'W → '+mr.qty+' un.',mr.qty+' un.',mr.custo);
     }
     if(usaEstr){
-      const qM=Math.ceil(area*1.2);push('🔩','Metalon 20×30mm (6m) — estrutura interna',qM+' barras (alt. > 2m)',qM+' barras',qM*P.metalon);
-      const qG=Math.max(1,Math.ceil(qM*6*0.5/(10*3.6)));push('🎨','Tinta Galvimax Preto (galão 3,6L)',qG+' '+_plural(qG,'galão','galões')+'',qG+' gl.',qG*P.galvimax);
+      const qM=_orcQ2(area*1.2);push('🔩','Metalon 20×30mm (6m) — estrutura interna',_orcQs(qM)+' barras (alt. > 2m)',_orcQs(qM)+' barras',qM*P.metalon);
+      const qG=_orcQ2(qM*6*0.5/(10*3.6));push('🎨','Tinta Galvimax Preto (galão 3,6L)',_orcQs(qG)+' '+_plural(qG,'galão','galões')+'',_orcQs(qG)+' gl.',qG*P.galvimax);
     }
   }
   (p.adesivos||[]).forEach(ad=>{
@@ -72700,11 +72755,16 @@ async function _orc2IaPaginas(buf,lim){
   // (2026-11-10, Guilherme: "tá demorando demais pra ler meu projeto de mobiliário") — prazo máximo pra abrir o
   // PDF e pra desenhar cada pedaço (prancha vetorial gigante travava); progresso também no Granda Mob (lim.prog);
   // lim.partesSoSemTexto: só recorta a prancha em partes quando a página não tem texto legível.
+  // (2026-11-26, Clabonde: "ler mais rápido") — nas pranchas grandes, as PARTES do mesmo tamanho saem de UM desenho só
+  // da prancha, copiadas pixel a pixel, em vez de a prancha inteira ser desenhada de novo pra cada parte. A página
+  // inteira continua desenhada direto. Mesmas imagens (mesma nitidez), mesmos tamanhos, mesma ordem e mesmo número de
+  // imagens pra IA. Prancha que não cabe na memória do navegador continua do jeito antigo (uma parte por vez).
   const prog=m=>{try{if(lim&&lim.prog)lim.prog(m);else _orc2IaProgresso(m);}catch(e){}};
   const comPrazo=(p,ms,msg)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)),ms))]);
   prog(rotArq+'Abrindo o PDF…');
   const pdf=await comPrazo(pdfjsLib.getDocument({data:buf}).promise,60000,'o PDF demorou demais pra abrir — confira a internet e tente de novo');
   const nPag=Math.max(0,Math.min(pdf.numPages,maxPag));const paginas=[];let nImg=0;const t0=Date.now();
+  const msImg=lim&&lim.msPorImagem||45000;
   for(let n=1;n<=nPag;n++){
     if(lim&&lim.cancelado&&lim.cancelado())throw new Error('leitura cancelada');
     prog(rotArq+'Preparando página '+n+' de '+nPag+(pdf.numPages>nPag?' (o PDF tem '+pdf.numPages+'; leio as '+nPag+' primeiras)':'')+'… '+Math.round((Date.now()-t0)/1000)+'s');
@@ -72713,19 +72773,56 @@ async function _orc2IaPaginas(buf,lim){
     const W=vp1.width,H=vp1.height,grande=Math.max(W,H)>1300&&!(lim&&lim.partesSoSemTexto&&texto.length>=300);
     const tile=(lim&&lim.tile)||1100;const cols=grande?Math.ceil(W/tile):1,lins=grande?Math.ceil(H/tile):1;
     const imgs=[];
-    const desenhar=async(x0,y0,w,h,rot)=>{
-      const esc=Math.min(1568/Math.max(w,h),4);const vp=pg.getViewport({scale:esc});
-      const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(w*esc));cv.height=Math.max(1,Math.round(h*esc));
-      const ctx=cv.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);ctx.translate(-x0*esc,-y0*esc);
-      const tarefa=pg.render({canvasContext:ctx,viewport:vp});
-      try{await comPrazo(tarefa.promise,lim&&lim.msPorImagem||45000,'render');}catch(e){try{tarefa.cancel();}catch(x){}console.warn('IA: página '+n+' demorou demais pra desenhar — vai só o texto',e);return;}
-      imgs.push({rot,data:cv.toDataURL('image/jpeg',0.82).split(',')[1]});
-    };
-    if(nImg<maxImg){await desenhar(0,0,W,H,grande?'página inteira':'');nImg++;}
+    // pedaços a mandar, na mesma ordem e com o mesmo limite de imagens de antes
+    const pedacos=[];
+    if(nImg<maxImg){pedacos.push({x0:0,y0:0,w:W,h:H,rot:grande?'página inteira':''});nImg++;}
     if(grande){const ox=W*0.06,oy=H*0.06,cw=W/cols,ch=H/lins;
       for(let r=0;r<lins;r++)for(let c=0;c<cols;c++){if(nImg>=maxImg)break;
         const x0=Math.max(0,c*cw-ox),y0=Math.max(0,r*ch-oy),x1=Math.min(W,(c+1)*cw+ox),y1=Math.min(H,(r+1)*ch+oy);
-        await desenhar(x0,y0,x1-x0,y1-y0,'parte '+(r*cols+c+1)+' de '+(cols*lins)+' (linha '+(r+1)+', coluna '+(c+1)+')');nImg++;}}
+        pedacos.push({x0,y0,w:x1-x0,h:y1-y0,rot:'parte '+(r*cols+c+1)+' de '+(cols*lins)+' (linha '+(r+1)+', coluna '+(c+1)+')'});nImg++;}}
+    const escDe=p=>Math.min(1568/Math.max(p.w,p.h),4);
+    const jpeg=cv=>cv.toDataURL('image/jpeg',0.82).split(',')[1];
+    // jeito antigo: desenha a prancha só pra este pedaço
+    const desenhar=async p=>{
+      const esc=escDe(p);const vp=pg.getViewport({scale:esc});
+      const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(p.w*esc));cv.height=Math.max(1,Math.round(p.h*esc));
+      const ctx=cv.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);ctx.translate(-p.x0*esc,-p.y0*esc);
+      const tarefa=pg.render({canvasContext:ctx,viewport:vp});
+      try{await comPrazo(tarefa.promise,msImg,'render');}catch(e){try{tarefa.cancel();}catch(x){}console.warn('IA: página '+n+' demorou demais pra desenhar — vai só o texto',e);return;}
+      imgs.push({rot:p.rot,data:jpeg(cv)});
+    };
+    // a página inteira continua desenhada direto (traço fino fica nítido); as PARTES saem de um desenho só
+    const inteira=pedacos.length&&pedacos[0].rot!==''&&pedacos[0].x0===0&&pedacos[0].y0===0&&pedacos[0].w===W&&pedacos[0].h===H?pedacos.shift():null;
+    if(inteira)await desenhar(inteira);
+    if(pedacos.length>1){
+      // partes com a mesma escala saem de UM desenho da prancha nessa escala, copiadas pixel a pixel (sem redimensionar)
+      const grupos=new Map();for(const p of pedacos){const k=escDe(p).toFixed(5);if(!grupos.has(k))grupos.set(k,[]);grupos.get(k).push(p);}
+      const saida=new Map();
+      for(const [k,ps] of grupos){
+        if(ps.length===1){continue;} // parte com escala só dela: desenha do jeito antigo, abaixo
+        const esc=Number(k),GW=Math.max(1,Math.round(W*esc)),GH=Math.max(1,Math.round(H*esc));
+        if(GW>12000||GH>12000||GW*GH>25e6)continue; // grande demais pra memória: jeito antigo
+        let big=document.createElement('canvas');big.width=GW;big.height=GH;const bctx=big.getContext('2d');
+        if(!bctx){big=null;continue;}
+        bctx.fillStyle='#fff';bctx.fillRect(0,0,GW,GH);
+        const tarefa=pg.render({canvasContext:bctx,viewport:pg.getViewport({scale:esc})});
+        try{await comPrazo(tarefa.promise,msImg*2,'render');}
+        catch(e){try{tarefa.cancel();}catch(x){}console.warn('IA: página '+n+' demorou demais pra desenhar — vai só o texto',e);ps.forEach(p=>saida.set(p,null));big.width=big.height=0;big=null;continue;}
+        for(const p of ps){
+          const cv=document.createElement('canvas');cv.width=Math.max(1,Math.round(p.w*esc));cv.height=Math.max(1,Math.round(p.h*esc));
+          const sx=Math.max(0,Math.min(GW-cv.width,Math.round(p.x0*esc))),sy=Math.max(0,Math.min(GH-cv.height,Math.round(p.y0*esc)));
+          const ctx=cv.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,cv.width,cv.height);
+          ctx.drawImage(big,sx,sy,cv.width,cv.height,0,0,cv.width,cv.height);
+          saida.set(p,jpeg(cv));
+        }
+        big.width=big.height=0;big=null; // libera a memória
+      }
+      // monta na ordem original; parte que não saiu de um desenho compartilhado é desenhada sozinha (jeito antigo)
+      for(const p of pedacos){
+        if(saida.has(p)){const d=saida.get(p);if(d)imgs.push({rot:p.rot,data:d});}
+        else await desenhar(p);
+      }
+    }else if(pedacos.length)await desenhar(pedacos[0]);
     paginas.push({n,texto,imgs});
   }
   return{paginas,total:pdf.numPages,lidas:nPag,nImg};
@@ -72970,8 +73067,8 @@ function orc2CalcFachada(p,P,adesivoPrecos){
   const caixaP=_orc2Num((p.extras||{}).caixaProf);
   const metPerim=(largura*2)+(alturaV*2),metTravas=(largura/1.50)*alturaV;
   const nLig=caixaP>0?(Math.ceil(largura/1.50)+1)*2:0,metFundo=caixaP>0?metPerim:0,metLig=nLig*caixaP;
-  const metTotal=metPerim+metTravas+metFundo+metLig,metBarras=Math.ceil(metTotal/6);
-  push('🔩','Metalon Galv. 20×30mm (barra 6m)','Perímetro: '+fmtQtd(metPerim,2)+'m + Travas: '+fmtQtd(metTravas,2)+'m'+(caixaP>0?' + Quadro de fundo da caixa: '+fmtQtd(metFundo,2)+'m + Ligações: '+nLig+' × '+fmtQtd(caixaP,2)+'m = '+fmtQtd(metLig,2)+'m':'')+' = '+fmtQtd(metTotal,2)+'m ÷ 6m → '+metBarras+' '+_plural(metBarras,'barra','barras')+'',metBarras+' '+_plural(metBarras,'barra','barras')+'',metBarras*P.metalon);
+  const metTotal=metPerim+metTravas+metFundo+metLig,metBarras=_orcQ2(metTotal/6);
+  push('🔩','Metalon Galv. 20×30mm (barra 6m)','Perímetro: '+fmtQtd(metPerim,2)+'m + Travas: '+fmtQtd(metTravas,2)+'m'+(caixaP>0?' + Quadro de fundo da caixa: '+fmtQtd(metFundo,2)+'m + Ligações: '+nLig+' × '+fmtQtd(caixaP,2)+'m = '+fmtQtd(metLig,2)+'m':'')+' = '+fmtQtd(metTotal,2)+'m ÷ 6m → '+_orcQs(metBarras)+' '+_plural(metBarras,'barra','barras')+'',_orcQs(metBarras)+' '+_plural(metBarras,'barra','barras')+'',metBarras*P.metalon);
   // ACM — branco fosco (padrão) usa P.acm122/P.acm150; outra cor puxa da base pelo código
   const cor=p.cor&&p.cor!==ORC2_ACM_PADRAO?String(p.cor):'';
   let p122=P.acm122,p150=P.acm150,tem122=true,tem150=true,avisoCor='';
@@ -72981,17 +73078,17 @@ function orc2CalcFachada(p,P,adesivoPrecos){
   const teorA=(largAdj/1.50)*altAdj/5,realA=_orc2CeilMeia(teorA),utilA=teorA/realA;
   const teorB=(largAdj/1.22)*altAdj/5,realB=_orc2CeilMeia(teorB),utilB=teorB/realB;
   const pcA=_orcEmPedacos(largAdj,altAdj,5,1.50),pcB=_orcEmPedacos(largAdj,altAdj,5,1.22);
-  const usaA=(tem122&&tem150)?(pcA!==pcB?pcA<pcB:utilA>=utilB):tem150; // emenda primeiro (2026-10-05), empate → aproveitamento
+  const usaA=(tem122&&tem150)?(pcA!==pcB?pcA<pcB:realA*p150<=realB*p122):tem150; // emenda primeiro (2026-10-05), empate → aproveitamento
   const tipoChapa=usaA?'5×1,50m':'5×1,22m',qtd=usaA?realA:realB,pCh=usaA?p150:p122,altCh=usaA?'1,50':'1,22',teor=usaA?teorA:teorB,util=usaA?utilA:utilB;
-  push('🔲','ACM 3mm '+(cor?_orc2Cap(cor):'Branco')+' '+tipoChapa,(caixaP>0?'Caixa: +'+fmtQtd(caixaP*100,0)+'cm de dobra/lado e +3cm/lado: ':'Dim. +3cm/lado: ')+fmtQtd(largAdj,2)+'m × '+fmtQtd(altAdj,2)+'m → ('+fmtQtd(largAdj,2)+' ÷ '+altCh+') × '+fmtQtd(altAdj,2)+' ÷ 5 = '+fmtQtd(teor,3)+' → '+fmtQtd(qtd,qtd%1?2:0)+' ch. (arredonda de meia em meia chapa · aprov. '+Math.round(util*100)+'% · '+_orcEmTxt(usaA?pcA:pcB)+')'+avisoCor,fmtQtd(qtd,qtd%1?2:0)+' ch.',qtd*pCh);
-  const fitaM=metBarras*6,fitaRol=Math.ceil(fitaM/33);
-  push('🎗️','Fita Dupla Face 3M VHB 4910 15mm×33m',metBarras+' barras × 6m = '+fitaM+'m ÷ 33m → '+fitaRol+' '+_plural(fitaRol,'rolo','rolos')+'',fitaRol+' '+_plural(fitaRol,'rolo','rolos')+'',fitaRol*P.fitaVhb);
+  push('🔲','ACM 3mm '+(cor?_orc2Cap(cor):'Branco')+' '+tipoChapa,(caixaP>0?'Caixa: +'+fmtQtd(caixaP*100,0)+'cm de dobra/lado e +3cm/lado: ':'Dim. +3cm/lado: ')+fmtQtd(largAdj,2)+'m × '+fmtQtd(altAdj,2)+'m → ('+fmtQtd(largAdj,2)+' ÷ '+altCh+') × '+fmtQtd(altAdj,2)+' ÷ 5 = '+fmtQtd(teor,3)+' → '+fmtQtd(qtd,qtd%1?2:0)+' ch. ('+_orcEmTxt(usaA?pcA:pcB)+')'+avisoCor,fmtQtd(qtd,qtd%1?2:0)+' ch.',qtd*pCh);
+  const fitaM=_orcQ2(metBarras*6),fitaRol=_orcQ2(fitaM/33);
+  push('🎗️','Fita Dupla Face 3M VHB 4910 15mm×33m',_orcQs(metBarras)+' barras × 6m = '+_orcQs(fitaM)+'m ÷ 33m → '+_orcQs(fitaRol)+' '+_plural(fitaRol,'rolo','rolos')+'',_orcQs(fitaRol)+' '+_plural(fitaRol,'rolo','rolos')+'',fitaRol*P.fitaVhb);
   // complementos
   const ex=p.extras||{};
   const nR=parseInt(ex.reflQtd)||0;
   if(nR>0){const pot=[30,50,100].indexOf(Number(ex.reflPot))>=0?Number(ex.reflPot):50;
     push('💡','Refletor de LED '+pot+'W',nR+' un.',nR+' un.',nR*(P['refl'+pot]||0));
-    if(ex.reflHaste!==false){const m=nR*1.5,b=_orc2CeilDec(m/6);push('🔩','Haste dos refletores — metalon 20×20 (barra 6m)',nR+' × 1,50m = '+fmtQtd(m,2)+'m ÷ 6m → '+fmtQtd(b,1)+' '+_plural(b,'barra','barras')+'',fmtQtd(b,1)+' '+_plural(b,'barra','barras')+'',b*P.metalon2020);}}
+    if(ex.reflHaste!==false){const m=nR*1.5,b=_orc2CeilDec(m/6);push('🔩','Haste dos refletores — metalon 20×20 (barra 6m)',nR+' × 1,50m = '+fmtQtd(m,2)+'m ÷ 6m → '+fmtQtd(b,2)+' '+_plural(b,'barra','barras')+'',fmtQtd(b,2)+' '+_plural(b,'barra','barras')+'',b*P.metalon2020);}}
   const am2=_orc2Num(ex.adesM2);
   if(am2>0){const pr=(ex.adesCod&&(adesivoPrecos||{})[ex.adesCod])||0,nome=(ORC2_ADESIVOS.find(x=>String(x[0])===String(ex.adesCod))||[0,'(escolha o adesivo)'])[1];
     push('🏷️','Adesivo de recorte — '+nome,fmtQtd(am2,2)+' m²'+(pr>0?'':' ⚠️ preço não carregado'),fmtQtd(am2,2)+' m²',am2*pr);}
@@ -73503,8 +73600,8 @@ function orc8CalcReceita(rc,L,A){
         if(melhor)mel={c:String(c).trim(),ac,qq,u,pr,pc};});
       if(!mel)return;cod=mel.c;qty=mel.qq;det=q(area,3)+' m² ÷ '+q(mel.ac,2)+' m² → '+q(qty,1)+' ch. (aprov. '+Math.round(mel.u*100)+'%'+(mel.pc!=null?' · '+_orcEmTxt(mel.pc):'')+')';
     }else if(ri.tipo==='m2'){qty=_orcxArred(area*(_orc2Num(ri.fator)||1),3);det=q(area,3)+' m² × '+q(_orc2Num(ri.fator)||1,2);}
-    else if(ri.tipo==='perim'){const b=per*(_orc2Num(ri.fator)||1)/(_orc2Num(ri.div)||1);qty=ri.ceil?Math.ceil(b-1e-9):_orcxArred(b,2);det=q(per,2)+' m de perímetro'+((_orc2Num(ri.fator)||1)!==1?' × '+q(_orc2Num(ri.fator),2):'')+((_orc2Num(ri.div)||1)!==1?' ÷ '+q(_orc2Num(ri.div),2):'');}
-    else if(ri.tipo==='grade'){const esp=_orc2Num(ri.esp)||1,trav=Math.max(0,Math.ceil(alt/esp)-1),m=per+trav*larg,b=m*(_orc2Num(ri.fator)||1)/(_orc2Num(ri.div)||1);qty=ri.ceil?Math.ceil(b-1e-9):_orcxArred(b,2);det=q(per,2)+' m + '+trav+' '+_plural(trav,'travessa','travessas')+' de '+q(larg,2)+' m = '+q(m,2)+' m'+((_orc2Num(ri.div)||1)!==1?' ÷ '+q(_orc2Num(ri.div),2):'');}
+    else if(ri.tipo==='perim'){const b=per*(_orc2Num(ri.fator)||1)/(_orc2Num(ri.div)||1);qty=_orcQ2(b);det=q(per,2)+' m de perímetro'+((_orc2Num(ri.fator)||1)!==1?' × '+q(_orc2Num(ri.fator),2):'')+((_orc2Num(ri.div)||1)!==1?' ÷ '+q(_orc2Num(ri.div),2):'');}
+    else if(ri.tipo==='grade'){const esp=_orc2Num(ri.esp)||1,trav=Math.max(0,Math.ceil(alt/esp)-1),m=per+trav*larg,b=m*(_orc2Num(ri.fator)||1)/(_orc2Num(ri.div)||1);qty=_orcQ2(b);det=q(per,2)+' m + '+trav+' '+_plural(trav,'travessa','travessas')+' de '+q(larg,2)+' m = '+q(m,2)+' m'+((_orc2Num(ri.div)||1)!==1?' ÷ '+q(_orc2Num(ri.div),2):'');}
     else if(ri.tipo==='fixo'){qty=_orc2Num(ri.qtd);det='quantidade fixa';}
     if(!(qty>0))return;
     const m=_orc8Mat(cod),pr=m&&m.v>0?m.v:0,c=_orcxArred(qty*pr,2);
@@ -75421,8 +75518,9 @@ async function orc2Pdf(){
   });
   y=doc.lastAutoTable.finalY+5;
   // ── Outros (serviços e logística) ──
-  if((prods.length||_ops.length)&&outros.length){
-    const rows=outros.map(o=>[_orc4Txt(o.t),o.info?'R$ 0,00':(o.on?_orcxBRL(o.v):'Não incluso')]);
+  const _outrosBl=(prods.length||_ops.length)?outros:outros.filter(o=>o.info);
+  if(_outrosBl.length){
+    const rows=_outrosBl.map(o=>[_orc4Txt(o.t),o.avisoSeguro?'Não incluso':(o.info?'R$ 0,00':(o.on?_orcxBRL(o.v):'Não incluso'))]);
     garantir(10+rows.length*6);
     fonte('bold',8.8);cor(ORC4_NAVY);doc.text('Outros',W-M-110,y+3);
     doc.autoTable({startY:y+5,margin:{left:W-M-110,right:M,top:TOPO,bottom:22},theme:'plain',body:rows,
@@ -75710,13 +75808,13 @@ async function _orc5EnviarParaCrm(d){
 
 // ── Fila de orçamento (lista) ──
 function _orc5HtmlFila(){
-  const fila=_orc5Crm().filter(e=>e.etapa==='orcamento'&&!e.fechamento).sort((a,b)=>{try{return _crmEtapaEntradaTs(a)-_crmEtapaEntradaTs(b);}catch(err){return 0;}});
+  const fila=_orc5Crm().filter(e=>e.etapa==='orcamento'&&!e.fechamento).sort((a,b)=>{try{return typeof _crmFilaCmp==='function'?_crmFilaCmp(a,b):_crmEtapaEntradaTs(a)-_crmEtapaEntradaTs(b);}catch(err){return 0;}});
   if(!fila.length)return'';
   let aberta=true;try{aberta=localStorage.getItem('gcore_orc5_fila')!=='0';}catch(e){}
   return`<div class="dash-card orc5-fila" style="padding:12px 14px;margin-bottom:12px">
     <div class="orc5-fila-h" onclick="orc5ToggleFila()"><b>📥 Na fila de orçamento</b><span class="orc5-n">${fila.length}</span><span style="flex:1"></span><span class="orc5-seta">${aberta?'▲':'▼'}</span></div>
     <div class="orc5-fila-l" style="${aberta?'':'display:none'}">${fila.map((e,i)=>{const o=_orc5OrcDoCard(e.id)[0];
-      return`<div class="orc5-fi"><span class="pos">${i+1}º</span><div class="i"><div class="n">${_orcxEsc(e.nome||'—')}</div><div class="m">${_orcxEsc([e.responsavel,[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'),e.job,_orc5Dias(e)].filter(Boolean).join(' · '))}</div>${typeof _crmCkResumoFila==='function'?_crmCkResumoFila(e):''}</div>
+      return`<div class="orc5-fi"><span class="pos">${i+1}º</span><div class="i"><div class="n">${_orcxEsc(e.nome||'—')}</div>${typeof _crmOrcPrioSelo==='function'?_crmOrcPrioSelo(e):''}<div class="m">${_orcxEsc([e.responsavel,[e.sedeCidade,e.sedeUf].filter(Boolean).join('/'),e.job,_orc5Dias(e)].filter(Boolean).join(' · '))}</div>${typeof _crmCkResumoFila==='function'?_crmCkResumoFila(e):''}</div>
       ${o?`<button type="button" class="orc2-btn sec" onclick="orc2Abrir('novo','${o.id}')">Abrir orçamento</button>`:`<button type="button" class="orc2-btn pri" onclick="orc5Orcar('${e.id}')">Orçar</button>`}</div>`;}).join('')}</div></div>`;
 }
 function orc5ToggleFila(){let a=true;try{a=localStorage.getItem('gcore_orc5_fila')!=='0';localStorage.setItem('gcore_orc5_fila',a?'0':'1');}catch(e){}orc2Render();}
@@ -82808,7 +82906,7 @@ function _uxSetHtml(){
   const ex=(D.extras||[]).map(e=>`<div class="md-g" style="color:#0f766e">${_uxEsc(e.titulo)} (${e.itens.length})</div>${lista(e.itens)}`).join('');
   const fazer=ex+g('📌 Pra hoje','#1d4ed8',hj,'#dbeafe')+g('🔴 Atrasado','#b91c1c',atr,'#fee2e2')+(D.lim>hoje?g(`🔜 Próximos 2 dias úteis (até ${fmtD(D.lim).slice(0,5)})`,'#475569',prox):'');
   const P=D.pessoas;
-  const pess=P?`<div class="dash-card" style="margin:0"><div class="dash-sec-title">${_uxEsc(P.titulo)}</div>${P.linhas&&P.linhas.length?`<table class="md-tab"><thead><tr>${P.cols.map((c,i)=>`<th${i?' class="r"':''}>${_uxEsc(c)}</th>`).join('')}</tr></thead><tbody>${P.linhas.map(l=>`<tr>${l.map((v,i)=>`<td${i?' class="r"':''}>${_uxEsc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`:`<div style="padding:10px 0;color:#94a3b8;font-size:.82rem">${_uxEsc(P.vazio||'Sem dados ainda.')}</div>`}</div>`:'';
+  const pess=P?`<div class="dash-card" style="margin:0"><div class="dash-sec-title">${_uxEsc(P.titulo)}</div>${P.linhas&&P.linhas.length?`<table class="md-tab"><thead><tr>${P.cols.map((c,i)=>`<th${i?' class="r"':''}>${_uxEsc(c)}</th>`).join('')}</tr></thead><tbody>${P.linhas.map((l,ri)=>`<tr${P.on&&P.on[ri]?` onclick="${P.on[ri]}" style="cursor:pointer" title="Ver os pedidos deste setor"`:''}>${l.map((v,i)=>`<td${i?' class="r"':''}>${_uxEsc(v)}</td>`).join('')}</tr>`).join('')}</tbody></table>`:`<div style="padding:10px 0;color:#94a3b8;font-size:.82rem">${_uxEsc(P.vazio||'Sem dados ainda.')}</div>`}</div>`:'';
   const tituloFazer=sel==='COMERCIAL'?'🎯 Cards com prazo de etapa':'🗓️ O que o setor tem pra fazer';
   return`<div id="ux-md-setor" class="dash-card" style="margin:0 0 14px;padding:16px 18px">
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px"><div class="dash-sec-title" style="margin:0;flex:1">${_UX_SET_ICO[sel]||''} Seu setor hoje — ${_uxEsc(_uxSetLabel(sel))}</div>
@@ -88597,6 +88695,8 @@ ${lista}`;
     // ── bloco de baixo: garantias, pagamento, prazo, observações ──
     const obs=String(d.obs||'').split(/\n+/).map(s=>s.trim()).filter(Boolean);
     if(d.validadeDias)obs.push('Validade da proposta: '+d.validadeDias+' '+pl(N(d.validadeDias),'dia','dias')+'.');
+    // (2026-11-26, Clabonde) aviso de seguro de obra em todo PDF de orçamento — o Granda Mob não tem campo de seguro
+    if(!obs.some(l=>/seguro/i.test(l)))obs.push('Seguro de obra não está incluso neste orçamento — verificar necessidade.');
     const altBloco=32+obs.length*4.5;
     if(y+10+altBloco>H-10){doc.addPage();y=14;}
     y+=10;const yB=y;
@@ -94096,10 +94196,102 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     });
     return leds;
   }
+  // (2026-11-26, Clabonde: "refinar e deixar melhor a montagem de LED") LED PELO EIXO DA PERNA: em vez de correntes
+  // grudadas nas paredes (que cruzavam a perna em diagonal nos cantos e deixavam o meio escuro), os módulos seguem o
+  // MEIO de cada perna da letra, alinhados com ela, 1 a cada 12 cm:
+  //  • perna com 7 cm ou mais → 2 fileiras paralelas, cada uma a ¼ da largura da perna (luz espalhada por igual);
+  //  • perna mais fina → 1 fileira no meio.
+  // O eixo sai do "esqueleto" da letra (afinamento de uma grade de 0,5 cm) e a largura local vem da distância até a
+  // parede, então a regra se adapta em letra de traço grosso/fino (ex.: script). Se o eixo não sair, usa o perímetro.
+  const EIXO_G=0.005,EIXO_2FILEIRAS=0.07;
+  function eixoGrade(aneis){
+    const bb=bbAneis(aneis),g=EIXO_G,m=2,nx=Math.ceil((bb.maxX-bb.minX)/g)+2*m,ny=Math.ceil((bb.maxY-bb.minY)/g)+2*m;
+    if(nx*ny>2.5e6)return null;
+    const x0=bb.minX-m*g,y0=bb.minY-m*g,M=new Uint8Array(nx*ny);
+    for(let r=0;r<ny;r++){const y=y0+(r+0.5)*g,xs=cortes(y,aneis);for(let k=0;k+1<xs.length;k+=2){const a=Math.max(0,Math.ceil((xs[k]-x0)/g-0.5)),b=Math.min(nx-1,Math.floor((xs[k+1]-x0)/g-0.5));for(let c=a;c<=b;c++)M[r*nx+c]=1;}}
+    return{M,nx,ny,x0,y0,g};
+  }
+  function eixoEdt(G){ // distância (m) de cada célula de dentro até a parede — EDT exata (Felzenszwalb)
+    const{M,nx,ny,g}=G,INF=1e12,D=new Float64Array(nx*ny);
+    const edt1=(f,n)=>{const d=new Float64Array(n),v=new Int32Array(n),z=new Float64Array(n+1);let k=0;v[0]=0;z[0]=-INF;z[1]=INF;
+      for(let q=1;q<n;q++){let s;while(true){s=((f[q]+q*q)-(f[v[k]]+v[k]*v[k]))/(2*q-2*v[k]);if(s<=z[k]){k--;if(k<0){k=0;break;}}else break;}k++;v[k]=q;z[k]=s;z[k+1]=INF;}
+      k=0;for(let q=0;q<n;q++){while(z[k+1]<q)k++;d[q]=(q-v[k])*(q-v[k])+f[v[k]];}return d;};
+    const col=new Float64Array(ny);
+    for(let c=0;c<nx;c++){for(let r=0;r<ny;r++)col[r]=M[r*nx+c]?INF:0;const d=edt1(col,ny);for(let r=0;r<ny;r++)D[r*nx+c]=d[r];}
+    const row=new Float64Array(nx);
+    for(let r=0;r<ny;r++){for(let c=0;c<nx;c++)row[c]=D[r*nx+c];const d=edt1(row,nx);for(let c=0;c<nx;c++)D[r*nx+c]=Math.sqrt(d[c])*g;}
+    return D;
+  }
+  function eixoAfina(G){ // Zhang-Suen
+    const{nx,ny}=G,S2=Uint8Array.from(G.M);let mud=true,it=0;
+    const P=(r,c)=>(r<0||c<0||r>=ny||c>=nx)?0:S2[r*nx+c];
+    while(mud&&it++<400){mud=false;for(const fase of[0,1]){const del=[];
+      for(let r=1;r<ny-1;r++)for(let c=1;c<nx-1;c++){if(!S2[r*nx+c])continue;
+        const p2=P(r-1,c),p3=P(r-1,c+1),p4=P(r,c+1),p5=P(r+1,c+1),p6=P(r+1,c),p7=P(r+1,c-1),p8=P(r,c-1),p9=P(r-1,c-1);
+        const B=p2+p3+p4+p5+p6+p7+p8+p9;if(B<2||B>6)continue;
+        const A=(!p2&&p3)+(!p3&&p4)+(!p4&&p5)+(!p5&&p6)+(!p6&&p7)+(!p7&&p8)+(!p8&&p9)+(!p9&&p2);if(A!==1)continue;
+        if(fase===0){if(p2*p4*p6||p4*p6*p8)continue;}else{if(p2*p4*p8||p2*p6*p8)continue;}
+        del.push(r*nx+c);}
+      if(del.length){mud=true;del.forEach(i=>S2[i]=0);}}}
+    // tira o "degrau" (pixel que só liga dois vizinhos que já se tocam) — senão vira junção falsa
+    const O8=[[-1,-1],[-1,0],[-1,1],[0,1],[1,1],[1,0],[1,-1],[0,-1]];
+    for(let r=1;r<ny-1;r++)for(let c=1;c<nx-1;c++){if(!S2[r*nx+c])continue;
+      const v=O8.map(([dr,dc])=>S2[(r+dr)*nx+c+dc]);const n=v.reduce((a,b)=>a+b,0);if(n<2)continue;
+      // componentes 8-conexas entre os vizinhos (anel de 8): conta inícios de trechos, com diagonais ligando pelos lados
+      let comp=0;for(let k=0;k<8;k++){if(v[k]&&!v[(k+7)%8]){comp++;}}if(n===8)comp=1;
+      // dois vizinhos ortogonais adjacentes ligados pela diagonal entre eles contam como 1
+      if(comp===2&&n===2){const idx=v.map((x,k)=>x?k:-1).filter(k=>k>=0);const d=(idx[1]-idx[0]+8)%8;if(d===2&&idx[0]%2===1||d===6&&idx[1]%2===1){S2[r*nx+c]=0;}}
+      else if(comp===1&&n<=3){/* ponta grossa: mantém */}
+    }
+    return S2;
+  }
+  const O8=[[-1,-1],[-1,0],[-1,1],[0,1],[1,1],[1,0],[1,-1],[0,-1]];
+  function layoutEixo(aneis,passo){
+    const G=eixoGrade(aneis);if(!G)return null;
+    const{nx,ny,g}=G,D=eixoEdt(G),SK=eixoAfina(G);
+    const P=(r,c)=>(r<0||c<0||r>=ny||c>=nx)?0:SK[r*nx+c];
+    const runs=i=>{const r=(i/nx)|0,c=i-r*nx;const v=O8.map(([dr,dc])=>P(r+dr,c+dc));let t=0;for(let k=0;k<8;k++)if(v[k]&&!v[(k+7)%8])t++;return v.every(x=>x)?0:t;};
+    const pt=i=>{const r=(i/nx)|0,c=i-r*nx;return{x:G.x0+(c+0.5)*g,y:G.y0+(r+0.5)*g,h:D[i],r,c};};
+    const sk=[];for(let i=0;i<SK.length;i++)if(SK[i])sk.push(i);if(!sk.length)return null;
+    // poda das pontas que vão pros cantos (ramo mais curto que a meia-perna)
+    for(let pass=0;pass<3;pass++){let tirou=false;
+      sk.filter(i=>SK[i]&&runs(i)===1).forEach(i=>{const ram=[i],vis=new Set([i]);let cur=i;
+        for(let s=0;s<400;s++){const r=(cur/nx)|0,c=cur-r*nx;const nb=O8.map(([dr,dc])=>(r+dr)*nx+c+dc).filter(j=>j>=0&&j<SK.length&&SK[j]&&!vis.has(j));if(nb.length!==1&&!(nb.length===2&&Math.abs(nb[0]-nb[1])<=1+nx&&runs(cur)===2))break;cur=nb[0];vis.add(cur);if(runs(cur)>=3)break;ram.push(cur);}
+        const fimJunc=runs(cur)>=3,len=ram.length*g;if(fimJunc&&len<D[cur]*1.15){ram.forEach(k=>SK[k]=0);tirou=true;}});
+      if(!tirou)break;}
+    const pts=[];for(let i=0;i<SK.length;i++)if(SK[i])pts.push(i);
+    // ordem: a partir das pontas, andando pelo esqueleto (BFS); laços sem ponta começam em qualquer lugar
+    const ord=[],vis=new Uint8Array(SK.length),q=[];
+    const bfs=s=>{q.length=0;q.push(s);vis[s]=1;while(q.length){const i=q.shift();ord.push(i);const r=(i/nx)|0,c=i-r*nx;for(const[dr,dc]of O8){const rr=r+dr,cc=c+dc;if(rr<0||cc<0||rr>=ny||cc>=nx)continue;const j=rr*nx+cc;if(SK[j]&&!vis[j]){vis[j]=1;q.push(j);}}}};
+    pts.filter(i=>runs(i)===1).forEach(i=>{if(!vis[i])bfs(i);});pts.forEach(i=>{if(!vis[i])bfs(i);});
+    // centros a cada "passo" ao longo do eixo; direção = eixo principal dos pontos do esqueleto num raio de 3 cm
+    // espaçamento medido AO LONGO do eixo (não em linha reta), pra braço curto (T, K, E) também ganhar módulo;
+    // ponta de perna aceita módulo um pouco antes (cobre a ponta), e nunca dois centros a menos de 8,5 cm em linha reta
+    const centros=[];const R=Math.max(2,Math.round(0.03/g));const gd=new Float64Array(SK.length).fill(Infinity);
+    const espalha=s=>{gd[s]=0;const fila=[s];while(fila.length){const i=fila.shift(),r=(i/nx)|0,c=i-r*nx;for(const[dr,dc]of O8){const rr=r+dr,cc=c+dc;if(rr<0||cc<0||rr>=ny||cc>=nx)continue;const j=rr*nx+cc;if(!SK[j])continue;const nd=gd[i]+((dr&&dc)?1.4142:1)*g;if(nd<gd[j]&&nd<=passo*1.2){gd[j]=nd;fila.push(j);}}}};
+    for(const i of ord){const p=pt(i),ponta=runs(i)===1;if(gd[i]<(ponta?passo*0.55:passo*0.98))continue;if(centros.some(c=>Math.hypot(c.x-p.x,c.y-p.y)<0.085))continue;centros.push(p);espalha(i);}
+    const dir=p=>{let sx=0,sy=0,n=0;const L=[];for(let dr=-R;dr<=R;dr++)for(let dc=-R;dc<=R;dc++){if(dr*dr+dc*dc>R*R)continue;const rr=p.r+dr,cc=p.c+dc;if(rr<0||cc<0||rr>=ny||cc>=nx||!SK[rr*nx+cc])continue;L.push([dc,dr]);sx+=dc;sy+=dr;n++;}
+      if(n<2)return 0;sx/=n;sy/=n;let a=0,b=0,c2=0;L.forEach(([x,y])=>{a+=(x-sx)*(x-sx);b+=(x-sx)*(y-sy);c2+=(y-sy)*(y-sy);});return 0.5*Math.atan2(2*b,a-c2);};
+    const leds=[];
+    for(const p of centros){
+      const ang=dir(p),tx=Math.cos(ang),ty=Math.sin(ang),nx2=-ty,ny2=tx,larg=2*p.h;
+      const offs=larg>=EIXO_2FILEIRAS?[larg/4,-larg/4]:[0];
+      // tenta no lugar certo; se não couber (ponta de perna, curva fechada em perna fina), corre um pouco ao longo da
+      // perna, pro lado de fora da curva e/ou gira de leve — só fica módulo INTEIRO dentro da letra
+      offs.forEach(o=>{
+        const lat=o===0?[0,0.3,-0.3,0.5,-0.5]:[1,0.8,1.2,0.6];
+        for(const dd of[0,0.01,-0.01,0.02,-0.02,0.03,-0.03,0.045,-0.045])for(const f of lat)for(const da of[0,0.15,-0.15,0.3,-0.3]){
+          const off=o===0?p.h*f:o*f,a2=ang+da;
+          const l={x:p.x+nx2*off+tx*dd,y:p.y+ny2*off+ty*dd,ang:a2};
+          if(ledCabe(l.x,l.y,a2,aneis)&&ledLivre(l,leds)){leds.push(l);return;}
+        }});
+    }
+    return leds;
+  }
   function layoutPeca(aneis,passo){
     passo=PASSO_REGRA;
     {const perna=pernaMedia(aneis);if(perna>0&&perna<PERNA_FINA){
-      const pP=(typeof _orcP==='function'&&_orcP().moduloM)||PASSO_REGRA,leds=layoutPerimetro(aneis,pP,perna),bb=bbAneis(aneis),g=0.02,lim=pP*1.05;
+      const pP=(typeof _orcP==='function'&&_orcP().moduloM)||PASSO_REGRA,leds=(function(){try{const le=layoutEixo(aneis,pP);if(le&&le.length)return le;}catch(err){console.warn('LED pelo eixo',err);}return layoutPerimetro(aneis,pP,perna);})(),bb=bbAneis(aneis),g=0.02,lim=pP*1.05;
       let sl=0;for(let y=bb.minY+g/2;y<bb.maxY;y+=g)for(let x=bb.minX+g/2;x<bb.maxX;x+=g)if(dentro(x,y,aneis)&&!leds.some(l=>Math.hypot(l.x-x,l.y-y)<lim))sl+=g*g;
       return{leds,semLuz:sl,perimetro:true};}}
     const bb=bbAneis(aneis),leds=[],H=bb.maxY-bb.minY;
@@ -94262,7 +94454,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         const ps=[...new Set(u.pos.map(q=>q.part))];
         for(const [L2,W2,lado] of [[ch.L/2,ch.W,'comprimento'],[ch.L,ch.W/2,'largura']]){const r=apvNestFormas(ps,{L:L2,W:W2},true);
           if(r.chapas.length===1&&r.chapas[0].pos.length===u.pos.length){u.pos=r.chapas[0].pos;u.meia=lado;ult=0.5;break;}}}}
-    const qCorte=Math.max(0.5,(chapas.length-1)+ult),qArea=Math.max(0.5,Math.ceil(frac*2-1e-9)/2),qtd=Math.max(qCorte,qArea);
+    const qCorte=Math.max(0.5,(chapas.length-1)+ult),qArea=Math.max(0.5,Math.ceil(frac*2-1e-9)/2),qtd=_orcQ2(frac); // (2026-11-26) área real usada, sem meia em meia
     const R0={chapas,soTira:false,formas:true,qtd,frac,qArea,qCorte,uso:qtd>0?areaPecas/(qtd*ch.L*ch.W):0,areaPecas};
     // nota: menos chapa; depois a última chapa mais "curta" (sobra inteira maior); depois menos emendas na tira
     const uC=chapas[chapas.length-1],ext=uC&&uC.pos.length?Math.min(Math.max(...uC.pos.map(q=>q.x+q.w))/ch.L,Math.max(...uC.pos.map(q=>q.y+q.h))/ch.W):0;
@@ -94350,7 +94542,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
       const cabeEm=(L2,W2)=>{const r=apvRecaixa(its,L2,W2,G);return r;};
       const m1=cabeEm((ch.L-2*BOR-G)/2,Wu),m2=cabeEm(Lu,(ch.W-2*BOR-G)/2);
       if(m1||m2){ult=0.5;meia=m1?'comprimento':'largura';const r=m1||m2;its.forEach((it,k)=>{it.x=r[k].x;it.y=r[k].y;it.w=r[k].w;it.h=r[k].h;if(r[k].g)it.rot=!it.rot;});u.meia=meia;}}
-    const qCorte=Math.max(0.5,(chapas.length-1)+ult),qArea=Math.max(0.5,Math.ceil(frac*2-1e-9)/2),qtd=Math.max(qCorte,qArea);
+    const qCorte=Math.max(0.5,(chapas.length-1)+ult),qArea=Math.max(0.5,Math.ceil(frac*2-1e-9)/2),qtd=_orcQ2(frac); // (2026-11-26) área real usada, sem meia em meia
     return{chapas,soTira,qtd,frac,qArea,qCorte,uso:qtd>0?areaPecas/(qtd*ch.L*ch.W):0,areaPecas};
   }
   // tenta encaixar um conjunto de retângulos já definidos num espaço L×W (usado pra ver se cabe em meia chapa)
@@ -94409,7 +94601,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     // se o que vai nela cabe em 3 m — nunca menos que os metros ÷ 6 de meia em meia
     const usoB=b=>b.cortes.reduce((s2,c)=>s2+c.L,0)+Math.max(0,b.cortes.length-1)*SERRA,menor=barras.length?Math.min(...barras.map(usoB)):0;
     const qPlano=barras.length?barras.length-(menor<=BARRA/2+1e-9?0.5:0):0,qM=Math.max(0.5,Math.ceil(usado/BARRA*2-1e-9)/2);
-    return{barras,usado,qtd:Math.max(qPlano,qM),qPlano,qM};
+    return{barras,usado,qtd:_orcQ2(usado/BARRA),qPlano,qM}; // (2026-11-26) metros usados ÷ 6, sem meia em meia
   }
   // ══ ESTRUTURA METÁLICA (2026-11-16, refeita a pedido do Clabonde) ══
   // Estrutura de letra caixa: QUADRO DA FRENTE + QUADRO DE TRÁS (mesmo desenho, um encostado atrás da frente e
@@ -94568,7 +94760,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
   // e monta um SVG equivalente em pontos (1/72 pol.), que segue pelo mesmo caminho do SVG. Texto que não foi
   // convertido em curvas não vira contorno (é contado e avisado). Clipes (máscaras) são ignorados.
   async function pdfParaSvg(buf){
-    if(!window.pdfjsLib){await js('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');}
+    if(!window.pdfjsLib){await js('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');}try{if(window._pdfjsPadrao)_pdfjsPadrao(window.pdfjsLib);}catch(e){}
     const lib=window.pdfjsLib;if(!lib)throw new Error('Não foi possível carregar o leitor de PDF. Confira a internet e tente de novo.');
     if(!lib.GlobalWorkerOptions.workerSrc)lib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     // disableFontFace: o pdf.js manda o desenho de cada letra das fontes → o texto vira contorno (não precisa Ctrl+Q no Corel)
@@ -94702,7 +94894,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     });
     r.per=r.perExt+r.perFuros;
     if(S.modelo==='acril'){
-      const ck=k.toFixed(6)+'|'+passo+'|v5|'+g.pecas.map((p,i)=>(ehAplic(i)||ehIgn(i)||ehTest(i)?1:0)+(S.pc[i]&&S.pc[i].tipoAp==='vazado'?'v':'')+(S.pc[i]&&opaca(S.pc[i])?'o':'')).join('');
+      const ck=k.toFixed(6)+'|'+passo+'|v6|'+g.pecas.map((p,i)=>(ehAplic(i)||ehIgn(i)||ehTest(i)?1:0)+(S.pc[i]&&S.pc[i].tipoAp==='vazado'?'v':'')+(S.pc[i]&&opaca(S.pc[i])?'o':'')).join('');
       if(_ledCache.k!==ck||_ledCache.g!==g){
         const leds=[],pp=[];
         g.pecas.forEach((p,i)=>{if(ehAplic(i)||ehIgn(i)||ehTest(i)){pp[i]={n:0,semLuz:0};return;}
@@ -94769,7 +94961,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     const c3=cM&&!v(cM)?(/\b3\s*MM/i.test(matNome(cM))?cM:irmao(cM,/\b4\s*MM/i,'3MM')):'',c4=cM&&!v(cM)?(/\b4\s*MM/i.test(matNome(cM))?cM:irmao(cM,/\b3\s*MM/i,'4MM')):'';
     const espB=(c,tx)=>c?`<button type="button" class="orc2-btn ${c===cM?'pri':'sec'}" style="flex:1" onclick="event.stopPropagation();l3dTs('tsMat','${c}')">${tx}</button>`:'';
     const est=pc.estrutura&&t!=='chapa'?estruturaSoma(sel):null;
-    let ap='';try{const G=grupos().find(g=>g.pecas.includes(sel[0]));if(G)ap=aprovGrupo(G).filter(c=>/revest/.test(c.papel)).map(c=>`<div class="fx">📐 ${E(nomeCurtoMat(c.nome))}: <b>${Q(c.res.qtd,1).replace(',0','')} ${PL(c.res.qtd,'chapa','chapas')}</b> ${c.papel==='revest'&&tsRetangulo(sel[0])&&tsDobra(sel[0])>0?'(frente + laterais dobradas numa peça só)':''}</div>`).join('');}catch(e){}
+    let ap='';try{const G=grupos().find(g=>g.pecas.includes(sel[0]));if(G)ap=aprovGrupo(G).filter(c=>/revest/.test(c.papel)).map(c=>`<div class="fx">📐 ${E(nomeCurtoMat(c.nome))}: <b>${_orcQs(c.res.qtd)} ${PL(c.res.qtd,'chapa','chapas')}</b> ${c.papel==='revest'&&tsRetangulo(sel[0])&&tsDobra(sel[0])>0?'(frente + laterais dobradas numa peça só)':''}</div>`).join('');}catch(e){}
     const okTs=cM&&!v(cM)&&String(S.caixa).trim()!==''&&(t==='chapa'||pc.estPerfil)?`<div class="fx l3d-ok" style="display:none">✔ ${E(nomeCurtoMat(matNome(cM)))} · ${{chapa:'só a chapa',simples:'estrutura simples',caixa:'caixa de '+Q(N(S.caixa)*100,0)+' cm'}[t]||''}</div>`:'';
     return card('frente','🏢','Testeira / placa',`${okTs}
       <div class="fx">${Q(q.w,2)} × ${Q(q.h,2)} m${tsRetangulo(sel[0])?'':' · formato recortado'} <button type="button" class="orcx-link" onclick="event.stopPropagation();l3dPapel('caixa')">não é testeira</button> · <button type="button" class="orcx-link" onclick="event.stopPropagation();l3dPapel('ignorar')">não faz parte</button></div>
@@ -95058,7 +95250,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
       const la=ehTest(i)?(pc.tsTipo==='simples'||pc.tsTipo==='caixa')&&ehAcm(matNome(pc.tsLat||pc.tsMat)):latEhAcm(pc,q.h);
       if(fr){mF+=cont+ref;nRef+=e.seg.filter(z=>z.t!=='q').length;mRef+=ref;}if(la)mL+=cont;});
     const m=mF+mL;if(!(m>0))return null;const r2=v=>Math.round(v*100)/100;
-    return{cod,rolo,mFrente:r2(mF),mRef:r2(mRef),nRef,mLat:r2(mL),metros:r2(m),frac:Math.round(m/rolo*1000)/1000,rolos:Math.ceil(m/rolo/0.05-1e-9)*0.05};}
+    return{cod,rolo,mFrente:r2(mF),mRef:r2(mRef),nRef,mLat:r2(mL),metros:r2(m),frac:Math.round(m/rolo*1000)/1000,rolos:_orcQ2(m/rolo)};} // (2026-11-26) sem arredondar
   function htmlFita(sel){const ps=sel.filter(precisaFita);if(!ps.length)return'';const cods=[...new Set(ps.map(i=>fitaDe(S.pc[i])))],c=cods.length===1?cods[0]:'';
     return`<div style="margin-top:10px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px"><div class="fx" style="font-weight:700;color:#1a2b5e">🎗️ Fita dupla face</div><div class="fx" style="color:#64748b">O ACM vai colado na estrutura com fita dupla face (metros onde o ACM encosta no metalon: frente + lateral, ÷ metros do rolo).</div>${_orcMpBuscaHtml('3d-fita',{tipo:'fita',on:cd=>{ps.forEach(i=>{S.pc[i].fitaCod=cd;});renderPainel();}},c,'🔍 Fita dupla face: nome ou código')}${!c?'<div class="fx l3d-pend" style="margin-top:4px">'+(cods.length>1?'As peças têm fitas diferentes.':'Escolha a fita (não achei a VHB 4910 na planilha).')+'</div>':''}</div>`;}
   function tintaCant(pc){return pc.cantTinta||(pc.cantPinta==='acm'&&!pc.semPintura&&pc.tinta?pc.tinta:null);}
@@ -95291,7 +95483,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
   function fiacaoGrupo(g){
     const M=S.med;if(S.modelo!=='acril'||!M.leds||!M.leds.length)return null;
     const leds=M.leds.filter(l=>g.pecas.includes(l.peca));if(!leds.length)return null;
-    const qLed=Math.ceil(leds.length/20)*20,P0=(typeof _orcP==='function'?_orcP():{}),pot=qLed*0.72*(1+(P0.reatorFolga!=null?P0.reatorFolga:20)/100);
+    const qLed=leds.length,P0=(typeof _orcP==='function'?_orcP():{}),pot=qLed*0.72*(1+(P0.reatorFolga!=null?P0.reatorFolga:20)/100);
     let nR=1;try{if(typeof _orc2MelhorReator==='function'&&typeof _orc2Precos==='function')nR=Math.max(1,_orc2MelhorReator(pot,_orc2Precos()).qty||1);}catch(e){}
     const por={};leds.forEach(l=>{(por[l.peca]=por[l.peca]||[]).push(l);});
     const ps=Object.keys(por).map(Number).map(i=>({i,l:por[i],cx:por[i].reduce((s2,l)=>s2+l.x,0)/por[i].length})).sort((a,b)=>a.cx-b.cx);
@@ -95463,7 +95655,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
             <div class="l3d-mat"><span>Travas na profundidade</span><b>${e.nTravas} × ${Q((e.trava||0)*100,1)} cm = ${Q(e.mTravas,2)} m</b></div>
             <div class="l3d-mat" style="border-top:1px solid #e5e7eb;padding-top:3px"><span>${E(pfN?nomeCurtoMat(pfN):'Perfil')}</span><b>${Q(e.metros,2)} m → ${(()=>{const b=apvBarras(cortesEstrutura([...S.sel]).perfil).qtd;return Q(b,1).replace(',0','')+' '+PL(b,'barra','barras');})()} de 6 m</b></div>
             ${cT2===true?`<div class="l3d-mat"><span>Treliça — ${E(cC&&cC!=='VARIOS'?nomeCurtoMat(matNome(cC)):'cantoneira')}</span><b>${Q(e.mDiag,2)} m → ${(()=>{const b=apvBarras(cortesEstrutura([...S.sel]).cant).qtd;return Q(b,1).replace(',0','')+' '+PL(b,'barra','barras');})()} de 6 m</b></div>`:''}
-            <div class="fx" style="color:#64748b;margin-top:3px">Barras pelo plano de corte (3 mm de serra), de meia em meia barra. Veja em 👁 Ver por dentro e no botão 🏗️ do perfil.</div></div>`;
+            <div class="fx" style="color:#64748b;margin-top:3px">Barras pelo plano de corte (3 mm de serra): metros usados ÷ 6 m, sem arredondar. Veja em 👁 Ver por dentro e no botão 🏗️ do perfil.</div></div>`;
       }
       const fsel=[...S.sel].filter(i=>!ehAplic(i)&&!ehTest(i)),fcs=[...new Set(fsel.map(i=>fundoDe(S.pc[i])))],fOk=fsel.length&&fsel.every(i=>fundoOkDe(S.pc[i]));
       const fundo=acril?(()=>{if(fOk&&fcs.length>1)return`<div class="fx l3d-ok">✔ ${fcs.map(c=>E(c?nomeCurtoMat(matNome(c)):'PVC 10 mm')+': '+E(listaPecas(fsel.filter(i=>fundoDe(S.pc[i])===c)))).join(' · ')}</div><div class="fx" style="margin-top:6px;color:#64748b">Cada peça pode ter o seu fundo — selecione só a peça (ou Shift pra um intervalo) e escolha. Pra pôr o mesmo em todas as selecionadas:</div><div style="display:flex;gap:6px;margin-top:6px"><button type="button" class="orc2-btn sec" style="flex-shrink:0" onclick="event.stopPropagation();l3dFundoMat('')">PVC 10 mm</button>${_orcMpBuscaHtml('3d-fundo',{tipo:'geral',on:c=>l3dFundoMat(c)},'','🔍 outro material')}</div>`;
@@ -95478,7 +95670,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
       const ledSel=(v(cL)?'<div class="fx l3d-pend" style="margin-top:6px">As peças selecionadas têm LEDs diferentes — escolha um pra todas.</div>':'')+(typeof _orcLedSelectHtml==='function'?_orcLedSelectHtml(v(cL)?'':cL,"l3dSel('ledCod',this.value)",'3d-led-novo',c=>l3dSel('ledCod',c)):`<select class="fc" onclick="event.stopPropagation()" onchange="l3dSel('ledCod',this.value)"><option value="">Temperatura do LED…</option>${leds.map(([c,n])=>`<option value="${c}" ${String(cL)===c?'selected':''}>${E(n)}</option>`).join('')}</select>`);
       const nSelLed=[...S.sel].reduce((s,i)=>s+M.porPeca[i].leds,0);
       const reatHtml=(()=>{try{if(typeof _orc2MelhorReator!=='function')return'';const P=_orc2Precos(),fol=(_orcP().reatorFolga||20);
-        return grupos().filter(g=>g.pecas.some(i=>S.sel.has(i))&&g.leds>0).map(g=>{const wL=typeof _orcLedWatts==='function'?_orcLedWatts(g.pc.ledCod):MOD.w,nC=Math.ceil(g.leds/MOD.corrente)*MOD.corrente,pot=Math.round(nC*wL*(1+fol/100)*100)/100,mr=_orc2MelhorReator(pot,P);
+        return grupos().filter(g=>g.pecas.some(i=>S.sel.has(i))&&g.leds>0).map(g=>{const wL=typeof _orcLedWatts==='function'?_orcLedWatts(g.pc.ledCod):MOD.w,nC=g.leds,pot=Math.round(nC*wL*(1+fol/100)*100)/100,mr=_orc2MelhorReator(pot,P);
           return`<div class="l3d-mat"><span>⚡ Item ${g.n}: ${nC} módulos × ${Q(wL,2)} W + ${Q(fol,0)}% = ${Q(pot,1)} W</span><b>${mr.qty} × ${E(mr.label)}</b></div>`;}).join('');}catch(e){return'';}})();
       const led=acril?`<div class="fx"><b>${nSelLed} ${PL(nSelLed,'módulo','módulos')}</b> nas peças selecionadas: 1 módulo a cada 12 cm, da borda e entre um e outro, nos dois eixos. Clique num módulo no 3D pra ver os de cada peça.</div>${reatHtml?`<div class="l3d-mats"><div class="t">⚡ Reator (fonte)</div>${reatHtml}</div>`:''}${ledSel}`
         :halo?`<div class="fx">No efeito halo o LED vai pelo contorno da letra (contorno ÷ ${Q(P.moduloM||0.12,2)} m por módulo).</div>${ledSel}`
@@ -95510,7 +95702,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     const caixa=N(S.caixa),fora=acril&&caixa>0&&(caixa<PASSO_MIN-1e-9||caixa>PASSO_MAX+1e-9);
     const faltasG=[];
     const gr=G.map(g=>{
-      const pc=g.pc,es=regraEstrutura(g.hMax),nC=Math.ceil(g.leds/MOD.corrente)*MOD.corrente;
+      const pc=g.pc,es=regraEstrutura(g.hMax),nC=g.leds;
       if(g.testeira){const fT=[];if(!pc.tsMat)fT.push('revestimento');if(!pc.tsTipo)fT.push('montagem');else if(pc.tsTipo!=='chapa'&&!pc.estPerfil)fT.push('metalon');
         const tp={chapa:'só a chapa',simples:'estrutura simples',caixa:'caixa'}[pc.tsTipo]||'';
         if(fT.length)faltasG.push({n:g.n,f:fT});
@@ -95572,7 +95764,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         const pr=(i.cost||0)>0||un>0?`${m?BRL(m.v):BRL(un)}${m?`<button type="button" class="ed" title="Revisar o preço desta matéria-prima (cód. ${E(f.cod)})" onclick="l3dPreco('${E(f.cod)}')">✏️</button>`:''}${rev}`:'<span style="color:#94a3b8">—</span>';
         return`<tr><td><span class="nm">${i.icon||'•'} ${E(i.name)}</span>${m?`<span class="cd">cód. ${E(f.cod)}</span>`:''}</td><td class="n">${E(i.qty)}</td><td class="n">${pr}</td><td class="n"><b>${(i.cost||0)>0?BRL(i.cost):'—'}</b></td></tr>`;}).join('');
       const ap=aprovGrupo(g);
-      const apH=ap.length?`<div class="l3d-mats"><div class="t">📐 Aproveitamento das chapas (clique pra ver o desenho)</div>${ap.map(c=>`<div class="l3d-mat" onclick="event.stopPropagation();l3dApv('${E(c.cod)}')" style="cursor:pointer"><span>${{frente:'Frente',filete:'Filete',fundo:'Fundo',lateral:'Lateral',vazado:'Vazados',pvc:'Letras em PVC',revest:'Revestimento',revestLat:'Laterais'}[c.papel]||E(c.papel)} · ${E(nomeCurtoMat(c.nome))}</span><b>${c.res.compart?Q(c.res.qtd,2)+' ch. (compartilhada)':Q(c.res.qtd,1).replace(',0','')+' ch.'} · ${Math.round(c.res.uso*100)}% ›</b></div>`).join('')}</div>`:'';
+      const apH=ap.length?`<div class="l3d-mats"><div class="t">📐 Aproveitamento das chapas (clique pra ver o desenho)</div>${ap.map(c=>`<div class="l3d-mat" onclick="event.stopPropagation();l3dApv('${E(c.cod)}')" style="cursor:pointer"><span>${{frente:'Frente',filete:'Filete',fundo:'Fundo',lateral:'Lateral',vazado:'Vazados',pvc:'Letras em PVC',revest:'Revestimento',revestLat:'Laterais'}[c.papel]||E(c.papel)} · ${E(nomeCurtoMat(c.nome))}</span><b>${c.res.compart?Q(c.res.qtd,2)+' ch. (compartilhada)':_orcQs(c.res.qtd)+' ch.'} · ${Math.round(c.res.uso*100)}% ›</b></div>`).join('')}</div>`:'';
       return`<div class="l3d-grp">${cab}<table class="l3d-mt"><thead><tr><th>Material</th><th class="n">Qtd</th><th class="n">Preço un.</th><th class="n">Total</th></tr></thead><tbody>${lin}</tbody><tfoot><tr><td colspan="3">Custo dos materiais${g.testeira?'':' (sem a margem)'}</td><td class="n"><b>${BRL(r.totalMat||0)}</b></td></tr></tfoot></table>${apH}</div>`;}).join('');
     return`<div class="fx" style="color:#64748b;margin:2px 0 8px">Preços da planilha de matérias-primas${dias!=null?` (atualizada há ${dias} ${PL(dias,'dia','dias')})`:''}. Achou preço velho? Clique no ✏️ e revise — vale pra todos os orçamentos e fica registrado quem mudou.</div>
       ${blocos}<div class="l3d-mt-tot"><span>Custo total dos materiais da arte</span><b>${BRL(tot)}</b></div>`;}
@@ -95580,7 +95772,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
   function htmlMatsGrupo(g){
     let html='';
     const ap=aprovGrupo(g);
-    if(ap.length)html+=`<div class="l3d-mats"><div class="t">📐 Aproveitamento das chapas</div>${ap.map(c=>`<div class="l3d-mat" onclick="event.stopPropagation();l3dApv('${E(c.cod)}')" style="cursor:pointer" title="Ver o desenho"><span>${{frente:'Frente',filete:'Filete',fundo:'Fundo',lateral:'Lateral',vazado:'Vazados',pvc:'Letras em PVC',revest:'Revestimento',revestLat:'Laterais'}[c.papel]||E(c.papel)} · ${E(nomeCurtoMat(c.nome))}</span><b>${c.res.compart?Q(c.res.qtd,2)+' ch. (compartilhada)':Q(c.res.qtd,1).replace(',0','')+' ch.'} · ${Math.round(c.res.uso*100)}% ›</b></div>`).join('')}</div>`;
+    if(ap.length)html+=`<div class="l3d-mats"><div class="t">📐 Aproveitamento das chapas</div>${ap.map(c=>`<div class="l3d-mat" onclick="event.stopPropagation();l3dApv('${E(c.cod)}')" style="cursor:pointer" title="Ver o desenho"><span>${{frente:'Frente',filete:'Filete',fundo:'Fundo',lateral:'Lateral',vazado:'Vazados',pvc:'Letras em PVC',revest:'Revestimento',revestLat:'Laterais'}[c.papel]||E(c.papel)} · ${E(nomeCurtoMat(c.nome))}</span><b>${c.res.compart?Q(c.res.qtd,2)+' ch. (compartilhada)':_orcQs(c.res.qtd)+' ch.'} · ${Math.round(c.res.uso*100)}% ›</b></div>`).join('')}</div>`;
     try{
       if(typeof orc2CalcLetra!=='function'||typeof _orc2Precos!=='function')return html;
       const r=orc2CalcLetra(itemDoGrupo(g,null,S.med),_orc2Precos(),orc2.adesivoPrecos);
@@ -95657,7 +95849,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
     // (2026-11-17, redesenho) cabeçalho com números, cada chapa com título claro e legenda das peças dela
     const nCh=res.chapas.length,ultMeia=nCh&&res.chapas[nCh-1].meia,nEm=res.chapas.reduce((s2,cc)=>s2+cc.pos.filter(q=>q.emenda).length,0);
     const kpi=(t,v,sub)=>`<div class="l3d-kpi"><span>${t}</span><b>${v}</b>${sub?`<small>${sub}</small>`:''}</div>`;
-    const itensH=us.map(({g,c})=>`<span class="l3d-apv-it"><i style="background:${corParte(c)}"></i>Item ${g.n}${g.nome?' — '+E(g.nome):''} · ${PAPEL[c.papel]}${c.papel==='lateral'?` (tiras de ${Q(caixa*100,0)} cm + abas)`:''} · <b>${c.res.compart?Q(c.res.qtd,2):Q(c.res.qtd,1).replace(',0','')} ch.</b></span>`).join('');
+    const itensH=us.map(({g,c})=>`<span class="l3d-apv-it"><i style="background:${corParte(c)}"></i>Item ${g.n}${g.nome?' — '+E(g.nome):''} · ${PAPEL[c.papel]}${c.papel==='lateral'?` (tiras de ${Q(caixa*100,0)} cm + abas)`:''} · <b>${c.res.compart?Q(c.res.qtd,2):_orcQs(c.res.qtd)} ch.</b></span>`).join('');
     const legenda=cc=>{const vis={},out=[];cc.pos.forEach(q=>{const segs=q.faixa?q.segs:[q];segs.forEach(z=>{const r=z.ref||q.ref;if(!r||r.peca==null)return;const k2=r.peca+(r.miolo?'m':'');if(vis[k2]){vis[k2].n++;return;}const pq=M.porPeca[r.peca];vis[k2]={n:1,i:r.peca,miolo:r.miolo,tira:!!q.faixa,dim:pq?Q(pq.w,2)+' × '+Q(pq.h,2)+' m':''};out.push(vis[k2]);});});
       return`<div class="l3d-apv-leg">${out.sort((x,y)=>(S._rank?S._rank[x.i]-S._rank[y.i]:x.i-y.i)).map(o=>{const cp=corPecaApv(o.i);return`<span><i style="background:${cp.f};border-color:${cp.s}"></i><b>${rotuloApv(o.i)}</b> ${E(nomePeca(o.i))}${o.miolo?' (miolo)':''}${o.tira?'':' · '+o.dim}${o.n>1?` · <em>${o.n} ${o.tira?'pedaços':'partes com emenda'}</em>`:''}</span>`;}).join('')}</div>`;};
     return`<style>.l3d-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:4px 0 10px}.l3d-kpi{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:7px 10px}.l3d-kpi span{display:block;font-size:.66rem;color:#64748b;text-transform:uppercase;letter-spacing:.03em}.l3d-kpi b{font-size:1.05rem;color:#0f172a}.l3d-kpi small{display:block;font-size:.66rem;color:#64748b}
@@ -95711,7 +95903,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
       .l3d-apv-leg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.72rem;color:#334155}.l3d-apv-leg span{display:inline-flex;align-items:center;gap:5px}.l3d-apv-leg i{width:12px;height:12px;border-radius:3px;border:2px solid}
       .l3d-tc{width:100%;border-collapse:collapse;font-size:.76rem}.l3d-tc th{text-align:left;font-size:.66rem;color:#64748b;text-transform:uppercase;border-bottom:2px solid #e2e8f0;padding:5px 6px;background:#fff}.l3d-tc td{padding:4px 6px;border-bottom:1px solid #f1f5f9}.l3d-tc td.n,.l3d-tc th.n{text-align:right;white-space:nowrap}.l3d-tc tr.sub td{background:#f1f5f9;font-weight:700;color:#1a2b5e;font-size:.74rem}.l3d-tc i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;border:1px solid #0003}</style>
       <div style="display:flex;align-items:center;gap:10px;position:sticky;top:0;background:#fff;padding:8px 0;z-index:2"><b style="flex:1;color:#1a2b5e;font-size:.9rem">🏗️ Plano de corte — ${E(matNome(cod)||'perfil')}</b><span style="font-size:.8rem;color:#1a2b5e">No orçamento: <b>${Q(res.qtd,1).replace(',0','')} ${PL(res.qtd,'barra','barras')} de 6 m</b></span><button type="button" class="orc2-btn sec" onclick="l3dApv('')">✕ Voltar ao 3D</button></div>
-      <div class="l3d-kpis">${kpi('Barras de 6 m',nB,'no orçamento '+Q(res.qtd,1).replace(',0',''))}${kpi('Perfil cortado',Q(mPerf,2)+' m',Q(res.usado,2)+' m com a serra')}${kpi('Aproveitamento',Q(aprovPct,0)+'%','do perfil comprado')}${kpi('Cortes',cortes.length,lin.length+' '+PL(lin.length,'posição','posições'))}${kpi('Sobras para guardar',aprov.length?Q(aprov.reduce((s2,x)=>s2+x,0),2)+' m':'nenhuma',aprov.length?aprov.length+' '+PL(aprov.length,'pedaço','pedaços')+' de 40 cm ou mais':'')}</div>
+      <div class="l3d-kpis">${kpi('Barras de 6 m',nB,'no orçamento '+_orcQs(res.qtd))}${kpi('Perfil cortado',Q(mPerf,2)+' m',Q(res.usado,2)+' m com a serra')}${kpi('Aproveitamento',Q(aprovPct,0)+'%','do perfil comprado')}${kpi('Cortes',cortes.length,lin.length+' '+PL(lin.length,'posição','posições'))}${kpi('Sobras para guardar',aprov.length?Q(aprov.reduce((s2,x)=>s2+x,0),2)+' m':'nenhuma',aprov.length?aprov.length+' '+PL(aprov.length,'pedaço','pedaços')+' de 40 cm ou mais':'')}</div>
       <div class="orcx-hint" style="margin:0 0 6px">Cada cor é uma peça (a mesma cor do desenho das chapas). Números = medida em mm. Quadro em meia-esquadria (ângulos na lista abaixo), medido pela face de fora; travas em corte reto, de face a face (faixa escura em cima); 3 mm de serra por corte. ✂ = peça maior que a barra, vai emendada.</div>
       <div class="l3d-apv-leg" style="margin:0 0 8px">${[...new Set(cortes.map(c=>c.pi))].sort((x,y)=>(S._rank?S._rank[x]-S._rank[y]:x-y)).map(i=>{const cp=corPecaApv(i);return`<span><i style="background:${cp.f};border-color:${cp.s}"></i><b>${rotuloApv(i)}</b> ${E(nomePeca(i))}</span>`;}).join('')}</div>
       ${barrasH}
@@ -95809,7 +96001,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
         </div><div id="l3d-apv" style="display:none;position:absolute;inset:0;background:#fff;overflow-y:auto;padding:0 16px 16px;z-index:3"></div><div class="l3d-dica">Arraste pra girar · roda do mouse pra aproximar · clique numa peça · Ctrl+clique soma peças</div></div>
         <div class="l3d-lado" id="l3d-lado"></div>
       </div>
-      <div class="l3d-pe"><div class="orcx-hint">${S.modelo==='acril'?'O LED é contado pelo desenho; a compra arredonda em correntes de 20.':''}</div><button type="button" class="orc2-btn sec" onclick="l3dFechar()">Cancelar</button><button type="button" class="orc2-btn pri" id="l3d-aplicar" onclick="l3dAplicar()">✔ Usar no orçamento</button></div></div>`;
+      <div class="l3d-pe"><div class="orcx-hint">${S.modelo==='acril'?'O LED é contado pelo desenho, módulo a módulo.':''}</div><button type="button" class="orc2-btn sec" onclick="l3dFechar()">Cancelar</button><button type="button" class="orc2-btn pri" id="l3d-aplicar" onclick="l3dAplicar()">✔ Usar no orçamento</button></div></div>`;
     document.body.appendChild(d);
     S.med=medir();renderPainel();
     requestAnimationFrame(()=>{try{montarCena();}catch(e){console.error('letra 3D',e);const c=document.getElementById('l3d-cena');if(c)c.insertAdjacentHTML('beforeend','<div class="orc2-vazio" style="padding:30px">Não consegui abrir o 3D neste navegador. As medidas ao lado continuam valendo.</div>');}});
@@ -96055,6 +96247,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
   function marcarUrl(id,url){const f=e=>{if(e&&e.arteId===id&&!e.url)e.url=url;};((orc2.doc&&orc2.doc.produtos)||[]).forEach(p=>f(estDe(p)));if(orc2.letra&&orc2.letra.arte)f(orc2.letra.arte.est);try{_orc2GuardarRascunho();}catch(e){}}
   function estadoArte(){return JSON.parse(JSON.stringify({v:1,arteId:S.arteId||'',nome:S.geo?S.geo.nome:'',url:_arteUrls[S.arteId]||'',alvo:S.alvo||'letra',modelo:S.modelo,modeloOk:!!S.modeloOk,larg:S.larg,caixa:S.caixa,altInst:S.altInst||'',fix:S.fix||null,fundoOk:!!S.fundoOk,fundoCod:S.fundoCod||'',nomes:S.nomes||{},nomePc:S.nomePc||{},pc:S.pc||[],juntar:S.juntar!==false,nomeUnico:S.nomeUnico||''}));}
   window._l3dEstDe=estDe;
+  window._l3dRedesenhar=function(){S.med=null;try{_apvCache.clear();}catch(e){}construirLetras();renderPainel(true);};
   async function geoDoEst(est){
     let geo=_geoCache[est.arteId];if(geo){await libs();return geo;}
     const url=est.url||_arteUrls[est.arteId];if(!url)throw new Error('o arquivo da arte ainda está sendo enviado — tente de novo em alguns segundos');
@@ -96125,7 +96318,7 @@ const L3D_PANTONE="100 C|f6eb61;101 C|f7ea48;102 C|fce300;103 C|c5a900;104 C|af9
       Object.assign(L,it,{nome:G[0].nome||L.nome||'',adesivos:manterAdes?L.adesivos:it.adesivos,trocas:Object.assign({},Object.fromEntries(Object.entries(L.trocas||{}).filter(([,t])=>!(t&&t.de3d))),it.trocas||{})});
       if(S.modelo!=='acril'){delete L.ledQtd;delete L.ledRef;}
       fecharModal();if(typeof _orc2ReRenderProdutos==='function')_orc2ReRenderProdutos();
-      toast('Medidas e materiais da arte aplicados ✔ — confira e clique em Adicionar','tok');return;
+      S._formPreenchido=true;return; // (2026-11-26) o wrapper de l3dAplicar adiciona direto no orçamento
     }
     // vários grupos: cada um vira um item do orçamento
     if(orc2.letraEditId){toast('Pra separar em vários itens, cancele a edição deste item e importe a arte como item novo','terr');return;}
@@ -96508,7 +96701,7 @@ async function mpPrecoSalvar(cod,valor){
 // p.estrutura → metalon 20×30 pelo desenho da estrutura (substitui a estrutura automática de letra acima de 2 m)
 // Depois de tudo, os insumos (5%) são refeitos sobre o novo total.
 function _orcAprovVale(p){const a=p&&p.aprov,r=a&&a.ref;if(!r)return false;const eq=(x,y)=>Math.abs(_orc2Num(x)-_orc2Num(y))<0.006;return eq(r.largura,p.largura)&&eq(r.altura,p.altura)&&eq(r.caixa,p.caixa);}
-function _orcAprovQ(p,papel){if(!_orcAprovVale(p))return 0;const x=p.aprov[papel];return x&&x.q>0?x.q:0;}
+function _orcAprovQ(p,papel){if(!_orcAprovVale(p))return 0;const x=p.aprov[papel];return x&&x.q>0?((!x.compart&&x.frac>0)?_orcQ2(x.frac):x.q):0;} // (2026-11-26) área real, sem meia em meia
 function _orcLetraExtras(r,p,P){
   try{
     if(!r||!r.ok||!p)return r;
@@ -96522,12 +96715,12 @@ function _orcLetraExtras(r,p,P){
       // vale se a chapa nova é a mesma do desenho ou tem o mesmo tamanho (senão fica a fórmula e avisa)
       const n=String(it.trocado&&it.chaveTroca?it.chaveTroca:(it.name||''));if(/^Adesivo/i.test(n))return it; // adesivo "(frente)" não é chapa
       const pap=/\(fundo\)/i.test(n)||(p.modelo==='acril'&&/^PVC Expandido/i.test(n))?'fundo':/\(later/i.test(n)?'lateral':(/^Frente —|\(frente\)/i.test(n)?'frente':'');
-      const a=pap&&p.aprov[pap];if(!a||!(a.q>0))return it;
+      const a0=pap&&p.aprov[pap];if(!a0||!(a0.q>0))return it;const a=(!a0.compart&&a0.frac>0)?Object.assign({},a0,{q:_orcQ2(a0.frac)}):a0;
       if(it.trocado){const t=((p.trocas||{})[it.chaveTroca])||((typeof _orc9Padroes==='function'?_orc9Padroes():{})[it.chaveTroca])||null,tc=t&&t.cod?String(t.cod):'';
         const dm=c=>{const d=c&&typeof _orcEmDims==='function'?_orcEmDims(c):null;return d?[Math.max(d[0],d[1]),Math.min(d[0],d[1])].map(v=>Math.round(v*100)).join('x'):'';};
         if(!tc||(tc!==String(a.cod||'')&&!(dm(tc)&&dm(tc)===dm(a.cod))))return Object.assign({},it,{detail:String(it.detail||'')+' · ⚠️ o aproveitamento do desenho foi feito pra outra chapa: escolha o material na arte 3D pra ele entrar no encaixe'});}
       const q0=_orcTrNum(it.qty),un=q0>0?(it.cost||0)/q0:0,cost=un>0?a.q*un:it.cost;if(Math.abs(cost-(it.cost||0))>0.005)mexeu=true;
-      return Object.assign({},it,{qty:q2(a.q,(a.q*2)%1?2:1)+' ch.',cost,detail:a.compart?('pelo aproveitamento do desenho: chapa compartilhada com outro item da mesma arte (total '+q2(a.qTot,1)+' ch.) → a parte deste item pela área ('+q2(a.frac,2)+' ch.) = '+q2(a.q,2)+' ch.'):('pelo aproveitamento do desenho: '+(a.chapas>1?(a.chapas-1)+' ch. cheias + a última':'o corte usa')+' → '+q2(a.q,1)+' ch. (área real '+q2(a.frac,2)+' ch.)')+(it.trocado?' · '+String(it.detail||'').split(' · ').slice(-1)[0]:'')});
+      return Object.assign({},it,{qty:_orcQs(a.q)+' ch.',cost,detail:a.compart?('pelo aproveitamento do desenho: chapa compartilhada com outro item da mesma arte (total '+q2(a.qTot,2)+' ch.) → a parte deste item pela área ('+q2(a.frac,2)+' ch.) = '+q2(a.q,2)+' ch.'):('pelo aproveitamento do desenho: '+(a.chapas>1?(a.chapas-1)+' ch. cheias + a última':'o corte usa')+' → '+q2(a.q,2)+' ch. (área real '+q2(a.frac,2)+' ch.)')+(it.trocado?' · '+String(it.detail||'').split(' · ').slice(-1)[0]:'')});
     });
     // ── (2026-11-16) dados medidos na arte 3D: só valem com as mesmas medidas da importação ──
     const A=p.arte,arteOk=!!(A&&A.ref&&Math.abs(_orc2Num(A.ref.largura)-_orc2Num(p.largura))<0.006&&Math.abs(_orc2Num(A.ref.altura)-_orc2Num(p.altura))<0.006);
@@ -96548,8 +96741,8 @@ function _orcLetraExtras(r,p,P){
         if(/^Tinta PU Branco Fosco \(interna\)/.test(it.name)){const q0=_orcTrNum(it.qty),un=q0>0?it.cost/q0:0;ltI=arr(intA*Lm2);
           return Object.assign({},it,{detail:'por dentro: laterais '+q2(latA,2)+' m²'+(fundoAcm?' (o fundo é ACM na cor própria, não pinta)':' + '+(p.modelo==='acril'?'fundo':'verso da face')+' '+q2(ar,2)+' m² = '+q2(intA,2)+' m²')+' × '+q2(Lm2,2)+' L/m² → '+q2(ltI,2)+' L',qty:q2(ltI,2)+' L',cost:ltI*un});}
         return it;});
-      if(achou){items=items.map(it=>{if(!/Catalisador|Wash Primer/i.test(it.name))return it;const tot=arr(ltE+ltI),q0=_orcTrNum(it.qty)||1,un=it.cost/q0,q=Math.ceil(tot/catL-1e-9);
-          return q>0?Object.assign({},it,{detail:q2(tot,2)+' L de tinta ÷ '+q2(catL,2)+' → '+q+' '+(q===1?'frasco':'frascos'),qty:q+' fr.',cost:q*un}):null;}).filter(Boolean);mexeu=true;}
+      if(achou){items=items.map(it=>{if(!/Catalisador|Wash Primer/i.test(it.name))return it;const tot=arr(ltE+ltI),q0=_orcTrNum(it.qty)||1,un=it.cost/q0,q=_orcQ2(tot/catL);
+          return q>0?Object.assign({},it,{detail:q2(tot,2)+' L de tinta ÷ '+q2(catL,2)+' → '+_orcQs(q)+' '+(q===1?'frasco':'frascos'),qty:_orcQs(q)+' fr.',cost:q*un}):null;}).filter(Boolean);mexeu=true;}
     }
     // FIAÇÃO pelo desenho: cada letra até o reator mais perto (caminho em L) + sobra por ligação, cabo preto + vermelho
     if(arteOk&&A.fio&&A.fio.m>0){items=items.map(it=>{if(!/^Cabo flexível 1,5mm/.test(it.name))return it;const q0=_orcTrNum(it.qty),un=q0>0?it.cost/q0:0,m=A.fio.m;mexeu=true;
@@ -96570,8 +96763,8 @@ function _orcLetraExtras(r,p,P){
         items=items.map(it=>{
           if(!/Catalisador|Wash Primer/i.test(it.name))return it;
           const tot=_orcTrNum(String(it.detail||'').split(' L')[0]),q0=_orcTrNum(it.qty)||1,un=it.cost/q0;
-          const resto=Math.max(0,tot-litros),q=Math.ceil(resto/0.30-1e-9);
-          return q>0?Object.assign({},it,{detail:q2(resto,2)+' L de tinta ÷ 0,30 → '+q+' '+(q===1?'frasco':'frascos')+' (sem a tinta externa: ACM na cor própria)',qty:q+' fr.',cost:q*un}):null;
+          const resto=Math.max(0,tot-litros),q=_orcQ2(resto/0.30);
+          return q>0?Object.assign({},it,{detail:q2(resto,2)+' L de tinta ÷ 0,30 → '+_orcQs(q)+' '+(q===1?'frasco':'frascos')+' (sem a tinta externa: ACM na cor própria)',qty:_orcQs(q)+' fr.',cost:q*un}):null;
         }).filter(Boolean);
         items.push({icon:'🎨',name:'Sem pintura externa — ACM na cor própria',detail:'a lateral fica na cor do próprio ACM',qty:'—',cost:0});
       }
@@ -96584,19 +96777,19 @@ function _orcLetraExtras(r,p,P){
       // perfil/cantoneira da planilha: preço por metro (unidade metro) ou por barra de 6 m
       const linha=(cod,nomePad,metros,precoPad,icone,papel,qB,usado)=>{
         // barras pelo plano de corte (de meia em meia); sem plano (item antigo), metros + 10%
-        const m=cod?_orc8Mat(cod):null,porM=m&&_orc8Un(m.u)==='m',nb=qB>0?qB:Math.ceil(metros*1.1/6-1e-9),mt=usado>0?usado:Math.round(metros*1.1*100)/100;
+        const m=cod?_orc8Mat(cod):null,porM=m&&_orc8Un(m.u)==='m',nb=qB>0?qB:_orcQ2(metros*1.1/6),mt=usado>0?usado:Math.round(metros*1.1*100)/100;
         const nome=(m?String(m.n).trim():nomePad)+' — '+papel;
         if(porM)return{icon:icone,name:nome,detail:q2(metros,2)+' m pelo desenho'+(usado>0?' + serra = ':' + 10% de perda = ')+q2(mt,2)+' m'+(cod?' · cód. '+cod:''),qty:q2(mt,2)+' m',cost:mt*(m.v||0)};
-        return{icon:icone,name:nome,detail:q2(metros,2)+' m pelo desenho'+(qB>0?' → plano de corte: '+q2(nb,1)+' '+(nb<=1?'barra':'barras')+' de 6 m (de meia em meia)':' + 10% de perda → '+nb+' barras de 6 m')+(cod?' · cód. '+cod:'')+(m?'':' ⚠️ perfil fora da planilha, preço padrão'),qty:q2(nb,nb%1?1:0)+' '+(nb<=1?'barra':'barras'),cost:nb*(m?(m.v||0):precoPad),nb};
+        return{icon:icone,name:nome,detail:q2(metros,2)+' m pelo desenho'+(qB>0?' → plano de corte: '+_orcQs(nb)+' '+(nb<=1?'barra':'barras')+' de 6 m':' + 10% de perda → '+_orcQs(nb)+' barras de 6 m')+(cod?' · cód. '+cod:'')+(m?'':' ⚠️ perfil fora da planilha, preço padrão'),qty:_orcQs(nb)+' '+(nb<=1?'barra':'barras'),cost:nb*(m?(m.v||0):precoPad),nb};
       };
       const pm=est.perfilMetros!=null?est.perfilMetros:est.metros;
       const lp=linha(est.perfilCod,'Metalon 20×30mm (6m)',pm,PP.metalon||0,'🏗️','estrutura (quadro da frente, quadro de trás e travas)',est.perfilQ,est.perfilUsado);
       lp.detail+=est.quadro?' · quadros 2 × '+q2(est.quadro,2)+' m + '+(est.nTravas||0)+' travas de '+q2((est.trava||0)*100,1)+' cm':'';
       items.push(lp);
-      let nbTot=lp.nb||Math.ceil(pm*1.1/6-1e-9);
-      if(est.cantMetros>0){const lc=linha(est.cantCod,'Cantoneira de ferro 1×1/8 (6m)',est.cantMetros,PP.cant||0,'📐','treliça da estrutura',est.cantQ,est.cantUsado);items.push(lc);nbTot+=lc.nb||Math.ceil(est.cantMetros*1.1/6-1e-9);}
-      const qG=Math.max(1,Math.ceil(nbTot*6*0.5/(10*3.6)));
-      items.push({icon:'🎨',name:'Tinta Galvimax Preto (galão 3,6L) — estrutura',detail:qG+' '+(qG===1?'galão':'galões'),qty:qG+' gl.',cost:qG*(PP.galvimax||0)});
+      let nbTot=lp.nb||_orcQ2(pm*1.1/6);
+      if(est.cantMetros>0){const lc=linha(est.cantCod,'Cantoneira de ferro 1×1/8 (6m)',est.cantMetros,PP.cant||0,'📐','treliça da estrutura',est.cantQ,est.cantUsado);items.push(lc);nbTot+=lc.nb||_orcQ2(est.cantMetros*1.1/6);}
+      const qG=_orcQ2(nbTot*6*0.5/(10*3.6));
+      items.push({icon:'🎨',name:'Tinta Galvimax Preto (galão 3,6L) — estrutura',detail:_orcQs(qG)+' '+(qG===1?'galão':'galões'),qty:_orcQs(qG)+' gl.',cost:qG*(PP.galvimax||0)});
       mexeu=true;
     }
     // (2026-11-16) vazados: policarbonato colado por dentro do recorte, pelo encaixe do desenho (+ 2 cm de sobra)
@@ -96609,16 +96802,16 @@ function _orcLetraExtras(r,p,P){
     // pelo aproveitamento do desenho. Sem o desenho (medidas mudaram), pela área das letras ÷ área da chapa.
     if(ab&&ab.tipo==='filetado'){const fa=_orcAprovVale(p)&&p.aprov.filete,m=_orc8Mat('1790'),d=(typeof _orcEmDims==='function'&&_orcEmDims('1790'))||[1.2,3],aCh=d[0]*d[1],un=m&&m.v>0?m.v:((P&&P.galv20)||0);
       const ar=(A&&A.area)||(_orc2Num(p.largura)*_orc2Num(p.altura)),qf=fa&&fa.q>0?fa.q:_orc2CeilMeia(ar/aCh);
-      items.push({icon:'🔲',name:'Chapa Galv. 20 0,95mm '+q2(d[0],2)+'×'+q2(d[1],2)+'m (filete da frente)',detail:'filete de '+q2(ab.filete*100,1)+' cm segurando a chapa da frente, recortado no formato das letras'+(fa&&fa.q>0?(fa.compart?' → chapa compartilhada com outro item da mesma arte (total '+q2(fa.qTot,1)+' ch.) → parte deste item '+q2(fa.q,2)+' ch.':' → pelo aproveitamento do desenho: '+q2(fa.q,1)+' ch. (uso '+fa.uso+'% da chapa)'):' → '+q2(ar,3)+' m² ÷ '+q2(aCh,2)+' m² → '+q2(qf,1)+' ch.')+' · cód. 1790',qty:q2(qf,(qf*2)%1?2:1)+' ch.',cost:qf*un});mexeu=true;}
+      items.push({icon:'🔲',name:'Chapa Galv. 20 0,95mm '+q2(d[0],2)+'×'+q2(d[1],2)+'m (filete da frente)',detail:'filete de '+q2(ab.filete*100,1)+' cm segurando a chapa da frente, recortado no formato das letras'+(fa&&fa.q>0?(fa.compart?' → chapa compartilhada com outro item da mesma arte (total '+q2(fa.qTot,1)+' ch.) → parte deste item '+q2(fa.q,2)+' ch.':' → pelo aproveitamento do desenho: '+q2(fa.q,1)+' ch. (uso '+fa.uso+'% da chapa)'):' → '+q2(ar,3)+' m² ÷ '+q2(aCh,2)+' m² → '+_orcQs(qf)+' ch.')+' · cód. 1790',qty:q2(qf,(qf*2)%1?2:1)+' ch.',cost:qf*un});mexeu=true;}
     // (2026-11-17) lateral em ACM: frente com CANTONEIRA DE ALUMÍNIO na borda (contorno no plano de barras) + tinta dela
     const CT=arteOk&&A.cant;
     if(CT&&CT.cod){const m=_orc8Mat(CT.cod),pr=m?(m.v||0):0,nm=m?String(m.n).trim():(CT.nome||'Cantoneira de alumínio');
-      items.push({icon:'📐',name:nm+' — cantoneira da borda da frente',detail:'contorno das letras (externo + miolos) '+q2(CT.metros,2)+' m em '+CT.cortes+' '+(CT.cortes===1?'pedaço':'pedaços')+(CT.porM?' → '+q2(CT.q,2)+' m com a serra':' → plano de corte em barras de 6 m (3 mm de serra, de meia em meia barra) → '+q2(CT.q,1)+' '+(CT.q===1?'barra':'barras'))+' · cód. '+CT.cod+(m?'':' ⚠️ fora da planilha'),qty:q2(CT.q,CT.porM?2:1)+(CT.porM?' m':' br.'),cost:CT.q*pr});
+      items.push({icon:'📐',name:nm+' — cantoneira da borda da frente',detail:'contorno das letras (externo + miolos) '+q2(CT.metros,2)+' m em '+CT.cortes+' '+(CT.cortes===1?'pedaço':'pedaços')+(CT.porM?' → '+q2(CT.q,2)+' m com a serra':' → plano de corte em barras de 6 m (3 mm de serra) → '+_orcQs(CT.q)+' '+(CT.q===1?'barra':'barras'))+' · cód. '+CT.cod+(m?'':' ⚠️ fora da planilha'),qty:(CT.porM?q2(CT.q,2):_orcQs(CT.q))+(CT.porM?' m':' br.'),cost:CT.q*pr});
       const T=CT.tinta;if(T){const area=CT.metros*(CT.lados||0.05),lt=Math.round(area*Lm2*100)/100,pL=typeof _orcTintaPrecoL==='function'?_orcTintaPrecoL(T):0;
         if(lt>0){items.push({icon:'🎨',name:'Tinta — '+(T.nome||'cantoneira')+' (cantoneira'+(CT.pinta==='acm'?', na cor do ACM':', outra cor')+')',detail:'cantoneira '+q2(CT.metros,2)+' m × abas '+q2((CT.lados||0.05)*100,1)+' cm = '+q2(area,2)+' m² × '+q2(Lm2,2)+' L/m² → '+q2(lt,2)+' L',qty:q2(lt,2)+' L',cost:lt*pL});
           const ic=items.findIndex(it=>/Catalisador|Wash Primer/i.test(it.name));
-          if(ic>=0){const it=items[ic],tot0=_orcTrNum(String(it.detail||'').split(' L')[0]),q0=_orcTrNum(it.qty)||1,un=it.cost/q0,tot=Math.round((tot0+lt)*100)/100,q=Math.ceil(tot/catL-1e-9);items[ic]=Object.assign({},it,{detail:q2(tot,2)+' L de tinta (com a da cantoneira) ÷ '+q2(catL,2)+' → '+q+' '+(q===1?'frasco':'frascos'),qty:q+' fr.',cost:q*un});}
-          else{const q=Math.ceil(lt/catL-1e-9),un=(P&&P.primer)||0;items.push({icon:'🧪',name:'Catalisador 2.1 Wash Primer 300ml',detail:q2(lt,2)+' L de tinta da cantoneira ÷ '+q2(catL,2)+' → '+q+' '+(q===1?'frasco':'frascos'),qty:q+' fr.',cost:q*un});}}}
+          if(ic>=0){const it=items[ic],tot0=_orcTrNum(String(it.detail||'').split(' L')[0]),q0=_orcTrNum(it.qty)||1,un=it.cost/q0,tot=Math.round((tot0+lt)*100)/100,q=_orcQ2(tot/catL);items[ic]=Object.assign({},it,{detail:q2(tot,2)+' L de tinta (com a da cantoneira) ÷ '+q2(catL,2)+' → '+_orcQs(q)+' '+(q===1?'frasco':'frascos'),qty:_orcQs(q)+' fr.',cost:q*un});}
+          else{const q=_orcQ2(lt/catL),un=(P&&P.primer)||0;items.push({icon:'🧪',name:'Catalisador 2.1 Wash Primer 300ml',detail:q2(lt,2)+' L de tinta da cantoneira ÷ '+q2(catL,2)+' → '+_orcQs(q)+' '+(q===1?'frasco':'frascos'),qty:_orcQs(q)+' fr.',cost:q*un});}}}
       mexeu=true;}
     // (2026-11-17) estrutura metálica com ACM por cima: fita dupla face (barras × 6 m ÷ metros do rolo, regra da fachada)
     if(arteOk&&A.fita&&A.fita.rolos>0){const F=A.fita,m=F.cod?_orc8Mat(F.cod):null;items.push({icon:'🎗️',name:(m?String(m.n).trim():'Fita Dupla Face 3M VHB 4910 15mm×33m')+' — ACM colado na estrutura',detail:_orcFitaDetalhe(F),qty:_orcFitaQtd(F),cost:F.rolos*(m?(m.v||0):(P&&P.fitaVhb||0))});mexeu=true;}
@@ -96651,13 +96844,13 @@ function _orcTsCalc(p,P,adesivoPrecos){
   const Pm=_orcP();
   (A.revest||[]).forEach(r=>{const m=mp(r.cod);push('🔲',(m?String(m.n).trim():r.nome||'Revestimento')+' — '+(r.papel==='revestLat'?'laterais':'revestimento'),'encaixe pelo desenho'+(r.dobra>0?' (frente + laterais dobradas numa peça só, +'+q2(r.dobra*100,0)+' cm de cada lado)':'')+': '+(r.chapas>1?(r.chapas-1)+' ch. cheias + a última':'o corte usa')+' → '+qtx(r.q)+' ch. (área real '+q2(r.frac,2)+' ch.)'+(m?' · cód. '+r.cod:' ⚠️ material fora da planilha'),qtx(r.q)+' ch.',r.q*(m?(m.v||0):0));});
   if(A.est&&A.est.metros>0){const e=A.est,PP=P;
-    const linha=(cod,nomePad,metros,precoPad,icone,papel,qB,usado)=>{const m=cod?_orc8Mat(cod):null,porM=m&&_orc8Un(m.u)==='m',nb=qB>0?qB:Math.ceil(metros*1.1/6-1e-9),mt=usado>0?usado:Math.round(metros*1.1*100)/100;const nome=(m?String(m.n).trim():nomePad)+' — '+papel;
+    const linha=(cod,nomePad,metros,precoPad,icone,papel,qB,usado)=>{const m=cod?_orc8Mat(cod):null,porM=m&&_orc8Un(m.u)==='m',nb=qB>0?qB:_orcQ2(metros*1.1/6),mt=usado>0?usado:Math.round(metros*1.1*100)/100;const nome=(m?String(m.n).trim():nomePad)+' — '+papel;
       if(porM)return{icon:icone,name:nome,detail:q2(metros,2)+' m pelo desenho + serra = '+q2(mt,2)+' m'+(cod?' · cód. '+cod:''),qty:q2(mt,2)+' m',cost:mt*(m.v||0),nb};
       return{icon:icone,name:nome,detail:q2(metros,2)+' m pelo desenho → plano de corte: '+qtx(nb)+' '+(nb<=1?'barra':'barras')+' de 6 m'+(cod?' · cód. '+cod:'')+(m?'':' ⚠️ perfil fora da planilha, preço padrão'),qty:qtx(nb)+' '+(nb<=1?'barra':'barras'),cost:nb*(m?(m.v||0):precoPad),nb};};
     const lp=linha(e.perfilCod,'Metalon 20×30mm (6m)',e.perfilMetros,PP.metalon||0,'🏗️',e.simples?'estrutura da testeira (1 quadro + montantes)':'estrutura da caixa (quadro da frente, quadro de trás e travas)',e.perfilQ,e.perfilUsado);
     lp.detail+=' · '+(e.simples?'quadro ':'quadros 2 × ')+q2(e.quadro,2)+' m'+(e.nTravas?' + '+e.nTravas+' travas de '+q2((e.trava||0)*100,1)+' cm':'');items.push(lp);
     let nbTot=lp.nb||0;if(e.cantMetros>0){const lc=linha(e.cantCod,'Cantoneira de ferro 1×1/8 (6m)',e.cantMetros,PP.cant||0,'📐','treliça da estrutura',e.cantQ,e.cantUsado);items.push(lc);nbTot+=lc.nb||0;}
-    const qG=Math.max(1,Math.ceil(nbTot*6*0.5/(10*3.6)));push('🎨','Tinta Galvimax Preto (galão 3,6L) — estrutura',qG+' '+(qG===1?'galão':'galões'),qG+' gl.',qG*(PP.galvimax||0));}
+    const qG=_orcQ2(nbTot*6*0.5/(10*3.6));push('🎨','Tinta Galvimax Preto (galão 3,6L) — estrutura',_orcQs(qG)+' '+(qG===1?'galão':'galões'),_orcQs(qG)+' gl.',qG*(PP.galvimax||0));}
   if(A.fita&&A.fita.rolos>0){const F=A.fita,m=F.cod?_orc8Mat(F.cod):null;push('🎗️',(m?String(m.n).trim():'Fita Dupla Face 3M VHB 4910 15mm×33m')+' — ACM colado na estrutura',_orcFitaDetalhe(F),_orcFitaQtd(F),F.rolos*(m?(m.v||0):(P.fitaVhb||0)));}
   const nomeAd=c=>{const x=(typeof ORC2_ADESIVOS!=='undefined'?ORC2_ADESIVOS:[]).find(a=>String(a[0])===String(c));if(x)return x[1];const m=mp(c);return m?String(m.n).trim():'cód. '+c;};
   const precoAd=c=>{const v=(adesivoPrecos||{})[c];if(v>0)return v;const m=mp(c);return m?(m.v||0):0;};
@@ -96667,7 +96860,7 @@ function _orcTsCalc(p,P,adesivoPrecos){
   (A.adesVaz||[]).forEach(a=>{const pr=precoAd(a.cod);push('🏷️','Adesivo — '+nomeAd(a.cod)+' (sobre o policarbonato dos vazados)',a.n+' '+(a.n===1?'vazado':'vazados')+' (retângulo de cada) = '+q2(a.m2,2)+' m²',q2(a.m2,2)+' m²',a.m2*pr);});
   (A.pvc||[]).forEach(v=>{const m=mp(v.cod);push('🔤',(m?String(m.n).trim():v.nome||'PVC expandido')+' — letras em PVC '+Math.round(v.esp*1000)+' mm',v.n+' '+(v.n===1?'letra':'letras')+' encaixadas pelo formato: área '+q2(v.frac,2)+' ch. → '+qtx(v.q)+' ch.'+(m?' · cód. '+v.cod:' ⚠️ material fora da planilha'),qtx(v.q)+' ch.',v.q*(m?(m.v||0):0));});
   let ltT=0;(A.tintaPvc||[]).forEach(t=>{const pl=typeof _orcTintaPrecoL==='function'?_orcTintaPrecoL(t.tinta):(t.tinta.precoL||0);ltT+=t.litros;push('🎨','Tinta — '+t.tinta.nome+' (letras em PVC)',t.n+' '+(t.n===1?'letra':'letras')+': frente + laterais = '+q2(t.m2,2)+' m² × '+q2(Pm.tintaLm2||0.2,2)+' L/m² → '+q2(t.litros,2)+' L',q2(t.litros,2)+' L',t.litros*pl);});
-  if(ltT>0){const qc=Math.ceil(ltT/(Pm.catalisadorL||0.30)-1e-9);push('🧪','Catalisador 2.1 Wash Primer 300ml',q2(ltT,2)+' L de tinta ÷ '+q2(Pm.catalisadorL||0.30,2)+' → '+qc+' '+(qc===1?'frasco':'frascos'),qc+' fr.',qc*(P.primer||0));}
+  if(ltT>0){const qc=_orcQ2(ltT/(Pm.catalisadorL||0.30));push('🧪','Catalisador 2.1 Wash Primer 300ml',q2(ltT,2)+' L de tinta ÷ '+q2(Pm.catalisadorL||0.30,2)+' → '+_orcQs(qc)+' '+(qc===1?'frasco':'frascos'),_orcQs(qc)+' fr.',qc*(P.primer||0));}
   if(A.fix&&A.fix.pontos>0)_orcFixItens(A.fix).forEach(x=>push(x.icon,x.name,x.detail,x.qty,x.cost));
   if(A.relevo>0)push('📦','Letras caixa em relevo por cima',A.relevo+' '+(A.relevo===1?'letra entra':'letras entram')+' como item próprio de letra caixa neste orçamento','—',0);
   if(A.peso&&A.peso.kg>0)push('⚖️','Peso estimado: '+q2(A.peso.kg,1)+' kg',(A.peso.porPeca||[]).map(x=>x.p+' '+q2(x.kg,1)+' kg').join(' · ')+' (revestimento, estrutura e letras em PVC)','—',0);
@@ -100906,6 +101099,26 @@ function _projIndMover(){
 })();
 </script>
 <script>
+// ══ (2026-11-26, Clabonde) "inserir o aviso em todos os pdf de orçamentos que o orçamento não possui seguro de obra,
+// verificar necessidade, caso não tenha sido marcado que tem seguro e inserido valor". Antes o aviso só saía quando a
+// instalação era por nossa conta; agora sai em toda proposta (só produto, completo, só serviço), a não ser que o
+// orçamento tenha o Seguro de obra marcado com valor > 0. No PDF a coluna mostra "Não incluso".
+(function(){
+  if(typeof _orc6Outros!=='function')return;
+  const _o=_orc6Outros;
+  window._orcTemSeguroObra=function(d){
+    try{if(!d||d.tipo==='produto')return false;const r=d.operacionais&&d.operacionais.resultado;
+      return!!(r&&(r.itens||[]).some(i=>/seguro/i.test(i.nome||'')&&(Number(i.valor)||0)>0));}catch(e){return false;}
+  };
+  _orc6Outros=window._orc6Outros=function(d,t){
+    let L=[];try{L=_o.apply(this,arguments)||[];}catch(err){L=[];}
+    try{L=L.filter(o=>!(o&&o.info&&/^Seguro de obra — não está incluso/i.test(o.t||'')));
+      if(!window._orcTemSeguroObra(d))L.push({t:'Seguro de obra — não está incluso neste orçamento, verificar necessidade',v:0,on:true,info:true,avisoSeguro:true});}
+    catch(err){console.warn('aviso seguro de obra (pdf)',err);}
+    return L;};
+})();
+</script>
+<script>
 // ══ ORDEM DA ABA "ORÇAMENTOS REALIZADOS" NO CARD DO CRM (2026-11-23, a pedido do Guilherme) ══
 // 1º Valores (bruto/operacionais/desconto/líquido) · 2º Histórico de propostas · depois o resto
 // (orçamentos do sistema, planilha do cliente, Anexar proposta) · por último Avaliação do
@@ -101835,6 +102048,690 @@ ${modelos()||'(nenhum)'}`;
   };
   // janela fechada no meio da leitura: libera para a próxima
   if(typeof _crmCkCancelar==='function'){const _c=_crmCkCancelar;_crmCkCancelar=function(){if(st){try{st.ctrl.abort();}catch(e){}st=null;}return _c.apply(this,arguments);};}
+})();
+</script>
+<script>
+// ══ CRM → card que VOLTA para ORÇAMENTO: "✏️ O que vai alterar?" em vez de "O que orçar" (2026-11-26, Clabonde) ══
+// Card que já passou de ORÇAMENTO (ex.: ORÇAMENTO APROVADO) e volta pra ORÇAMENTO: o vendedor já disse o que orçar lá
+// atrás. A janela vira "O que vai alterar", com a lista anterior já preenchida (só ajusta o que mudar) e um campo
+// obrigatório descrevendo a alteração. A alteração fica no card (orcAlteracoes + timeline) e aparece em destaque pro
+// orçamentista no bloco do card e no orçamento, enquanto o card estiver em ORÇAMENTO / REVISÃO DE ORÇAMENTO.
+(function(){
+  'use strict';
+  if(typeof _crmAbrirChecklistOrc!=='function'||typeof _crmCkConfirmar!=='function')return;
+  const esc=s=>{try{return _crmCkEsc(s==null?'':String(s));}catch(e){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}};
+  const quem=()=>(typeof usuarioLogado!=='undefined'&&usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  function ehVolta(e,etapaKey,modo){
+    try{
+      if((modo||'mover')!=='mover'||etapaKey!=='orcamento'||!e||!e.orcChecklist)return false;
+      const et=_crmEtapas();const iCur=et.findIndex(x=>x.key===e.etapa),iOrc=et.findIndex(x=>x.key==='orcamento');
+      return iOrc>=0&&iCur>iOrc;
+    }catch(err){return false;}
+  }
+  let volta=null;
+  const _ab=_crmAbrirChecklistOrc;
+  _crmAbrirChecklistOrc=function(e,etapaKey,modo){
+    const v=ehVolta(e,etapaKey,modo);
+    volta=v?{id:e.id}:null;
+    const r=_ab.apply(this,arguments);
+    if(!v)return r;
+    try{
+      const m=document.getElementById('crm-ck-modal');if(!m)return r;
+      const tit=m.querySelector('div[style*="font-size:1rem;font-weight:800;color:#101B3D"]');
+      if(tit)tit.innerHTML='✏️ O que vai alterar — '+esc(e.nome||'');
+      const sub=m.querySelector('div[style*="font-size:.76rem;color:#64748b;margin:4px 0 12px"]');
+      if(sub){
+        sub.innerHTML='Este card já foi orçado e está voltando para ORÇAMENTO. Escreva o que muda — a lista abaixo é a do orçamento anterior: ajuste só o que for alterar.';
+        if(!document.getElementById('crm-ck-alt-box'))sub.insertAdjacentHTML('afterend',`<div id="crm-ck-alt-box" style="border:1.5px solid #f59e0b;background:#fffbeb;border-radius:10px;padding:10px 12px;margin-bottom:10px">
+          <label for="crm-ck-alt" style="display:block;font-size:.86rem;font-weight:800;color:#92400e;margin-bottom:6px">✏️ O que vai alterar? *</label>
+          <textarea id="crm-ck-alt" class="no-upper" rows="3" placeholder="Ex.: o cliente quer o totem com 6 m de altura em vez de 7 m e tirou a letra caixa da fachada" style="width:100%;box-sizing:border-box;border:1.5px solid #fcd34d;border-radius:8px;padding:8px 10px;font-size:.82rem;font-family:inherit;color:#1e293b;resize:vertical;background:#fff"></textarea>
+        </div>`);
+        setTimeout(()=>{const t=document.getElementById('crm-ck-alt');if(t)try{t.focus({preventScroll:true});}catch(x){}},0);
+      }
+    }catch(err){console.warn('o que vai alterar: janela',err);}
+    return r;
+  };
+  const _cf=_crmCkConfirmar;
+  _crmCkConfirmar=async function(){
+    const p=_crmCkPend,ta=document.getElementById('crm-ck-alt');
+    if(!volta||!p||p.id!==volta.id||p.modo!=='mover'||!ta)return _cf.apply(this,arguments);
+    const erro=document.getElementById('crm-ck-erro');
+    const txt=(ta.value||'').trim();
+    if(!txt){if(erro)erro.textContent='Escreva o que vai alterar — é isso que o orçamentista vai ver.';ta.style.borderColor='#dc2626';try{ta.focus();}catch(x){}return;}
+    ta.style.borderColor='#fcd34d';
+    const e=crmEmpresas.find(x=>x.id===p.id);if(!e)return _cf.apply(this,arguments);
+    const agora=new Date().toISOString();
+    const reg={id:'alt_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),texto:txt,em:agora,por:quem(),de:e.etapa||''};
+    const tlId='pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+    if(!Array.isArray(e.orcAlteracoes))e.orcAlteracoes=[];
+    e.orcAlteracoes.push(reg);
+    if(!e.timeline)e.timeline=[];
+    e.timeline.push({id:tlId,texto:'✏️ Voltou para ORÇAMENTO — o que vai alterar: '+txt,autor:reg.por,em:agora,sistema:true});
+    let ok=false;
+    try{const r=await _cf.apply(this,arguments);ok=!document.getElementById('crm-ck-modal')&&e.etapa==='orcamento';return r;}
+    finally{
+      if(ok)volta=null;
+      else{e.orcAlteracoes=e.orcAlteracoes.filter(x=>x.id!==reg.id);e.timeline=e.timeline.filter(x=>x.id!==tlId);}
+    }
+  };
+  if(typeof _crmCkCancelar==='function'){const _c=_crmCkCancelar;_crmCkCancelar=function(){
+    const v=volta&&_crmCkPend&&_crmCkPend.id===volta.id&&_crmCkPend.modo==='mover';volta=null;
+    if(!v)return _c.apply(this,arguments);
+    const _t=toast;toast=function(m,c){if(/sem o checklist o orçamentista/.test(String(m||'')))m='O card não voltou para ORÇAMENTO — falta dizer o que vai alterar';return _t.call(this,m,c);};
+    try{return _c.apply(this,arguments);}finally{toast=_t;}
+  };}
+  // ── destaque pro orçamentista (card e orçamento) enquanto está em ORÇAMENTO / REVISÃO ──
+  function ultAlt(e){
+    try{if(!e||!(e.etapa==='orcamento'||e.etapa==='revisao_orcamento'))return null;const l=e.orcAlteracoes;return Array.isArray(l)&&l.length?l[l.length-1]:null;}catch(x){return null;}
+  }
+  function avisoHtml(a){
+    let quando='';try{quando=_fmtDataHora(a.em);}catch(x){}
+    return`<div class="crm-ck-alt-aviso" style="background:#fffbeb;border:1.5px solid #fcd34d;border-left:4px solid #f59e0b;border-radius:10px;padding:9px 12px;margin:0 0 10px">
+      <div style="font-size:.74rem;font-weight:800;color:#92400e;text-transform:uppercase;letter-spacing:.04em">✏️ O que vai alterar</div>
+      <div style="font-size:.82rem;color:#1e293b;margin-top:4px;white-space:pre-wrap;word-break:break-word">${esc(a.texto)}</div>
+      <div style="font-size:.66rem;color:#94a3b8;margin-top:4px">Por ${esc(a.por||'—')}${quando?' · '+quando:''}</div></div>`;
+  }
+  if(typeof _crmCkBlocoCard==='function'){const _o=_crmCkBlocoCard;_crmCkBlocoCard=function(e){
+    const h=_o.apply(this,arguments);
+    try{const a=ultAlt(e);if(a&&h&&/<div id="crm-ck-bloco"[^>]*>/.test(h))return h.replace(/(<div id="crm-ck-bloco"[^>]*>)/,'$1'+avisoHtml(a));}catch(err){console.warn('o que vai alterar: card',err);}
+    return h;};}
+  if(typeof _orcCkHtmlEditor==='function'){const _o=_orcCkHtmlEditor;_orcCkHtmlEditor=function(){
+    const h=_o.apply(this,arguments);
+    try{const d=typeof orc2!=='undefined'&&orc2.doc;const e=d&&d.crm&&d.crm.id?_orc5Card(d.crm.id):null;const a=ultAlt(e);
+      if(a){if(h&&/<div[^>]*id="orc-ck-editor"[^>]*>/.test(h))return h.replace(/(<div[^>]*id="orc-ck-editor"[^>]*>)/,'$1'+avisoHtml(a));
+        return`<div class="dash-card" id="orc-ck-editor" style="margin-bottom:12px">${avisoHtml(a)}</div>`+(h||'');}}catch(err){console.warn('o que vai alterar: orçamento',err);}
+    return h;};}
+})();
+</script>
+<script>
+// ══ Fila de ORÇAMENTO: card devolvido da REVISÃO (erro) entra na FRENTE da fila (2026-11-26, Clabonde) ══
+// Voltou da REVISÃO DE ORÇAMENTO para ORÇAMENTO = orçamento com erro → prioridade (fica à frente dos outros, e entre
+// os prioritários vale a ordem de chegada). Voltou de ORÇAMENTO APROVADO ou do funil de vendas = alteração do cliente →
+// fila normal (ordem de chegada). A marca (e.orcPrioridade) só vale enquanto o card está nessa passagem por ORÇAMENTO:
+// se ele sair e voltar depois por outro motivo, entra na fila normal.
+(function(){
+  'use strict';
+  window._crmOrcPrioAtiva=function(e){
+    try{if(!e||e.etapa!=='orcamento'||e.fechamento||!e.orcPrioridade||!e.orcPrioridade.em)return false;
+      return Date.parse(e.orcPrioridade.em)>=_crmEtapaEntradaTs(e)-60000;}catch(x){return false;}
+  };
+  window._crmFilaCmp=function(a,b){
+    const pa=_crmOrcPrioAtiva(a)?0:1,pb=_crmOrcPrioAtiva(b)?0:1;
+    if(pa!==pb)return pa-pb;
+    return _crmEtapaEntradaTs(a)-_crmEtapaEntradaTs(b);
+  };
+  window._crmOrcPrioSelo=function(e){
+    if(!_crmOrcPrioAtiva(e))return'';
+    return'<div style="display:inline-block;background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;border-radius:999px;padding:2px 9px;font-size:.66rem;font-weight:800;margin:2px 0 4px;white-space:nowrap" title="Voltou da revisão para corrigir: passa na frente da fila">🔴 PRIORIDADE · voltou da revisão</div><br>';
+  };
+  if(typeof crmMoverEtapa!=='function')return;
+  const _mv=crmMoverEtapa;
+  crmMoverEtapa=async function(id,etapaKey){
+    let e=null;try{e=crmEmpresas.find(x=>x.id===id);}catch(x){}
+    if(!e||e.etapa!=='revisao_orcamento'||etapaKey!=='orcamento'||e.fechamento)return _mv.apply(this,arguments);
+    const antes=e.orcPrioridade,agora=new Date().toISOString(),quem=(usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+    const tlId='pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+    e.orcPrioridade={em:agora,por:quem,motivo:'devolvido da revisão'};
+    if(!e.timeline)e.timeline=[];
+    e.timeline.push({id:tlId,texto:'🔴 Voltou da revisão para corrigir — prioridade na fila de orçamentos',autor:quem,em:agora,sistema:true});
+    let r;
+    try{r=await _mv.apply(this,arguments);}
+    finally{
+      if(e.etapa!=='orcamento'){ // não voltou (cancelou/travou): desfaz a marca
+        if(antes===undefined)delete e.orcPrioridade;else e.orcPrioridade=antes;
+        e.timeline=e.timeline.filter(x=>x.id!==tlId);
+      }else{try{renderCrmKanban();}catch(x){}}
+    }
+    return r;
+  };
+})();
+</script>
+<script>
+// ══ Resultado da IA no orçamento: lista de produtos do catálogo calculada 1 vez por redesenho (2026-11-26, Clabonde) ══
+// _orc11Opcoes() monta TODAS as variações dos cadernos (nome, medida formatada, texto de busca) e era chamada de novo
+// pra cada linha do resultado da IA, várias vezes por linha — era o que fazia cada clique (Incluir / Não incluir…)
+// levar ~2 s. Agora a lista é montada uma vez e reaproveitada só até o fim daquele redesenho (some no próximo ciclo
+// do navegador), então qualquer mudança no catálogo aparece no clique seguinte, como antes.
+(function(){
+  'use strict';
+  if(typeof _orc11Opcoes!=='function')return;
+  const _op=_orc11Opcoes;let cache=null,porRef=null;
+  function lista(){
+    if(!cache){
+      const c=_op.apply(this,arguments);cache=c;porRef=new Map();c.forEach(o=>{if(!porRef.has(o.ref))porRef.set(o.ref,o);});
+      setTimeout(()=>{if(cache===c){cache=null;porRef=null;}},0);
+    }
+    return cache;
+  }
+  _orc11Opcoes=function(){return lista().slice();};
+  _orc11Opcao=function(ref){lista();return porRef.get(ref)||null;};
+})();
+</script>
+<script>
+// ══ Conferência "pedido do vendedor × projeto": Incluir / Não incluir / Perguntar respondem na hora (2026-11-26, Clabonde) ══
+// Antes cada clique redesenhava a tela inteira de Produtos do orçamento (lista, lateral, totais, prévia da letra…).
+// Agora só a caixa do resultado da IA é redesenhada (é a única parte que muda com essas respostas), mantendo a
+// rolagem da janela. Se a caixa não estiver na tela, cai no redesenho completo de antes.
+(function(){
+  'use strict';
+  if(typeof window.iacfDec!=='function')return;
+  function atualizar(){
+    try{
+      const el=document.getElementById('orc2-ia-box');
+      if(el&&orc2.ia&&orc2.ia.status==='ok'&&typeof _orc2IaHtmlBox==='function'){
+        const roladores=[];let p=el.parentElement;while(p){if(p.scrollHeight>p.clientHeight&&p.scrollTop)roladores.push([p,p.scrollTop]);p=p.parentElement;}
+        el.innerHTML=_orc2IaHtmlBox();
+        roladores.forEach(([n,t])=>{n.scrollTop=t;});
+        return;
+      }
+    }catch(e){console.warn('conferência: atualização rápida',e);}
+    try{_orc2ReRenderProdutos();}catch(e){}
+  }
+  window.iacfDec=function(i,d){const it=orc2.ia&&orc2.ia.itens[i];if(!it)return;it.dec=d;it.sel=d==='incluir';atualizar();};
+  window.iacfRes=function(n,r){const C=orc2.ia&&orc2.ia.conf;if(!C)return;if(r)C.res[n]=r;else delete C.res[n];atualizar();};
+  window.iacfLigar=function(i,n){const it=orc2.ia&&orc2.ia.itens[i];if(!it)return;n=parseInt(n)||0;it.ckIdx=n;
+    if(n){it.extra=false;it.dec='';it.sel=true;const C=orc2.ia.conf;if(C)delete C.res[n];}else{it.extra=true;it.dec='';it.sel=false;}atualizar();};
+})();
+</script>
+<script>
+// ══ Produtos (Projetos → Produtos): faixa de cadernos EM CIMA da busca (2026-11-26, Clabonde) ══
+// A faixa de cadernos é desenhada dentro da lista (#comprod-body) a cada busca/filtro; depois de cada desenho ela é
+// levada pra um espaço fixo logo acima da linha da busca. A busca não sai do lugar, então quem está digitando não
+// perde o cursor.
+(function(){
+  'use strict';
+  if(typeof renderComercialProdutos!=='function')return;
+  function posicionar(){
+    const body=document.getElementById('comprod-body'),busca=document.getElementById('comprod-fil-busca');
+    if(!body||!busca)return;
+    const linha=busca.parentElement;if(!linha||!linha.parentElement)return;
+    let slot=document.getElementById('comprod-cad-slot');
+    if(!slot){slot=document.createElement('div');slot.id='comprod-cad-slot';linha.parentElement.insertBefore(slot,linha);}
+    const prim=body.firstElementChild;
+    if(!prim||!prim.matches('.cadbar-wrap,.cadbar'))return; // faixa não veio neste desenho: deixa a que já está
+    slot.innerHTML='';slot.appendChild(prim);
+    const info=body.firstElementChild;if(info&&info.matches('.cadinfo'))slot.appendChild(info);
+  }
+  const _r=renderComercialProdutos;
+  renderComercialProdutos=function(){const r=_r.apply(this,arguments);try{posicionar();}catch(e){console.warn('faixa de cadernos',e);}return r;};
+  try{posicionar();}catch(e){}
+})();
+</script>
+<script>
+// ══ SEPARAÇÃO ÚNICA de produtos BOB'S a pedido do Clabonde (26/11/2026) ══
+// "TAG LINE BURGERS & SHAKES" (BO-0006) e "TAG LINE SUNDAES & SHAKES" (BO-0007) tinham as variações HORIZONTAIS e
+// VERTICAIS no mesmo produto. Vira 1 produto só com as horizontais (mantém o código BO-0006 / BO-0007 e os códigos
+// das variações horizontais, que já são -01 a -06) e 1 produto NOVO só com as verticais (próximo código livre do
+// caderno, variações -01, -02… na ordem de antes). A palavra HORIZONTAL/VERTICAL sai da variação e vai pro nome do
+// produto. Nada é apagado: mesmos registros (mesmo id), mesma ficha, preço, matérias-primas, projetos, foto e histórico.
+// Roda 1 vez (cfg.prodSeparacoes[id]), com Projetos/admin logado, ~12 s depois de abrir. Se algo não bater
+// (produto não achado, variação sem HORIZONTAL/VERTICAL, nome novo já existente), NÃO mexe e avisa no sino.
+(function(){
+  'use strict';
+  const N=s=>String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+  const salvar=()=>{if(window._fbSaveCfg)window._fbSaveCfg(cfg);try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}};
+  const quem=()=>(typeof usuarioLogado!=='undefined'&&usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—';
+  const ehBobs=p=>['BOBS','BOB S'].includes(N(p&&p.categoria).replace(/['´`’]/g,'').replace(/\s+/g,' ').trim())||N(p&&p.categoria).replace(/[^A-Z]/g,'')==='BOBS';
+  const SEPARACOES=[
+    {id:'bobs_tagline_burgers_20261126',produto:'TAG LINE BURGERS & SHAKES',cod:'BO-0006'},
+    {id:'bobs_tagline_sundaes_20261126',produto:'TAG LINE SUNDAES & SHAKES',cod:'BO-0007'}];
+  // "HORIZONTAL · MODELO 150 · 1,20 × 0,15 M" → {ori:'HORIZONTAL', resto:'MODELO 150 · 1,20 × 0,15 M'}
+  function orientacao(v){
+    const m=/^\s*(HORIZONTAL|VERTICAL)\s*(?:[·\-–|:]\s*)?(.*)$/i.exec(String(v||''));
+    if(!m)return null;return{ori:m[1].toUpperCase(),resto:String(m[2]||'').replace(/\s+/g,' ').trim()};
+  }
+  const reg_em=()=>new Date().toISOString();
+  function separar(x){
+    const reg={em:new Date().toISOString(),por:quem(),desc:x.produto+' ('+x.cod+') — separar horizontais e verticais'};
+    const L=getProdutos();
+    const fam=L.filter(p=>p&&ehBobs(p)&&_prodCatTxt(p.tipoProduto)===x.produto);
+    if(!fam.length){
+      const ja=L.filter(p=>p&&ehBobs(p)&&[x.produto+' HORIZONTAL',x.produto+' VERTICAL'].includes(_prodCatTxt(p.tipoProduto)));
+      reg.resultado=ja.length?'já estava separado — nada mudou':'não feito — produto não encontrado no caderno BOB\'S';return reg;}
+    const ori=new Map();const sem=[];
+    fam.forEach(p=>{const o=orientacao(p.variacao);if(o)ori.set(p,o);else sem.push(p);});
+    if(sem.length){reg.resultado='não feito — '+sem.length+' variação(ões) sem HORIZONTAL/VERTICAL no nome, precisa confirmar';reg.nomes=sem.map(p=>(p.codigo||'')+' '+(p.variacao||p.nome));return reg;}
+    const H=fam.filter(p=>ori.get(p).ori==='HORIZONTAL'),V=fam.filter(p=>ori.get(p).ori==='VERTICAL');
+    if(!H.length||!V.length){reg.resultado='não feito — só há variações '+(H.length?'horizontais':'verticais');return reg;}
+    const catH=x.produto+' HORIZONTAL',catV=x.produto+' VERTICAL';
+    if(L.some(p=>p&&ehBobs(p)&&!fam.includes(p)&&[catH,catV].includes(_prodCatTxt(p.tipoProduto)))){reg.resultado='não feito — já existe produto com o nome '+catH+' ou '+catV;return reg;}
+    const porCod=(a,b)=>String(a.codigo||'').localeCompare(String(b.codigo||''),'pt-BR',{numeric:true});
+    H.sort(porCod);V.sort(porCod);
+    const antes=new Map(fam.map(p=>[p,p.codigo||'']));
+    // horizontais: mesmo produto, mesmos códigos
+    H.forEach(p=>{const o=ori.get(p);p.tipoProduto=catH;p.variacao=o.resto||'PADRÃO';if(p.nomeAuto)p.nome=_prodNomeAuto(catH,p.variacao);});
+    // verticais: produto novo com código novo (os códigos antigos saem antes de gerar, pra não herdar o BO-0006)
+    // o registro de códigos trava o código de cada produto: tira as verticais do registro (o código antigo fica
+    // guardado como "aposentado" pra nunca ser dado a outro produto) e autoriza a troca em cfg.prodCodTrocas
+    const regCod=Object.assign({},cfg.produtosCodigos||{});
+    V.forEach(p=>{const ant=antes.get(p);if(ant)regCod['aposentado:'+p.id+':'+ant]=ant;delete regCod[p.id];});
+    cfg.produtosCodigos=regCod;
+    V.forEach(p=>{const o=ori.get(p);p.tipoProduto=catV;p.variacao=o.resto||'PADRÃO';if(p.nomeAuto)p.nome=_prodNomeAuto(catV,p.variacao);p.codigoAnterior=antes.get(p);delete p.codigo;});
+    V.forEach(p=>_prodGerarCodigo(p));
+    cfg.prodCodTrocas=Object.assign({},cfg.prodCodTrocas||{});
+    V.forEach(p=>{cfg.prodCodTrocas[p.id]={de:antes.get(p),para:p.codigo,em:reg_em(),por:quem(),motivo:'separação '+x.produto+' (horizontal × vertical)'};});
+    fam.forEach(p=>{try{
+      const novo=p.codigo||'';const ant=antes.get(p);
+      _prodHist(p.id,'Produto separado (horizontal × vertical)',(ant!==novo?ant+' → '+novo+' · ':'')+_prodCatTxt(p.tipoProduto)+' — '+p.variacao+' · pedido do Clabonde');
+    }catch(e){}});
+    const codV=_prodFamCod(V[0]);
+    reg.resultado='feito: '+H.length+' horizontais ficaram em '+x.cod+' ('+catH+') e '+V.length+' verticais foram para o produto novo '+codV+' ('+catV+')';
+    reg.nomes=V.map(p=>antes.get(p)+' → '+p.codigo+' '+p.variacao);
+    reg.mudou=true;return reg;
+  }
+  function rodar(){
+    cfg.prodSeparacoes=cfg.prodSeparacoes||{};
+    const pend=SEPARACOES.filter(x=>!cfg.prodSeparacoes[x.id]);if(!pend.length)return;
+    const regs=[];
+    pend.forEach(x=>{let r;try{r=separar(x);}catch(e){console.error('separação de produto',e);r={em:new Date().toISOString(),por:quem(),desc:x.produto,resultado:'não feito — erro: '+(e&&e.message||e)};}
+      cfg.prodSeparacoes[x.id]=r;regs.push(r);});
+    salvar();
+    try{renderComercialProdutos();}catch(e){}
+    try{regs.forEach(r=>toast('📦 '+r.desc+': '+r.resultado,r.mudou?'tok':'tinf'));}catch(e){}
+  }
+  let n=0;const t=setInterval(()=>{n++;
+    try{if(typeof usuarioLogado!=='undefined'&&usuarioLogado&&window._fbSaveCfg&&typeof cfg!=='undefined'&&(cfg.produtos||[]).length>0&&_prodPodeEditar()){if(n>=6){clearInterval(t);rodar();}}}catch(e){}
+    if(n>200)clearInterval(t);},2000);
+  // aviso no sino (3 dias) pra admin/Projetos
+  try{const _oA=_avisosAutomaticos;_avisosAutomaticos=function(){const out=_oA.apply(this,arguments);try{
+    if(!_prodPodeEditar())return out;
+    Object.entries(cfg.prodSeparacoes||{}).forEach(([id,r])=>{if(!r||!r.em||Date.now()-new Date(r.em)>3*86400000)return;
+      out.push({id:'prod_sep_'+id,automatico:true,tipoAuto:'prod_separacao',assunto:'📦 Produto separado',texto:r.desc+'\n'+r.resultado+(r.nomes&&r.nomes.length?'\n'+r.nomes.map(x=>'• '+x).join('\n'):''),destinatarioTipo:'setor',destinatarioValor:'ADMIN'});});
+  }catch(e){}return out;};}catch(e){}
+  try{const _oP=_avisoAplicavelPara;_avisoAplicavelPara=function(av){if(av&&av.tipoAuto==='prod_separacao'){try{return _prodPodeEditar();}catch(e){return false;}}return _oP.apply(this,arguments);};}catch(e){}
+})();
+</script>
+<script>
+// ══ TESTEIRAS EM TELA / TELHA METÁLICA (BOB'S) VENDIDAS POR m² (2026-11-26, pedido do Clabonde) ══
+// (1) Migração única (cfg.prodM2Telas20261126, Projetos/admin): as variações com medida de "TESTEIRA EM TELA METÁLICA"
+//     e "TESTEIRA EM TELHA METÁLICA PRETA" do BOB'S passam a ser vendidas por m². O preço cadastrado era da PEÇA
+//     inteira (decisão do Clabonde) → preço do m² = preço da peça ÷ área daquela variação (6 casas, pra que a medida
+//     original dê exatamente o mesmo valor de antes). A medida da variação fica como medida PADRÃO do item
+//     (p.m2MedidaPadrao) e o preço da peça antiga fica guardado em p.precoPecaAnterior. SOB MEDIDA (sem medida) fica igual.
+// (2) Orçamento: item em m² desses produtos já entra com a medida da variação (ou a lida do projeto), editável.
+// (3) Itens que já estavam em orçamentos viram m² ao abrir, com o MESMO preço (preço do m² = preço do item ÷ área).
+// (4) Leitura do projeto com IA: produto do caderno vendido por m² mostra o preço pela medida lida (antes mostrava
+//     o preço do m² como se fosse da peça) e a medida pode ser corrigida ali mesmo.
+(function(){
+  'use strict';
+  const N=v=>{try{return _orc2Num(v);}catch(e){return parseFloat(String(v==null?'':v).replace(',','.'))||0;}};
+  const R2=v=>Math.round((Number(v)||0)*100)/100;
+  const R6=v=>Math.round((Number(v)||0)*1e6)/1e6;
+  const ehBobs=p=>String(p&&p.categoria||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/[^A-Z]/g,'')==='BOBS';
+  const PRODS=['TESTEIRA EM TELA METÁLICA','TESTEIRA EM TELHA METÁLICA PRETA'];
+  const FLAG='prodM2Telas20261126';
+  const quem=()=>(typeof usuarioLogado!=='undefined'&&usuarioLogado&&(usuarioLogado.nomeExibicao||usuarioLogado.email))||'—';
+  // ── (1) migração ──
+  function migrar(){
+    if(cfg[FLAG])return;
+    const L=getProdutos(),feitos=[],pul=[];let comCusto=0;
+    L.forEach(p=>{
+      if(!p||!ehBobs(p)||!PRODS.includes(_prodCatTxt(p.tipoProduto))||_prodPorM2(p))return;
+      const l=(Number(p.largura)||0)/100,a=(Number(p.altura)||0)/100,pr=Number(p.precoFinal)||0;
+      if(!(l>0&&a>0&&pr>0)){pul.push((p.codigo||'')+' '+(p.variacao||p.nome));return;}
+      const ar=l*a,m2=R6(pr/ar);
+      p.precoPecaAnterior=pr;p.precoFinal=m2;p.vendaPor='m2';p.m2MedidaPadrao=true;
+      if(Number(p.custo)>0)comCusto++;
+      try{_prodHist(p.id,'Mudou a unidade do preço','unidade → metro quadrado (m²) · peça '+fmtR(pr)+' ÷ '+String(Math.round(ar*10000)/10000).replace('.',',')+' m² = '+fmtR(m2)+'/m² · pedido do Clabonde');}catch(e){}
+      feitos.push((p.codigo||'')+' '+(p.variacao||'')+' → '+fmtR(m2)+'/m²');
+    });
+    cfg[FLAG]={em:new Date().toISOString(),por:quem(),feitos,pulados:pul,comCusto};
+    if(window._fbSaveCfg)window._fbSaveCfg(cfg);try{localStorage.setItem('gcore_cfg',JSON.stringify(cfg));}catch(e){}
+    try{renderComercialProdutos();}catch(e){}
+    if(feitos.length)try{toast('📐 '+feitos.length+' variações de testeira em tela/telha (BOB\'S) passaram a ser vendidas por m²','tok');}catch(e){}
+  }
+  let n=0;const t=setInterval(()=>{n++;
+    try{if(typeof usuarioLogado!=='undefined'&&usuarioLogado&&window._fbSaveCfg&&typeof cfg!=='undefined'&&(cfg.produtos||[]).length>0&&_prodPodeEditar()&&typeof _prodPorM2==='function'){if(n>=7){clearInterval(t);migrar();}}}catch(e){}
+    if(n>200)clearInterval(t);},2000);
+  try{const _oA=_avisosAutomaticos;_avisosAutomaticos=function(){const out=_oA.apply(this,arguments);try{
+    const r=cfg&&cfg[FLAG];if(!_prodPodeEditar()||!r||!r.em||Date.now()-new Date(r.em)>3*86400000||!(r.feitos||[]).length)return out;
+    out.push({id:'prod_m2_telas',automatico:true,tipoAuto:'prod_separacao',assunto:'📐 Testeiras em tela/telha por m²',
+      texto:'As variações abaixo (BOB\'S) passaram a ser vendidas por m². O preço do m² é o preço da peça ÷ a área dela.'+(r.comCusto?'\n⚠️ '+r.comCusto+' delas têm custo de matéria-prima cadastrado: a composição agora precisa ser de 1 m².':'')+'\n'+r.feitos.map(x=>'• '+x).join('\n'),
+      destinatarioTipo:'setor',destinatarioValor:'ADMIN'});}catch(e){}return out;};}catch(e){}
+  // ── (2) orçamento: preço do m² com precisão e medida padrão da variação ──
+  const prodDe=it=>{try{return getProdutos().find(p=>p&&String(p.id)===String(it.produtoId))||null;}catch(e){return null;}};
+  if(typeof _orc2ItemCatalogo==='function'){const _ic=_orc2ItemCatalogo;_orc2ItemCatalogo=function(p,qtd,l,a){
+    const it=_ic.apply(this,arguments);
+    try{if(p&&it&&it.porM2){
+      it.precoM2=R6(Number(p.precoFinal)||0);
+      if(p.m2MedidaPadrao&&!(N(it.largura)>0&&N(it.altura)>0)){const pl=(Number(p.largura)||0)/100,pa=(Number(p.altura)||0)/100;if(pl>0&&pa>0){it.largura=pl;it.altura=pa;it.areaM2='';}}
+      it.precoUnit=R2(N(it.precoM2)*_orcM2Area(it));
+    }}catch(e){console.warn('item m² (testeira)',e);}
+    return it;};}
+  // ── (3) item antigo (por unidade) de produto que virou m² → m², mesmo preço ──
+  function converter(it){
+    try{if(!it||it.tipo!=='catalogo'||it.porM2)return;const p=prodDe(it);if(!p||!_prodPorM2(p)||!p.m2MedidaPadrao)return;
+      let l=N(it.largura),a=N(it.altura);if(!(l>0&&a>0)){l=(Number(p.largura)||0)/100;a=(Number(p.altura)||0)/100;}
+      const ar=Math.round(l*a*10000)/10000,pu=N(it.precoUnit);if(!(ar>0&&pu>0))return;
+      it.porM2=true;it.precoM2=R6(pu/ar);it.largura=l;it.altura=a;it.areaM2='';it.medida='';delete it.profundidade;
+      it.precoUnit=R2(it.precoM2*ar);
+    }catch(e){console.warn('converter item p/ m²',e);}
+  }
+  if(typeof _orc2HtmlItemFixo==='function'){const _fx=_orc2HtmlItemFixo;_orc2HtmlItemFixo=function(it){converter(it);return _fx.apply(this,arguments);};}
+  // ── (4) leitura com IA: preço do item do caderno em m² pela medida lida ──
+  if(typeof _orc2IaCalc==='function'){const _c=_orc2IaCalc;_orc2IaCalc=function(it){
+    try{if(it&&it.tipo==='catalogo'){const p=_orc2CatalogoAchar(it.catId);
+      if(p&&_prodPorM2(p)){let l=N(it.largura),a=N(it.altura);
+        if(!(l>0&&a>0)&&p.m2MedidaPadrao){l=(Number(p.largura)||0)/100;a=(Number(p.altura)||0)/100;}
+        if(!(l>0&&a>0))return{ok:false,msg:'informe largura e altura (preço por m²)'};
+        return{ok:true,unit:R2(R6(Number(p.precoFinal)||0)*Math.round(l*a*10000)/10000)};}}}catch(e){}
+    return _c.apply(this,arguments);};}
+})();
+</script>
+<script>
+// ══ CRM: mudar o card de etapa pede o PORQUÊ (2026-11-26, Clabonde) ══
+// • Pra FRENTE, com destino em PROPOSTA APRESENTADA ou depois (proposta apresentada, follow-up, quentes…):
+//   obrigatório responder "O que falta para fechar o negócio?".
+// • Pra TRÁS (qualquer etapa anterior, menos ORÇAMENTO): obrigatório responder "Por que voltou para a etapa X?".
+//   Voltar pra ORÇAMENTO continua como já era (janela "O que vai alterar" / devolução da revisão).
+// A resposta entra na linha do tempo do card (como comentário de quem moveu, logo junto do "Etapa alterada") e fica
+// guardada no card (e.faltaFechar / e.motivoVolta). Sem resposta o card não muda de etapa.
+(function(){
+  'use strict';
+  if(typeof crmMoverEtapa!=='function')return;
+  const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const quem=()=>(typeof usuarioLogado!=='undefined'&&usuarioLogado&&usuarioLogado.nomeExibicao)||'—';
+  let pend=null,ok=false;
+  function regra(e,dest){
+    try{
+      const et=_crmEtapas(),io=et.findIndex(x=>x.key===e.etapa),id=et.findIndex(x=>x.key===dest),ip=et.findIndex(x=>x.key==='proposta_apresentada');
+      if(io<0||id<0||io===id)return null;
+      const lab=(et[id].label||dest);
+      if(id>io&&ip>=0&&id>=ip)return{tipo:'frente',pergunta:'O que falta para fechar o negócio?',ph:'Ex.: cliente aguardando aprovação da diretoria; quer desconto de 5%; falta mandar o projeto revisado…',lab};
+      if(id<io&&dest!=='orcamento')return{tipo:'volta',pergunta:'Por que voltou para a etapa '+lab+'?',ph:'Ex.: cliente pediu pra rever o escopo; decisor mudou; projeto foi cancelado e reabriu…',lab};
+    }catch(err){}
+    return null;
+  }
+  function fechar(){const m=document.getElementById('crm-mot-modal');if(m)m.remove();}
+  function redesenhar(id){try{renderCrmKanban();}catch(x){}try{if(typeof _crmCardAtualId!=='undefined'&&_crmCardAtualId===id){const e=crmEmpresas.find(x=>x.id===id);if(e)_crmRenderCard(e);}}catch(x){}}
+  function abrir(e,dest,r){
+    fechar();
+    const m=document.createElement('div');m.id='crm-mot-modal';
+    m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10060;display:flex;align-items:center;justify-content:center;padding:20px';
+    const cor=r.tipo==='frente'?'#1a2b5e':'#b45309';
+    m.innerHTML=`<div style="background:#fff;border-radius:14px;padding:20px 22px;max-width:520px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,.25)">
+      <div style="font-size:.72rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em">${esc(e.nome||'')} · ${esc((_crmEtapas().find(x=>x.key===e.etapa)||{}).label||e.etapa)} → ${esc(r.lab)}</div>
+      <label for="crm-mot-txt" style="display:block;font-size:1rem;font-weight:800;color:${cor};margin:6px 0 8px">${r.tipo==='frente'?'🎯':'↩️'} ${esc(r.pergunta)} *</label>
+      <textarea id="crm-mot-txt" class="no-upper" rows="4" placeholder="${esc(r.ph)}" style="width:100%;box-sizing:border-box;border:1.5px solid #cbd5e1;border-radius:9px;padding:9px 11px;font-size:.86rem;font-family:inherit;color:#1e293b;resize:vertical"></textarea>
+      <div id="crm-mot-erro" style="font-size:.78rem;color:#dc2626;min-height:1em;margin-top:6px"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button type="button" onclick="_crmMotCancelar()" class="dash-btn-conf" style="background:#94a3b8;flex:1">Cancelar</button>
+        <button type="button" onclick="_crmMotConfirmar()" class="dash-btn-conf" style="background:#e91e63;flex:2">Salvar e mover para ${esc(r.lab)}</button>
+      </div></div>`;
+    try{if(typeof _dynModalSemFechaClique==='function')_dynModalSemFechaClique(m);}catch(x){}
+    document.body.appendChild(m);
+    setTimeout(()=>{const t=document.getElementById('crm-mot-txt');if(t)t.focus();},0);
+  }
+  window._crmMotCancelar=function(){const p=pend;pend=null;fechar();if(p){toast('O card não mudou de etapa — falta responder a pergunta','tinf');redesenhar(p.id);}};
+  window._crmMotConfirmar=async function(){
+    const p=pend;if(!p)return;const ta=document.getElementById('crm-mot-txt'),er=document.getElementById('crm-mot-erro');
+    const txt=(ta&&ta.value||'').trim();
+    if(txt.length<3){if(er)er.textContent='Escreva a resposta pra poder mover o card.';if(ta){ta.style.borderColor='#dc2626';ta.focus();}return;}
+    const e=crmEmpresas.find(x=>x.id===p.id);pend=null;fechar();if(!e)return;
+    const agora=new Date().toISOString(),ev={id:'pcm_'+Date.now()+'_'+Math.random().toString(36).slice(2,7),autor:quem(),autorEmail:(usuarioLogado&&usuarioLogado.email)||'',em:agora,
+      texto:(p.r.tipo==='frente'?'🎯 O que falta para fechar o negócio: ':'↩️ Por que voltou para '+p.r.lab+': ')+txt};
+    const campo=p.r.tipo==='frente'?'faltaFechar':'motivoVolta',antes=e[campo];
+    if(!e.timeline)e.timeline=[];e.timeline.push(ev);
+    e[campo]={texto:txt,em:agora,por:quem(),etapa:p.dest};
+    ok=true;
+    try{await crmMoverEtapa(p.id,p.dest);}catch(err){console.error('mover com motivo',err);}
+    finally{ok=false;
+      const e2=crmEmpresas.find(x=>x.id===p.id)||e;
+      if(e2.etapa!==p.dest){ // outra trava não deixou mover: desfaz
+        e2.timeline=(e2.timeline||[]).filter(x=>x.id!==ev.id);if(antes===undefined)delete e2[campo];else e2[campo]=antes;redesenhar(p.id);}
+      else{try{toast('Card movido para '+p.r.lab,'tok');}catch(x){}}
+      try{if(typeof _orc5AtualizarBarra==='function')_orc5AtualizarBarra();}catch(x){}
+    }
+  };
+  const _mv=crmMoverEtapa;
+  crmMoverEtapa=async function(id,dest){
+    if(ok)return _mv.apply(this,arguments);
+    let e=null;try{e=crmEmpresas.find(x=>x.id===id);}catch(x){}
+    // movimentos automáticos do sistema (avaliação do orçamento, checklist, conselho…) seguem como antes
+    if(!e||e.fechamento||window._orcavOk||window._crmChecklistOrcOk)return _mv.apply(this,arguments);
+    const r=regra(e,dest);
+    if(!r)return _mv.apply(this,arguments);
+    pend={id,dest,r};abrir(e,dest,r);
+  };
+})();
+</script>
+<script>
+// ══ Nome da marca nos rankings/faturamento por cliente (2026-11-26, Clabonde) ══
+// FANCAR (concessionária) aparece como OMODA JAECOO e SUMITOMO aparece como DUNLOP PNEUS — nos Indicadores do
+// Comercial (ranking/concentração), no Faturamento por Cliente e no ranking por marca da Qualidade.
+(function(){
+  'use strict';
+  if(typeof _fatClienteGrupoNome!=='function')return;
+  const NOMES={'FANCAR':'OMODA JAECOO','SUMITOMO':'DUNLOP PNEUS'};
+  const _o=_fatClienteGrupoNome;
+  _fatClienteGrupoNome=function(){const g=_o.apply(this,arguments);const k=String(g==null?'':g).toUpperCase().trim();return NOMES[k]||g;};
+})();
+</script>
+<script>
+// ══ CRM Comercial → Nova tarefa: "Responsável pela tarefa" só com o time COMERCIAL (2026-11-26, Clabonde) ══
+// Antes listava todos os usuários da empresa. Agora usa o mesmo time do CRM (_crmNomesEquipe: categoria COMERCIAL,
+// sem desligados, + Guilherme). Quem está abrindo a tarefa continua na lista (padrão "(eu)").
+(function(){
+  'use strict';
+  if(typeof _tarefaCardPopularResp!=='function'||typeof _crmNomesEquipe!=='function')return;
+  const _o=_tarefaCardPopularResp;
+  _tarefaCardPopularResp=function(pre){
+    const r=_o.apply(this,arguments);
+    try{
+      if(pre!=='crm')return r;
+      const sel=document.getElementById('crm-tarefa-resp');if(!sel||!sel.options.length)return r;
+      const N=s=>(typeof _normSemAcento==='function'?_normSemAcento(s):String(s||'')).toUpperCase().trim();
+      const eq=new Set(_crmNomesEquipe().map(N));
+      const meu=N(usuarioLogado&&usuarioLogado.nomeExibicao||'');
+      [...sel.options].forEach(o=>{const n=N(o.value);if(n!==meu&&!eq.has(n))o.remove();});
+    }catch(e){console.warn('responsável da tarefa (comercial)',e);}
+    return r;
+  };
+})();
+</script>
+<script>
+// ══ "📐 Usar valor do m²" em item do caderno no orçamento (2026-11-26, Clabonde) ══
+// Num item do caderno que já está no orçamento, o orçamentista clica em "📐 Usar valor do m²": o preço do m² é o
+// preço do item ÷ a área do cadastro (largura × altura da variação) e a largura × altura viram editáveis — o preço
+// do item passa a ser m² × área nova. Vale SÓ pra esse item desse orçamento (o caderno não muda). "↩ Voltar ao
+// preço do caderno" desfaz. Selo "📐 ajustado pelo m² do <código>" no item (o gestor vê na revisão) e aviso quando a
+// área nova for mais que o dobro ou menos da metade da do cadastro. Só aparece pra item com largura e altura no
+// cadastro e que ainda não é vendido por m².
+(function(){
+  'use strict';
+  if(typeof _orc2HtmlItemFixo!=='function')return;
+  const N=v=>{try{return _orc2Num(v);}catch(e){return parseFloat(String(v==null?'':v).replace(',','.'))||0;}};
+  const R2=v=>Math.round((Number(v)||0)*100)/100,R6=v=>Math.round((Number(v)||0)*1e6)/1e6,R4=v=>Math.round((Number(v)||0)*1e4)/1e4;
+  const E=s=>{try{return _orcxEsc(s);}catch(e){return String(s==null?'':s);}};
+  const prodDe=it=>{try{return getProdutos().find(p=>p&&String(p.id)===String(it.produtoId))||null;}catch(e){return null;}};
+  const dimsCad=p=>{const l=(Number(p&&p.largura)||0)/100,a=(Number(p&&p.altura)||0)/100;return l>0&&a>0?{l,a,ar:R4(l*a)}:null;};
+  const area=it=>{try{return _orcM2Area(it);}catch(e){const l=N(it.largura),a=N(it.altura);return l>0&&a>0?R4(l*a):N(it.areaM2);}};
+  const item=id=>orc2&&orc2.doc&&(orc2.doc.produtos||[]).find(x=>x.id===id);
+  const pode=it=>{if(!it||it.tipo!=='catalogo'||it.porM2)return false;const p=prodDe(it);return!!(p&&!(typeof _prodPorM2==='function'&&_prodPorM2(p))&&dimsCad(p)&&N(it.precoUnit)>0);};
+  window.orc2UsarM2=function(id){
+    const it=item(id);if(!pode(it)){toast('Este item não tem largura e altura no cadastro — não dá pra calcular o m²','terr');return;}
+    const p=prodDe(it),d=dimsCad(p),pu=N(it.precoUnit);
+    it.m2Estimado={codigo:p.codigo||'',areaRef:d.ar,lRef:d.l,aRef:d.a,precoRef:pu,medidaRef:it.medida||'',em:new Date().toISOString(),por:(usuarioLogado&&usuarioLogado.nomeExibicao)||'—'};
+    it.porM2=true;it.precoM2=R6(pu/d.ar);it.largura=d.l;it.altura=d.a;it.areaM2='';it.medida='';
+    it.precoUnit=R2(it.precoM2*area(it));
+    _orc2DepoisDeMudarProdutos();
+    toast('📐 '+_orcxBRL(it.precoM2)+'/m² — mude a largura e a altura do item','tok');
+  };
+  window.orc2VoltarPrecoCaderno=function(id){
+    const it=item(id);if(!it||!it.m2Estimado)return;const r=it.m2Estimado;
+    delete it.porM2;delete it.precoM2;delete it.areaM2;delete it.m2Estimado;
+    it.precoUnit=r.precoRef;it.largura=r.lRef;it.altura=r.aRef;it.medida=r.medidaRef||'';
+    _orc2DepoisDeMudarProdutos();toast('↩ Item voltou ao preço do caderno','tinf');
+  };
+  const _fx=_orc2HtmlItemFixo;
+  _orc2HtmlItemFixo=function(it){
+    const h=_fx.apply(this,arguments);
+    try{
+      const i=h.indexOf('<span>Qtd ');if(i<0)return h;
+      let extra='';
+      if(it&&it.m2Estimado){
+        const r=it.m2Estimado,ar=area(it),fator=r.areaRef>0&&ar>0?ar/r.areaRef:1;
+        extra=`<span style="white-space:nowrap;font-size:.68rem;font-weight:800;padding:2px 8px;border-radius:999px;background:#f0fdfa;color:#0f766e;border:1px solid #99f6e4" title="Preço do caderno ${E(_orcxBRL(r.precoRef))} ÷ ${E(String(r.areaRef).replace('.',','))} m² do cadastro">📐 ajustado pelo m² do ${E(r.codigo||'caderno')}</span>`
+          +`<button type="button" onclick="orc2VoltarPrecoCaderno('${E(it.id)}')" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:3px 9px;font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap;font-family:inherit">↩ Voltar ao preço do caderno</button>`
+          +((fator>2||fator<0.5)?`<span style="color:#b45309;font-weight:700;font-size:.72rem;white-space:nowrap">⚠️ Medida muito diferente da do caderno (${E(String(r.areaRef).replace('.',','))} m²) — confira o preço</span>`:'');
+      }else if(pode(it)){
+        extra=`<button type="button" onclick="orc2UsarM2('${E(it.id)}')" title="Calcula o preço do m² deste item (preço do caderno ÷ área do cadastro) e libera mudar largura × altura — só neste orçamento" style="border:1.5px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:8px;padding:3px 10px;font-size:.72rem;font-weight:800;cursor:pointer;white-space:nowrap;font-family:inherit">📐 Usar valor do m²</button>`;
+      }
+      return extra?h.slice(0,i)+extra+h.slice(i):h;
+    }catch(e){console.warn('usar valor do m²',e);return h;}
+  };
+  // custo pela ficha: a ficha é da PEÇA do cadastro → custo × (área nova ÷ área do cadastro)
+  if(typeof _orcCustoFicha==='function'){const _cf=_orcCustoFicha;_orcCustoFicha=function(it){
+    if(!it||!it.m2Estimado)return _cf.apply(this,arguments);
+    const cp=Object.assign({},it);delete cp.porM2;
+    const c=_cf.call(this,cp);if(!c)return c;
+    const f=it.m2Estimado.areaRef>0?area(it)/it.m2Estimado.areaRef:1;if(!(f>0))return null;
+    c.mp=R2(c.mp*f);c.tot=R2(c.mp+c.inst+c.emb);c.marg=c.liq>0?(c.liq-c.tot)/c.liq*100:null;c.cmv=c.liq>0?c.tot/c.liq*100:null;return c;
+  };}
+})();
+</script>
+<script>
+// ══ ARTE 3D: Ctrl+Z (desfazer) + "Usar no orçamento" já adiciona o item (2026-11-26, Clabonde) ══
+// • Ctrl+Z (⌘+Z no Mac) desfaz a última edição feita na arte 3D (materiais, peças, modelo, medidas, juntar/separar…).
+//   Antes de cada clique/edição na janela o estado das peças é guardado (até 60 passos). Dentro de um campo de texto o
+//   Ctrl+Z continua sendo o do próprio campo. Trocar só a seleção ou a vista não conta como edição.
+// • "Usar no orçamento" com UM item: antes preenchia o formulário e pedia pra clicar em Adicionar; agora já adiciona
+//   (ou atualiza o item que estava sendo editado). Se faltar algo, o formulário fica aberto com o aviso, como antes.
+(function(){
+  'use strict';
+  const S=window._l3dS;if(!S)return;
+  const CAMPOS=['pc','modelo','modeloOk','larg','caixa','altInst','fix','fundoOk','fundoCod','nomes','nomePc','juntar','nomeUnico','alvo'];
+  const chave=()=>{try{return JSON.stringify(CAMPOS.map(k=>S[k]===undefined?null:S[k]));}catch(e){return'';}};
+  let pilha=[],arte=null;
+  const zerarSeTrocou=()=>{if(arte!==S.arteId){arte=S.arteId;pilha=[];}};
+  function guardar(){
+    if(!document.getElementById('l3d-modal')||!S.geo)return;zerarSeTrocou();
+    const k=chave();if(!k)return;if(pilha.length&&pilha[pilha.length-1].k===k)return;
+    pilha.push({k,sel:[...(S.sel||[])],parte:S.parte||''});if(pilha.length>60)pilha.shift();
+  }
+  ['pointerdown','focusin'].forEach(ev=>document.addEventListener(ev,e=>{try{if(e.target&&e.target.closest&&e.target.closest('#l3d-modal'))guardar();}catch(x){}},true));
+  function desfazer(){
+    zerarSeTrocou();const cur=chave();
+    while(pilha.length&&pilha[pilha.length-1].k===cur)pilha.pop();
+    const s=pilha.pop();if(!s){toast('Nada pra desfazer','tinf');return;}
+    const v=JSON.parse(s.k);CAMPOS.forEach((k,i)=>{S[k]=v[i];});
+    S.sel=new Set(s.sel);S.parte=s.parte;
+    try{window._l3dRedesenhar();}catch(e){console.warn('desfazer 3D',e);}
+    toast('↶ Desfeito','tinf');
+  }
+  window.l3dDesfazer=desfazer;
+  document.addEventListener('keydown',e=>{
+    if(!(e.ctrlKey||e.metaKey)||e.shiftKey||e.altKey||String(e.key).toLowerCase()!=='z')return;
+    if(!document.getElementById('l3d-modal'))return;
+    const t=e.target;if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.isContentEditable))return;
+    e.preventDefault();desfazer();
+  });
+  // "Usar no orçamento" com 1 item: adiciona direto
+  const _ap=window.l3dAplicar;
+  if(typeof _ap==='function')window.l3dAplicar=function(){
+    S._formPreenchido=false;
+    const r=_ap.apply(this,arguments);
+    if(S._formPreenchido){S._formPreenchido=false;
+      const ref=orc2.letra,ed=orc2.letraEditId;
+      try{orc2AdicionarLetra();}catch(e){console.error('adicionar item da arte',e);}
+      if(orc2.letra!==ref)toast(ed?'Item da arte atualizado no orçamento ✔':'Item da arte adicionado ao orçamento ✔','tok');
+    }
+    return r;
+  };
+})();
+</script>
+<script>
+// ══ MEU DIA — SETOR (coordenador) (2026-11-26, Clabonde) ══
+// 1) Em cada setor (Projetos, Produção, Planejamento, PCP): o que estava programado pra terminar NA SEMANA PASSADA
+//    (seg a dom), quanto foi finalizado no prazo e quanto não foi finalizado na data (terminou depois ou ainda não
+//    terminou) — pela baixa da etapa (p.lpBaixas), a mesma regra da Assertividade da Lista de Pedidos.
+// 2) Produção: pedidos com a data de produção atrasada, separando os que estão atrasados porque o PROJETO ainda não
+//    foi finalizado.
+// 3) Produção → "Andamento por setor": cada setor (Router, ACM…) é clicável e mostra os pedidos em produção que têm
+//    item pendente naquele setor.
+(function(){
+  'use strict';
+  if(typeof _uxSetCalc!=='function')return;
+  const ETAPAS={PROJETOS:['projeto'],'PRODUÇÃO':['producao','corteGalv','adesivo'],PLANEJAMENTO:['art','embalagem'],PCP:['projeto','producao','corteGalv','adesivo','art','embalagem']};
+  const NOME_ET={projeto:'Projeto',producao:'Produção',corteGalv:'Corte galvanizado',adesivo:'Adesivo',art:'ART',embalagem:'Embalagem'};
+  const MENU={PROJETOS:'PROJETOS','PRODUÇÃO':'PRODUÇÃO',PLANEJAMENTO:'PLANEJAMENTO',PCP:'LISTA_PEDIDOS'};
+  const isoD=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  function semanaPassada(hoje){const d=new Date(hoje+'T12:00:00'),dw=(d.getDay()+6)%7;const seg=new Date(d);seg.setDate(d.getDate()-dw-7);const dom=new Date(seg);dom.setDate(seg.getDate()+6);return{ini:isoD(seg),fim:isoD(dom)};}
+  function dataFeito(p,key){const b=p.lpBaixas&&p.lpBaixas[key];if(b&&b.data)return String(b.data).slice(0,10);
+    if(key==='projeto'){try{const d=_projDataRealConclusao(p);if(d)return String(d).slice(0,10);}catch(e){}}
+    return null;}
+  window._uxSemanaDados=function(setor,hoje){
+    const st=ETAPAS[setor];if(!st)return null;const W=semanaPassada(hoje);
+    const prog=[],noPrazo=[],fora=[];
+    let ped=[];try{ped=_lpPedidosElegiveis();}catch(e){}
+    ped.forEach(p=>{let calc;try{calc=_lpCalcEtapas(p);}catch(e){return;}if(!calc||!calc.ok)return;
+      (calc.etapas||[]).forEach(e=>{
+        if(!e||st.indexOf(e.key)<0||e.aplicavel===false||!e.iso||e.iso<W.ini||e.iso>W.fim)return;
+        const fd=dataFeito(p,e.key),fin=_lpObraFinalizada(p),it={p,key:e.key,iso:e.iso,fd};
+        prog.push(it);
+        if(fd?fd<=e.iso:(fin&&!(p.lpBaixas&&p.lpBaixas[e.key])))noPrazo.push(it);else fora.push(it);
+      });});
+    return{W,prog,noPrazo,fora};
+  };
+  const _o=_uxSetCalc;
+  _uxSetCalc=function(setor,hoje){
+    const R=_o.apply(this,arguments);
+    try{
+      const lbl=p=>_agPedLbl(p),menu=MENU[setor]||R.menu;
+      const abrir=p=>`_uxAbrirNoMenu('${_uxJs(menu)}','${_uxJs(p&&p.os!=null?p.os:'')}')`;
+      // 1) semana passada
+      const S=window._uxSemanaDados(setor,hoje);
+      if(S){
+        const pr=S.prog.length,ok=S.noPrazo.length,nf=S.fora.length,pct=pr?Math.round(ok/pr*100):null;
+        const per=fmtD(S.W.ini).slice(0,5)+' a '+fmtD(S.W.fim).slice(0,5);
+        R.kpis.push({l:'Semana passada: programado',v:String(pr),tom:'n',tip:'Etapas do setor com prazo de '+per});
+        R.kpis.push({l:'Semana passada: no prazo',v:pr?ok+' ('+pct+'%)':'0',tom:pr?(pct>=90?'v':pct>=70?'a':'r'):'n',tip:'Finalizadas até a data programada'});
+        R.kpis.push({l:'Semana passada: fora da data',v:String(nf),tom:nf?'r':'n',tip:'Finalizadas depois da data ou ainda não finalizadas'});
+        if(nf)R.extras.push({titulo:`📅 Semana passada (${per}) — não finalizado na data`,itens:S.fora.sort((a,b)=>a.iso.localeCompare(b.iso)).map(x=>({txt:lbl(x.p),
+          sub:`${NOME_ET[x.key]||x.key} programado pra ${fmtD(x.iso)} · `+(x.fd?`finalizado em ${fmtD(x.fd)} (${Math.max(1,_diasUteisEntreSafe(x.iso,x.fd))} ${_plural(Math.max(1,_diasUteisEntreSafe(x.iso,x.fd)),'dia útil','dias úteis')} depois)`:'⚠️ ainda não finalizado'),on:abrir(x.p)}))});
+      }
+      // 2) e 3) Produção
+      if(setor==='PRODUÇÃO'){
+        let ped=[];try{ped=_lpPedidosElegiveis();}catch(e){}
+        const infos=ped.map(p=>{try{return _prodInfo(p,hoje);}catch(e){return null;}}).filter(x=>x&&x.ok&&x.statusPedido!=='concluido');
+        const atr=[];infos.forEach(x=>{const s=(x.subs||[]).find(s=>s.key==='producao'&&!s.feito&&s.etapa&&s.etapa.iso<hoje);if(!s)return;
+          let projOk=true;try{const calc=_lpCalcEtapas(x.p);const ep=calc&&calc.ok&&(calc.etapas||[]).find(e=>e.key==='projeto'&&e.aplicavel!==false);if(ep)projOk=!!dataFeito(x.p,'projeto')||_lpObraFinalizada(x.p);}catch(e){}
+          atr.push({x,s,projOk});});
+        if(atr.length){
+          const semProj=atr.filter(a=>!a.projOk),comProj=atr.filter(a=>a.projOk);
+          R.kpis.push({l:'Atrasados por projeto não finalizado',v:semProj.length+' de '+atr.length,tom:semProj.length?'a':'n',tip:'Pedidos com a produção atrasada cujo projeto ainda não foi finalizado'});
+          const item=a=>({txt:lbl(a.x.p),sub:`Produção era até ${fmtD(a.s.etapa.iso)} · ${Math.round(a.x.pctValor||0)}% produzido`+(a.projOk?'':' · 🧩 projeto ainda não finalizado'+(a.x.p.projResponsavel?' ('+a.x.p.projResponsavel+')':'')),on:abrir(a.x.p)});
+          const ord=(a,b)=>a.s.etapa.iso.localeCompare(b.s.etapa.iso);
+          if(semProj.length)R.extras.push({titulo:`⏰ Produção atrasada porque o projeto não foi finalizado`,itens:semProj.sort(ord).map(item)});
+          if(comProj.length)R.extras.push({titulo:`⏰ Produção atrasada com projeto já finalizado`,itens:comProj.sort(ord).map(item)});
+        }
+        // setores clicáveis
+        if(R.pessoas&&Array.isArray(R.pessoas.linhas)&&typeof PROD_SETORES_ITEM!=='undefined'){
+          R.pessoas.on=R.pessoas.linhas.map(l=>{const s=PROD_SETORES_ITEM.find(z=>z.label===l[0]);return s?`_uxProdSetorLista('${_uxJs(s.key)}')`:'';});
+          R.pessoas.titulo+=' · clique no setor';
+        }
+      }
+    }catch(e){console.warn('meu dia — indicadores do coordenador',e);}
+    return R;
+  };
+  function _diasUteisEntreSafe(a,b){try{let n=0,d=a;while(d<b&&n<400){d=_agProxDiaUtil(d);n++;}return n;}catch(e){return 1;}}
+  window._uxProdSetorLista=function(key){
+    try{
+      const hoje=_uxHoje(),s=(PROD_SETORES_ITEM||[]).find(z=>z.key===key)||{label:key};
+      let lim=hoje;try{lim=_agProxDiaUtil(_agProxDiaUtil(hoje));}catch(e){}
+      const lista=[];
+      _lpPedidosElegiveis().forEach(p=>{let x;try{x=_prodInfo(p,hoje);}catch(e){return;}if(!x||!x.ok||x.statusPedido==='concluido')return;
+        let its=[];try{its=_prodProgressoItens(p).itens||[];}catch(e){}
+        let n=0,pend=0,soma=0;its.forEach(it=>{let na=false;try{na=!!_prodItemSetorNA(it,key);}catch(e){}if(na)return;const v=_prodItemSetorValor(it,key);n++;soma+=v;if(v<100)pend++;});
+        if(!pend)return;
+        const sp=(x.subs||[]).find(z=>z.key==='producao'),iso=sp&&sp.etapa?sp.etapa.iso:'';
+        lista.push({p,valor:x.valorLiquidoTotal||0,iso,cor:iso&&iso<hoje?'#dc2626':iso&&iso<=lim?'#b45309':'#1a1f36',
+          sub:`${pend} de ${n} ${_plural(n,'item','itens')} pendente${pend===1?'':'s'} em ${s.label} · média ${Math.round(soma/n)}%`+(iso?` · produção até ${fmtD(iso)}${iso<hoje?' (atrasada)':''}`:'')});
+      });
+      lista.sort((a,b)=>(a.iso||'9').localeCompare(b.iso||'9'));
+      _prodVGAbrirListaPedidos('🔧 '+s.label+' — pedidos com item pendente',lista);
+    }catch(e){console.error('lista do setor',e);toast('Não consegui montar a lista agora','terr');}
+  };
 })();
 </script>
 </body>
